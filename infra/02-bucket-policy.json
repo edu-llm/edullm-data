@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Id": "edullm-data-airlock-v1",
+  "Statement": [
+    {
+      "Sid": "OnlyValidatorWrites",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": [
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
+        "s3:PutObjectTagging",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": "arn:aws:s3:::edullm-data/*",
+      "Condition": {
+        "ArnNotEqualsIfExists": {
+          "aws:PrincipalArn": [
+            "arn:aws:iam::056956104102:role/sbsandbox-intern-edullm-batch-workload",
+            "arn:aws:iam::056956104102:role/sbsandbox-intern-edullm-infra-deployer"
+          ]
+        }
+      }
+    }
+  ]
+}

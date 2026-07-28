@@ -1,0 +1,41 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "edullm-data"
+version = "0.1.0"
+description = "Publisher, validator, and reader for the eduLLM Dataset Standard v1"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "eduLLM", email = "edullm-data@alphaaiengineering.com" }]
+keywords = ["dataset", "manifest", "validation", "s3"]
+classifiers = [
+  "Programming Language :: Python :: 3.11",
+  "Private :: Do Not Upload",
+]
+dependencies = [
+  "boto3",
+  "numpy",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7.0"]
+
+[project.scripts]
+edullm-data = "edullm_data.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/edullm_data"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "infra", "families", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+# src-layout: keeps `python -m pytest` working without an editable install, which is
+# the documented fallback for network-less / externally-managed environments.
+pythonpath = ["src"]
+addopts = "-ra"

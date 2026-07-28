@@ -1,0 +1,49 @@
+{
+  "schema_version": "edullm-family/v1",
+  "family": "pretrain",
+  "owner": "edullm-data@alphaaiengineering.com",
+  "license": {
+    "id": null,
+    "basis": "unknown"
+  },
+  "sources": [],
+  "defaults": {
+    "profile": "pretrain-tokens/v1",
+    "mutability": "frozen",
+    "reproducibility": "logical",
+    "tokenizer": {
+      "repo_id": "allenai/dolma2-tokenizer",
+      "revision": "TODO-verify: pin an exact Hugging Face commit sha, never a branch. A moving revision makes every token count in this family unfalsifiable.",
+      "fingerprint_sha256": "TODO-verify: sha256 of the canonicalized tokenizer.json, computed by publish(), never typed.",
+      "vocab_size": 100278,
+      "eos_token_id": 100257
+    },
+    "format": {
+      "container": "raw",
+      "dtype": "uint32",
+      "byte_order": "little",
+      "header_bytes": 0,
+      "codec": "none"
+    },
+    "extension": ".u32le.bin",
+    "shard_name_template": "<split>-<NNNNN>.u32le.bin",
+    "partitions": [
+      {
+        "name": "train",
+        "by": "path",
+        "glob": "train-*.u32le.bin"
+      }
+    ],
+    "coverage": "partition",
+    "decode_smoke_test": {
+      "window_bytes": 65536,
+      "distinct_ids_min": 256,
+      "eos_fraction_max": 0.05,
+      "zero_fraction_max": 0.01
+    },
+    "tags": {
+      "Project": "edullm"
+    }
+  },
+  "notes": "Packed token shards ready to feed straight into OLMo-core pretraining runs: the raw fuel, in training order-agnostic form, with a tokenizer pinned hard enough that token counts are falsifiable. Names carry corpus plus token budget, because the budget is the axis that distinguishes siblings (pretrain/dolma2-150b, pretrain/fineweb-edu-10b) - see DATASET-STANDARD.md section 2. THE FORMAT DEFAULT IS THE POINT: uint32 little-endian, headerless, extension .u32le.bin, NEVER .npy. OLMo-core memmaps these files from byte 0 (olmo_core/data/utils.py:158) and derives token count from raw file size (:233), so a real 128-byte .npy header would corrupt the leading tokens AND the count, silently. OLMo-core also defaults to dtype uint16 while these corpora are uint32, which halves the count if dtype is inferred rather than read - hence dtype is declared here and read by dataset_paths(), never guessed. vocab_size 100278 is marked TODO-verify: it must be recomputed from the pinned tokenizer revision before the first publish, because it is the upper bound the decode smoke test asserts every sampled token id against (0 <= id < vocab_size), and an inflated bound makes that gate decorative. eos_token_id 100257 likewise. license.basis is an honest 'unknown' at the family level rather than a convenient 'ODC-By-1.0': this family will hold Dolma2 (ODC-By-1.0), FineWeb-Edu (ODC-By-1.0), and selection-method rebuilds of sources whose terms nobody has read, and section 3 is explicit that an honest unknown beats a false value and stays queryable in the catalog. Each dataset overrides license with its actual, checked terms. Per section 5 there is no -of-NNNNN in shard names: the surviving shard count is unknowable at write time because it depends on filtering that has not run yet; completeness is proven by path-set equality against the manifest instead. decode_smoke_test bounds are the section 7 defaults - they catch all-zeros shards, all-EOS shards, and the zero-filled tail a crashed writer leaves behind, all of which pass every checksum and size gate ever written."
+}
