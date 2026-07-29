@@ -218,12 +218,20 @@ def build_plan(
     source_prefix: str,
     owner: str | None = None,
     group_meta: Mapping[str, Mapping[str, Any]] | None = None,
+    hash_workers: int = 1,
 ) -> PublishPlan:
     """Turn (path, size) metadata + the staged S3 objects into the exact objects to write.
 
     Hashes each object by STREAMING it from S3 (``s3.hash_object``) — never loads a payload
     whole. ``files`` carries sizes only; bytes stay in S3. ``source_bucket``/``source_prefix``
-    locate the already-staged objects to hash and count."""
+    locate the already-staged objects to hash and count.
+
+    ``hash_workers`` > 1 hashes a group's objects concurrently on a thread pool. Hashing is
+    network-bound (stream the object, feed hashlib), so threads scale it near-linearly despite
+    the GIL — a 125 GB / 218-shard corpus hashes in minutes instead of ~45 min single-threaded.
+    Default 1 keeps the original strictly-sequential behavior (and every existing test) intact.
+    Results are collected in submission order, so the manifest is identical regardless of
+    worker count."""
     defaults = family.get("defaults", {})
     group_meta = group_meta or {}
     source_prefix = source_prefix.strip("/")
@@ -258,20 +266,32 @@ def build_plan(
     ds_prefix = f"{dataset_id}/{version}"
 
     for g in sorted(by_group):
-        entries: list[ManifestEntry] = []
-        for rel, size in sorted(by_group[g], key=lambda t: t[0]):
+        group_files = sorted(by_group[g], key=lambda t: t[0])
+
+        def _entry_for(item: tuple[str, int]) -> ManifestEntry:
+            rel, _size = item
             fmt = _format_for(rel, defaults)
             src_key = f"{source_prefix}/{rel}" if source_prefix else rel
             sha, hashed_size = s3.hash_object(source_bucket, src_key)  # streamed, no whole-object RAM
-            entries.append(
-                ManifestEntry(
-                    path=rel,
-                    sha256=sha,
-                    bytes=hashed_size,
-                    count=_count_for(rel, hashed_size, fmt, s3, source_bucket, src_key),
-                    format=fmt,
-                )
+            return ManifestEntry(
+                path=rel,
+                sha256=sha,
+                bytes=hashed_size,
+                count=_count_for(rel, hashed_size, fmt, s3, source_bucket, src_key),
+                format=fmt,
             )
+
+        if hash_workers > 1 and len(group_files) > 1:
+            # Concurrent, but order-preserving: executor.map yields results in submission
+            # order, so the manifest is byte-identical to the sequential path.
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=hash_workers) as pool:
+                entries = list(pool.map(_entry_for, group_files))
+        else:
+            entries = [_entry_for(item) for item in group_files]
+
+        for rel, _size in group_files:
             payload_keys.append(f"{ds_prefix}/{rel}")
         man = build_manifest(entries, group_name=g)
         manifests[g] = man
@@ -473,8 +493,17 @@ def publish(
     build_executor: dict[str, Any] | None = None,
     env: Mapping[str, str] | None = None,
     max_version_attempts: int = 8,
+    hash_workers: int = 1,
+    copy_workers: int = 1,
 ) -> PublishPlan:
     """Publish a dataset to landing. Returns the plan that was written.
+
+    ``hash_workers`` / ``copy_workers`` > 1 parallelize the two network-bound, per-shard
+    phases (stream-hash in ``build_plan``; server-side copy to the final prefix) across a
+    thread pool. Both default to 1 (strictly sequential, unchanged behavior). For a TB-scale
+    corpus on a multi-vCPU host, setting these to e.g. 16 turns a ~45-min sequential hash and
+    a ~40-min sequential copy into a few minutes each. Concurrency is safe here: each shard is
+    an independent create-only write to a distinct key, and hashing has no shared state.
 
     ``tokenizer`` names the PUBLISHED tokenizer this corpus was tokenized with — the primary,
     per-dataset way to attach it. Tokenizers vary per dataset (a family has no single
@@ -557,6 +586,7 @@ def publish(
             source_prefix=source_prefix,
             owner=owner,
             group_meta=group_meta,
+            hash_workers=hash_workers,
         )
         ds_prefix = f"{dataset_id}/{version}"
         # 1. reserve the version: create-only dataset.json FIRST (§6 order)
@@ -568,13 +598,24 @@ def publish(
 
         # 2. payload objects: SERVER-SIDE COPY from the staged/source location to the final
         #    dataset prefix. Bytes move S3→S3 in-region; nothing transits the client. If the
-        #    source is already exactly the final key (rare), skip.
-        for rel, _size in files:
+        #    source is already exactly the final key (rare), skip. Each copy is an independent
+        #    write to a distinct key, so copy_workers>1 fans them out on a thread pool.
+        def _copy_one(item: tuple[str, int]) -> None:
+            rel, _size = item
             src_key = f"{source_prefix}/{rel}" if source_prefix else rel
             dst_key = f"{ds_prefix}/{rel}"
             if source_bucket == landing_bucket and src_key == dst_key:
-                continue
+                return
             s3.copy(source_bucket, src_key, landing_bucket, dst_key)
+
+        if copy_workers > 1 and len(files) > 1:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=copy_workers) as pool:
+                list(pool.map(_copy_one, files))  # raises if any copy failed
+        else:
+            for item in files:
+                _copy_one(item)
 
         # 3. group manifests LAST — the commit point (§6). Small control objects, safe to put.
         for g, man in plan.manifests.items():

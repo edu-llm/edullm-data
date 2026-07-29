@@ -102,6 +102,51 @@ def test_pretrain_publish_then_validate_partition_rows_computed():
     assert part["name"] == "train" and part["rows"] == 60000  # computed from the manifest
 
 
+def _multishard_tokens_dir(shards: int = 6) -> Path:
+    """A multi-shard token group with varied per-shard sizes, so parallel hashing/copying
+    has something to reorder if it were going to."""
+    d = Path(tempfile.mkdtemp())
+    (d / "tokens").mkdir()
+    for i in range(shards):
+        n = 40000 + i * 7000  # distinct sizes per shard
+        arr = (np.arange(1, n + 1, dtype=np.uint32) % 90000)
+        (d / "tokens" / f"train-{i:05d}.u32le.bin").write_bytes(arr.tobytes())
+    return d
+
+
+def test_parallel_workers_produce_identical_manifest_and_validate():
+    """hash_workers/copy_workers > 1 must yield a byte-identical dataset.json + manifest to
+    the sequential path (executor.map preserves submission order), and the result must still
+    pass Gate A. Regression for the parallelism added to unblock the 218-shard/125GB olmo
+    migration, which timed out hashing/copying single-threaded."""
+    src = _multishard_tokens_dir()
+
+    def run(hw: int, cw: int) -> tuple[bytes, bytes]:
+        s3 = FakeS3()
+        plan = P.publish(
+            src,
+            dataset_id="pretrain/olmo-mix-1124-31b",
+            purpose="OLMo-mix-1124 token corpus for 370M ladder pretraining, parallel-publish regression",
+            profile="pretrain-tokens/v1",
+            s3=s3,
+            created_at=CREATED,
+            group_meta=_tokens_meta(),
+            env=ENV,
+            hash_workers=hw,
+            copy_workers=cw,
+        )
+        r = V.validate_dataset("edullm-landing", f"{plan.dataset_id}/{plan.version}", s3, data_bucket="edullm-data")
+        assert r.ok, [str(v) for v in r.violations]
+        ds = s3.get("edullm-landing", f"{plan.dataset_id}/{plan.version}/dataset.json")
+        man = s3.get("edullm-landing", f"{plan.dataset_id}/{plan.version}/tokens/manifest.json")
+        return ds, man
+
+    seq_ds, seq_man = run(1, 1)
+    par_ds, par_man = run(8, 8)
+    assert par_man == seq_man, "parallel hashing changed the manifest bytes"
+    assert par_ds == seq_ds, "parallel publish changed dataset.json bytes"
+
+
 def test_publish_from_s3_source():
     s3 = FakeS3()
     # stage payload directly in landing (the AWS-native producer case)
