@@ -58,15 +58,34 @@ class S3(Protocol):
         (str) and ``size`` (int). Order is unspecified — callers compare as sets (§5)."""
         ...
 
+    def hash_object(self, bucket: str, key: str) -> tuple[str, int]:
+        """Stream the object and return ``(sha256_hex, size)`` WITHOUT ever holding the
+        whole object in memory. This is the primitive that keeps publishing byte-count-
+        agnostic: a 633 GB shard is hashed in bounded RAM, and — when this runs on Batch
+        in-region — the bytes never leave AWS. Publishing must never load a payload whole
+        (the old ``get`` + ``len`` path pulled TB to the caller). Raises :class:`NotFound`."""
+        ...
+
     def put(self, bucket: str, key: str, body: bytes, *, content_type: str | None = None) -> None:
         """Write ``body`` at ``key``. Used for ``_REJECTED.json`` on landing and the
-        catalog entry on the published bucket."""
+        catalog entry on the published bucket — small control objects only."""
+        ...
+
+    def put_file(self, bucket: str, key: str, local_path: str) -> None:
+        """Upload a local file to ``key`` by STREAMING it (multipart, bounded memory) —
+        never read the whole file into RAM. Used only to stage a local source directory
+        into landing; payload bytes above laptop scale should originate in S3, not here."""
         ...
 
     def copy(self, src_bucket: str, src_key: str, dst_bucket: str, dst_key: str) -> None:
-        """Server-side copy — bytes never transit the client (§1 promotion). Implementations
-        must use multipart copy above the 5 GB single-part ceiling (§9); 8 of the audit's 15
-        largest objects exceeded it, so this is not optional."""
+        """Server-side copy — bytes never transit the client (§1 promotion, and publish()'s
+        staged→final move). Implementations must use multipart copy above the 5 GB single-part
+        ceiling (§9); 8 of the audit's 15 largest objects exceeded it, so this is not optional."""
+        ...
+
+    def delete(self, bucket: str, key: str) -> None:
+        """Delete one object (current version). Used for best-effort staging cleanup after a
+        server-side copy to the final prefix. Not for the airlock-locked read bucket."""
         ...
 
 
@@ -137,12 +156,34 @@ class Boto3S3:
             raise self._wrap_not_found(e) from e
         return out
 
+    def hash_object(self, bucket: str, key: str) -> tuple[str, int]:
+        import hashlib
+
+        h = hashlib.sha256()
+        size = 0
+        try:
+            body = self._c.get_object(Bucket=bucket, Key=key)["Body"]
+            # stream in 8 MiB chunks — bounded RAM regardless of object size
+            for chunk in body.iter_chunks(chunk_size=8 * 1024 * 1024):
+                h.update(chunk)
+                size += len(chunk)
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap_not_found(e) from e
+        return h.hexdigest(), size
+
     def put(self, bucket: str, key: str, body: bytes, *, content_type: str | None = None) -> None:
         kwargs: dict = {"Bucket": bucket, "Key": key, "Body": body}
         if content_type:
             kwargs["ContentType"] = content_type
         try:
             self._c.put_object(**kwargs)
+        except Exception as e:  # noqa: BLE001
+            raise S3Error(str(e)) from e
+
+    def put_file(self, bucket: str, key: str, local_path: str) -> None:
+        # upload_file streams and does multipart automatically — bounded memory
+        try:
+            self._c.upload_file(local_path, bucket, key)
         except Exception as e:  # noqa: BLE001
             raise S3Error(str(e)) from e
 
@@ -161,6 +202,12 @@ class Boto3S3:
             raise
         except Exception as e:  # noqa: BLE001
             raise self._wrap_not_found(e) from e
+
+    def delete(self, bucket: str, key: str) -> None:
+        try:
+            self._c.delete_object(Bucket=bucket, Key=key)
+        except Exception as e:  # noqa: BLE001
+            raise S3Error(str(e)) from e
 
     def _multipart_copy(
         self, src_bucket: str, src_key: str, dst_bucket: str, dst_key: str, size: int
@@ -230,7 +277,13 @@ class FakeS3:
             raise NotFound(f"s3://{bucket}/{key}") from None
 
     def get_range(self, bucket: str, key: str, start: int, length: int) -> bytes:
-        body = self.get(bucket, key)
+        # Read the store directly, NOT via self.get — Boto3S3.get_range issues a ranged
+        # request (Range header) and never fetches the whole object, so the fake models that
+        # separation (a test subclass guarding get() must not see a ranged read as a whole get).
+        try:
+            body = self._store[(bucket, key)]
+        except KeyError:
+            raise NotFound(f"s3://{bucket}/{key}") from None
         if length <= 0:
             return b""
         return body[start : start + length]
@@ -250,14 +303,33 @@ class FakeS3:
             if b == bucket and k.startswith(prefix)
         ]
 
+    def hash_object(self, bucket: str, key: str) -> tuple[str, int]:
+        import hashlib
+
+        # Read the store directly, NOT via self.get — Boto3S3.hash_object streams with
+        # iter_chunks and never touches the whole-object get() path, so the fake must model
+        # that separation faithfully (else a test subclass that guards get() sees a false hit).
+        try:
+            body = self._store[(bucket, key)]
+        except KeyError:
+            raise NotFound(f"s3://{bucket}/{key}") from None
+        return hashlib.sha256(body).hexdigest(), len(body)
+
     def put(self, bucket: str, key: str, body: bytes, *, content_type: str | None = None) -> None:
         self._store[(bucket, key)] = body
+
+    def put_file(self, bucket: str, key: str, local_path: str) -> None:
+        with open(local_path, "rb") as fh:
+            self._store[(bucket, key)] = fh.read()
 
     def copy(self, src_bucket: str, src_key: str, dst_bucket: str, dst_key: str) -> None:
         try:
             self._store[(dst_bucket, dst_key)] = self._store[(src_bucket, src_key)]
         except KeyError:
             raise NotFound(f"s3://{src_bucket}/{src_key}") from None
+
+    def delete(self, bucket: str, key: str) -> None:
+        self._store.pop((bucket, key), None)
 
 
 # Re-export io so a caller can wrap bytes without a separate import when streaming.

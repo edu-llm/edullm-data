@@ -217,8 +217,12 @@ def test_unknown_family_rejected():
 
 
 def test_build_executor_aws_batch_captured():
+    # build_plan hashes objects from S3 by streaming — seed the staged object, pass (path, size)
+    s3 = FakeS3()
+    body = np.arange(1, 1001, dtype=np.uint32).tobytes()
+    s3.seed("edullm-landing", "_staging/pretrain/dolma2-150b/tokens/train-00000.u32le.bin", body)
     plan = P.build_plan(
-        [("tokens/train-00000.u32le.bin", (np.arange(1, 1001, dtype=np.uint32)).tobytes())],
+        [("tokens/train-00000.u32le.bin", len(body))],
         dataset_id="pretrain/dolma2-150b",
         version="v1",
         purpose="150B-token Dolma2 mix for 370M ladder pretraining at 1.25xC",
@@ -227,6 +231,9 @@ def test_build_executor_aws_batch_captured():
         created_at=CREATED,
         build_executor=P._build_executor_from_env({"AWS_BATCH_JOB_ID": "job-123", "AWS_REGION": "us-east-1"}),
         source_kind="local",
+        s3=s3,
+        source_bucket="edullm-landing",
+        source_prefix="_staging/pretrain/dolma2-150b",
         group_meta=_tokens_meta(),
     )
     ex = plan.dataset_json["build"]["executor"]

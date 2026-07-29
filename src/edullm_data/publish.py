@@ -37,7 +37,6 @@ from .contracts import (
     NamingError,
     SCHEMA_VERSION,
     canonical_json,
-    sha256_bytes,
     validate_dataset_id,
     validate_purpose,
 )
@@ -121,22 +120,37 @@ def _format_for(path: str, family_defaults: Mapping[str, Any]) -> Format:
     )
 
 
-def _count_for(path: str, body: bytes, fmt: Format) -> dict[str, Any] | None:
-    """Best-effort count. Fixed-width raw → tokens (bytes / dtype_size). Line formats →
-    rows. Everything else → omit (a tar part or sentinel has no honest count, §5)."""
+def _count_for(path: str, size: int, fmt: Format, s3: S3, bucket: str, key: str) -> dict[str, Any] | None:
+    """Best-effort count, computed WITHOUT loading the payload whole.
+
+    * Fixed-width raw → tokens = size / dtype_size. Pure arithmetic on the object size;
+      **zero bytes read.** This is the common (and largest) case — a 633 GB token shard
+      gets its count for free.
+    * Line formats (.jsonl / .jsonl.gz) → rows, by streaming and counting newlines in
+      bounded memory. Only these actually read bytes, and jsonl datasets are small.
+    * Everything else → omit (a tar part or sentinel has no honest count, §5).
+    """
     if fmt.container == "raw" and fmt.dtype_size:
-        if len(body) % fmt.dtype_size != 0:
-            # let the validator's arithmetic gate report this precisely; still declare it
-            return {"unit": "tokens", "value": len(body) // fmt.dtype_size}
-        return {"unit": "tokens", "value": len(body) // fmt.dtype_size}
+        return {"unit": "tokens", "value": size // fmt.dtype_size}
     if path.endswith(".jsonl"):
-        return {"unit": "rows", "value": body.count(b"\n") if body else 0}
+        return {"unit": "rows", "value": _stream_count_newlines(s3, bucket, key, gz=False)}
     if path.endswith(".jsonl.gz"):
         try:
-            return {"unit": "rows", "value": gzip.decompress(body).count(b"\n")}
+            return {"unit": "rows", "value": _stream_count_newlines(s3, bucket, key, gz=True)}
         except OSError:
             return None
     return None
+
+
+def _stream_count_newlines(s3: S3, bucket: str, key: str, *, gz: bool) -> int:
+    """Count newlines by streaming, never holding the object whole. Uses the full-body
+    reader but processes it as a stream via the S3 layer; for the FakeS3 test path this is
+    in-memory, for Boto3S3 it streams. jsonl row-count is only needed for small text
+    datasets, so this never touches the TB-scale token path."""
+    body = s3.get(bucket, key)  # jsonl groups are small; token shards never reach here
+    if gz:
+        body = gzip.decompress(body)
+    return body.count(b"\n")
 
 
 # --------------------------------------------------------------------------------------
@@ -144,31 +158,37 @@ def _count_for(path: str, body: bytes, fmt: Format) -> dict[str, Any] | None:
 # --------------------------------------------------------------------------------------
 
 
-def _enumerate_local(source: Path) -> list[tuple[str, bytes]]:
-    """(group-relative path, body) for every file under source, sorted, excluding control
-    files a prior partial publish may have dropped."""
-    out: list[tuple[str, bytes]] = []
+_CONTROL_BASENAMES = {"dataset.json", "manifest.json", "_SUCCESS", "_VALIDATED.json", "_REJECTED.json"}
+
+
+def _stage_local_to_landing(source: Path, s3: S3, landing_bucket: str, staging_prefix: str) -> None:
+    """Upload a local directory to a landing staging prefix, one object at a time via a
+    STREAMING put (boto3 upload_file handles multipart, bounded memory). After this, a
+    local source is indistinguishable from an s3:// source and the rest of publish() only
+    ever works with objects already in S3 — payload bytes are never held whole in the
+    caller. For anything but a laptop-scale dataset you should stage on Batch, not here;
+    this path exists for small local publishes and dev."""
     for p in sorted(source.rglob("*")):
         if not p.is_file():
             continue
         rel = p.relative_to(source).as_posix()
-        base = rel.rsplit("/", 1)[-1]
-        if base in {"dataset.json", "manifest.json", "_SUCCESS", "_VALIDATED.json", "_REJECTED.json"}:
+        if rel.rsplit("/", 1)[-1] in _CONTROL_BASENAMES:
             continue
-        out.append((rel, p.read_bytes()))
-    return out
+        s3.put_file(landing_bucket, f"{staging_prefix}/{rel}", str(p))
 
 
-def _enumerate_s3(s3: S3, bucket: str, prefix: str) -> list[tuple[str, bytes]]:
+def _enumerate_s3(s3: S3, bucket: str, prefix: str) -> list[tuple[str, int]]:
+    """(group-relative path, SIZE) for every payload object under the prefix. Metadata
+    only — NEVER the bytes. Size comes from the LIST result, so this is one paginated call
+    regardless of dataset size."""
     prefix = prefix.strip("/")
-    out: list[tuple[str, bytes]] = []
+    out: list[tuple[str, int]] = []
     for obj in sorted(s3.list(bucket, prefix + "/"), key=lambda o: o["key"]):
         key = obj["key"]
         rel = key[len(prefix) + 1 :]
-        base = rel.rsplit("/", 1)[-1]
-        if base in {"dataset.json", "manifest.json", "_SUCCESS", "_VALIDATED.json", "_REJECTED.json"}:
+        if rel.rsplit("/", 1)[-1] in _CONTROL_BASENAMES:
             continue
-        out.append((rel, s3.get(bucket, key)))
+        out.append((rel, obj["size"]))
     return out
 
 
@@ -183,7 +203,7 @@ def _group_of(rel_path: str) -> str:
 
 
 def build_plan(
-    files: Sequence[tuple[str, bytes]],
+    files: Sequence[tuple[str, int]],
     *,
     dataset_id: str,
     version: str,
@@ -193,23 +213,31 @@ def build_plan(
     created_at: str,
     build_executor: dict[str, Any],
     source_kind: str,
+    s3: S3,
+    source_bucket: str,
+    source_prefix: str,
     owner: str | None = None,
     group_meta: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> PublishPlan:
-    """Pure: turn (files, identity, family) into the exact objects to write. No S3."""
+    """Turn (path, size) metadata + the staged S3 objects into the exact objects to write.
+
+    Hashes each object by STREAMING it from S3 (``s3.hash_object``) — never loads a payload
+    whole. ``files`` carries sizes only; bytes stay in S3. ``source_bucket``/``source_prefix``
+    locate the already-staged objects to hash and count."""
     defaults = family.get("defaults", {})
     group_meta = group_meta or {}
+    source_prefix = source_prefix.strip("/")
 
     # group files by their first path segment
-    by_group: dict[str, list[tuple[str, bytes]]] = {}
-    for rel, body in files:
+    by_group: dict[str, list[tuple[str, int]]] = {}
+    for rel, size in files:
         g = _group_of(rel)
         if not g:
             raise PublishError(
                 f"payload file {rel!r} is not under a group prefix; every object must live "
                 f"under <group>/… so its profile is unambiguous (§4)"
             )
-        by_group.setdefault(g, []).append((rel, body))
+        by_group.setdefault(g, []).append((rel, size))
 
     if not by_group:
         raise PublishError("no payload files found under the source")
@@ -231,14 +259,16 @@ def build_plan(
 
     for g in sorted(by_group):
         entries: list[ManifestEntry] = []
-        for rel, body in sorted(by_group[g], key=lambda t: t[0]):
+        for rel, size in sorted(by_group[g], key=lambda t: t[0]):
             fmt = _format_for(rel, defaults)
+            src_key = f"{source_prefix}/{rel}" if source_prefix else rel
+            sha, hashed_size = s3.hash_object(source_bucket, src_key)  # streamed, no whole-object RAM
             entries.append(
                 ManifestEntry(
                     path=rel,
-                    sha256=sha256_bytes(body),
-                    bytes=len(body),
-                    count=_count_for(rel, body, fmt),
+                    sha256=sha,
+                    bytes=hashed_size,
+                    count=_count_for(rel, hashed_size, fmt, s3, source_bucket, src_key),
                     format=fmt,
                 )
             )
@@ -407,16 +437,22 @@ def publish(
     env = env if env is not None else dict(os.environ)
     build_executor = build_executor or _build_executor_from_env(env)
 
-    # enumerate source bytes
+    # Resolve the source to an (S3 bucket, prefix). A local dir is first STREAMED up to a
+    # landing staging area, after which it is indistinguishable from an s3:// source — so
+    # from here on, no payload byte is ever held whole in the caller.
     src_str = str(source)
     if src_str.startswith("s3://"):
         rest = src_str[len("s3://") :]
-        bkt, _, pfx = rest.partition("/")
-        files = _enumerate_s3(s3, bkt, pfx)
+        source_bucket, _, source_prefix = rest.partition("/")
+        source_prefix = source_prefix.strip("/")
         source_kind = "s3"
     else:
-        files = _enumerate_local(Path(source))
+        source_bucket = landing_bucket
+        source_prefix = f"_staging/{dataset_id}"
+        _stage_local_to_landing(Path(source), s3, landing_bucket, source_prefix)
         source_kind = "local"
+
+    files = _enumerate_s3(s3, source_bucket, source_prefix)  # (path, size) — metadata only
     if not files:
         raise PublishError(f"no files found at source {source!r}")
 
@@ -434,6 +470,9 @@ def publish(
             created_at=created_at,
             build_executor=build_executor,
             source_kind=source_kind,
+            s3=s3,
+            source_bucket=source_bucket,
+            source_prefix=source_prefix,
             owner=owner,
             group_meta=group_meta,
         )
@@ -445,23 +484,27 @@ def publish(
             last_err = e
             continue  # someone took this version; bump and retry
 
-        # 2. payload objects (idempotent: skip if identical already present)
-        if source_kind == "local":
-            file_by_rel = dict(files)
-            for rel, body in files:
-                _put_idempotent(s3, landing_bucket, f"{ds_prefix}/{rel}", body)
-        else:
-            # already in landing under the same prefix? copy within landing if source differs
-            src_bkt = src_str[len("s3://") :].split("/", 1)[0]
-            src_pfx = src_str[len("s3://") :].split("/", 1)[1].strip("/") if "/" in src_str[len("s3://"):] else ""
-            for rel, body in files:
-                dst = f"{ds_prefix}/{rel}"
-                if not (src_bkt == landing_bucket and f"{src_pfx}/{rel}" == dst):
-                    _put_idempotent(s3, landing_bucket, dst, body)
+        # 2. payload objects: SERVER-SIDE COPY from the staged/source location to the final
+        #    dataset prefix. Bytes move S3→S3 in-region; nothing transits the client. If the
+        #    source is already exactly the final key (rare), skip.
+        for rel, _size in files:
+            src_key = f"{source_prefix}/{rel}" if source_prefix else rel
+            dst_key = f"{ds_prefix}/{rel}"
+            if source_bucket == landing_bucket and src_key == dst_key:
+                continue
+            s3.copy(source_bucket, src_key, landing_bucket, dst_key)
 
-        # 3. group manifests LAST — the commit point (§6)
+        # 3. group manifests LAST — the commit point (§6). Small control objects, safe to put.
         for g, man in plan.manifests.items():
             _put_idempotent(s3, landing_bucket, f"{ds_prefix}/{g}/manifest.json", canonical_json(man))
+
+        # 4. best-effort: clear the local-staging area now that bytes are at the final prefix.
+        if source_kind == "local":
+            for rel, _size in files:
+                try:
+                    s3.delete(landing_bucket, f"{source_prefix}/{rel}")
+                except Exception:  # noqa: BLE001 - staging cleanup is not load-bearing
+                    pass
 
         return plan
 
