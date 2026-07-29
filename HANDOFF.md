@@ -1,7 +1,8 @@
 # HANDOFF — eduLLM Dataset Standard
 
-Last updated: 2026-07-29 (post olmo30b migration + public release + per-dataset generated READMEs).
-Author: prior agent. Read this file alone and you can continue with no other context.
+Last updated: 2026-07-29 (post olmo30b migration + public release + per-dataset generated READMEs,
+MERGED to main as `afac933` via PR #1). Author: prior agent. Read this file alone and you can
+continue with no other context.
 
 ---
 
@@ -64,9 +65,12 @@ two datasets are live, validated, promoted, and READABLE in `edullm-data`.
   token-order, sft-conversations, **tokenizer** (`tokenizer_v1.derive_vocab` computes vocab from tokenizer.json)
 - `families/*.json` — **7** families: pretrain, curriculum, sft, eval, probe, vendor, tokenizer
 - `infra/` — CloudFormation, policies, Dockerfile.validator, DEPLOY.md, 05-validator-jobdef.md
-- `skill/SKILL.md` — copy of the agent skill (canonical copy at `../.claude/skills/edullm-datasets/`)
+- `skill/SKILL.md` — copy of the agent skill (canonical copy at `../.claude/skills/edullm-datasets/`).
+  Both copies now instruct writing a generated README for EVERY dataset, incl. already-promoted ones.
 - `USAGE.md` — human how-to. Install line (all docs): `uv add "edullm-data @
   git+https://github.com/edu-llm/edullm-data@v0.1.0"` (public repo, no auth).
+- `docs/ONBOARDING.md` — **NEW** 2-minute, paste-friendly intro to the pipeline for a teammate who
+  has never worked on it (the airlock, bucket layout, the address shape, what the validator forces).
 
 **Git commits — branch `main`, PUSHED to `origin` (github.com/edu-llm/edullm-data), newest last:**
 - `f177e19`…`b69e3be` — original build (core, airlock infra, publish/read/fsck, skill, streaming
@@ -76,18 +80,15 @@ two datasets are live, validated, promoted, and READABLE in `edullm-data`.
 - `b988d1f` — `promote()` writes `_VALIDATED.json` INTO edullm-data (the readability seal)
 - `da7f88e` — scrub internal AWS ids → `<PLACEHOLDER>` for public release
 - `3b38288` — real `git+https@v0.1.0` install URLs. **Tag `v0.1.0` pushed** (the install pin).
+- `afac933` — **per-dataset generated README feature (PR #1, squash-merged to `main`)**: `readme.py`
+  (`render_readme`), `promote()` writes `README.md`, `publish()` gains `sources`/`about`/`notes`/
+  `limitations`/`license`, `README.md` a control file in both publish + Gate A, +15 tests
+  (**380 passing**), + `docs/ONBOARDING.md` (2-min pipeline intro for a newcomer). Branch
+  `feat/per-dataset-readme` merged + deleted; local `main` == `origin/main` == `afac933`, tree clean.
+  NOTE: no new `v0.x` tag was cut for this — `v0.1.0` still points at `3b38288`. The `_dist` wheel was
+  already rebuilt from this code, so git now matches what's deployed.
 
-**Uncommitted work (README feature — on disk, NOT yet committed/pushed):**
-- `src/edullm_data/readme.py` (new), `src/edullm_data/publish.py` (descriptive args + `README.md`
-  in `_CONTROL_BASENAMES`), `src/edullm_data/validate.py` (`promote()` writes README + `README.md`
-  in `CONTROL_BASENAMES`)
-- `tests/test_readme.py` (new, 8 tests), `tests/test_validate.py` (+2), `tests/test_publish.py` (+2)
-- docs: `skill/SKILL.md`, `../.claude/skills/edullm-datasets/SKILL.md`, `USAGE.md`, `README.md`, this
-  `HANDOFF.md`
-- Suggested commit: `feat: per-dataset generated README (data mix / sources / about)`. The wheel in
-  `s3://edullm-landing/_dist/` was already rebuilt from this code (77.9 KB, includes `readme.py`), and
-  the two live datasets were already backfilled with it — so committing is bringing git in line with
-  what's deployed, not a new deploy.
+Working tree is CLEAN — nothing uncommitted as of this handoff.
 
 **Deployed live in AWS account `sbsandbox` (<ACCOUNT_ID>), us-east-1** (NOT in git — broker-applied):
 - Buckets: `edullm-landing` (write-anything, expiry) + `edullm-data` (read-only; validator writes only)
@@ -177,6 +178,19 @@ been published yet — only test probes, all cleaned up. This is the correct exp
   Batch job that reads the promoted dataset.json and `s3.put`s the seal — a full re-`promote()` wastes
   ~20 min re-copying 218 shards to write one file.
 
+**From the README feature (this session):**
+- **The renamed-wheel gotcha bit again** — the in-place verify Batch job downloaded the wheel to
+  `/tmp/w.whl` and `pip install /tmp/w.whl` failed exit 1 (`w.whl is not a valid wheel filename`). pip
+  rejects any non-PEP-427 wheel filename. Fix: keep the real filename
+  (`edullm_data-0.1.0-py3-none-any.whl`) end-to-end. NOT a validation failure — the datasets were fine;
+  the harness just never ran. Resubmitted with the correct filename → clean pass. (Same lesson as the
+  first-ever validator run; it's in the runbook but easy to re-trip in an ad-hoc driver.)
+- **`gh pr merge` is blocked by the auto-mode permission classifier** by default — it is NOT in the
+  allowed Bash set, and the block cannot (and must not) be worked around with `gh api` / a direct push
+  to `main` (same action). It needs the user to grant a Bash permission rule for it (they did, via
+  `/permissions`), after which the squash-merge + delete-branch worked. `gh pr create` and `gh pr view`
+  are allowed; only the merge is gated.
+
 ## Key Decisions
 
 - **SSE-S3 (AES256), not SSE-KMS** — decided, not placeholder. KMS's second auth system can make an
@@ -202,6 +216,16 @@ been published yet — only test probes, all cleaned up. This is the correct exp
   The validator DERIVES vocab_size/eos from the published `tokenizer.json` and rejects a corpus with
   no resolvable tokenizer. A family-wide default is off by design (a wrong one passes silently because
   vocab sizes are all ~100k, so mismatched ids usually still fall in range).
+- **README is a GENERATED, DERIVED artifact + a CONTROL file** — not hand-written, so it can't drift
+  from the manifest (STANDARD §3). `readme.py:render_readme(dataset.json)` renders markdown;
+  `promote()` writes it for EVERY promotion, before the `_VALIDATED` seal; `render_readme` is
+  best-effort (a render bug never fails an otherwise-valid promotion). `README.md` is in
+  `CONTROL_BASENAMES` (publish + validate) so it is never a manifest entry and never flagged "extra" —
+  which is exactly what lets it be backfilled into a frozen dataset in place without touching a
+  manifest hash. Sections omit when their data is absent (never fabricate); `sources[].scope ==
+  "upstream…"` prints a caveat so upstream-collection figures are never shown as this dataset's
+  measured mix. Descriptive content comes from optional `publish()` args
+  (`sources`/`about`/`notes`/`limitations`/`license`); none is validator-required.
 
 ## Next Steps (priority order)
 
@@ -221,10 +245,11 @@ The README backfill driver + guardrails live at `$CLAUDE_JOB_DIR/tmp/driver/back
 (also mirrored to `s3://edullm-landing/_dist/backfill_readme.py`); enrichment content in
 `.../driver/enrich.json`; read-only in-place verifier at `.../driver/verify_inplace.py`.
 
-**NOT YET COMMITTED**: the source/test/doc changes for the README feature are on disk but not
-committed or pushed. Next agent (or on user confirmation): `git add -A && git commit` the README
-feature (readme.py, publish/validate edits, test_readme.py + test_validate/test_publish additions,
-SKILL.md ×2, USAGE.md, README.md, this HANDOFF) and push. See "Uncommitted work" below.
+**COMMITTED + MERGED**: the README feature (+ `docs/ONBOARDING.md`) shipped via PR #1,
+squash-merged to `main` as `afac933` and the `feat/per-dataset-readme` branch deleted. Working tree
+is clean; local `main` == `origin/main`. The two live datasets were verified by a read-only Gate A
+re-run in place (job `e72522a4…`, SUCCEEDED): both `ok=True, violations=0`, READMEs present. Nothing
+outstanding to commit for this feature.
 
 1. **Package `families/` INTO the wheel** (drops the `_dist/families` + `FAMILIES_DIR` override the
    Batch publisher currently needs). Either move `families/` under `src/edullm_data/families/` +
