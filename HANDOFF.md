@@ -135,12 +135,13 @@ been published yet — only test probes, all cleaned up. This is the correct exp
    The tokenizer is now a first-class PUBLISHED artifact (profile `tokenizer/v1`, family `tokenizer/`),
    not a hand-typed pin — the validator DERIVES vocab_size/eos_token_id from the published
    `tokenizer.json` (`tokenizer_v1.derive_vocab`) and a `pretrain-tokens` corpus `depends_on` it.
-   To finish: (a) publish the real tokenizer, e.g. `publish(tok_dir, dataset_id="tokenizer/dolma2-bpe",
-   profile="tokenizer/v1", …)`; (b) set `families/pretrain.json`'s `tokenizer_dependency` block
-   (currently `TODO-set`: dataset_id + version + manifest_sha256) so every corpus inherits the
-   depends_on automatically. `curriculum/` inherits the tokenizer transitively through its parent
-   pool, so nothing to set there. The old inline `vocab_size`/`revision`/`fingerprint_sha256` pins
-   are GONE — this replaced them.
+   TOKENIZERS ARE PER-DATASET — there is no single canonical one. To finish: (a) publish each real
+   tokenizer once, e.g. `publish(tok_dir, dataset_id="tokenizer/dolma2-bpe", profile="tokenizer/v1", …)`;
+   (b) when publishing a pretrain corpus, NAME its tokenizer: `publish(..., tokenizer="tokenizer/dolma2-bpe")`.
+   The validator derives vocab_size/eos from that tokenizer's tokenizer.json and rejects a corpus with no
+   resolvable tokenizer. Do NOT set a family-wide default (`tokenizer_dependency_optional` is off by
+   design; a wrong default passes silently). `curriculum/` inherits the tokenizer transitively through
+   its parent pool. The old inline `vocab_size`/`revision`/`fingerprint_sha256` pins are GONE.
 2. **Create a git remote and push.** The repo exists only on this laptop (no backup; the git-install
    URL in the skill/USAGE is a placeholder; `build.code_sha256` is weaker without it). `gh repo create`
    + push. Then update the install URL in `skill/SKILL.md` + `../.claude/skills/edullm-datasets/SKILL.md`
