@@ -118,6 +118,41 @@ def test_promote_refuses_failed_result():
         V.promote(r, s3, data_bucket=DATA, landing_bucket=LANDING)
 
 
+def test_promote_writes_generated_readme():
+    """promote() emits a README.md into the data bucket, generated from dataset.json (§3). It
+    renders the real dataset id + purpose, so it is documentation of THIS dataset, not a stub."""
+    s3 = FakeS3()
+    _build(s3, ds_over={"about": "A tiny Dolma2 slice.",
+                        "sources": [{"name": "Dolma2", "tokens": 150000000000, "license": "ODC-By-1.0"}]})
+    r = V.validate_dataset(LANDING, f"{DID}/{VER}", s3, data_bucket=DATA)
+    assert r.ok, [str(v) for v in r.violations]
+    V.promote(r, s3, data_bucket=DATA, landing_bucket=LANDING)
+    body = s3._store.get((DATA, f"{DID}/{VER}/README.md"))
+    assert body is not None
+    text = body.decode("utf-8")
+    assert text.startswith(f"# {DID} — {VER}")
+    assert "## About" in text and "A tiny Dolma2 slice." in text
+    assert "## Data mix / sources" in text and "Dolma2" in text
+    assert "## How to read it" in text
+
+
+def test_readme_is_control_not_flagged_on_revalidate():
+    """The README is a CONTROL file, never a manifest entry — so re-running Gate A over the
+    PROMOTED prefix (which now contains README.md) must not flag it as an unlisted/extra object.
+    This is what lets the golden-rule 'recompute in place against edullm-data' check pass after a
+    promotion writes the README."""
+    s3 = FakeS3()
+    _build(s3)
+    r = V.validate_dataset(LANDING, f"{DID}/{VER}", s3, data_bucket=DATA)
+    assert r.ok, [str(v) for v in r.violations]
+    V.promote(r, s3, data_bucket=DATA, landing_bucket=LANDING)
+    assert s3._store.get((DATA, f"{DID}/{VER}/README.md")) is not None
+    # re-validate the promoted copy in the DATA bucket (both landing_bucket and data_bucket = DATA)
+    r2 = V.validate_dataset(DATA, f"{DID}/{VER}", s3, data_bucket=DATA)
+    assert r2.ok, [str(v) for v in r2.violations]
+    assert "unlisted-object" not in _codes(r2)
+
+
 # --------------------------------------------------------------------------------------
 # one test per gate
 # --------------------------------------------------------------------------------------

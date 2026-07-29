@@ -22,7 +22,7 @@ uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.1.0"
 
 # editable (local dev)
 python3 -m pip install -e /path/to/edullm-data
-python3 -m pytest tests/ -q   # 368 passing
+python3 -m pytest tests/ -q   # 380 passing
 ```
 
 > The repo is public at [github.com/edu-llm/edullm-data](https://github.com/edu-llm/edullm-data);
@@ -114,6 +114,48 @@ If your job already wrote output into landing, pass that prefix and no bytes mov
 ```python
 publish("s3://edullm-landing/eval/mcq-arc/_pending/", dataset_id="eval/mcq-arc", ...)
 ```
+
+### Describe the data mix — the README is generated from this
+
+Every published dataset carries a **generated `README.md`** at its prefix
+(`s3://edullm-data/<id>/<version>/README.md`), rendered from `dataset.json` by the validator
+during promotion — you never hand-write or upload it, and it can't drift from the manifest. To
+make it say something useful, pass the descriptive fields to `publish()` (all optional):
+
+```python
+publish(
+    tokens_dir, dataset_id="pretrain/olmo-mix-1124-31b", purpose="...",
+    profile="pretrain-tokens/v1", tokenizer="tokenizer/dolma2-bpe",
+    s3=Boto3S3.default(), created_at=...,
+    about="What this corpus is and how it was produced (a curated paragraph).",
+    sources=[                                # → the 'Data mix / sources' table
+        {"name": "DCLM-Baseline", "tokens": 3_700_000_000_000, "license": "CC-BY-4.0",
+         "scope": "upstream-full-collection",         # prints an honesty caveat: these are
+         "uri": "https://huggingface.co/datasets/allenai/olmo-mix-1124"},  # upstream figures,
+        {"name": "pes2o", "tokens": 58_600_000_000, "license": "ODC-By-1.0",  # not this subset's
+         "scope": "upstream-full-collection"},                                # measured mix
+    ],
+    license={"id": "ODC-By-1.0", "basis": "declared"},   # overrides the family's honest "unknown"
+    notes="Free-text caveat.",
+    limitations=[{"kind": "contamination", "benchmark": "gsm8k", "overlap_rate": 0.003}],
+)
+```
+
+- `about` is the one **curated** prose block; everything else in the README (contents,
+  tokenizer, splits, inventory, how-to-read) is **derived** from `dataset.json`.
+- A section is **omitted** when its data is absent — an empty `sources=[]` renders no mix table,
+  never a fake one.
+- `scope: "upstream-full-collection"` marks a source as describing the upstream collection rather
+  than a measured breakdown of *this* dataset, and the README prints a caveat saying so — use it
+  whenever your corpus is a subset/derivation and you didn't separately measure per-source shares.
+- None of these are validator-required fields — they only feed the README, so adding them never
+  changes what Gate A accepts.
+
+**Already-promoted datasets get a README too.** The README is a control file, so it (and the
+descriptive fields) can be backfilled into an existing frozen dataset in place — the validator
+role re-writes `dataset.json` with the added descriptive keys and writes `README.md`, without
+touching any payload byte, manifest hash, or the inventory. See the HANDOFF for the backfill
+driver used on the migrated olmo-mix corpus.
 
 ---
 

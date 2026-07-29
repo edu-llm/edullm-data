@@ -37,6 +37,17 @@ publish(source,
 only ever writes to landing — never to `edullm-data` — and if `source` is already in landing it just
 seals the manifest without moving bytes.
 
+### The generated README
+
+Every promoted dataset carries a `README.md` at its prefix, **generated from `dataset.json`** by the
+validator (§3: the README is a derived artifact, never hand-written). Pass optional descriptive
+fields to `publish()` to fill it — `about` (one curated prose block), `sources` (the data-mix table;
+mark a source `scope:"upstream-full-collection"` to print an honesty caveat when it's upstream
+figures rather than this dataset's measured mix), `license`, `notes`, `limitations`. None are
+validator-required; they only feed `render_readme()` (`src/edullm_data/readme.py`). Sections whose
+data is absent are omitted, never faked. Already-promoted datasets get a README too — it's a control
+file, backfilled in place without touching any payload byte or manifest hash.
+
 ## The one thing to know
 
 **Producers write ONLY to `s3://edullm-landing`.** The validator role
@@ -63,7 +74,8 @@ edullm-data/                    ← git root
 │   ├── s3.py                   S3 protocol + Boto3S3 + FakeS3                     done
 │   ├── publish.py              publish() — landing-only writes                   done
 │   ├── read.py                 dataset_paths() reader                            done
-│   ├── validate.py             Gate A (runs on AWS Batch as the validator)       done
+│   ├── validate.py             Gate A + promote() (writes the generated README)  done
+│   ├── readme.py               render_readme() — README generated from dataset.json  done
 │   ├── fsck.py                 wu-fsck, Gate B, nightly integrity re-check       done
 │   └── profiles/
 │       ├── base.py             Violation / GroupContext / sample_offsets         done
@@ -74,7 +86,7 @@ edullm-data/                    ← git root
 │       └── sft_conversations_v1.py messages[] schema, dedup + leakage report     done
 ├── infra/                      CloudFormation + policies + Dockerfile + runbooks done (deployed)
 ├── families/                   the six family.json files                         done
-└── tests/                      352 passing                                       done
+└── tests/                      380 passing                                       done
 ```
 
 ## Build status (standard §13)

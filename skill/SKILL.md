@@ -72,6 +72,43 @@ formats, build provenance (from the environment), and `license`/`tokenizer`/`sou
 From an AWS Batch job that already wrote output to landing, pass the `s3://` prefix as
 `source` — no bytes leave S3.
 
+## Every dataset gets a generated README — always fill in the data-mix fields
+
+Every published dataset carries a `README.md` at its prefix
+(`s3://edullm-data/<id>/<version>/README.md`), **generated from `dataset.json`** by the validator
+at promotion time (§3: the README is a derived artifact, never hand-written — so it can't drift
+from the manifest). This is not optional and not something you upload: the validator writes it for
+**every** promotion.
+
+Your job is to give it real content by passing the descriptive fields to `publish()` (all
+optional, none validator-required — they only feed the README):
+
+```python
+publish(..., 
+    about="A curated paragraph: what this data is and how it was produced.",
+    sources=[{"name": "DCLM-Baseline", "tokens": 3_700_000_000_000, "license": "CC-BY-4.0",
+              "scope": "upstream-full-collection",   # → prints an honesty caveat (see below)
+              "uri": "https://huggingface.co/datasets/allenai/olmo-mix-1124"}],
+    license={"id": "ODC-By-1.0", "basis": "declared"},   # override the family's honest "unknown"
+    notes="Free-text caveat.",
+    limitations=[{"kind": "contamination", "benchmark": "gsm8k", "overlap_rate": 0.003}])
+```
+
+- `about` is the one **curated** prose block; contents/tokenizer/splits/inventory/how-to-read are
+  **derived**. A section is omitted when its data is absent (empty `sources=[]` → no mix table,
+  never a fake one — do not fabricate).
+- Mark a source `scope: "upstream-full-collection"` when the figures describe the upstream
+  collection and not a measured breakdown of *this* dataset (a subset/derivation). The README then
+  prints a caveat so the numbers read as provenance, not as this dataset's realized mix. **Never
+  present upstream proportions as this dataset's measured mix.**
+- **For a dataset that is ALREADY promoted** (frozen, live in `edullm-data`): you still add its
+  README. The README is a control file, so a validator-role job re-writes `dataset.json` with the
+  added descriptive keys and writes `README.md` **in place** — no payload byte, manifest hash, or
+  inventory changes (the frozen contract on the data holds). Do this rather than re-publishing a v2
+  just to add documentation. The backfill driver + guardrails (descriptive-keys-only, recompute the
+  group `manifest_sha256`/inventory unchanged before writing) are the proven pattern; see the
+  package HANDOFF.
+
 ## Naming — the user will manually verify name quality, so get it right
 
 `s3://edullm-data/<family>/<name>/<version>/`
