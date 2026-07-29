@@ -8,11 +8,10 @@ the standard wins and this package has a bug.
 
 ## Install
 
-Not yet published — no tag exists. Once `v0.1.0` is tagged (placeholder org/repo below, fill in on
-first release):
+Public repo — the `git+https` install needs no auth. Pin a tag so the publisher and validator agree:
 
 ```bash
-uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.1.0"
+uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.2.0"
 ```
 
 For local development, editable install with test extras:

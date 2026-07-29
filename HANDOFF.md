@@ -1,8 +1,8 @@
 # HANDOFF — eduLLM Dataset Standard
 
 Last updated: 2026-07-29 (post olmo30b migration + public release + per-dataset generated READMEs,
-MERGED to main as `afac933` via PR #1). Author: prior agent. Read this file alone and you can
-continue with no other context.
+MERGED to main as `afac933` via PR #1; then the `v0.2.0` release bump — see Next Step #6). Author:
+prior agent. Read this file alone and you can continue with no other context.
 
 ---
 
@@ -271,10 +271,27 @@ outstanding to commit for this feature.
    `infra/Dockerfile.validator` → new ECR repo → re-register `edullm-validator` + `edullm-fsck` job
    defs at the image (drops the ~30-60s pip-install per run). `infra/05-validator-jobdef.md`. Not
    blocking — wheel bootstrap works.
-6. **When the wheel changes**, rebuild (`python -m pip wheel . --no-deps`) + `aws s3 cp` to
-   `s3://edullm-landing/_dist/edullm_data-0.1.0-py3-none-any.whl` (same filename); next validator/fsck
-   run picks it up. Bump version + filename + git tag for a real release. Consider `gh release create
-   v0.1.0` if a formal Release page is wanted (only the lightweight tag exists now).
+6. **`v0.2.0` release — DONE in git, wheel reship STILL OUTSTANDING (deployment lag).** The version
+   was bumped to `0.2.0` (`pyproject.toml`, `src/edullm_data/__init__.py`) and every **team-facing**
+   install pin updated to `@v0.2.0` (`README.md` — also fixed its stale "no tag exists" line —,
+   `USAGE.md`, `skill/SKILL.md`, `.claude/skills/edullm-datasets/SKILL.md`). Shipped via branch
+   `release/v0.2.0` → PR. **Tag `v0.2.0` is cut on `main` AFTER the PR merges** (the merge is
+   permission-gated; do it once the PR is approved). 380 tests pass. `v0.1.0` still points at the
+   pre-README commit `10c18fb`, which is why the pin was stale.
+   **NOT yet done, needs a broker/creds session (this session had neither `sb-aws` nor local AWS
+   creds, so it could not write S3):**
+   - Two pin sites were deliberately LEFT at `0.1.0` because they describe the *deployed* artifact,
+     not what the team installs: `infra/05-validator-jobdef.md` and `infra/DEPLOY.md` (the git+https
+     line + the `_dist` wheel filename + the ECR tag), and the `CLAUDE.md` gotcha #3 wheel filename.
+     The live Batch validator bootstraps `s3://edullm-landing/_dist/edullm_data-0.1.0-py3-none-any.whl`
+     by exact filename — so bumping those docs to `0.2.0` without reshipping would break the bootstrap.
+   - **Reship steps (run in a broker session):** `python3 -m pip wheel . --no-deps` →
+     `edullm_data-0.2.0-py3-none-any.whl`; `aws s3 cp` it to `s3://edullm-landing/_dist/`; update the
+     hardcoded `0.1.0` filename in `_dist/publish_driver.py` and the validator/fsck bootstrap command
+     (`infra/05-validator-jobdef.md:95`) to `0.2.0` (or ship both wheels and cut over deliberately);
+     then update the two infra docs + the `CLAUDE.md` gotcha to `0.2.0`. Next validator/fsck run picks
+     up the new wheel. Consider `gh release create v0.2.0` if a formal Release page is wanted (only a
+     lightweight tag exists).
 7. **Migrate more high-value legacy datasets** using the proven playbook: server-side rename any
    headerless `.npy`→`.u32le.bin` into `s3://edullm-landing/_migrate/<name>/`, then run the Batch
    publish driver with `PUB_HASH_WORKERS`/`PUB_COPY_WORKERS=16`. (Verify each shard is headerless first:

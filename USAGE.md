@@ -18,7 +18,7 @@ Install the package:
 
 ```bash
 # pinned git install (production) — pin a tag so the publisher and validator agree
-uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.1.0"
+uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.2.0"
 
 # editable (local dev)
 python3 -m pip install -e /path/to/edullm-data
