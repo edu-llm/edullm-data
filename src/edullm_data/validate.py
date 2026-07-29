@@ -555,6 +555,28 @@ def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucke
         content_type="application/json",
     )
 
+    # Seal the promoted prefix with _VALIDATED.json IN THE DATA BUCKET. This is the marker
+    # read.dataset_paths() looks for (§9): "only edullm-data holds validated data", so the
+    # proof-of-validation must live beside the promoted copy, not only in landing. The landing
+    # _VALIDATED.json main() writes is the self-discovery work-list signal (so the scanner skips
+    # an already-done prefix) and expires with landing's 14-day lifecycle; this copy is durable
+    # and is what makes a promoted dataset actually readable. Written LAST, after the payload +
+    # catalog are in place, so the marker's presence always implies a complete, readable dataset.
+    seal = {
+        "dataset_id": result.dataset_id,
+        "version": result.version,
+        "objects": ds.get("inventory", {}).get("objects"),
+        "bytes": ds.get("inventory", {}).get("bytes"),
+    }
+    if now is not None:
+        seal["validated_at"] = now
+    s3.put(
+        data_bucket,
+        f"{prefix}/_VALIDATED.json",
+        canonical_json(seal),
+        content_type="application/json",
+    )
+
 
 # --------------------------------------------------------------------------------------
 # self-discovery (§7 event wiring) — the wake-up-and-scan work list

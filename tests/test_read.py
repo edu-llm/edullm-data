@@ -46,10 +46,23 @@ def _publish_and_promote(s3: FakeS3) -> str:
     r = V.validate_dataset("edullm-landing", f"pretrain/dolma2-150b/{plan.version}", s3, data_bucket="edullm-data")
     assert r.ok, [str(v) for v in r.violations]
     V.promote(r, s3, data_bucket="edullm-data", landing_bucket="edullm-landing")
-    # promotion copies dataset.json + manifests + payload, but not a _VALIDATED marker;
-    # main() writes that. Simulate it so the reader's require_validated has something.
-    s3.seed("edullm-data", f"pretrain/dolma2-150b/{plan.version}/_VALIDATED.json", b"{}")
+    # promote() now writes _VALIDATED.json into edullm-data itself (the marker the reader
+    # requires) — no manual seeding. This is the real end-to-end path: a promoted dataset is
+    # readable with no extra step. Regression for the olmo migration, where the marker had
+    # only ever been written to landing and dataset_paths() would refuse a promoted dataset.
     return plan.version
+
+
+def test_promote_writes_validated_marker_into_data_bucket():
+    """promote() must seal the promoted prefix with _VALIDATED.json IN edullm-data, because
+    that is exactly where dataset_paths() looks. Without it, a correctly-promoted dataset is
+    unreadable through the standard API (the bug the first real migration surfaced)."""
+    s3 = FakeS3()
+    ver = _publish_and_promote(s3)
+    # the marker exists in the DATA bucket (not just landing), so the default reader works
+    assert s3._store.get(("edullm-data", f"pretrain/dolma2-150b/{ver}/_VALIDATED.json")) is not None
+    res = R.dataset_paths("pretrain/dolma2-150b", ver, s3=s3)  # require_validated=True default
+    assert len(res.paths) == 2
 
 
 def test_returns_correct_dtype():
