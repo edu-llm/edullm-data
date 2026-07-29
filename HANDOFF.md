@@ -1,6 +1,6 @@
 # HANDOFF — eduLLM Dataset Standard
 
-Last updated: 2026-07-28 (evening). Author: prior agent. Read this file alone and you can
+Last updated: 2026-07-29. Author: prior agent. Read this file alone and you can
 continue with no other context.
 
 ---
@@ -21,27 +21,32 @@ Motivating audit: `../docs/dataset-creation/s3-dataset-audit-2026-07-28.md` (23 
 ## Current Progress — the system is BUILT, DEPLOYED, and PROVEN AUTOMATIC
 
 Everything through the standard's §13 build order is done except two clearly-scoped items
-(baked container image; family tokenizer pins). The full pipeline has been proven end-to-end on
-live AWS with real data.
+(baked container image; publish real tokenizers). The full pipeline has been proven end-to-end on
+live AWS with real data, INCLUDING fully-automatic event-triggered validation.
 
-**Code** (this repo, `edullm-data/`, its own git root; **352 tests passing**):
-- `src/edullm_data/contracts.py` — canonical JSON, hashing, naming/purpose validation
+**Code** (this repo, `edullm-data/`, its own git root; **363 tests passing**):
+- `src/edullm_data/contracts.py` — canonical JSON, hashing, naming/purpose validation (7-family enum)
 - `src/edullm_data/manifest.py` — per-file format, manifest build/verify, arithmetic + extension checks
-- `src/edullm_data/s3.py` — `S3` protocol, `Boto3S3` (real), `FakeS3` (tests, no AWS needed)
-- `src/edullm_data/validate.py` — Gate A orchestrator + `promote()` + `discover_pending()` + CLI
-- `src/edullm_data/publish.py` — producer entrypoint `publish()`; version auto-alloc; family inheritance
+- `src/edullm_data/s3.py` — `S3` protocol, `Boto3S3` (real), `FakeS3` (tests). Now also
+  `hash_object` (streaming), `put_file` (streaming upload), `delete`.
+- `src/edullm_data/validate.py` — Gate A orchestrator + `promote()` + `discover_pending()` + CLI;
+  resolves a corpus's tokenizer dependency and injects derived vocab into `GroupContext.resolved`
+- `src/edullm_data/publish.py` — producer `publish()`; **never holds a payload whole** (stream-hash +
+  server-side copy, TB-scale safe); `tokenizer=` per-dataset arg; version auto-alloc; family inheritance
 - `src/edullm_data/read.py` — `dataset_paths()` (returns correct dtype), `resolve_latest()`
 - `src/edullm_data/fsck.py` — `wu-fsck` Gate B (post-publish decay sweep), owner Eric Wu
-- `src/edullm_data/profiles/` — registry + 4 v1 profiles: pretrain-tokens, eval-results,
-  token-order, sft-conversations
-- `families/*.json` — 6 families: pretrain, curriculum, sft, eval, probe, vendor
+- `src/edullm_data/profiles/` — registry + **5** v1 profiles: pretrain-tokens, eval-results,
+  token-order, sft-conversations, **tokenizer** (`tokenizer_v1.derive_vocab` computes vocab from tokenizer.json)
+- `families/*.json` — **7** families: pretrain, curriculum, sft, eval, probe, vendor, tokenizer
 - `infra/` — CloudFormation, policies, Dockerfile.validator, DEPLOY.md, 05-validator-jobdef.md
 - `skill/SKILL.md` — copy of the agent skill (canonical copy at `../.claude/skills/edullm-datasets/`)
 - `USAGE.md` — human how-to
 
-**Git commits (this repo, branch `main`, nothing pushed — no remote yet):**
+**Git commits (this repo, branch `main`, nothing pushed — no remote yet), newest last:**
 - `f177e19` steps 1–4 (core + airlock infra) · `a8844b1` steps 5–11 (publish/read/fsck + deploys)
 - `30f26a5` skill + usage · `cdfb6b3` skill hard-prereq + fsck schedule notes
+- `85236c7` HANDOFF · `8d8f9e6` streaming publish (no local bytes) · `4b7a163` tokenizer artifact
+- `58b590e` per-dataset tokenizer · `b69e3be` HANDOFF per-dataset tokenizer
 
 **Deployed live in AWS account `sbsandbox` (056956104102), us-east-1** (NOT in git — broker-applied):
 - Buckets: `edullm-landing` (write-anything, expiry) + `edullm-data` (read-only; validator writes only)
@@ -128,6 +133,14 @@ been published yet — only test probes, all cleaned up. This is the correct exp
   bad work in the audit recomputed a hash. This is the golden rule (CONTRIBUTING.md).
 - **`experimental/v1` is quota-limited (2 live per family), not approval-gated** — approvals erode.
 - **Greenfield** — legacy ~2.53 TB is NOT migrated; new datasets only.
+- **No dataset byte is ever managed locally.** `publish()` stream-hashes (never loads a payload
+  whole), counts tokens as `size // dtype_size` (zero reads), stages local sources to landing then
+  moves everything by server-side `s3.copy`. Built for TB-scale migration sources.
+- **Tokenizer is a PUBLISHED artifact, named PER DATASET** — not an HF reference, not a family
+  default. There is no single canonical tokenizer; each corpus passes `tokenizer="tokenizer/<name>"`.
+  The validator DERIVES vocab_size/eos from the published `tokenizer.json` and rejects a corpus with
+  no resolvable tokenizer. A family-wide default is off by design (a wrong one passes silently because
+  vocab sizes are all ~100k, so mismatched ids usually still fall in range).
 
 ## Next Steps (priority order)
 
@@ -160,8 +173,8 @@ been published yet — only test probes, all cleaned up. This is the correct exp
 
 ## How to operate it (quick reference)
 
-- **Publish**: `from edullm_data.publish import publish` — 4 args (source, dataset_id, purpose,
-  profile) + group_meta. See `USAGE.md`.
+- **Publish**: `from edullm_data.publish import publish` — args (source, dataset_id, purpose,
+  profile) + `tokenizer="tokenizer/<name>"` for a pretrain corpus + optional group_meta. See `USAGE.md`.
 - **Read**: `from edullm_data.read import dataset_paths, resolve_latest`.
 - **Discover what's published**: list `s3://edullm-data/_catalog/`.
 - **All AWS access in this project goes through the `sb-aws` MCP broker** (read-only default; the
