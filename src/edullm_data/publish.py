@@ -286,17 +286,19 @@ def build_plan(
             "manifest_sha256": manifest_sha256(man),
         }
         # merge profile-specific metadata.
-        # Tokenizer: prefer the family's published-tokenizer dependency (the derive path),
-        # attaching it as a depends_on entry so the validator resolves vocab from real bytes.
-        # A legacy inline `tokenizer` default is still honored as a migration fallback.
+        # Tokenizer: the primary path is the per-dataset publish(tokenizer=…) arg, already
+        # threaded into group_meta as a depends_on above. Only if THIS group still has no
+        # tokenizer dependency do we fall back to an OPTIONAL family-wide default — set solely
+        # when a team truly standardizes on one tokenizer (see the family note; a wrong
+        # family default is dangerous because a mismatched tokenizer's ids usually still fall
+        # in range and pass silently).
         if profile_for(g).startswith("pretrain-tokens/"):
-            tok_dep = defaults.get("tokenizer_dependency")
-            if isinstance(tok_dep, Mapping) and not str(tok_dep.get("dataset_id", "")).startswith("TODO"):
+            already = any(d.get("role") == "tokenizer" for d in (group_meta.get(g, {}).get("depends_on", []) or []))
+            fam_dep = defaults.get("tokenizer_dependency_optional")
+            if not already and isinstance(fam_dep, Mapping) and fam_dep.get("dataset_id"):
                 existing = list(gm.get("depends_on", []) or [])
-                existing.append({k: tok_dep[k] for k in ("role", "dataset_id", "version", "manifest_sha256") if k in tok_dep})
+                existing.append({k: fam_dep[k] for k in ("role", "dataset_id", "version", "manifest_sha256") if fam_dep.get(k)})
                 gm["depends_on"] = existing
-            elif defaults.get("tokenizer"):
-                gm["tokenizer"] = defaults["tokenizer"]
         if defaults.get("partitions") and "partitions" not in group_meta.get(g, {}):
             # The family default declares the partition SHAPE (name + by:path glob) but
             # cannot know rows — that count is only knowable once the shards exist. Fill it
@@ -412,6 +414,49 @@ def _build_executor_from_env(env: Mapping[str, str]) -> dict[str, Any]:
     }
 
 
+def _resolve_tokenizer_dependency(tokenizer: str, s3: S3, data_bucket: str) -> dict[str, Any]:
+    """Turn a ``tokenizer/<name>[/vN]`` reference into a pinned depends_on entry by looking
+    up the PUBLISHED tokenizer dataset in the data bucket. Fails loudly if it isn't published
+    — a corpus must reference a real, owned tokenizer, never a bare string."""
+    parts = tokenizer.strip("/").split("/")
+    if len(parts) < 2 or parts[0] != "tokenizer":
+        raise PublishError(
+            f"tokenizer={tokenizer!r} must be 'tokenizer/<name>' or 'tokenizer/<name>/vN' — "
+            f"the id of a PUBLISHED tokenizer/v1 dataset"
+        )
+    tok_id = f"{parts[0]}/{parts[1]}"
+    version = parts[2] if len(parts) >= 3 else None
+    if version is None:
+        # latest published version from the catalog
+        best = 0
+        for obj in s3.list(data_bucket, f"_catalog/{tok_id}/"):
+            base = obj["key"].rsplit("/", 1)[-1]
+            if base.endswith(".json") and base[:-5].startswith("v") and base[:-5][1:].isdigit():
+                best = max(best, int(base[:-5][1:]))
+        if best == 0:
+            raise PublishError(
+                f"no published version of tokenizer {tok_id!r} found in {data_bucket} — "
+                f"publish it first (profile tokenizer/v1)"
+            )
+        version = f"v{best}"
+    dprefix = f"{tok_id}/{version}"
+    try:
+        pds = _load_family_json_from_s3(s3, data_bucket, f"{dprefix}/dataset.json")
+    except Exception as e:  # noqa: BLE001
+        raise PublishError(f"tokenizer {dprefix!r} is not readable in {data_bucket}: {e}") from e
+    groups = pds.get("groups", [])
+    if not groups:
+        raise PublishError(f"tokenizer {dprefix!r} has no groups")
+    man_sha = groups[0].get("manifest_sha256")
+    return {"role": "tokenizer", "dataset_id": tok_id, "version": version, "manifest_sha256": man_sha}
+
+
+def _load_family_json_from_s3(s3: S3, bucket: str, key: str) -> dict[str, Any]:
+    import json
+
+    return json.loads(s3.get(bucket, key).decode("utf-8"))
+
+
 def publish(
     source: str | Path,
     *,
@@ -420,6 +465,8 @@ def publish(
     profile: str | Mapping[str, str],
     s3: S3,
     created_at: str,
+    tokenizer: str | None = None,
+    data_bucket: str = "edullm-data",
     landing_bucket: str = LANDING_BUCKET,
     owner: str | None = None,
     group_meta: Mapping[str, Mapping[str, Any]] | None = None,
@@ -428,6 +475,16 @@ def publish(
     max_version_attempts: int = 8,
 ) -> PublishPlan:
     """Publish a dataset to landing. Returns the plan that was written.
+
+    ``tokenizer`` names the PUBLISHED tokenizer this corpus was tokenized with — the primary,
+    per-dataset way to attach it. Tokenizers vary per dataset (a family has no single
+    canonical one), so this is named at publish time, not inherited from a family default.
+    Accepts ``"tokenizer/<name>"`` (resolves the latest published version) or
+    ``"tokenizer/<name>/vN"`` (exact). publish() looks up that dataset in ``data_bucket``,
+    pins it by ``manifest_sha256``, and attaches it as a ``depends_on`` on every
+    ``pretrain-tokens`` group — so the validator derives the vocab bound from the real
+    tokenizer.json. Required in practice for a pretrain corpus: without a resolvable
+    tokenizer the decode smoke test cannot recompute its bound and Gate A rejects the dataset.
 
     ``s3`` and ``created_at`` are injected so the whole thing is testable and deterministic;
     the CLI supplies a real client and an ISO timestamp.
@@ -444,6 +501,22 @@ def publish(
 
     family = _load_family(family_name)
     env = env if env is not None else dict(os.environ)
+
+    # Resolve the per-dataset tokenizer (if named) into a depends_on entry, threaded into
+    # group_meta for every pretrain-tokens group so the caller need not hand-build it.
+    if tokenizer is not None:
+        tok_dep = _resolve_tokenizer_dependency(tokenizer, s3, data_bucket)
+        gm_in = {k: dict(v) for k, v in (group_meta or {}).items()}
+        # attach to the token group(s); if the caller named groups, respect them, else the
+        # conventional "tokens" group.
+        target_groups = [g for g in gm_in] or ["tokens"]
+        for g in target_groups:
+            gm_in.setdefault(g, {})
+            existing = list(gm_in[g].get("depends_on", []) or [])
+            if not any(d.get("role") == "tokenizer" for d in existing):
+                existing.append(tok_dep)
+                gm_in[g]["depends_on"] = existing
+        group_meta = gm_in
     build_executor = build_executor or _build_executor_from_env(env)
 
     # Resolve the source to an (S3 bucket, prefix). A local dir is first STREAMED up to a

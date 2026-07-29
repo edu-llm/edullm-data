@@ -141,3 +141,71 @@ def test_derived_vocab_bound_bites_with_no_typed_vocab():
     assert not r.ok
     codes = {v.code for v in r.violations}
     assert "vocab-out-of-range" in codes or any("vocab" in c for c in codes), codes
+
+
+# --------------------------------------------------------------------------------------
+# per-dataset tokenizers: each corpus names its own; there is no single canonical one
+# --------------------------------------------------------------------------------------
+
+
+def _publish_named_tokenizer(s3: FakeS3, name: str, *, base_vocab: int, eos_id: int) -> str:
+    d = Path(tempfile.mkdtemp())
+    (d / "files").mkdir()
+    (d / "files" / "tokenizer.json").write_bytes(_tokenizer_json(base_vocab=base_vocab, eos_id=eos_id))
+    plan = P.publish(
+        d, dataset_id=name,
+        purpose=f"Published tokenizer {name} for corpora that were tokenized with it, not with any other",
+        profile="tokenizer/v1", s3=s3, created_at=CREATED, env=ENV,
+    )
+    r = V.validate_dataset("edullm-landing", f"{name}/{plan.version}", s3, data_bucket="edullm-data")
+    assert r.ok, [str(v) for v in r.violations]
+    V.promote(r, s3, data_bucket="edullm-data", landing_bucket="edullm-landing")
+    return plan.version
+
+
+def _publish_corpus_with_tokenizer(s3: FakeS3, dsid: str, tokenizer: str, max_id: int):
+    d = Path(tempfile.mkdtemp())
+    (d / "tokens").mkdir()
+    # Varied ids in [0, max_id] (enough distinct values to clear the distinct-ids check),
+    # with max_id present — so the ONLY thing under test is the vocab-range bound derived
+    # from the named tokenizer. Fine under a big-vocab tokenizer, out-of-range under a small one.
+    arr = np.arange(40000, dtype=np.uint32) % (max_id + 1)
+    arr[0] = max_id  # ensure the top id appears
+    (d / "tokens" / "train-00000.u32le.bin").write_bytes(arr.tobytes())
+    plan = P.publish(
+        d, dataset_id=dsid,
+        purpose="Corpus tokenized with a specific published tokenizer, deriving its vocab bound from that one",
+        profile="pretrain-tokens/v1", s3=s3, created_at=CREATED,
+        tokenizer=tokenizer,  # the first-class per-dataset arg
+        env=ENV,
+    )
+    return V.validate_dataset("edullm-landing", f"{dsid}/{plan.version}", s3, data_bucket="edullm-data")
+
+
+def test_two_datasets_two_different_tokenizers_each_derive_own_vocab():
+    s3 = FakeS3()
+    # big tokenizer: vocab 50001; small tokenizer: vocab 5001
+    big = _publish_named_tokenizer(s3, "tokenizer/dolma2-bpe", base_vocab=50000, eos_id=50000)
+    small = _publish_named_tokenizer(s3, "tokenizer/gpt2-bpe", base_vocab=5000, eos_id=5000)
+
+    # a corpus with ids up to 40000: valid under big-bpe (vocab 50001), INVALID under small-bpe (5001)
+    ok = _publish_corpus_with_tokenizer(s3, "pretrain/dolma2-corpus-40k", "tokenizer/dolma2-bpe", max_id=40000)
+    assert ok.ok, [str(v) for v in ok.violations]
+
+    bad = _publish_corpus_with_tokenizer(s3, "pretrain/gpt2-corpus-40k", "tokenizer/gpt2-bpe", max_id=40000)
+    assert not bad.ok  # 40000 >= derived vocab 5001 — caught against THIS tokenizer, not a shared default
+    assert any("vocab" in v.code for v in bad.violations), [str(v) for v in bad.violations]
+
+
+def test_tokenizer_arg_resolves_latest_version():
+    s3 = FakeS3()
+    _publish_named_tokenizer(s3, "tokenizer/dolma2-bpe", base_vocab=50000, eos_id=50000)
+    # reference without a version → resolves the published latest
+    ok = _publish_corpus_with_tokenizer(s3, "pretrain/dolma2-corpus-10b", "tokenizer/dolma2-bpe", max_id=100)
+    assert ok.ok, [str(v) for v in ok.violations]
+
+
+def test_unpublished_tokenizer_rejected_at_publish():
+    s3 = FakeS3()
+    with pytest.raises(P.PublishError):
+        _publish_corpus_with_tokenizer(s3, "pretrain/no-tok-10b", "tokenizer/never-published", max_id=100)

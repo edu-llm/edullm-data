@@ -74,7 +74,13 @@ publish(
 
 **You type four things** (`source`, `dataset_id`, `purpose`, `profile`) plus the per-group
 `group_meta` your profile requires. Everything else — version, hashes, counts, formats, build
-provenance, license, tokenizer pins — is derived or inherited from `families/<family>.json`.
+provenance, license — is derived or inherited from `families/<family>.json`.
+
+**Tokenizers are per-dataset.** A pretrain/curriculum corpus names the tokenizer it was built
+with by passing `tokenizer="tokenizer/<name>"` to `publish()` (publish the tokenizer once with
+profile `tokenizer/v1`). The validator derives `vocab_size`/`eos_token_id` from that published
+tokenizer and checks every token id against it. There is no single canonical tokenizer, so
+don't rely on a family default — name the exact one each corpus used.
 
 Layout of your `source` directory: one subdirectory per **group**, files under it.
 

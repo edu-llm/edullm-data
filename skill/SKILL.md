@@ -122,7 +122,7 @@ shards + a sidecar table — each with its own profile). Pick by what the bytes 
 | Payload | Profile | Required in `group_meta` |
 |---|---|---|
 | a published tokenizer (tokenizer.json + friends) | `tokenizer/v1` | nothing — vocab_size/eos are DERIVED from tokenizer.json |
-| packed pre-tokenized corpus (`.u32le.bin`) | `pretrain-tokens/v1` | `depends_on` a published `tokenizer/vN` (role: tokenizer); vocab is derived from it, not typed |
+| packed pre-tokenized corpus (`.u32le.bin`) | `pretrain-tokens/v1` | `publish(tokenizer="tokenizer/<name>")` — names the per-dataset tokenizer; vocab derived from it, not typed |
 | raw untokenized documents | `text-corpus/v1` | record schema, `text` field |
 | instruction / conversation data | `sft-conversations/v1` | `record_schema` w/ `messages[]`, `partitions` incl. heldout, `dedup`, `leakage` |
 | benchmark inputs | `eval-items/v1` | stable per-item id |
@@ -142,24 +142,38 @@ is a small PR (see `edullm-data/CONTRIBUTING.md`): a registry entry, a schema fr
 functions that RECOMPUTE something, and two fixtures. Only reach for `experimental/v1` when you
 must ship today and don't yet know the shape.
 
-### Publish the tokenizer FIRST (before any token corpus)
+### Tokenizers: publish once, name per dataset
 
 The tokenizer is an owned artifact, not an HF reference — otherwise your token shards become
-undecodable if the upstream repo moves. Publish it once, then every corpus depends on it:
+undecodable if the upstream repo moves. And **there is no single canonical tokenizer** — every
+corpus may use its own — so each corpus **names the tokenizer it was built with**.
+
+**Step 1 — publish the tokenizer** (once per distinct tokenizer):
 
 ```python
 publish(tokenizer_dir,                 # a dir containing tokenizer.json (+ merges, config…)
         dataset_id="tokenizer/dolma2-bpe",
-        purpose="Published Dolma2 tokenizer so pretrain corpora own their tokenizer",
+        purpose="Published Dolma2 tokenizer so corpora own the tokenizer they were built with",
         profile="tokenizer/v1", s3=..., created_at=...)
 ```
 
-The validator **derives** `vocab_size`/`eos_token_id` from the published `tokenizer.json` — you
-never type them. A `pretrain-tokens` corpus then declares its dependency (or inherits it from
-the family default once `tokenizer_dependency` is filled in), and the decode smoke test asserts
-every token id against the *derived* vocabulary. Set the family's `tokenizer_dependency`
-(`families/pretrain.json`, currently `TODO-set`) to the published tokenizer's id + version +
-`manifest_sha256` so producers don't repeat it per dataset.
+**Step 2 — name it when publishing a corpus**, via the first-class `tokenizer=` argument:
+
+```python
+publish(tokens_dir, dataset_id="pretrain/dolma2-150b", purpose="…",
+        profile="pretrain-tokens/v1",
+        tokenizer="tokenizer/dolma2-bpe",   # ← THE per-dataset tokenizer. use the exact one
+        s3=..., created_at=...)             #    this corpus was tokenized with
+```
+
+`tokenizer=` accepts `"tokenizer/<name>"` (latest published version) or
+`"tokenizer/<name>/vN"` (exact). The validator **derives** `vocab_size`/`eos_token_id` from that
+tokenizer's `tokenizer.json` and asserts every token id against *that* vocabulary — the real
+one this corpus used, never a guess or a shared default. **A pretrain corpus with no resolvable
+tokenizer is rejected** (the vocab check can't run without one). Do NOT rely on a family-wide
+default — tokenizers vary per dataset, and a wrong default passes silently (mismatched vocab
+sizes are usually still in range). Only set `tokenizer_dependency_optional` in the family if a
+team genuinely standardizes on one tokenizer for everything.
 
 ## Format rules that bite
 
