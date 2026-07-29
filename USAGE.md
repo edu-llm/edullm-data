@@ -18,16 +18,16 @@ Install the package:
 
 ```bash
 # pinned git install (production) — pin a tag so the publisher and validator agree
-uv add "edullm-data @ git+ssh://git@github.com/<org>/<edullm-data-repo>@v0.1.0"
+uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.1.0"
 
 # editable (local dev)
 python3 -m pip install -e /path/to/edullm-data
-python3 -m pytest tests/ -q   # 352 passing
+python3 -m pytest tests/ -q   # 368 passing
 ```
 
-> The git URL is a placeholder until this repo has a remote. Until then, `pip install -e` the
-> local checkout, or use the wheel-from-S3 bootstrap in
-> [`infra/05-validator-jobdef.md`](infra/05-validator-jobdef.md).
+> The repo is public at [github.com/edu-llm/edullm-data](https://github.com/edu-llm/edullm-data);
+> the `git+https` install needs no auth. For local dev, `pip install -e` the checkout; on AWS
+> Batch, use the wheel-from-S3 bootstrap in [`infra/05-validator-jobdef.md`](infra/05-validator-jobdef.md).
 
 ---
 

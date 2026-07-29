@@ -155,10 +155,12 @@ been published yet — only test probes, all cleaned up. This is the correct exp
    resolvable tokenizer. Do NOT set a family-wide default (`tokenizer_dependency_optional` is off by
    design; a wrong default passes silently). `curriculum/` inherits the tokenizer transitively through
    its parent pool. The old inline `vocab_size`/`revision`/`fingerprint_sha256` pins are GONE.
-2. **Create a git remote and push.** The repo exists only on this laptop (no backup; the git-install
-   URL in the skill/USAGE is a placeholder; `build.code_sha256` is weaker without it). `gh repo create`
-   + push. Then update the install URL in `skill/SKILL.md` + `../.claude/skills/edullm-datasets/SKILL.md`
-   + `USAGE.md` (currently `git+ssh://git@github.com/<org>/<edullm-data-repo>@v0.1.0`).
+2. **DONE — repo pushed public + install URLs updated.** Remote is
+   `https://github.com/edu-llm/edullm-data` (public; internal AWS ids scrubbed to placeholders in
+   commit da7f88e). Install lines in `README.md`, `USAGE.md`, `skill/SKILL.md`,
+   `../.claude/skills/edullm-datasets/SKILL.md`, and the infra docs now read
+   `git+https://github.com/edu-llm/edullm-data@v0.1.0`. Requires the `v0.1.0` git tag to exist
+   (create it if a fresh clone can't resolve the pin).
 3. **(Optional, better steady state) Bake the validator container image (Path A).** On a machine with
    Docker + ECR push: `infra/Dockerfile.validator` → push to a new ECR repo → re-register
    `edullm-validator` + `edullm-fsck` job defs pointing at the image (drops the ~30-60s pip-install per

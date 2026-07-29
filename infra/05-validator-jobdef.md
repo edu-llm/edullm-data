@@ -13,8 +13,8 @@ needing something this workstation does not have:
 
 1. **Bake it into an image** (`infra/Dockerfile.validator`) and push to ECR. Needs Docker
    (not installed here) and `ecr:PutImage` (untested).
-2. **`pip install "edullm-data @ git+ssh://…@v0.1.0"`** at container start. Needs a git
-   remote (this repo has no remote yet).
+2. **`pip install "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.1.0"`** at
+   container start (the repo is public, so no auth needed).
 
 The wheel itself builds cleanly (`python -m pip wheel . --no-deps` →
 `edullm_data-0.1.0-py3-none-any.whl`, ~62 KB), so nothing about the package blocks this.

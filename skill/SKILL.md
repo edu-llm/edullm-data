@@ -33,8 +33,8 @@ the publisher produces).
 
 ```bash
 python3 -c "import edullm_data" 2>/dev/null && echo "present" || \
-  uv add "edullm-data @ git+ssh://git@github.com/<org>/<edullm-data-repo>@v0.1.0"
-# local dev / no remote yet:  python3 -m pip install -e /path/to/edullm-data
+  uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.1.0"
+# local dev:  python3 -m pip install -e /path/to/edullm-data
 ```
 
 Install it **wherever you run `publish()`** — the machine that holds the data and can reach

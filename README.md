@@ -12,7 +12,7 @@ Not yet published — no tag exists. Once `v0.1.0` is tagged (placeholder org/re
 first release):
 
 ```bash
-uv add "edullm-data @ git+ssh://git@github.com/<org>/<repo>@v0.1.0"
+uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.1.0"
 ```
 
 For local development, editable install with test extras:
