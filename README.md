@@ -40,7 +40,7 @@ seals the manifest without moving bytes.
 ## The one thing to know
 
 **Producers write ONLY to `s3://edullm-landing`.** The validator role
-(`sbsandbox-intern-edullm-batch-workload`, service-assumable only — no human or intern session can
+(`<BATCH_JOB_ROLE>`, service-assumable only — no human or intern session can
 assume it) is the *only* principal with `PutObject` on `s3://edullm-data`. That is an IAM bucket-policy
 Deny, not a convention.
 

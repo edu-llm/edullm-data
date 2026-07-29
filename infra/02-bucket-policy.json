@@ -17,8 +17,8 @@
       "Condition": {
         "ArnNotEqualsIfExists": {
           "aws:PrincipalArn": [
-            "arn:aws:iam::056956104102:role/sbsandbox-intern-edullm-batch-workload",
-            "arn:aws:iam::056956104102:role/sbsandbox-intern-edullm-infra-deployer"
+            "arn:aws:iam::<ACCOUNT_ID>:role/<BATCH_JOB_ROLE>",
+            "arn:aws:iam::<ACCOUNT_ID>:role/<INFRA_DEPLOYER_ROLE>"
           ]
         },
         "BoolIfExists": {
@@ -36,7 +36,7 @@
       "Resource": "arn:aws:s3:::edullm-data/_inventory/*",
       "Condition": {
         "StringEquals": {
-          "aws:SourceAccount": "056956104102",
+          "aws:SourceAccount": "<ACCOUNT_ID>",
           "s3:x-amz-acl": "bucket-owner-full-control"
         },
         "ArnLike": {

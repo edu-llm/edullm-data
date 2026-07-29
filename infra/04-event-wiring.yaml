@@ -6,15 +6,15 @@
 #   1. EventBridgeConfiguration on edullm-landing   <- done in 01-buckets.yaml
 #   2. a rule filtering detail.object.key suffix `manifest.json`   <- THIS FILE
 #   3. target = the Batch queue, BatchParameters.JobDefinition =
-#      sbsandbox-intern-edullm-cpu-run, RoleArn = sbsandbox-intern-edullm-batch-workload
+#      <JOB_DEFINITION>, RoleArn = <BATCH_JOB_ROLE>
 #
 # Per §6 "Order", the per-group manifest.json is written LAST and is the commit point.
 # Its arrival is therefore the only correct trigger: dataset.json arriving means "a version
 # was reserved", payload objects arriving mean "an upload is in progress", and only
 # manifest.json means "this claim is complete, go check it".
 #
-# NO IAM ROLE IS CREATED HERE. iam:CreateRole is denied by InternSandboxBoundary (§1).
-# The rule reuses the existing sbsandbox-intern-edullm-batch-workload role — see the
+# NO IAM ROLE IS CREATED HERE. iam:CreateRole is denied by <PERMISSION_BOUNDARY> (§1).
+# The rule reuses the existing <BATCH_JOB_ROLE> role — see the
 # large caveat on RuleTargetRoleArn below, which is the single biggest deployment risk
 # in this template.
 #
@@ -39,7 +39,7 @@
 #
 #   (a) RESOURCES. §1: "vcpus and memory are null on the definition, so every submission
 #       must supply them in the override or the job fails to place." Revision 1 of
-#       sbsandbox-intern-edullm-cpu-run has both null. The override this rule cannot send
+#       <JOB_DEFINITION> has both null. The override this rule cannot send
 #       is exactly the one from §1:
 #
 #           --container-overrides '{"command":["python","-m","edullm_data.validate",
@@ -49,7 +49,7 @@
 #   (b) THE WORK ITEM. Even with resources solved, the rule cannot tell the container WHICH
 #       landing prefix to validate — `detail.object.key` from the event has nowhere to go.
 #       The definition's default command is
-#       `python -c 'print("sbsandbox-intern-edullm-cpu-run: no command override was supplied")'`
+#       `python -c 'print("<JOB_DEFINITION>: no command override was supplied")'`
 #       (§1), so an event-triggered job would, at best, print that and exit 0 — a validator
 #       that silently blesses nothing while looking healthy. That is the exact class of
 #       decorative mechanism this standard exists to eliminate.
@@ -70,7 +70,7 @@
 #      DatasetValidator role in §1 / §13, so ask for both at once.
 #
 #   2. NO ADMIN NEEDED, UNTESTED PERMISSION: register a revision 2 of
-#      sbsandbox-intern-edullm-cpu-run that bakes in resourceRequirements (VCPU 4,
+#      <JOB_DEFINITION> that bakes in resourceRequirements (VCPU 4,
 #      MEMORY 8192) and a default command that SELF-DISCOVERS work — i.e. lists
 #      s3://edullm-landing/ for manifests with no sibling _REJECTED.json and no
 #      corresponding _catalog entry, then validates each. Self-discovery dissolves problem
@@ -101,7 +101,7 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >-
   eduLLM Dataset Standard v1 event wiring: EventBridge rule matching Object Created on
   s3://edullm-landing for keys ending in manifest.json, targeting the
-  sbsandbox-intern-edullm-cpu Batch queue. Created DISABLED by default - EventBridge
+  <JOB_QUEUE> Batch queue. Created DISABLED by default - EventBridge
   cannot send the vcpus/memory container override the job definition requires. See the
   KNOWN LIMITATION block at the top of this file.
 
@@ -116,7 +116,7 @@ Parameters:
     Description: >-
       Leave DISABLED until a dispatch wrapper exists (see KNOWN LIMITATION). Every
       invocation of the enabled rule as written will fail at SubmitJob, because revision 1
-      of sbsandbox-intern-edullm-cpu-run has null vcpus and null memory and EventBridge
+      of <JOB_DEFINITION> has null vcpus and null memory and EventBridge
       cannot override them. Flip to ENABLED only once the target can actually place a job.
 
   LandingBucketName:
@@ -133,12 +133,12 @@ Parameters:
 
   BatchJobQueueArn:
     Type: String
-    Default: arn:aws:batch:us-east-1:056956104102:job-queue/sbsandbox-intern-edullm-cpu
+    Default: arn:aws:batch:us-east-1:<ACCOUNT_ID>:job-queue/<JOB_QUEUE>
     Description: ARN of the existing, enabled Batch job queue. Verified live in §1.
 
   BatchJobDefinition:
     Type: String
-    Default: sbsandbox-intern-edullm-cpu-run
+    Default: <JOB_DEFINITION>
     Description: >-
       Existing job definition (revision 1, type container, image digest-pinned). Reused
       rather than registered - §1 "Running the validator without registering a job
@@ -148,12 +148,12 @@ Parameters:
 
   RuleTargetRoleArn:
     Type: String
-    Default: arn:aws:iam::056956104102:role/CloudWatchSendEventsToVdi
+    Default: arn:aws:iam::<ACCOUNT_ID>:role/<EVENTBRIDGE_INVOKE_ROLE>
     Description: >-
       Role EventBridge assumes to call batch:SubmitJob. MUST be assumable by
-      events.amazonaws.com. sbsandbox-intern-edullm-batch-workload is NOT (its trust policy
+      events.amazonaws.com. <BATCH_JOB_ROLE> is NOT (its trust policy
       allows only ecs-tasks.amazonaws.com — verified), so it cannot be used here even though
-      the job RUNS as that role via the job definition's jobRoleArn. CloudWatchSendEventsToVdi
+      the job RUNS as that role via the job definition's jobRoleArn. <EVENTBRIDGE_INVOKE_ROLE>
       trusts events.amazonaws.com (verified) and is the correct invocation identity. The
       writer to edullm-data is unchanged — it is still the job's jobRoleArn.
 
@@ -165,7 +165,7 @@ Resources:
       Name: edullm-landing-manifest-created
       Description: >-
         s3://edullm-landing Object Created with key suffix manifest.json -> submit the
-        dataset validator (Gate A) on the sbsandbox-intern-edullm-cpu queue.
+        dataset validator (Gate A) on the <JOB_QUEUE> queue.
       State:
         Ref: RuleState
 

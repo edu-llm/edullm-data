@@ -25,7 +25,7 @@ The wheel itself builds cleanly (`python -m pip wheel . --no-deps` →
   deregistered).
 - The validator role can `pip install` and write `edullm-data` (the live promotion test).
 - The image runtime is python 3.12 with pip, no boto3, no uv — hence the bundled image.
-- `CloudWatchSendEventsToVdi` is the correct EventBridge invocation role (deployed in the
+- `<EVENTBRIDGE_INVOKE_ROLE>` is the correct EventBridge invocation role (deployed in the
   event-wiring stack, DISABLED).
 
 ## To finish (pick one path)
@@ -37,13 +37,13 @@ On a machine with Docker + ECR push rights:
 ```bash
 cd edullm-data
 aws ecr get-login-password --region us-east-1 \
-  | docker login --username AWS --password-stdin 056956104102.dkr.ecr.us-east-1.amazonaws.com
+  | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com
 # A dedicated repo is cleaner than reusing olmo-core; create it if allowed:
-aws ecr create-repository --repository-name sbsandbox-intern-edullm-validator || true
+aws ecr create-repository --repository-name <VALIDATOR_JOBDEF> || true
 docker build -f infra/Dockerfile.validator -t \
-  056956104102.dkr.ecr.us-east-1.amazonaws.com/sbsandbox-intern-edullm-validator:v0.1.0 .
+  <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/<VALIDATOR_JOBDEF>:v0.1.0 .
 docker push \
-  056956104102.dkr.ecr.us-east-1.amazonaws.com/sbsandbox-intern-edullm-validator:v0.1.0
+  <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/<VALIDATOR_JOBDEF>:v0.1.0
 ```
 
 Then register the job definition (run through the sb-aws broker; all args verified-allowed):
@@ -62,15 +62,15 @@ image by digest after the push resolves one):
 
 ```json
 {
-  "image": "056956104102.dkr.ecr.us-east-1.amazonaws.com/sbsandbox-intern-edullm-validator@sha256:<digest>",
+  "image": "<ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/<VALIDATOR_JOBDEF>@sha256:<digest>",
   "vcpus": 2,
   "memory": 4096,
-  "jobRoleArn": "arn:aws:iam::056956104102:role/sbsandbox-intern-edullm-batch-workload",
-  "executionRoleArn": "arn:aws:iam::056956104102:role/sbsandbox-intern-edullm-batch-execution",
+  "jobRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/<BATCH_JOB_ROLE>",
+  "executionRoleArn": "arn:aws:iam::<ACCOUNT_ID>:role/<BATCH_EXEC_ROLE>",
   "logConfiguration": {
     "logDriver": "awslogs",
     "options": {
-      "awslogs-group": "/aws/batch/sbsandbox-intern-edullm-cpu",
+      "awslogs-group": "/aws/batch/<JOB_QUEUE>",
       "awslogs-region": "us-east-1",
       "awslogs-stream-prefix": "validator"
     }
@@ -81,13 +81,13 @@ image by digest after the push resolves one):
 Because the entrypoint is self-discovering (`python -m edullm_data.validate --promote` with
 no args), the EventBridge rule can target this definition with empty `BatchParameters` — the
 gap documented in `04-event-wiring.yaml` dissolves. Update the rule's `JobDefinition` to
-`edullm-validator`, re-point `RuleTargetRoleArn` is already `CloudWatchSendEventsToVdi`, then
+`edullm-validator`, re-point `RuleTargetRoleArn` is already `<EVENTBRIDGE_INVOKE_ROLE>`, then
 flip `RuleState` to `ENABLED`.
 
 ### Path B — wheel-from-S3 bootstrap (no Docker needed)
 
 Upload the built wheel to a private prefix (the validator role can read landing), and use
-the existing `sbsandbox-intern-edullm-cpu-run` job definition with a command override that
+the existing `<JOB_DEFINITION>` job definition with a command override that
 installs it first:
 
 ```

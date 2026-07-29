@@ -48,16 +48,16 @@ live AWS with real data, INCLUDING fully-automatic event-triggered validation.
 - `85236c7` HANDOFF · `8d8f9e6` streaming publish (no local bytes) · `4b7a163` tokenizer artifact
 - `58b590e` per-dataset tokenizer · `b69e3be` HANDOFF per-dataset tokenizer
 
-**Deployed live in AWS account `sbsandbox` (056956104102), us-east-1** (NOT in git — broker-applied):
+**Deployed live in AWS account `sbsandbox` (<ACCOUNT_ID>), us-east-1** (NOT in git — broker-applied):
 - Buckets: `edullm-landing` (write-anything, expiry) + `edullm-data` (read-only; validator writes only)
   — CFN stacks `edullm-data-buckets`, `edullm-data-event-wiring` both CREATE_COMPLETE
 - `edullm-data` bucket policy: 2 statements — `OnlyValidatorWrites` Deny (with
   `BoolIfExists aws:PrincipalIsAWSService=false`) + `AllowS3InventoryDelivery`
-- Validator identity: EXISTING role `sbsandbox-intern-edullm-batch-workload` (ecs-tasks-only trust),
+- Validator identity: EXISTING role `<BATCH_JOB_ROLE>` (ecs-tasks-only trust),
   inline policy `dataset-validator` (S3 rw scoped to the two buckets)
 - Batch job defs: `edullm-validator:1` (self-discovering validate+promote), `edullm-fsck:1`
 - **Event rule `edullm-landing-manifest-created` — ENABLED**: manifest.json upload → validate+promote,
-  RoleArn `CloudWatchSendEventsToVdi` + its inline `edullm-validator-submit` (SubmitJob+PassRole)
+  RoleArn `<EVENTBRIDGE_INVOKE_ROLE>` + its inline `edullm-validator-submit` (SubmitJob+PassRole)
 - **Schedule rule `edullm-wu-fsck-nightly` — ENABLED**: `cron(6 9 * * ? *)` UTC (04:06 local) → fsck
 - S3 Inventory (weekly) on `edullm-data`; landing lifecycle scoped to family prefixes (keeps `_dist/`)
 - `s3://edullm-landing/_dist/edullm_data-0.1.0-py3-none-any.whl` — the durable bootstrap wheel
@@ -79,7 +79,7 @@ been published yet — only test probes, all cleaned up. This is the correct exp
 
 - **The airlock model** (two buckets, IAM Deny on the read bucket) — enforcement that can't be
   routed around, unlike the previous written-policy-only approach that was 100% ignored.
-- **Reusing the existing `sbsandbox-intern-edullm-batch-workload` role** instead of creating one
+- **Reusing the existing `<BATCH_JOB_ROLE>` role** instead of creating one
   (`iam:CreateRole` is boundary-denied; `iam:PutRolePolicy` is allowed).
 - **Wheel-from-S3 bootstrap (Path B)** to run the validator without a Docker host: Batch job
   `pip install boto3 numpy` → boto3-download the wheel from `_dist/` → `pip install` it → run.
@@ -105,7 +105,7 @@ been published yet — only test probes, all cleaned up. This is the correct exp
 - **The minimal Batch image has no `aws` CLI and no boto3** — first validator runs failed 127
   (`aws: not found`) then 1 (`w.whl is not a valid wheel filename`). Fix: use boto3 to download,
   keep the PEP-427 wheel filename, `pip install boto3 numpy` first.
-- **Event rule fired but didn't invoke** — `CloudWatchSendEventsToVdi` trusts events.amazonaws.com
+- **Event rule fired but didn't invoke** — `<EVENTBRIDGE_INVOKE_ROLE>` trusts events.amazonaws.com
   (so PutTargets accepted it) but had NO `batch:SubmitJob` (only events:PutEvents cross-account).
   `TriggeredRules=1, FailedInvocations=1`. **PutTargets FailedEntryCount:0 does NOT prove
   invocability.** Fix: added inline `edullm-validator-submit` (SubmitJob + PassRole).

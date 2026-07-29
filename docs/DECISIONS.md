@@ -20,11 +20,11 @@ glob.
 
 ---
 
-### Reuse `sbsandbox-intern-edullm-batch-workload` instead of creating a validator role
+### Reuse `<BATCH_JOB_ROLE>` instead of creating a validator role
 
-**Decision:** The validator runs as the existing `sbsandbox-intern-edullm-batch-workload` role.
+**Decision:** The validator runs as the existing `<BATCH_JOB_ROLE>` role.
 
-**Why:** `iam:CreateRole` is explicitly denied by the `InternSandboxBoundary` permissions boundary, so a
+**Why:** `iam:CreateRole` is explicitly denied by the `<PERMISSION_BOUNDARY>` permissions boundary, so a
 purpose-built role can't be created from an intern session. This role's trust policy already allows
 only `ecs-tasks.amazonaws.com` — no human or intern session can assume it — and `iam:PutRolePolicy` on
 it is allowed, so its S3 grants can be attached without creating anything.
@@ -45,9 +45,9 @@ Lambda in v1.
 
 ---
 
-### Reuse job definition `sbsandbox-intern-edullm-cpu-run` with command overrides
+### Reuse job definition `<JOB_DEFINITION>` with command overrides
 
-**Decision:** Submit validator jobs against the existing `sbsandbox-intern-edullm-cpu-run` job
+**Decision:** Submit validator jobs against the existing `<JOB_DEFINITION>` job
 definition with a container command override, instead of registering a new one.
 
 **Why:** `batch:RegisterJobDefinition` is assume-denied. It isn't needed: the existing definition's

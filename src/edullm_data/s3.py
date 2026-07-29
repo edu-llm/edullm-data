@@ -100,7 +100,7 @@ _COPY_PART_BYTES = 256 * 1024**2  # 256 MiB parts; 10,000-part cap ⇒ up to ~2.
 
 class Boto3S3:
     """Real S3 via boto3. Constructed with a client so the region/credentials come from
-    the Batch task environment (the validator runs as ``sbsandbox-intern-edullm-batch-workload``)."""
+    the Batch task environment (the validator runs as ``<BATCH_JOB_ROLE>``)."""
 
     def __init__(self, client) -> None:
         self._c = client

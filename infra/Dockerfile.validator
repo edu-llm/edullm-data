@@ -1,6 +1,6 @@
 # Validator container image (§13 step, "package into a validator container image").
 #
-# The validator runs on AWS Batch as sbsandbox-intern-edullm-batch-workload (the only
+# The validator runs on AWS Batch as <BATCH_JOB_ROLE> (the only
 # principal that can write edullm-data). This image bundles the edullm-data package so the
 # job needs no network install at run time — the fragile part the live promotion test hit
 # was that the existing olmo-core image has no boto3 and no way to fetch the package.

@@ -13,7 +13,7 @@ the tool, not as a shell line:
 mcp__sb-aws__aws(account="sbsandbox", command=[ ...array below... ])
 ```
 
-`account` is **always `sbsandbox`** — account `056956104102`, region `us-east-1`. Never `sbproduction`,
+`account` is **always `sbsandbox`** — account `<ACCOUNT_ID>`, region `us-east-1`. Never `sbproduction`,
 never `legacy`. §10: *one region*, `us-east-1`, for everything.
 
 Two consequences of going through the broker:
@@ -22,7 +22,7 @@ Two consequences of going through the broker:
   take `file://` URIs. If the broker runs the CLI somewhere that cannot see this repo, use the inline
   `--cli-input-json`-free fallbacks noted per step, or paste the document as a literal string argument.
   Verify once with the `--generate-cli-skeleton`-free dry check in step 0.
-- **The broker's identity is an intern session**, so it is bound by `InternSandboxBoundary`. Everything
+- **The broker's identity is an intern session**, so it is bound by `<PERMISSION_BOUNDARY>`. Everything
   below is on §1's verified-allowed list. Nothing here calls `iam:CreateRole` or
   `batch:RegisterJobDefinition`.
 
@@ -62,7 +62,7 @@ mcp__sb-aws__whoami()
 mcp__sb-aws__aws(account="sbsandbox", command=["sts","get-caller-identity"])
 ```
 
-Expect account `056956104102`.
+Expect account `<ACCOUNT_ID>`.
 
 Confirm the bucket names are free (a global namespace — `edullm-data` may be taken by a stranger):
 
@@ -86,7 +86,7 @@ Confirm the validator role and its existing inline policy, so step 2 cannot clob
 
 ```
 mcp__sb-aws__aws(account="sbsandbox", command=[
-  "iam","list-role-policies","--role-name","sbsandbox-intern-edullm-batch-workload"
+  "iam","list-role-policies","--role-name","<BATCH_JOB_ROLE>"
 ])
 ```
 
@@ -99,7 +99,7 @@ Confirm the Batch queue and job definition exist and the resource nulls are stil
 
 ```
 mcp__sb-aws__aws(account="sbsandbox", command=[
-  "batch","describe-job-queues","--job-queues","sbsandbox-intern-edullm-cpu",
+  "batch","describe-job-queues","--job-queues","<JOB_QUEUE>",
   "--query","jobQueues[0].{name:jobQueueName,state:state,status:status,arn:jobQueueArn}"
 ])
 ```
@@ -107,7 +107,7 @@ mcp__sb-aws__aws(account="sbsandbox", command=[
 ```
 mcp__sb-aws__aws(account="sbsandbox", command=[
   "batch","describe-job-definitions",
-  "--job-definition-name","sbsandbox-intern-edullm-cpu-run","--status","ACTIVE",
+  "--job-definition-name","<JOB_DEFINITION>","--status","ACTIVE",
   "--query","jobDefinitions[].{rev:revision,vcpus:containerProperties.vcpus,mem:containerProperties.memory,jobRole:containerProperties.jobRoleArn,image:containerProperties.image}"
 ])
 ```
@@ -210,7 +210,7 @@ until the rule in step 5 is enabled, which per §"Event wiring" waits for the se
 ```
 mcp__sb-aws__aws(account="sbsandbox", command=[
   "iam","put-role-policy",
-  "--role-name","sbsandbox-intern-edullm-batch-workload",
+  "--role-name","<BATCH_JOB_ROLE>",
   "--policy-name","dataset-validator",
   "--policy-document","file://infra/03-validator-policy.json"
 ])
@@ -223,14 +223,14 @@ Confirm both policies are present and read the new one back:
 
 ```
 mcp__sb-aws__aws(account="sbsandbox", command=[
-  "iam","list-role-policies","--role-name","sbsandbox-intern-edullm-batch-workload"
+  "iam","list-role-policies","--role-name","<BATCH_JOB_ROLE>"
 ])
 ```
 
 ```
 mcp__sb-aws__aws(account="sbsandbox", command=[
   "iam","get-role-policy",
-  "--role-name","sbsandbox-intern-edullm-batch-workload",
+  "--role-name","<BATCH_JOB_ROLE>",
   "--policy-name","dataset-validator"
 ])
 ```
@@ -258,7 +258,7 @@ mcp__sb-aws__aws(account="sbsandbox", command=[
 JSON cannot carry comments, so `02-bucket-policy.json` is bare. §1's warnings, restated:
 
 1. **`aws:PrincipalArn` holds the *role* ARN, never the session ARN.** Writing
-   `arn:aws:sts::056956104102:assumed-role/Role/session` makes the condition *always true* and the Deny
+   `arn:aws:sts::<ACCOUNT_ID>:assumed-role/Role/session` makes the condition *always true* and the Deny
    fires on **everyone**, including you. The file has the `arn:aws:iam::…:role/…` form. Keep it.
 2. **Never `s3:*` or `s3:Put*` in the Deny.** That catches `PutBucketPolicy` itself — a hard lockout
    that binds root and needs AWS Support to undo. The file lists five data-plane actions only.
@@ -284,7 +284,7 @@ mcp__sb-aws__aws(account="sbsandbox", command=[
 
 Expect `"IsPublic": false`. If `put-bucket-policy` itself starts returning `AccessDenied` on a retry,
 the Deny has caught the control plane — use the break-glass role
-`arn:aws:iam::056956104102:role/sbsandbox-intern-edullm-infra-deployer`, which is listed in the
+`arn:aws:iam::<ACCOUNT_ID>:role/<INFRA_DEPLOYER_ROLE>`, which is listed in the
 condition exactly so this is recoverable.
 
 `edullm-landing` gets **no** bucket policy. §1: *anything may write here.* Its protection is the 14-day
@@ -415,7 +415,7 @@ mcp__sb-aws__aws(account="sbsandbox", command=[
 ])
 ```
 Expect one target whose `Arn` is the job-queue ARN and whose `BatchParameters.JobDefinition` is
-`sbsandbox-intern-edullm-cpu-run`.
+`<JOB_DEFINITION>`.
 
 ---
 
@@ -434,14 +434,14 @@ that — it proves the **airlock**, not the validator (the package does not exis
 
 `--container-overrides` supplies `vcpus` and `memory` because the definition has both `null` (§1). The
 command writes a single trivial object to `edullm-data` using the container's own credentials — i.e. as
-`sbsandbox-intern-edullm-batch-workload`, the only identity the bucket policy permits.
+`<BATCH_JOB_ROLE>`, the only identity the bucket policy permits.
 
 ```
 mcp__sb-aws__aws(account="sbsandbox", command=[
   "batch","submit-job",
   "--job-name","edullm-airlock-smoke-write",
-  "--job-queue","sbsandbox-intern-edullm-cpu",
-  "--job-definition","sbsandbox-intern-edullm-cpu-run",
+  "--job-queue","<JOB_QUEUE>",
+  "--job-definition","<JOB_DEFINITION>",
   "--container-overrides","{\"command\":[\"python\",\"-c\",\"import urllib.request,json,subprocess,sys; subprocess.run([sys.executable,'-m','pip','install','--quiet','awscli'],check=False); open('/tmp/ok.txt','w').write('airlock smoke test\\n'); sys.exit(subprocess.run(['aws','s3api','put-object','--bucket','edullm-data','--key','_smoke/airlock-write-check.txt','--body','/tmp/ok.txt']).returncode)\"],\"vcpus\":2,\"memory\":4096}"
 ])
 ```
@@ -548,7 +548,7 @@ mcp__sb-aws__aws(account="sbsandbox", command=[
   **multipart copy**; 8 of the 15 largest objects in the audit exceeded that. Untested until the package
   lands, and it is the most likely place for a first-run surprise.
 - **Not** the §1 known gap: the validator shares a role with general Batch workloads, so **any** Batch
-  job on `sbsandbox-intern-edullm-cpu` inherits write access to `edullm-data`. Step 6a *demonstrates*
+  job on `<JOB_QUEUE>` inherits write access to `edullm-data`. Step 6a *demonstrates*
   this gap as much as it demonstrates the mechanism — the job that succeeded was an arbitrary one, not a
   validator. Mitigations, in §1's preference order: (a) ask an admin for a dedicated `DatasetValidator`
   role, or (b) add a condition on the job-definition ARN to `03-validator-policy.json`.
@@ -589,7 +589,7 @@ mcp__sb-aws__aws(account="sbsandbox", command=[
 ```
 
 If this itself returns `AccessDenied`, the Deny has caught the control plane (footgun 2) — assume the
-break-glass role `arn:aws:iam::056956104102:role/sbsandbox-intern-edullm-infra-deployer` and retry.
+break-glass role `arn:aws:iam::<ACCOUNT_ID>:role/<INFRA_DEPLOYER_ROLE>` and retry.
 **§1: use of the break-glass path should be alarmed.** Say so out loud when you use it.
 
 ### T3 — empty and delete the buckets
@@ -652,14 +652,14 @@ survive (§1).
 ```
 mcp__sb-aws__aws(account="sbsandbox", command=[
   "iam","delete-role-policy",
-  "--role-name","sbsandbox-intern-edullm-batch-workload",
+  "--role-name","<BATCH_JOB_ROLE>",
   "--policy-name","dataset-validator"
 ])
 ```
 
 ```
 mcp__sb-aws__aws(account="sbsandbox", command=[
-  "iam","list-role-policies","--role-name","sbsandbox-intern-edullm-batch-workload"
+  "iam","list-role-policies","--role-name","<BATCH_JOB_ROLE>"
 ])
 ```
 
@@ -673,9 +673,9 @@ and `iam:CreateRole` is denied, so deleting it would be unrecoverable from an in
 | Not done | Why |
 |---|---|
 | KMS key for `edullm-data` | Not wanted. §10 specifies SSE-S3 (AES256): same at-rest encryption, no second authorization system that could make an intact bucket unreadable. KMS's revocation + decrypt audit trail are unnecessary under the No-PII assumption. |
-| Any IAM role | `iam:CreateRole` denied by `InternSandboxBoundary` (§1). Design reuses `sbsandbox-intern-edullm-batch-workload`. |
+| Any IAM role | `iam:CreateRole` denied by `<PERMISSION_BOUNDARY>` (§1). Design reuses `<BATCH_JOB_ROLE>`. |
 | New Batch job definition | Deferred, not blocked — `batch:RegisterJobDefinition` **is** permitted (smoke-tested since: a probe definition was registered and deregistered). Step 4 of the standard's build order registers a dedicated `edullm-validator` definition with a self-discovering default command; until then revision 1 is reused with overrides. |
-| Enabled EventBridge rule | Two reasons, both real: `BatchParameters` cannot express `containerOverrides` *or* pass `detail.object.key`, and `sbsandbox-intern-edullm-batch-workload` is not assumable by `events.amazonaws.com` (use `CloudWatchSendEventsToVdi` as the rule's `RoleArn` — verified to trust `events.amazonaws.com`). Enable only once the self-discovering job definition exists. See step 5. |
+| Enabled EventBridge rule | Two reasons, both real: `BatchParameters` cannot express `containerOverrides` *or* pass `detail.object.key`, and `<BATCH_JOB_ROLE>` is not assumable by `events.amazonaws.com` (use `<EVENTBRIDGE_INVOKE_ROLE>` as the rule's `RoleArn` — verified to trust `events.amazonaws.com`). Enable only once the self-discovering job definition exists. See step 5. |
 | DLQ on the rule target | `sqs:CreateQueue` not in §1's verified table. Watch `FailedInvocations` until it exists. |
 | S3 Inventory on `edullm-data` | §13 step 10, after the package. |
 | `wu-fsck` schedule (Gate B) | §13 step 11. Needs the package. Owner: Eric Wu — §7 is explicit that an unowned nightly job gets muted and becomes decoration. |

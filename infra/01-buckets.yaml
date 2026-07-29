@@ -7,9 +7,9 @@
 #   s3://edullm-data      ONLY the validator role may write. Everyone reads.
 #
 # This template creates BUCKETS ONLY. It deliberately creates:
-#   * no IAM role  — iam:CreateRole is DENIED by the InternSandboxBoundary permissions
+#   * no IAM role  — iam:CreateRole is DENIED by the <PERMISSION_BOUNDARY> permissions
 #                    boundary. The validator identity is the pre-existing role
-#                    sbsandbox-intern-edullm-batch-workload (§1 "reuse, don't create").
+#                    <BATCH_JOB_ROLE> (§1 "reuse, don't create").
 #   * no bucket policy — the edullm-data Deny statement lives in 02-bucket-policy.json and
 #                    is applied out-of-band with `s3api put-bucket-policy`. Keeping it out
 #                    of CFN means a bad policy can be repaired with one call instead of a
