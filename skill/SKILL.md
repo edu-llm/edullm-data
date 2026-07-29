@@ -33,7 +33,7 @@ the publisher produces).
 
 ```bash
 python3 -c "import edullm_data" 2>/dev/null && echo "present" || \
-  uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.1.0"
+  uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.2.0"
 # local dev:  python3 -m pip install -e /path/to/edullm-data
 ```
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "edullm-data"
-version = "0.1.0"
+version = "0.2.0"
 description = "Publisher, validator, and reader for the eduLLM Dataset Standard v1"
 readme = "README.md"
 requires-python = ">=3.11"
