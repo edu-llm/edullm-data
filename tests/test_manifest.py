@@ -330,11 +330,31 @@ def test_byte_order_in_the_extension_is_enforced():
         ("rows/train-00000.parquet", Format(container="jsonl"), False),
         ("dataset.json", Format(container="json"), True),
         ("dataset.json", Format(container="jsonl"), False),
+        ("tokenizer/merges.txt", Format(container="text"), True),
+        ("tokenizer/merges.txt", Format(container="json"), False),
     ],
 )
 def test_container_and_codec_honesty_for_tabular_and_text(path, fmt, ok):
     violations = check_extension_matches_format(path, fmt)
     assert (violations == []) is ok
+
+
+def test_txt_sidecar_publishes_as_honest_text_not_an_error():
+    """A tokenizer's merges.txt must resolve to an honest 'text' format (no dtype, no
+    arithmetic), so a published tokenizer keeps every file that loads it. Regression for
+    the first tokenizer publish, where '.txt' was an unknown extension and publish()
+    raised 'cannot determine format' rather than shipping the merges file."""
+    from edullm_data.publish import _format_for
+    from edullm_data.manifest import verify_arithmetic, ManifestEntry
+
+    fmt = _format_for("tokenizer/merges.txt", {})
+    assert fmt.container == "text"
+    assert fmt.dtype is None and fmt.byte_order is None
+    # honest declaration, no contradiction
+    assert check_extension_matches_format("tokenizer/merges.txt", fmt) == []
+    # text is not fixed-width, so the arithmetic identity must decline (never fire)
+    entry = ManifestEntry(path="tokenizer/merges.txt", sha256="a" * 64, bytes=916646, format=fmt)
+    assert verify_arithmetic(entry) == []
 
 
 def test_jsonl_gz_beats_a_shorter_suffix_match():

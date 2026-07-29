@@ -344,6 +344,13 @@ EXTENSION_FORMAT: dict[str, dict[str, Any]] = {
     ".csv": {"container": "csv", "codec": "none"},
     ".csv.gz": {"container": "csv", "codec": "gzip"},
     ".json": {"container": "json", "codec": "none"},
+    # Opaque UTF-8 text. Not fixed-width (no dtype/byte_order), so the arithmetic
+    # identity never applies; it just lets an honest text sidecar declare a truthful
+    # container instead of erroring. The concrete case is a tokenizer's merges.txt
+    # riding alongside tokenizer.json (families/tokenizer.json says these "may ride
+    # along") — a real BPE merges file is text, and dropping it to dodge a missing
+    # extension would reduce the published tokenizer to less than what loads it.
+    ".txt": {"container": "text", "codec": "none"},
     # --- the lie the standard was written to stop ---
     # A real .npy always has a header (magic \x93NUMPY + version + dict), so
     # header_bytes must be > 0 and the container is not "raw". `min_header_bytes`
