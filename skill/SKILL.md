@@ -21,20 +21,32 @@ There are two buckets:
 So publishing is: write to landing → the validator checks it → it copies the passing dataset
 into `edullm-data` and writes a catalog entry. You never write `edullm-data` directly.
 
-## Install (what a dataset creator needs)
+## Prerequisite: the `edullm-data` package MUST be installed
+
+This skill is all you need to *know* — but it is not self-executing. Every command below
+calls the **`edullm-data` Python package**. It is a hard requirement: without it there is no
+`publish()` and no `dataset_paths()`, and you cannot correctly hand-roll a compliant
+`dataset.json` + manifests (the validator will reject anything that isn't byte-for-byte what
+the publisher produces).
+
+**Before doing anything else, ensure it is installed, and install it if not:**
 
 ```bash
-# 1. the package (git-installable; pin a tag)
-uv add "edullm-data @ git+ssh://git@github.com/<org>/<edullm-data-repo>@v0.1.0"
-#    editable, for local dev:
-python3 -m pip install -e /path/to/edullm-data
-
-# 2. this skill — already in .claude/skills/edullm-datasets/ for agents in this repo
+python3 -c "import edullm_data" 2>/dev/null && echo "present" || \
+  uv add "edullm-data @ git+ssh://git@github.com/<org>/<edullm-data-repo>@v0.1.0"
+# local dev / no remote yet:  python3 -m pip install -e /path/to/edullm-data
 ```
 
-The package gives you `publish()` (produce a dataset) and `dataset_paths()` (read one). You
-do **not** need it to read if you resolve the manifest yourself, but it returns the correct
-dtype for free — use it.
+Install it **wherever you run `publish()`** — the machine that holds the data and can reach
+AWS (laptop, FarmShare node, GPU box, or an AWS Batch job). The package is a *client*: it
+uploads to `s3://edullm-landing`. Nothing is installed "onto AWS" — the buckets, validator,
+and the event rule that auto-validates on upload are already deployed and running.
+
+You also need **AWS credentials that can write `edullm-landing`** (in this project: the
+`sb-aws` broker; elsewhere: ordinary AWS creds with `s3:PutObject` on that bucket).
+
+The package gives you `publish()` (produce a dataset) and `dataset_paths()` (read one, with
+the correct dtype). Confirm it's importable before you start, or the steps below will fail.
 
 ## Publishing a dataset — four hand-typed arguments
 
