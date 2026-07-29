@@ -1,7 +1,7 @@
 # HANDOFF — eduLLM Dataset Standard
 
-Last updated: 2026-07-29. Author: prior agent. Read this file alone and you can
-continue with no other context.
+Last updated: 2026-07-29 (post olmo30b migration + public release). Author: prior agent.
+Read this file alone and you can continue with no other context.
 
 ---
 
@@ -18,13 +18,24 @@ Motivating audit: `../docs/dataset-creation/s3-dataset-audit-2026-07-28.md` (23 
 
 ---
 
-## Current Progress — the system is BUILT, DEPLOYED, and PROVEN AUTOMATIC
+## Current Progress — BUILT, DEPLOYED, PROVEN AUTOMATIC, PUBLIC, and carrying REAL DATA
 
-Everything through the standard's §13 build order is done except two clearly-scoped items
-(baked container image; publish real tokenizers). The full pipeline has been proven end-to-end on
-live AWS with real data, INCLUDING fully-automatic event-triggered validation.
+The full pipeline is proven end-to-end on live AWS with real data, including fully-automatic
+event-triggered validation. The repo is now **public at
+`https://github.com/edu-llm/edullm-data`** (tag `v0.1.0`). The first real migration is DONE:
+two datasets are live, validated, promoted, and READABLE in `edullm-data`.
 
-**Code** (this repo, `edullm-data/`, its own git root; **363 tests passing**):
+**Two datasets now in `edullm-data` (migrated 2026-07-29 from `s3://edullm-datasets/olmo30b/`):**
+- `tokenizer/dolma2-bpe/v1` — the real `allenai/dolma2-tokenizer` (tokenizer.json + merges.txt +
+  vocab.json + configs). `vocab_size 100278` & `eos 100257` DERIVED from tokenizer.json.
+- `pretrain/olmo-mix-1124-31b/v1` — 31,334,000,834 dolma2 tokens, 218 shards, 125.336 GB,
+  uint32 headerless `.u32le.bin`, `depends_on tokenizer/dolma2-bpe`. Both have `_VALIDATED.json`
+  + `_catalog/` entries; `read.dataset_paths()` returns them with dtype uint32.
+- Legacy `s3://edullm-datasets/olmo30b/` left fully intact (greenfield + provenance). The legacy
+  `.npy` shards were headerless-raw-uint32 (the ".npy lie"), so migration was a pure server-side
+  rename `.npy → .u32le.bin` + publish — zero re-encode, zero bytes through the laptop.
+
+**Code** (this repo, `edullm-data/`, its own git root; **368 tests passing**):
 - `src/edullm_data/contracts.py` — canonical JSON, hashing, naming/purpose validation (7-family enum)
 - `src/edullm_data/manifest.py` — per-file format, manifest build/verify, arithmetic + extension checks
 - `src/edullm_data/s3.py` — `S3` protocol, `Boto3S3` (real), `FakeS3` (tests). Now also
@@ -40,13 +51,17 @@ live AWS with real data, INCLUDING fully-automatic event-triggered validation.
 - `families/*.json` — **7** families: pretrain, curriculum, sft, eval, probe, vendor, tokenizer
 - `infra/` — CloudFormation, policies, Dockerfile.validator, DEPLOY.md, 05-validator-jobdef.md
 - `skill/SKILL.md` — copy of the agent skill (canonical copy at `../.claude/skills/edullm-datasets/`)
-- `USAGE.md` — human how-to
+- `USAGE.md` — human how-to. Install line (all docs): `uv add "edullm-data @
+  git+https://github.com/edu-llm/edullm-data@v0.1.0"` (public repo, no auth).
 
-**Git commits (this repo, branch `main`, nothing pushed — no remote yet), newest last:**
-- `f177e19` steps 1–4 (core + airlock infra) · `a8844b1` steps 5–11 (publish/read/fsck + deploys)
-- `30f26a5` skill + usage · `cdfb6b3` skill hard-prereq + fsck schedule notes
-- `85236c7` HANDOFF · `8d8f9e6` streaming publish (no local bytes) · `4b7a163` tokenizer artifact
-- `58b590e` per-dataset tokenizer · `b69e3be` HANDOFF per-dataset tokenizer
+**Git commits — branch `main`, PUSHED to `origin` (github.com/edu-llm/edullm-data), newest last:**
+- `f177e19`…`b69e3be` — original build (core, airlock infra, publish/read/fsck, skill, streaming
+  publish, per-dataset tokenizer) + `226eb42` HANDOFF refresh.
+- `60f53b3` — `.txt`→`text` container (so a tokenizer's merges.txt publishes)
+- `8b8e63f` — parallelize `publish()` hash+copy (`hash_workers`/`copy_workers`, default 1)
+- `b988d1f` — `promote()` writes `_VALIDATED.json` INTO edullm-data (the readability seal)
+- `da7f88e` — scrub internal AWS ids → `<PLACEHOLDER>` for public release
+- `3b38288` — real `git+https@v0.1.0` install URLs. **Tag `v0.1.0` pushed** (the install pin).
 
 **Deployed live in AWS account `sbsandbox` (<ACCOUNT_ID>), us-east-1** (NOT in git — broker-applied):
 - Buckets: `edullm-landing` (write-anything, expiry) + `edullm-data` (read-only; validator writes only)
@@ -116,6 +131,26 @@ been published yet — only test probes, all cleaned up. This is the correct exp
   `_dist/` and would have deleted the bootstrap wheel in 14 days. Fix: explicit per-family-prefix
   expiry rules, leaving `_dist/` untouched.
 
+**From the olmo30b migration (first real `publish` on Batch — surfaced 4 issues, all fixed):**
+- **`publish()` couldn't find `families/` on Batch** — `FAMILIES_DIR` is repo-root-relative but the
+  wheel packages only `src/edullm_data`. Fix: `aws s3 cp families/ s3://edullm-landing/_dist/families/`
+  + a tiny driver that sets `P.FAMILIES_DIR=/tmp/families` before calling publish. (Proper fix TODO:
+  package families into the wheel.) The Batch driver lives at `_dist/publish_driver.py`.
+- **`.txt` had no format** — a tokenizer's `merges.txt` hit `cannot determine format` (`.txt` not in
+  EXTENSION_FORMAT, tokenizer family has no format default). Fix `60f53b3`: added `.txt`→`text`
+  container (no dtype, so arithmetic never applies).
+- **125 GB publish TIMED OUT at Batch's 60-min `attemptDurationSeconds`** — `publish()` stream-hashed
+  then server-side-copied 218 shards STRICTLY SEQUENTIALLY single-threaded (~48 MB/s), 31 of 32 vCPUs
+  idle. Fix `8b8e63f`: `hash_workers`/`copy_workers` ThreadPoolExecutor fan-out (order-preserving →
+  byte-identical manifest; default 1). Driver passes 16. ALSO pass `--timeout attemptDurationSeconds=7200`
+  on submit-job to override the 60-min job-def default.
+- **Promoted datasets were UNREADABLE** — `promote()` wrote `_VALIDATED.json` only to LANDING, but
+  `read.dataset_paths()` requires it in edullm-data (and landing's copy expires in 14d). The tests had
+  papered over this by manually seeding the marker. Fix `b988d1f`: `promote()` writes a durable
+  `_VALIDATED.json` seal into edullm-data, last. Backfill for already-promoted datasets: a MARKER-ONLY
+  Batch job that reads the promoted dataset.json and `s3.put`s the seal — a full re-`promote()` wastes
+  ~20 min re-copying 218 shards to write one file.
+
 ## Key Decisions
 
 - **SSE-S3 (AES256), not SSE-KMS** — decided, not placeholder. KMS's second auth system can make an
@@ -144,42 +179,51 @@ been published yet — only test probes, all cleaned up. This is the correct exp
 
 ## Next Steps (priority order)
 
-1. **Publish the tokenizer, then wire the family dependency, before the first REAL pretrain dataset.**
-   The tokenizer is now a first-class PUBLISHED artifact (profile `tokenizer/v1`, family `tokenizer/`),
-   not a hand-typed pin — the validator DERIVES vocab_size/eos_token_id from the published
-   `tokenizer.json` (`tokenizer_v1.derive_vocab`) and a `pretrain-tokens` corpus `depends_on` it.
-   TOKENIZERS ARE PER-DATASET — there is no single canonical one. To finish: (a) publish each real
-   tokenizer once, e.g. `publish(tok_dir, dataset_id="tokenizer/dolma2-bpe", profile="tokenizer/v1", …)`;
-   (b) when publishing a pretrain corpus, NAME its tokenizer: `publish(..., tokenizer="tokenizer/dolma2-bpe")`.
-   The validator derives vocab_size/eos from that tokenizer's tokenizer.json and rejects a corpus with no
-   resolvable tokenizer. Do NOT set a family-wide default (`tokenizer_dependency_optional` is off by
-   design; a wrong default passes silently). `curriculum/` inherits the tokenizer transitively through
-   its parent pool. The old inline `vocab_size`/`revision`/`fingerprint_sha256` pins are GONE.
-2. **DONE — repo pushed public + install URLs updated.** Remote is
-   `https://github.com/edu-llm/edullm-data` (public; internal AWS ids scrubbed to placeholders in
-   commit da7f88e). Install lines in `README.md`, `USAGE.md`, `skill/SKILL.md`,
-   `../.claude/skills/edullm-datasets/SKILL.md`, and the infra docs now read
-   `git+https://github.com/edu-llm/edullm-data@v0.1.0`. Requires the `v0.1.0` git tag to exist
-   (create it if a fresh clone can't resolve the pin).
-3. **(Optional, better steady state) Bake the validator container image (Path A).** On a machine with
-   Docker + ECR push: `infra/Dockerfile.validator` → push to a new ECR repo → re-register
-   `edullm-validator` + `edullm-fsck` job defs pointing at the image (drops the ~30-60s pip-install per
-   run). Details in `infra/05-validator-jobdef.md`. Not blocking — the wheel bootstrap works today.
-4. **When the wheel changes**, rebuild it (`python -m pip wheel . --no-deps`) and
-   `aws s3 cp` it to `s3://edullm-landing/_dist/edullm_data-0.1.0-py3-none-any.whl` (same filename).
-   Next validator/fsck run picks it up. (Bump the version + filename for a real release.)
-5. **Publish the first real dataset** to exercise the live pipeline for actual work; then watch
-   `edullm-data/_catalog/` populate and the nightly fsck report on it.
-6. **Consider migrating high-value legacy datasets** into the standard if desired (out of original
-   scope) — e.g. the tokenized corpora in `edullm-datasets` / `edullm-checkpoints` from the audit.
+DONE this session: first tokenizer published (`tokenizer/dolma2-bpe/v1`); first pretrain corpus
+migrated + published + promoted + readable (`pretrain/olmo-mix-1124-31b/v1`, 31.334B tokens); repo
+pushed public with `v0.1.0` tag + real install URLs. The pipeline is proven with real data end to end.
+
+1. **Package `families/` INTO the wheel** (drops the `_dist/families` + `FAMILIES_DIR` override the
+   Batch publisher currently needs). Either move `families/` under `src/edullm_data/families/` +
+   `importlib.resources`, or add `[tool.hatch.build.targets.wheel.force-include]`. Then rebuild the
+   wheel + `aws s3 cp` to `_dist/` (same filename) and simplify `_dist/publish_driver.py`.
+2. **Add per-shard progress logging to `publish()` / the driver.** The ~8-min silent hash of 125 GB
+   looked exactly like a hang (I had to probe S3 object counts to tell progress from stall). Emit a
+   line every N shards from `build_plan`'s hash loop and the copy loop.
+3. **Set the corpus's real `license.basis`.** `pretrain/olmo-mix-1124-31b`'s dataset.json has
+   `license.basis: "unknown"`. OLMo-mix / Dolma2 is likely ODC-By-1.0 — confirm and set it per-dataset
+   (families inherit an honest "unknown"; each dataset overrides with checked terms).
+4. **(Optional) Parallelize `promote()`'s copy loop** like `publish()` — it's still sequential
+   per-shard (~7/min), which is why promotion of the 218-shard corpus took ~30 min. Fine at this scale;
+   revisit if promotion latency matters. The validator's Gate A reads are single-threaded too but
+   I/O-light (~64 KB range-read per shard), so those are fine as-is.
+5. **(Optional, better steady state) Bake the validator container image (Path A).** Docker + ECR push:
+   `infra/Dockerfile.validator` → new ECR repo → re-register `edullm-validator` + `edullm-fsck` job
+   defs at the image (drops the ~30-60s pip-install per run). `infra/05-validator-jobdef.md`. Not
+   blocking — wheel bootstrap works.
+6. **When the wheel changes**, rebuild (`python -m pip wheel . --no-deps`) + `aws s3 cp` to
+   `s3://edullm-landing/_dist/edullm_data-0.1.0-py3-none-any.whl` (same filename); next validator/fsck
+   run picks it up. Bump version + filename + git tag for a real release. Consider `gh release create
+   v0.1.0` if a formal Release page is wanted (only the lightweight tag exists now).
+7. **Migrate more high-value legacy datasets** using the proven playbook: server-side rename any
+   headerless `.npy`→`.u32le.bin` into `s3://edullm-landing/_migrate/<name>/`, then run the Batch
+   publish driver with `PUB_HASH_WORKERS`/`PUB_COPY_WORKERS=16`. (Verify each shard is headerless first:
+   first bytes ≠ `\x93NUMPY` and `tokens×dtype_size == bytes`.)
 
 ## How to operate it (quick reference)
 
 - **Publish**: `from edullm_data.publish import publish` — args (source, dataset_id, purpose,
   profile) + `tokenizer="tokenizer/<name>"` for a pretrain corpus + optional group_meta. See `USAGE.md`.
 - **Read**: `from edullm_data.read import dataset_paths, resolve_latest`.
-- **Discover what's published**: list `s3://edullm-data/_catalog/`.
+- **Discover what's published**: list `s3://edullm-data/_catalog/` (now has `tokenizer/dolma2-bpe/v1`
+  + `pretrain/olmo-mix-1124-31b/v1`).
+- **Migrate a legacy corpus (proven playbook)**: broker-copy headerless `.npy`→`.u32le.bin` into
+  `s3://edullm-landing/_migrate/<name>/tokens/`, ship wheel+driver+families to `_dist/`, then Batch
+  submit `_dist/publish_driver.py` via the boto3 bootstrap with `PUB_*` env (incl. `PUB_HASH_WORKERS`/
+  `PUB_COPY_WORKERS=16`) and `--timeout attemptDurationSeconds=7200`. EventBridge auto-validates+promotes.
 - **All AWS access in this project goes through the `sb-aws` MCP broker** (read-only default; the
-  intern session CANNOT write `edullm-data` by design — that's the airlock working).
-- **Durable AWS memory note**: `../.claude/.../memory/dataset-standard-airlock.md` has the full
-  live-resource inventory and every hard-won fact.
+  intern session CANNOT write `edullm-data` by design — that's the airlock working). publish/validate/
+  promote run on AWS Batch as the validator role (which can't read the legacy `edullm-datasets` bucket
+  — so legacy→landing rename-copies must be broker-driven, not Batch-driven).
+- **Durable AWS memory note**: `../.claude/.../memory/dataset-standard-airlock.md` +
+  `publish-on-batch-needs-families.md` have the full live-resource inventory and every hard-won fact.
