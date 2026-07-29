@@ -148,11 +148,14 @@ Parameters:
 
   RuleTargetRoleArn:
     Type: String
-    Default: arn:aws:iam::056956104102:role/sbsandbox-intern-edullm-batch-workload
+    Default: arn:aws:iam::056956104102:role/CloudWatchSendEventsToVdi
     Description: >-
-      Role EventBridge assumes to call batch:SubmitJob, per §1's verified path. SEE THE
-      TRUST-POLICY CAVEAT in the EdullmLandingManifestRule comments - this role's trust
-      policy allows only ecs-tasks.amazonaws.com, which events.amazonaws.com is not.
+      Role EventBridge assumes to call batch:SubmitJob. MUST be assumable by
+      events.amazonaws.com. sbsandbox-intern-edullm-batch-workload is NOT (its trust policy
+      allows only ecs-tasks.amazonaws.com — verified), so it cannot be used here even though
+      the job RUNS as that role via the job definition's jobRoleArn. CloudWatchSendEventsToVdi
+      trusts events.amazonaws.com (verified) and is the correct invocation identity. The
+      writer to edullm-data is unchanged — it is still the job's jobRoleArn.
 
 Resources:
 

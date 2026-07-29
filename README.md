@@ -56,23 +56,25 @@ started.
 
 ```
 edullm-data/                    ← git root
-├── pyproject.toml              [project.name = "edullm-data"]                    TODO
+├── pyproject.toml              [project.name = "edullm-data"]                    done
 ├── src/edullm_data/
-│   ├── contracts.py            canonical_json, hashing                          in progress
-│   ├── manifest.py             build + verify manifests                         in progress
-│   ├── publish.py              publish() — landing-only writes                  TODO
-│   ├── read.py                 dataset_paths() reader                           TODO
-│   ├── validate.py             Gate A (runs on AWS Batch as the validator)      TODO
-│   ├── fsck.py                 wu-fsck, Gate B, nightly integrity re-check      TODO
+│   ├── contracts.py            canonical_json, hashing, naming                   done
+│   ├── manifest.py             build + verify manifests                          done
+│   ├── s3.py                   S3 protocol + Boto3S3 + FakeS3                     done
+│   ├── publish.py              publish() — landing-only writes                   done
+│   ├── read.py                 dataset_paths() reader                            done
+│   ├── validate.py             Gate A (runs on AWS Batch as the validator)       done
+│   ├── fsck.py                 wu-fsck, Gate B, nightly integrity re-check       done
 │   └── profiles/
-│       ├── registry.py         profile lookup by name+version                  TODO
-│       ├── pretrain_tokens_v1.py   tokenizer pin, vocab bound, alignment       TODO
-│       ├── eval_results_v1.py      model pin, decode params, failure accounting TODO
-│       ├── token_order_v1.py       permutation/index-vector checks            TODO
-│       └── sft_conversations_v1.py messages[] schema, dedup + leakage report   TODO
-├── infra/                      CloudFormation for buckets, IAM, event wiring    TODO
-├── families/                   the six family.json files                       TODO
-└── tests/fixtures/             one passing + one broken fixture per profile     TODO
+│       ├── base.py             Violation / GroupContext / sample_offsets         done
+│       ├── registry.py         profile lookup by name                            done
+│       ├── pretrain_tokens_v1.py   tokenizer pin, vocab bound, alignment         done
+│       ├── eval_results_v1.py      model pin, decode params, failure accounting  done
+│       ├── token_order_v1.py       permutation/index-vector checks               done
+│       └── sft_conversations_v1.py messages[] schema, dedup + leakage report     done
+├── infra/                      CloudFormation + policies + Dockerfile + runbooks done (deployed)
+├── families/                   the six family.json files                         done
+└── tests/                      352 passing                                       done
 ```
 
 ## Build status (standard §13)
@@ -80,17 +82,22 @@ edullm-data/                    ← git root
 | # | Step | Status |
 |---|---|---|
 | 1 | git root created, package dirs scaffolded | done |
-| 2 | infrastructure: `edullm-landing` / `edullm-data`, bucket policy, lifecycle, versioning | todo |
-| 3 | `contracts.py` + `manifest.py` | in progress |
-| 4 | validator (Gate A), Batch-only, profile-driven | todo |
-| 5 | four v1 profiles + fixtures (`pretrain-tokens`, `eval-results`, `token-order`, `sft-conversations`) | todo |
-| 6 | `publish()` | todo |
-| 7 | `dataset_paths()` reader | todo |
-| 8 | six `family.json` files | todo |
-| 9 | event wiring (EventBridge on landing → Batch queue) | todo |
-| 10 | S3 Inventory on `edullm-data` | todo |
-| 11 | `wu-fsck` (Gate B), nightly, owner **Eric Wu** | todo |
+| 2 | infrastructure: `edullm-landing` / `edullm-data`, bucket policy, lifecycle, versioning | **done — deployed live** |
+| 3 | `contracts.py` + `manifest.py` | done |
+| 4 | validator (Gate A), Batch-only, profile-driven | done |
+| 5 | four v1 profiles + tests (`pretrain-tokens`, `eval-results`, `token-order`, `sft-conversations`) | done |
+| 6 | `publish()` | done |
+| 7 | `dataset_paths()` reader | done |
+| 8 | six `family.json` files | done |
+| 9 | event wiring (EventBridge on landing → Batch queue), deployed DISABLED | **done — deployed live** |
+| 10 | S3 Inventory on `edullm-data` | **done — deployed live** |
+| 11 | `wu-fsck` (Gate B), nightly, owner **Eric Wu** | done (code); scheduling TODO |
 | 12 | generate the agent skill from the profile registry | todo |
+
+**One packaging step remains before the validator runs in-cluster** (`infra/05-validator-jobdef.md`):
+the container needs the package, which requires either a Docker host + ECR push, or a git remote to
+`pip install` from — neither available from the build workstation. The wheel builds cleanly; two deploy
+paths are documented. The airlock itself is proven end-to-end (live promotion test).
 
 `wu-fsck` is named for its owner deliberately — an unowned nightly job gets muted after its first false
 alarm. Ownership transfers by renaming the job, not by editing a config field.

@@ -1,0 +1,29 @@
+# Validator container image (§13 step, "package into a validator container image").
+#
+# The validator runs on AWS Batch as sbsandbox-intern-edullm-batch-workload (the only
+# principal that can write edullm-data). This image bundles the edullm-data package so the
+# job needs no network install at run time — the fragile part the live promotion test hit
+# was that the existing olmo-core image has no boto3 and no way to fetch the package.
+#
+# Base is python:3.12-slim to match the runtime already verified in the account
+# (/usr/local/bin/python3, 3.12.13). boto3 is baked in, not pip-installed at start.
+FROM python:3.12-slim
+
+WORKDIR /opt/edullm-data
+
+# Dependencies first (layer caching): boto3 for S3, numpy for the decode smoke test.
+RUN pip install --no-cache-dir "boto3>=1.34" "numpy>=1.26"
+
+# The package itself. Copy source + families (publish/read/validate read families/*.json
+# via a path relative to the package root) and install.
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY families ./families
+RUN pip install --no-cache-dir .
+
+# Self-discovering entrypoint: no arguments needed. It scans edullm-landing for sealed-but-
+# unvalidated datasets and validates each, promoting the ones that pass. This is what makes
+# the EventBridge rule a pure "wake up" signal — the event carries no payload, so the
+# container discovers its own work (see infra/04-event-wiring.yaml, recommended fix #2).
+# --promote is on because the whole point of a triggered run is to advance datasets.
+ENTRYPOINT ["python", "-m", "edullm_data.validate", "--promote"]

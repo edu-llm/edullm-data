@@ -21,6 +21,15 @@
       "Resource": "arn:aws:s3:::edullm-data"
     },
     {
+      "Sid": "ReadPublishedObjectsForDependsOnResolution",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectAttributes"
+      ],
+      "Resource": "arn:aws:s3:::edullm-data/*"
+    },
+    {
       "Sid": "ReadLandingPayloadAndManifests",
       "Effect": "Allow",
       "Action": [

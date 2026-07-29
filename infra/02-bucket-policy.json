@@ -20,6 +20,27 @@
             "arn:aws:iam::056956104102:role/sbsandbox-intern-edullm-batch-workload",
             "arn:aws:iam::056956104102:role/sbsandbox-intern-edullm-infra-deployer"
           ]
+        },
+        "BoolIfExists": {
+          "aws:PrincipalIsAWSService": "false"
+        }
+      }
+    },
+    {
+      "Sid": "AllowS3InventoryDelivery",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "s3.amazonaws.com"
+      },
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::edullm-data/_inventory/*",
+      "Condition": {
+        "StringEquals": {
+          "aws:SourceAccount": "056956104102",
+          "s3:x-amz-acl": "bucket-owner-full-control"
+        },
+        "ArnLike": {
+          "aws:SourceArn": "arn:aws:s3:::edullm-data"
         }
       }
     }
