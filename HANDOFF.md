@@ -1,7 +1,7 @@
 # HANDOFF — eduLLM Dataset Standard
 
-Last updated: 2026-07-29 (post olmo30b migration + public release). Author: prior agent.
-Read this file alone and you can continue with no other context.
+Last updated: 2026-07-29 (post olmo30b migration + public release + per-dataset generated READMEs).
+Author: prior agent. Read this file alone and you can continue with no other context.
 
 ---
 
@@ -31,19 +31,33 @@ two datasets are live, validated, promoted, and READABLE in `edullm-data`.
 - `pretrain/olmo-mix-1124-31b/v1` — 31,334,000,834 dolma2 tokens, 218 shards, 125.336 GB,
   uint32 headerless `.u32le.bin`, `depends_on tokenizer/dolma2-bpe`. Both have `_VALIDATED.json`
   + `_catalog/` entries; `read.dataset_paths()` returns them with dtype uint32.
+- **Both now carry a generated `README.md`** at their prefix, plus enriched descriptive metadata
+  in `dataset.json`. The olmo corpus has the real OLMo-mix-1124 data-mix table (DCLM-Baseline,
+  starcoder, pes2o, arxiv, open-web-math, algebraic-stack, wiki — upstream token/doc counts,
+  per-source licenses) with an explicit "these are upstream-collection figures, not this subset's
+  measured mix" caveat, an `about` block, and `license {id: ODC-By-1.0, basis: declared}`. The
+  tokenizer README keeps license `unknown` (upstream terms unverified — not fabricated). These were
+  added by an **in-place backfill** that changed ONLY descriptive keys — every group's
+  `manifest_sha256`, the `depends_on` pin, and `inventory` are byte-identical to pre-backfill
+  (verified), so the frozen contract on the 218 shards holds and no payload byte was re-copied.
 - Legacy `s3://edullm-datasets/olmo30b/` left fully intact (greenfield + provenance). The legacy
   `.npy` shards were headerless-raw-uint32 (the ".npy lie"), so migration was a pure server-side
   rename `.npy → .u32le.bin` + publish — zero re-encode, zero bytes through the laptop.
 
-**Code** (this repo, `edullm-data/`, its own git root; **368 tests passing**):
+**Code** (this repo, `edullm-data/`, its own git root; **380 tests passing**):
 - `src/edullm_data/contracts.py` — canonical JSON, hashing, naming/purpose validation (7-family enum)
 - `src/edullm_data/manifest.py` — per-file format, manifest build/verify, arithmetic + extension checks
 - `src/edullm_data/s3.py` — `S3` protocol, `Boto3S3` (real), `FakeS3` (tests). Now also
   `hash_object` (streaming), `put_file` (streaming upload), `delete`.
 - `src/edullm_data/validate.py` — Gate A orchestrator + `promote()` + `discover_pending()` + CLI;
-  resolves a corpus's tokenizer dependency and injects derived vocab into `GroupContext.resolved`
+  resolves a corpus's tokenizer dependency and injects derived vocab into `GroupContext.resolved`.
+  `promote()` now also renders + writes a `README.md` into edullm-data (before the `_VALIDATED` seal)
 - `src/edullm_data/publish.py` — producer `publish()`; **never holds a payload whole** (stream-hash +
-  server-side copy, TB-scale safe); `tokenizer=` per-dataset arg; version auto-alloc; family inheritance
+  server-side copy, TB-scale safe); `tokenizer=` per-dataset arg; version auto-alloc; family
+  inheritance; optional `sources`/`about`/`notes`/`limitations`/`license` descriptive fields (feed the README)
+- `src/edullm_data/readme.py` — **NEW** pure `render_readme(dataset.json) -> markdown`. The README is a
+  DERIVED artifact (§3): one source of truth, can't drift from the manifest. Omits any section whose
+  data is absent (never fabricates); prints an upstream-scope caveat for `sources[].scope == "upstream…"`
 - `src/edullm_data/read.py` — `dataset_paths()` (returns correct dtype), `resolve_latest()`
 - `src/edullm_data/fsck.py` — `wu-fsck` Gate B (post-publish decay sweep), owner Eric Wu
 - `src/edullm_data/profiles/` — registry + **5** v1 profiles: pretrain-tokens, eval-results,
@@ -62,6 +76,18 @@ two datasets are live, validated, promoted, and READABLE in `edullm-data`.
 - `b988d1f` — `promote()` writes `_VALIDATED.json` INTO edullm-data (the readability seal)
 - `da7f88e` — scrub internal AWS ids → `<PLACEHOLDER>` for public release
 - `3b38288` — real `git+https@v0.1.0` install URLs. **Tag `v0.1.0` pushed** (the install pin).
+
+**Uncommitted work (README feature — on disk, NOT yet committed/pushed):**
+- `src/edullm_data/readme.py` (new), `src/edullm_data/publish.py` (descriptive args + `README.md`
+  in `_CONTROL_BASENAMES`), `src/edullm_data/validate.py` (`promote()` writes README + `README.md`
+  in `CONTROL_BASENAMES`)
+- `tests/test_readme.py` (new, 8 tests), `tests/test_validate.py` (+2), `tests/test_publish.py` (+2)
+- docs: `skill/SKILL.md`, `../.claude/skills/edullm-datasets/SKILL.md`, `USAGE.md`, `README.md`, this
+  `HANDOFF.md`
+- Suggested commit: `feat: per-dataset generated README (data mix / sources / about)`. The wheel in
+  `s3://edullm-landing/_dist/` was already rebuilt from this code (77.9 KB, includes `readme.py`), and
+  the two live datasets were already backfilled with it — so committing is bringing git in line with
+  what's deployed, not a new deploy.
 
 **Deployed live in AWS account `sbsandbox` (<ACCOUNT_ID>), us-east-1** (NOT in git — broker-applied):
 - Buckets: `edullm-landing` (write-anything, expiry) + `edullm-data` (read-only; validator writes only)
@@ -183,6 +209,23 @@ DONE this session: first tokenizer published (`tokenizer/dolma2-bpe/v1`); first 
 migrated + published + promoted + readable (`pretrain/olmo-mix-1124-31b/v1`, 31.334B tokens); repo
 pushed public with `v0.1.0` tag + real install URLs. The pipeline is proven with real data end to end.
 
+DONE (per-dataset README, this session): added `readme.py` (`render_readme`), wired `promote()` to
+write a generated `README.md` into edullm-data for EVERY promotion, extended `publish()` with
+`sources`/`about`/`notes`/`limitations`/`license`, made `README.md` a control file in both publish
+and Gate A, and **backfilled the two live datasets in place** (README + enriched data-mix metadata,
+descriptive-keys-only, manifests/inventory byte-identical). 380 tests pass. Rebuilt wheel (77.9 KB,
+now includes `readme.py`) + shipped to `_dist/`. Verified: intern PutObject to edullm-data still
+AccessDenied (airlock intact); Gate A re-run in place against the enriched datasets = clean pass.
+This retires old Next-Step #3 (license.basis) for the olmo corpus — now `ODC-By-1.0`/`declared`.
+The README backfill driver + guardrails live at `$CLAUDE_JOB_DIR/tmp/driver/backfill_readme.py`
+(also mirrored to `s3://edullm-landing/_dist/backfill_readme.py`); enrichment content in
+`.../driver/enrich.json`; read-only in-place verifier at `.../driver/verify_inplace.py`.
+
+**NOT YET COMMITTED**: the source/test/doc changes for the README feature are on disk but not
+committed or pushed. Next agent (or on user confirmation): `git add -A && git commit` the README
+feature (readme.py, publish/validate edits, test_readme.py + test_validate/test_publish additions,
+SKILL.md ×2, USAGE.md, README.md, this HANDOFF) and push. See "Uncommitted work" below.
+
 1. **Package `families/` INTO the wheel** (drops the `_dist/families` + `FAMILIES_DIR` override the
    Batch publisher currently needs). Either move `families/` under `src/edullm_data/families/` +
    `importlib.resources`, or add `[tool.hatch.build.targets.wheel.force-include]`. Then rebuild the
@@ -190,9 +233,11 @@ pushed public with `v0.1.0` tag + real install URLs. The pipeline is proven with
 2. **Add per-shard progress logging to `publish()` / the driver.** The ~8-min silent hash of 125 GB
    looked exactly like a hang (I had to probe S3 object counts to tell progress from stall). Emit a
    line every N shards from `build_plan`'s hash loop and the copy loop.
-3. **Set the corpus's real `license.basis`.** `pretrain/olmo-mix-1124-31b`'s dataset.json has
-   `license.basis: "unknown"`. OLMo-mix / Dolma2 is likely ODC-By-1.0 — confirm and set it per-dataset
-   (families inherit an honest "unknown"; each dataset overrides with checked terms).
+3. ~~Set the corpus's real `license.basis`.~~ **DONE for `pretrain/olmo-mix-1124-31b`** (now
+   `{id: ODC-By-1.0, basis: declared}`, set via the README backfill). The tokenizer's license is
+   still an honest `unknown` — set it if/when the upstream dolma2-tokenizer terms are confirmed.
+   Pattern for future datasets: pass `license=` (and `sources=`/`about=`) to `publish()` at publish
+   time so it lands in `dataset.json` and the generated README from the start.
 4. **(Optional) Parallelize `promote()`'s copy loop** like `publish()` — it's still sequential
    per-shard (~7/min), which is why promotion of the 218-shard corpus took ~30 min. Fine at this scale;
    revisit if promotion latency matters. The validator's Gate A reads are single-threaded too but

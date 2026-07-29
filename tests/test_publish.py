@@ -167,6 +167,64 @@ def test_publish_from_s3_source():
 
 
 # --------------------------------------------------------------------------------------
+# descriptive metadata (drives the generated README)
+# --------------------------------------------------------------------------------------
+
+
+def test_descriptive_fields_land_in_dataset_json_and_validate():
+    """sources/about/notes/limitations/license passed to publish() are written into dataset.json
+    (the README renders from them) and the result still passes Gate A — none of them is a
+    validator-required field, so they're purely additive."""
+    s3 = FakeS3()
+    plan = P.publish(
+        _tokens_dir(),
+        dataset_id="pretrain/olmo-mix-1124-31b",
+        purpose="OLMo-mix-1124 ~31B-token corpus for 370M ladder pretraining on OLMo-core",
+        profile="pretrain-tokens/v1",
+        s3=s3,
+        created_at=CREATED,
+        group_meta=_tokens_meta(),
+        env=ENV,
+        sources=[{"name": "DCLM-Baseline", "tokens": 3700000000000, "license": "CC-BY-4.0",
+                  "scope": "upstream-full-collection",
+                  "uri": "https://huggingface.co/datasets/allenai/olmo-mix-1124"}],
+        about="A document-trimmed ~31B-token subset of allenai/olmo-mix-1124.",
+        notes="Subset proportions were not separately measured.",
+        limitations=[{"kind": "contamination", "benchmark": "gsm8k", "overlap_rate": 0.003}],
+        license={"id": "ODC-By-1.0", "basis": "declared"},
+    )
+    r = V.validate_dataset("edullm-landing", f"{plan.dataset_id}/{plan.version}", s3, data_bucket="edullm-data")
+    assert r.ok, [str(v) for v in r.violations]
+    ds = json.loads(s3.get("edullm-landing", f"{plan.dataset_id}/{plan.version}/dataset.json"))
+    assert ds["sources"][0]["name"] == "DCLM-Baseline"
+    assert ds["about"].startswith("A document-trimmed")
+    assert ds["notes"].startswith("Subset proportions")
+    assert ds["limitations"][0]["kind"] == "contamination"
+    assert ds["license"] == {"id": "ODC-By-1.0", "basis": "declared"}
+
+
+def test_descriptive_fields_default_to_family_inheritance():
+    """Omitting the descriptive args must reproduce today's behavior exactly: sources/license
+    inherit from the family, and about/notes/limitations are simply absent (not empty)."""
+    s3 = FakeS3()
+    plan = P.publish(
+        _tokens_dir(),
+        dataset_id="pretrain/dolma2-150b",
+        purpose="150B-token Dolma2 mix for 370M ladder pretraining at 1.25xC",
+        profile="pretrain-tokens/v1",
+        s3=s3,
+        created_at=CREATED,
+        group_meta=_tokens_meta(),
+        env=ENV,
+    )
+    ds = json.loads(s3.get("edullm-landing", f"{plan.dataset_id}/{plan.version}/dataset.json"))
+    fam = P._load_family("pretrain")
+    assert ds["sources"] == fam.get("sources", [])
+    assert ds["license"] == fam.get("license", {"id": None, "basis": "unknown"})
+    assert "about" not in ds and "notes" not in ds and "limitations" not in ds
+
+
+# --------------------------------------------------------------------------------------
 # version allocation
 # --------------------------------------------------------------------------------------
 

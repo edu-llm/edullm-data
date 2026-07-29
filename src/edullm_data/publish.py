@@ -158,7 +158,7 @@ def _stream_count_newlines(s3: S3, bucket: str, key: str, *, gz: bool) -> int:
 # --------------------------------------------------------------------------------------
 
 
-_CONTROL_BASENAMES = {"dataset.json", "manifest.json", "_SUCCESS", "_VALIDATED.json", "_REJECTED.json"}
+_CONTROL_BASENAMES = {"dataset.json", "manifest.json", "_SUCCESS", "_VALIDATED.json", "_REJECTED.json", "README.md"}
 
 
 def _stage_local_to_landing(source: Path, s3: S3, landing_bucket: str, staging_prefix: str) -> None:
@@ -219,6 +219,11 @@ def build_plan(
     owner: str | None = None,
     group_meta: Mapping[str, Mapping[str, Any]] | None = None,
     hash_workers: int = 1,
+    sources: Sequence[Mapping[str, Any]] | None = None,
+    about: str | None = None,
+    notes: str | None = None,
+    limitations: Sequence[Mapping[str, Any]] | None = None,
+    license: Mapping[str, Any] | None = None,
 ) -> PublishPlan:
     """Turn (path, size) metadata + the staged S3 objects into the exact objects to write.
 
@@ -340,13 +345,26 @@ def build_plan(
         "mutability": defaults.get("mutability", "frozen"),
         "inventory": {"objects": total_objects, "bytes": total_bytes},
         "groups": groups_meta,
-        "sources": family.get("sources", []),
+        # sources/license inherit from the family (written once, §11), but a per-dataset value
+        # overrides: a corpus knows its real upstream mix and checked license terms, which the
+        # family's honest "unknown" placeholder cannot. These are what the generated README's
+        # data-mix and license sections render from (§3: the README is generated from here).
+        "sources": list(sources) if sources is not None else family.get("sources", []),
         "build": {
             "executor": build_executor,
             "reproducibility": defaults.get("reproducibility", "logical"),
         },
-        "license": family.get("license", {"id": None, "basis": "unknown"}),
+        "license": dict(license) if license is not None else family.get("license", {"id": None, "basis": "unknown"}),
     }
+    # about/notes/limitations are optional free-text/structured provenance (§3: they exist
+    # because the README is generated). Emit only when provided — an absent key reads as "not
+    # recorded", which is honest; an empty string/[] would read as "deliberately none".
+    if about is not None and str(about).strip():
+        dataset_json["about"] = str(about).strip()
+    if notes is not None and str(notes).strip():
+        dataset_json["notes"] = str(notes).strip()
+    if limitations:
+        dataset_json["limitations"] = list(limitations)
 
     return PublishPlan(
         dataset_id=dataset_id,
@@ -495,6 +513,11 @@ def publish(
     max_version_attempts: int = 8,
     hash_workers: int = 1,
     copy_workers: int = 1,
+    sources: Sequence[Mapping[str, Any]] | None = None,
+    about: str | None = None,
+    notes: str | None = None,
+    limitations: Sequence[Mapping[str, Any]] | None = None,
+    license: Mapping[str, Any] | None = None,
 ) -> PublishPlan:
     """Publish a dataset to landing. Returns the plan that was written.
 
@@ -517,6 +540,15 @@ def publish(
 
     ``s3`` and ``created_at`` are injected so the whole thing is testable and deterministic;
     the CLI supplies a real client and an ISO timestamp.
+
+    ``sources`` / ``about`` / ``notes`` / ``limitations`` / ``license`` are the descriptive
+    metadata the generated per-dataset README renders from (§3: the README is generated *from*
+    dataset.json). All optional and all defaulting to today's behavior: ``sources`` and
+    ``license`` fall back to the family's inherited values when omitted, and the free-text fields
+    are simply absent. ``sources`` is a list of ``{name, share?, tokens?, documents?, license?,
+    uri?, scope?}`` describing the data mix; ``about`` is a curated narrative block; ``notes`` is
+    a free-text caveat; ``limitations`` is a list of structured ``{kind, ...}`` caveats. None of
+    these add a validator-required field — they are read only by the README generator.
     """
     # validate the four typed things up front — a bad name fails before any bytes move
     try:
@@ -587,6 +619,11 @@ def publish(
             owner=owner,
             group_meta=group_meta,
             hash_workers=hash_workers,
+            sources=sources,
+            about=about,
+            notes=notes,
+            limitations=limitations,
+            license=license,
         )
         ds_prefix = f"{dataset_id}/{version}"
         # 1. reserve the version: create-only dataset.json FIRST (§6 order)

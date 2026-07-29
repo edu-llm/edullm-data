@@ -49,7 +49,7 @@ from .s3 import S3, NotFound, S3Error
 # Control files that live under a dataset prefix but are not group payload — excluded from
 # the manifest-exhaustiveness comparison so they never read as "extra".
 CONTROL_BASENAMES = frozenset(
-    {"dataset.json", "manifest.json", "_SUCCESS", "_VALIDATED.json", "_REJECTED.json"}
+    {"dataset.json", "manifest.json", "_SUCCESS", "_VALIDATED.json", "_REJECTED.json", "README.md"}
 )
 CONTROL_PREFIXES = ("_catalog/", "dependents/")
 
@@ -554,6 +554,26 @@ def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucke
         canonical_json(catalog),
         content_type="application/json",
     )
+
+    # Generate the per-dataset README from dataset.json and write it beside the payload (§3:
+    # the README is a DERIVED artifact, generated from dataset.json — never hand-written, so it
+    # can't drift from the manifest). It is a CONTROL file, not a manifest entry, so it never
+    # enters the hash chain or the exhaustiveness check (README.md is in CONTROL_BASENAMES).
+    # Written here, before the _VALIDATED seal, so the "seal implies complete" invariant covers
+    # it too. A rendering bug must not fail an otherwise-valid promotion — the README is
+    # documentation, the dataset is the bytes — so this is best-effort.
+    try:
+        from . import __version__ as _pkg_version
+        from .readme import render_readme
+
+        s3.put(
+            data_bucket,
+            f"{prefix}/README.md",
+            render_readme(ds, generator_version=_pkg_version).encode("utf-8"),
+            content_type="text/markdown",
+        )
+    except Exception:  # noqa: BLE001 - README generation is documentation, not a gate
+        pass
 
     # Seal the promoted prefix with _VALIDATED.json IN THE DATA BUCKET. This is the marker
     # read.dataset_paths() looks for (§9): "only edullm-data holds validated data", so the
