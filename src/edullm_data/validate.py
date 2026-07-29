@@ -308,7 +308,12 @@ def _validate_group(
     if manifest.get("bytes") != rebuilt["bytes"]:
         v.append(Violation("manifest-bytes", f"group {gname!r}: manifest bytes={manifest.get('bytes')} != {rebuilt['bytes']}", path=gname))
 
-    profile_is_vendored = isinstance(profile_name, str) and profile_name.startswith("vendored/")
+    # Shard-naming (<split>-<NNNNN>) is exempt for profiles whose files aren't shards:
+    # vendored trees keep upstream names; a tokenizer's files have fixed meaningful names
+    # (tokenizer.json, merges.txt, …); CAS objects are named by hash (handled per-entry).
+    profile_is_vendored = isinstance(profile_name, str) and (
+        profile_name.startswith("vendored/") or profile_name.startswith("tokenizer/")
+    )
 
     # -- register depends_on parent shas FIRST, so the per-entry loop can catch a child
     #    shard that re-materializes a parent's bytes (the 37 GB duplication) --
@@ -380,6 +385,14 @@ def _validate_group(
             v.append(Violation("unknown-profile", str(e), path=gname))
         else:
             rng_seed = hashlib.sha256(f"{dataset_id}|{version_id}|{gname}".encode()).hexdigest()
+            # Resolve facts the profile can't compute itself because they live in the data
+            # bucket (which the profile deliberately can't see). The tokenizer is the case
+            # that matters: derive vocab_size/eos_token_id from the tokenizer this group
+            # depends_on, so the decode-smoke bound is computed from real bytes, not typed.
+            resolved: dict[str, Any] = {}
+            tok_derived = _resolve_tokenizer(s3, data_bucket, group, v, gname)
+            if tok_derived is not None:
+                resolved["tokenizer"] = tok_derived
             # prefix is the DATASET prefix, not the group prefix: entry.path already carries
             # the group segment (tokens/train-00000...), so a profile joins prefix+entry.path.
             ctx = GroupContext(
@@ -391,6 +404,7 @@ def _validate_group(
                 manifest=manifest,
                 s3=s3,
                 rng_seed=rng_seed,
+                resolved=resolved,
             )
             for check in profile.CHECKS:
                 try:
@@ -450,6 +464,53 @@ def _register_parent_shas(s3, data_bucket, group, ds_depends, all_shas, v, gname
                 sha = e.get("sha256")
                 if sha:
                     all_shas[sha] = f"PARENT:{dprefix}"
+
+
+def _resolve_tokenizer(s3, data_bucket, group, v, gname) -> dict[str, Any] | None:
+    """If this group depends_on a published tokenizer dataset, load its tokenizer.json from
+    the data bucket and DERIVE {vocab_size, eos_token_id} from the actual bytes. Returns the
+    derived dict, or None if there's no tokenizer dependency (not every group has one).
+
+    This is what makes the tokenizer an owned, first-class artifact rather than an HF
+    reference, and what turns vocab_size from a typed guess into a computed, unfakeable value.
+    A pretrain-tokens/curriculum-token group SHOULD carry a tokenizer dependency; if it
+    doesn't, that's flagged so the decode bound can't silently fall back to a typed number.
+    """
+    from .profiles.tokenizer_v1 import derive_vocab
+
+    deps = group.get("depends_on") or []
+    tok_dep = next((d for d in deps if str(d.get("role", "")) == "tokenizer"
+                    or str(d.get("dataset_id", "")).startswith(("tokenizer/", "vendor/"))
+                    and "tokenizer" in str(d.get("dataset_id", ""))), None)
+    if tok_dep is None:
+        return None
+    if data_bucket is None:
+        v.append(Violation("tokenizer-no-data-bucket", f"group {gname!r} depends on a tokenizer but no data_bucket to resolve it", path=gname))
+        return None
+    dprefix = f"{tok_dep.get('dataset_id')}/{tok_dep.get('version')}"
+    # find tokenizer.json in the parent's manifests
+    try:
+        pds = _load_json(s3, data_bucket, f"{dprefix}/dataset.json")
+    except NotFound:
+        v.append(Violation("tokenizer-parent-missing", f"tokenizer dependency {dprefix!r} not found in data bucket", path=gname))
+        return None
+    for pg in pds.get("groups", []):
+        pman_rel = pg.get("manifest") or "manifest.json"
+        try:
+            pman = _load_json(s3, data_bucket, f"{dprefix}/{pman_rel}")
+        except NotFound:
+            continue
+        for e in pman.get("entries", []):
+            path = e.get("path", "")
+            if path.rsplit("/", 1)[-1] == "tokenizer.json":
+                try:
+                    body = s3.get(data_bucket, f"{dprefix}/{path}")
+                    return derive_vocab(body)
+                except Exception as e2:  # noqa: BLE001
+                    v.append(Violation("tokenizer-parent-unreadable", f"{dprefix}/{path}: {e2}", path=gname))
+                    return None
+    v.append(Violation("tokenizer-json-not-in-parent", f"tokenizer dependency {dprefix!r} has no tokenizer.json", path=gname))
+    return None
 
 
 # --------------------------------------------------------------------------------------

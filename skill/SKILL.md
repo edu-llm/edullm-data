@@ -76,7 +76,7 @@ From an AWS Batch job that already wrote output to landing, pass the `s3://` pre
 
 `s3://edullm-data/<family>/<name>/<version>/`
 
-- **`<family>`** is a fixed enum: `pretrain` · `curriculum` · `sft` · `eval` · `probe` · `vendor`
+- **`<family>`** is a fixed enum: `pretrain` · `curriculum` · `sft` · `eval` · `probe` · `vendor` · `tokenizer`
 - **`<name>`** is kebab-case, 2–5 words, stating **what the data is + the one axis that
   distinguishes it from its siblings**. No dates, no version tokens, no person names, no
   relative words.
@@ -121,7 +121,8 @@ shards + a sidecar table — each with its own profile). Pick by what the bytes 
 
 | Payload | Profile | Required in `group_meta` |
 |---|---|---|
-| packed pre-tokenized corpus (`.u32le.bin`) | `pretrain-tokens/v1` | `tokenizer{repo_id, revision, fingerprint_sha256, vocab_size, eos_token_id}` |
+| a published tokenizer (tokenizer.json + friends) | `tokenizer/v1` | nothing — vocab_size/eos are DERIVED from tokenizer.json |
+| packed pre-tokenized corpus (`.u32le.bin`) | `pretrain-tokens/v1` | `depends_on` a published `tokenizer/vN` (role: tokenizer); vocab is derived from it, not typed |
 | raw untokenized documents | `text-corpus/v1` | record schema, `text` field |
 | instruction / conversation data | `sft-conversations/v1` | `record_schema` w/ `messages[]`, `partitions` incl. heldout, `dedup`, `leakage` |
 | benchmark inputs | `eval-items/v1` | stable per-item id |
@@ -140,6 +141,25 @@ shards + a sidecar table — each with its own profile). Pick by what the bytes 
 is a small PR (see `edullm-data/CONTRIBUTING.md`): a registry entry, a schema fragment, check
 functions that RECOMPUTE something, and two fixtures. Only reach for `experimental/v1` when you
 must ship today and don't yet know the shape.
+
+### Publish the tokenizer FIRST (before any token corpus)
+
+The tokenizer is an owned artifact, not an HF reference — otherwise your token shards become
+undecodable if the upstream repo moves. Publish it once, then every corpus depends on it:
+
+```python
+publish(tokenizer_dir,                 # a dir containing tokenizer.json (+ merges, config…)
+        dataset_id="tokenizer/dolma2-bpe",
+        purpose="Published Dolma2 tokenizer so pretrain corpora own their tokenizer",
+        profile="tokenizer/v1", s3=..., created_at=...)
+```
+
+The validator **derives** `vocab_size`/`eos_token_id` from the published `tokenizer.json` — you
+never type them. A `pretrain-tokens` corpus then declares its dependency (or inherits it from
+the family default once `tokenizer_dependency` is filled in), and the decode smoke test asserts
+every token id against the *derived* vocabulary. Set the family's `tokenizer_dependency`
+(`families/pretrain.json`, currently `TODO-set`) to the published tokenizer's id + version +
+`manifest_sha256` so producers don't repeat it per dataset.
 
 ## Format rules that bite
 

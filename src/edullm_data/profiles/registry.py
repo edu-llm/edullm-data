@@ -36,6 +36,7 @@ _SHIPPED = (
     "eval_results_v1",
     "token_order_v1",
     "sft_conversations_v1",
+    "tokenizer_v1",
 )
 
 

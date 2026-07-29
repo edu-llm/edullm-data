@@ -53,6 +53,13 @@ class GroupContext:
     * ``rng_seed`` — the deterministic seed a check must use for any sampling, so a result
       is reproducible and auditable (§7 decode smoke test). Derived once, per group, by the
       orchestrator: ``sha256(dataset_id|version|group_name)``.
+    * ``resolved`` — facts the ORCHESTRATOR derived that a profile cannot compute itself
+      because they live outside landing. The load-bearing case: the tokenizer. A profile
+      must not typed-trust a tokenizer block; instead the validator loads the tokenizer that
+      the dataset ``depends_on`` (from the published data bucket, which the profile can't
+      see), computes ``vocab_size``/``eos_token_id`` from its ``tokenizer.json``, and places
+      them here as ``resolved["tokenizer"]``. A check reads the bound from here, not from a
+      hand-typed field — so the bound is unfakeable.
     """
 
     dataset_id: str
@@ -64,6 +71,7 @@ class GroupContext:
     s3: S3
     rng_seed: str
     family_defaults: Mapping[str, Any] = field(default_factory=dict)
+    resolved: Mapping[str, Any] = field(default_factory=dict)
 
 
 # A check recomputes something and returns any violations it finds. Empty list = clean.

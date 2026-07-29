@@ -285,9 +285,18 @@ def build_plan(
             "manifest": f"{g}/manifest.json",
             "manifest_sha256": manifest_sha256(man),
         }
-        # merge profile-specific metadata: family tokenizer default, then explicit group_meta
-        if defaults.get("tokenizer") and profile_for(g).startswith("pretrain-tokens/"):
-            gm["tokenizer"] = defaults["tokenizer"]
+        # merge profile-specific metadata.
+        # Tokenizer: prefer the family's published-tokenizer dependency (the derive path),
+        # attaching it as a depends_on entry so the validator resolves vocab from real bytes.
+        # A legacy inline `tokenizer` default is still honored as a migration fallback.
+        if profile_for(g).startswith("pretrain-tokens/"):
+            tok_dep = defaults.get("tokenizer_dependency")
+            if isinstance(tok_dep, Mapping) and not str(tok_dep.get("dataset_id", "")).startswith("TODO"):
+                existing = list(gm.get("depends_on", []) or [])
+                existing.append({k: tok_dep[k] for k in ("role", "dataset_id", "version", "manifest_sha256") if k in tok_dep})
+                gm["depends_on"] = existing
+            elif defaults.get("tokenizer"):
+                gm["tokenizer"] = defaults["tokenizer"]
         if defaults.get("partitions") and "partitions" not in group_meta.get(g, {}):
             # The family default declares the partition SHAPE (name + by:path glob) but
             # cannot know rows — that count is only knowable once the shards exist. Fill it

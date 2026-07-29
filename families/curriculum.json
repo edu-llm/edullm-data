@@ -11,13 +11,7 @@
     "profile": "token-order/v1",
     "mutability": "frozen",
     "reproducibility": "logical",
-    "tokenizer": {
-      "repo_id": "allenai/dolma2-tokenizer",
-      "revision": "TODO-verify: pin an exact Hugging Face commit sha, and it MUST equal the parent pretrain dataset's pinned revision - a curriculum whose tokenizer disagrees with its token pool is indexing into bytes it does not understand.",
-      "fingerprint_sha256": "TODO-verify: sha256 of the canonicalized tokenizer.json, computed by publish(), never typed.",
-      "vocab_size": 100278,
-      "eos_token_id": 100257
-    },
+    "tokenizer_note": "A curriculum carries NO tokenizer of its own. It is index vectors over a parent token pool (depends_on the pretrain dataset), and the pool in turn depends_on a published tokenizer/v1 dataset - so the tokenizer is resolved transitively through the pool, never pinned or typed here. This replaces the old inline vocab_size/eos_token_id pins.",
     "format": {
       "container": "raw",
       "dtype": "uint32",

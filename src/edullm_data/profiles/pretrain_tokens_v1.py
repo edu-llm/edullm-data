@@ -32,10 +32,14 @@ NAME = "pretrain-tokens/v1"
 #: declarative; the VALUES are what CHECKS recompute (§0.1 — an unchecked required field is
 #: worse than an absent one, so nothing here is trusted without a byte-level counterpart).
 REQUIRED_FIELDS: Mapping[str, Any] = {
-    "tokenizer": {
-        "type": "object",
-        "required": ["repo_id", "revision", "fingerprint_sha256", "vocab_size", "eos_token_id"],
-    },
+    # The tokenizer is resolved from a published tokenizer/v1 dataset this group
+    # depends_on; the validator derives vocab_size/eos_token_id from its tokenizer.json and
+    # the decode check reads them from ctx.resolved (NOT a hand-typed block — that would
+    # reintroduce the guess §0.1 warns against). A group SHOULD declare:
+    #   depends_on: [{role: "tokenizer", dataset_id: "tokenizer/…", version: "vN", manifest_sha256: …}]
+    # A raw declared `tokenizer` block is still accepted as a migration fallback, but the
+    # derived value wins when a tokenizer dependency is present.
+    #
     # Every manifest entry must declare a token count so the manifest arithmetic identity
     # (edullm_data.manifest.verify_arithmetic) is falsifiable. Enforced by
     # check_entries_declare_token_counts below.
@@ -101,6 +105,19 @@ def _bound(ctx: GroupContext, key: str, default: Any) -> Any:
 
 
 def _tokenizer(ctx: GroupContext) -> Mapping[str, Any]:
+    """Tokenizer facts for the vocab-range bound, in trust order:
+
+    1. ``ctx.resolved["tokenizer"]`` — DERIVED by the validator from the published
+       tokenizer.json this dataset ``depends_on``. This is the real, unfakeable source and
+       is preferred whenever present (§0.4).
+    2. a declared ``group.tokenizer`` block — a fallback for datasets that (legitimately or
+       during migration) don't yet reference a published tokenizer; still checked against
+       bytes, but the value itself is asserted, not derived.
+    3. the family default.
+    """
+    resolved = ctx.resolved.get("tokenizer") if isinstance(ctx.resolved, Mapping) else None
+    if isinstance(resolved, Mapping) and resolved.get("vocab_size"):
+        return resolved
     tok = ctx.group.get("tokenizer")
     if isinstance(tok, Mapping):
         return tok

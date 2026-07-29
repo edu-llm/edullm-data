@@ -107,7 +107,7 @@ class NamingError(ValueError):
 
 
 #: §2 — a fixed enum, on purpose. Adding a family is a deliberate edit to the standard.
-FAMILIES = frozenset({"pretrain", "curriculum", "sft", "eval", "probe", "vendor"})
+FAMILIES = frozenset({"pretrain", "curriculum", "sft", "eval", "probe", "vendor", "tokenizer"})
 
 #: §2 — kebab-case, lowercase, and nothing else. Rejects ``dolma2_150B``.
 _WORD_RE = re.compile(r"^[a-z0-9]+$")

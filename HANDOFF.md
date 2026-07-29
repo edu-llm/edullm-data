@@ -131,10 +131,16 @@ been published yet — only test probes, all cleaned up. This is the correct exp
 
 ## Next Steps (priority order)
 
-1. **Set the family tokenizer pins before the first REAL pretrain dataset.** `families/pretrain.json`
-   and `families/curriculum.json` have `vocab_size`, `tokenizer.revision`, `fingerprint_sha256` marked
-   `TODO-verify`. The decode smoke test asserts token ids `< vocab_size`, so a wrong bound makes that
-   gate decorative. Compute from the real pinned tokenizer.
+1. **Publish the tokenizer, then wire the family dependency, before the first REAL pretrain dataset.**
+   The tokenizer is now a first-class PUBLISHED artifact (profile `tokenizer/v1`, family `tokenizer/`),
+   not a hand-typed pin — the validator DERIVES vocab_size/eos_token_id from the published
+   `tokenizer.json` (`tokenizer_v1.derive_vocab`) and a `pretrain-tokens` corpus `depends_on` it.
+   To finish: (a) publish the real tokenizer, e.g. `publish(tok_dir, dataset_id="tokenizer/dolma2-bpe",
+   profile="tokenizer/v1", …)`; (b) set `families/pretrain.json`'s `tokenizer_dependency` block
+   (currently `TODO-set`: dataset_id + version + manifest_sha256) so every corpus inherits the
+   depends_on automatically. `curriculum/` inherits the tokenizer transitively through its parent
+   pool, so nothing to set there. The old inline `vocab_size`/`revision`/`fingerprint_sha256` pins
+   are GONE — this replaced them.
 2. **Create a git remote and push.** The repo exists only on this laptop (no backup; the git-install
    URL in the skill/USAGE is a placeholder; `build.code_sha256` is weaker without it). `gh repo create`
    + push. Then update the install URL in `skill/SKILL.md` + `../.claude/skills/edullm-datasets/SKILL.md`
