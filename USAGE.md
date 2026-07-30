@@ -4,6 +4,12 @@ For people (and agents) who create or consume datasets. The authoritative spec i
 [`../docs/dataset-creation/DATASET-STANDARD.md`](../docs/dataset-creation/DATASET-STANDARD.md);
 this is the practical how-to.
 
+> **Haven't generated the data yet?** Read
+> [`docs/DESIGN-A-DATASET.md`](docs/DESIGN-A-DATASET.md) first. Some choices — where heldout
+> comes from, per-row eval status, how your source tree is nested — are baked into
+> `manifest_sha256` or exist only while your job runs, so they cannot be added afterwards
+> without re-generating or re-copying the data. This page assumes your bytes already exist.
+
 ---
 
 ## What you install

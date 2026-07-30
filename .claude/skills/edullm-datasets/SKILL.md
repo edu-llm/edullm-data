@@ -9,6 +9,11 @@ The single way datasets are created, stored, and read in this project. The full 
 `docs/dataset-creation/DATASET-STANDARD.md`; the diagrams are `DATASET-STANDARD-DIAGRAMS.md`.
 This skill is the operational summary — follow it, don't re-derive it.
 
+> **If the data does not exist yet, use the `edullm-dataset-design` skill first.** Some choices
+> must be made before generation: `entry.labels`/`entry.split` are inside `manifest_sha256`
+> (unbackfillable — changing them means re-copying every byte), and per-row eval status exists
+> only while the run is happening. This skill assumes the bytes are already written.
+
 ## The one thing to understand first
 
 There are two buckets:
