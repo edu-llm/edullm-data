@@ -1,19 +1,27 @@
 # HANDOFF — eduLLM Dataset Standard
 
-Last updated: 2026-07-29 (post olmo30b migration + public release + per-dataset generated READMEs,
-MERGED as `afac933` via PR #1; then the `v0.2.0` release bump — see Next Step #6; then the
-**schema-v2 / validator-recompute-gaps** work, MERGED as `2e561cc` via **PR #4** — see "THIS BRANCH"
-below; then the **31B corpus was DELETED** from `edullm-data`). Author: prior agent. Read this file
-alone and you can continue with no other context.
+Last updated: **2026-07-30** — the 150B migration. Read "THE 150B PUBLISH PLAN" first; it is the
+live work. Everything before it is history that still holds.
 
-> **You are on `main` at `2e561cc`**, pushed, `main == origin/main`. **541 tests passing, 0 ruff
-> errors.** PR #4 merged with `--merge` (not squash), so all 13 commits are preserved in history —
-> the per-fix reasoning and executed proofs live in those messages.
+> **You are on branch `feat/entry-labels-from-path`** (NOT merged, NOT pushed), **564 tests
+> passing, 0 ruff errors**. Commits this session, oldest first:
+> `aa4d509` key-derived `entry.labels` + Gate A recompute · `62c81a4` cut the Batch job defs to
+> the new wheel · `2515f79` `promote(copy_workers=…)` · `d6e8a7f` `--promote-workers` CLI flag +
+> version bump to **0.3.0**. Plus three HANDOFF commits.
 >
-> **`edullm-data` NOW HOLDS ONE DATASET: `tokenizer/dolma2-bpe/v1`.** 11 objects, 6.5 MiB. The
-> 31B corpus was deleted on 2026-07-29 (see "THE 31B DELETION"). **There is currently NO pretrain
-> corpus to train on** — that is expected and was a deliberate choice; the 150B migration is the
-> replacement. Read "THE 31B DELETION" and "DEFERRED DECISIONS" before doing anything else.
+> **DEPLOYED NOW:** `_dist/edullm_data-0.3.0-py3-none-any.whl`; job defs `edullm-validator:3`
+> (4 vCPU / 8 GB, `--promote-workers 16`) and `edullm-fsck:2`. Both assert their wheel version at
+> startup and fail loudly on a mismatch. Proven by real jobs logging `WHEEL_VERSION=0.3.0` /
+> `FAMILIES_OK=7` and `WHEEL_VERSION=0.2.0` respectively. **0.1.0 and 0.2.0 are still in `_dist/`
+> but nothing references them.**
+>
+> **THE 150B PUBLISH IS IN FLIGHT as of this writing.** All 6,913 objects (586.6 GiB) are staged
+> and verified at `s3://edullm-landing/_migrate/olmo-150b-staged/`; `publish()` is running against
+> them as `pretrain/olmo-150b-dolma2`. **If it did not finish, do NOT re-copy anything** — the
+> staged tree is intact and re-runnable; see "THE 150B PUBLISH PLAN" for exactly where to resume.
+>
+> `edullm-data` held only `tokenizer/dolma2-bpe/v1` (11 objects) before this publish. The 31B
+> corpus was deleted 2026-07-29 — see "THE 31B DELETION".
 
 ---
 
