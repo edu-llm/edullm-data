@@ -37,6 +37,7 @@ from .contracts import (
     NamingError,
     SCHEMA_VERSION,
     SPLITS,
+    _resolve_families_dir,
     canonical_json,
     validate_dataset_id,
     validate_purpose,
@@ -53,7 +54,14 @@ from .manifest import (
 from .s3 import S3, NotFound
 
 LANDING_BUCKET = "edullm-landing"
-FAMILIES_DIR = Path(__file__).resolve().parent.parent.parent / "families"
+#: Shared with the validator ON PURPOSE — see ``validate._resolve_families_dir`` for the three
+#: layouts it covers (env override, installed wheel, source checkout). This module used to
+#: hardcode the repo-root-relative path, which resolves to a nonexistent directory inside an
+#: installed wheel: `publish()` then died with "no family.json for 'pretrain'" the first time it
+#: ran on Batch, having already spent the whole run getting there. The validator was fixed and
+#: the producer was not, which is the same half-fix twice — one module's bounds silently wrong,
+#: the other's publish loudly dead.
+FAMILIES_DIR = _resolve_families_dir()
 
 
 class PublishError(RuntimeError):

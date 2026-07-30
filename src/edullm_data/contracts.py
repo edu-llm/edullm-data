@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
@@ -501,3 +502,35 @@ class Version:
         if "relation" not in d:
             raise NamingError("version is missing required key 'relation'")
         return cls(id=d["id"], relation=d["relation"], of=d.get("of"))
+
+
+# ---------------------------------------------------------------------------------------
+# where families/*.json lives (shared by the producer and the validator)
+# ---------------------------------------------------------------------------------------
+
+def _resolve_families_dir() -> Path:
+    """Where ``families/*.json`` lives, across all three ways this code runs.
+
+    This is load-bearing and got it wrong once. The family files hold the bounds Gate A
+    enforces, so if the directory is not found every bound silently falls back to the profile's
+    own laxer constant — and it fails *only in production*, because a checkout finds it and the
+    test suite passes. That is precisely how the live corpus came to be validated at 50% EOS /
+    50% zeros instead of the family's declared 5% / 1%.
+
+    Three layouts, checked in order:
+
+    1. ``EDULLM_FAMILIES_DIR`` — an explicit override, mirroring the ``P.FAMILIES_DIR`` override
+       the publish driver already needs on Batch. Wins so an operator can always point at a
+       staged copy without a rebuild.
+    2. ``<package>/families/`` — an installed wheel. ``pyproject.toml`` force-includes the
+       directory into the package for exactly this case.
+    3. ``<repo>/families/`` — a source checkout, where it sits at the repo root.
+    """
+    override = os.environ.get("EDULLM_FAMILIES_DIR")
+    if override:
+        return Path(override)
+    packaged = Path(__file__).resolve().parent / "families"
+    if packaged.is_dir():
+        return packaged
+    return Path(__file__).resolve().parent.parent.parent / "families"
+
