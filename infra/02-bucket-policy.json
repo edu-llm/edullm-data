@@ -1,6 +1,6 @@
 {
   "Version": "2012-10-17",
-  "Id": "edullm-data-airlock-v1",
+  "Id": "edullm-data-airlock-v2",
   "Statement": [
     {
       "Sid": "OnlyValidatorWrites",
@@ -8,8 +8,6 @@
       "Principal": "*",
       "Action": [
         "s3:PutObject",
-        "s3:DeleteObject",
-        "s3:DeleteObjectVersion",
         "s3:PutObjectTagging",
         "s3:AbortMultipartUpload"
       ],
@@ -21,6 +19,21 @@
             "arn:aws:iam::<ACCOUNT_ID>:role/<INFRA_DEPLOYER_ROLE>"
           ]
         },
+        "BoolIfExists": {
+          "aws:PrincipalIsAWSService": "false"
+        }
+      }
+    },
+    {
+      "Sid": "NobodyDeletesPublishedData",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": [
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion"
+      ],
+      "Resource": "arn:aws:s3:::edullm-data/*",
+      "Condition": {
         "BoolIfExists": {
           "aws:PrincipalIsAWSService": "false"
         }

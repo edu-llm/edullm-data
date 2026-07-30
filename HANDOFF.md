@@ -93,8 +93,12 @@ Working tree is CLEAN — nothing uncommitted as of this handoff.
 **Deployed live in AWS account `sbsandbox` (<ACCOUNT_ID>), us-east-1** (NOT in git — broker-applied):
 - Buckets: `edullm-landing` (write-anything, expiry) + `edullm-data` (read-only; validator writes only)
   — CFN stacks `edullm-data-buckets`, `edullm-data-event-wiring` both CREATE_COMPLETE
-- `edullm-data` bucket policy: 2 statements — `OnlyValidatorWrites` Deny (with
-  `BoolIfExists aws:PrincipalIsAWSService=false`) + `AllowS3InventoryDelivery`
+- `edullm-data` bucket policy: **3 statements** (was 2) — `OnlyValidatorWrites` Deny (Put only,
+  validator/deployer exempt) + **`NobodyDeletesPublishedData` Deny (Delete*, NO exemption —
+  binds the validator too)** + `AllowS3InventoryDelivery`. All carry
+  `BoolIfExists aws:PrincipalIsAWSService=false`.
+  **NOT YET DEPLOYED** — `infra/02-bucket-policy.json` is updated in the repo; the live bucket
+  still has the 2-statement v1 policy. See "Deploying the split Delete Deny" in `infra/DEPLOY.md`.
 - Validator identity: EXISTING role `<BATCH_JOB_ROLE>` (ecs-tasks-only trust),
   inline policy `dataset-validator` (S3 rw scoped to the two buckets)
 - Batch job defs: `edullm-validator:1` (self-discovering validate+promote), `edullm-fsck:1`
