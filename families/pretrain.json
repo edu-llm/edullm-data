@@ -44,7 +44,7 @@
       "window_bytes": 65536,
       "distinct_ids_min": 256,
       "eos_fraction_max": 0.05,
-      "zero_fraction_max": 0.01
+      "zero_run_max": 256
     },
     "tags": {
       "Project": "edullm"

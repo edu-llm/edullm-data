@@ -46,7 +46,7 @@ REQUIRED_FIELDS: Mapping[str, Any] = {
     "entries[].count": {"type": "object", "required": ["unit", "value"], "unit": "tokens"},
     # Optional, profile-tunable bounds (all have registry defaults; declaring an absurd one
     # to pass is visible in review, §7):
-    #   min_distinct_ids (default 16), max_eos_fraction (0.5), max_zero_fraction (0.5),
+    #   min_distinct_ids (default 16), max_eos_fraction (0.5), max_zero_run (256),
     #   seq_len (optional; enables the mid-sequence truncation check).
 }
 
@@ -56,7 +56,9 @@ _N_WINDOWS = 4
 _NPY_MAGIC = b"\x93NUMPY"
 _DEFAULT_MIN_DISTINCT = 16
 _DEFAULT_MAX_EOS_FRACTION = 0.5
-_DEFAULT_MAX_ZERO_FRACTION = 0.5
+#: A run this long cannot be prose in any tokenizer; the old density default (0.5) was
+#: meaningless for a vocabulary whose id 0 is a common character.
+_DEFAULT_MAX_ZERO_RUN = 256
 
 
 # --------------------------------------------------------------------------------------
@@ -102,7 +104,7 @@ def _np_dtype(entry: ManifestEntry) -> "np.dtype | None":
 _BOUND_LAXER_DIRECTION = {
     "min_distinct_ids": "smaller",
     "max_eos_fraction": "larger",
-    "max_zero_fraction": "larger",
+    "max_zero_run": "larger",
 }
 
 
@@ -111,7 +113,7 @@ def _bound(ctx: GroupContext, key: str, default: Any) -> Any:
 
     A group override may TIGHTEN a family bound freely but cannot LOOSEN it silently. Without
     that clamp the family bounds are decoration: a group declaring
-    ``{"min_distinct_ids": 1, "max_zero_fraction": 1.0}`` publishes an all-zeros corpus clean —
+    ``{"min_distinct_ids": 1, "max_zero_run": 10**9}`` publishes an all-zeros corpus clean —
     re-enabling by hand the exact failure the family bounds exist to forbid, and which this
     profile's own docstring claims is "visible in review" (it is one line in a group_meta block).
 
@@ -233,7 +235,7 @@ def check_decode_smoke(ctx: GroupContext) -> list[Violation]:
     eos_id = tok.get("eos_token_id")
     min_distinct = int(_bound(ctx, "min_distinct_ids", _DEFAULT_MIN_DISTINCT))
     max_eos = float(_bound(ctx, "max_eos_fraction", _DEFAULT_MAX_EOS_FRACTION))
-    max_zero = float(_bound(ctx, "max_zero_fraction", _DEFAULT_MAX_ZERO_FRACTION))
+    max_zero_run = int(_bound(ctx, "max_zero_run", _DEFAULT_MAX_ZERO_RUN))
 
     have_vocab = isinstance(vocab_size, int) and not isinstance(vocab_size, bool)
     if not have_vocab:
@@ -315,17 +317,46 @@ def check_decode_smoke(ctx: GroupContext) -> list[Violation]:
                     )
                 )
 
-        zero_frac = float(np.count_nonzero(ids == 0)) / n
-        if zero_frac > max_zero:
+        # A crashed writer leaves a CONTIGUOUS RUN of 0x00000000, so that is what to look for.
+        # This used to be a density test — `count(ids == 0) / n > max_zero_fraction` — which
+        # conflates "the file has a hole in it" with "the tokenizer maps a common character to
+        # id 0". For dolma2, id 0 is "!", so the density form was measuring punctuation and
+        # rejected two healthy prose shards of the 150B corpus at 0.0106 and 0.0108 against a
+        # 0.010 bound. Their zeros were 30 scattered singletons, longest run 1: a "!" mid
+        # sentence, e.g. [43096, 512, 1937, 38, 0, 2209, 430, 889, 358].
+        #
+        # The run form is tokenizer-independent, which is the point: no vocabulary makes a
+        # thousand consecutive identical ids meaningful, whereas ANY id can be a frequent
+        # token. It is also strictly more sensitive to the real failure — a 4 KiB hole inside
+        # a 64 KiB sample is 6% of tokens and slipped under a 10% density bound, but its run
+        # length is 1,024.
+        longest_zero_run = _longest_run_of(ids, 0)
+        if longest_zero_run >= max_zero_run:
             out.append(
                 Violation(
-                    "zero-fraction-out-of-bounds",
-                    f"zeros are {zero_frac:.3f} of sampled tokens, over the declared max "
-                    f"{max_zero:.3f} — signature of a partial zero-fill from a crashed writer",
+                    "zero-run-in-shard",
+                    f"{longest_zero_run} consecutive zero ids in the sampled window (limit "
+                    f"{max_zero_run}) — the signature of a partial zero-fill from a crashed "
+                    f"writer. Note this is a RUN, not a fraction: a tokenizer that maps a "
+                    f"common character to id 0 (dolma2 maps '!') makes scattered zeros normal.",
                     entry.path,
                 )
             )
     return out
+
+
+def _longest_run_of(ids: "np.ndarray", value: int) -> int:
+    """Length of the longest contiguous run of ``value`` in ``ids``.
+
+    Vectorised because the decode sample is 16 K ids per shard across thousands of shards: a
+    Python loop here would dominate Gate A's runtime for a large corpus.
+    """
+    hits = ids == value
+    if not hits.any():
+        return 0
+    # Boundaries where the run state flips; the diff of their positions is each run's length.
+    edges = np.flatnonzero(np.diff(np.concatenate(([0], hits.view(np.int8), [0]))))
+    return int((edges[1::2] - edges[::2]).max())
 
 
 def check_first_bytes_not_npy(ctx: GroupContext) -> list[Violation]:

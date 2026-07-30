@@ -21,12 +21,12 @@ import fnmatch
 import hashlib
 import json
 import sys
-from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from .contracts import (
     FAMILIES,
+    _resolve_families_dir,
     SPLITS,
     TRAINABLE_SPLITS,
     is_trainable,
@@ -49,6 +49,7 @@ from .manifest import (
     check_shard_naming,
     diff_paths,
     is_cas_name,
+    labels_from_path,
     manifest_sha256,
     parse_shard_name,
     verify_arithmetic,
@@ -63,35 +64,6 @@ CONTROL_BASENAMES = frozenset(
     {"dataset.json", "manifest.json", "_SUCCESS", "_VALIDATED.json", "_REJECTED.json", "README.md"}
 )
 CONTROL_PREFIXES = ("_catalog/", "dependents/")
-
-def _resolve_families_dir() -> Path:
-    """Where ``families/*.json`` lives, across all three ways this code runs.
-
-    This is load-bearing and got it wrong once. The family files hold the bounds Gate A
-    enforces, so if the directory is not found every bound silently falls back to the profile's
-    own laxer constant — and it fails *only in production*, because a checkout finds it and the
-    test suite passes. That is precisely how the live corpus came to be validated at 50% EOS /
-    50% zeros instead of the family's declared 5% / 1%.
-
-    Three layouts, checked in order:
-
-    1. ``EDULLM_FAMILIES_DIR`` — an explicit override, mirroring the ``P.FAMILIES_DIR`` override
-       the publish driver already needs on Batch. Wins so an operator can always point at a
-       staged copy without a rebuild.
-    2. ``<package>/families/`` — an installed wheel. ``pyproject.toml`` force-includes the
-       directory into the package for exactly this case.
-    3. ``<repo>/families/`` — a source checkout, where it sits at the repo root.
-    """
-    import os
-
-    override = os.environ.get("EDULLM_FAMILIES_DIR")
-    if override:
-        return Path(override)
-    packaged = Path(__file__).resolve().parent / "families"
-    if packaged.is_dir():
-        return packaged
-    return Path(__file__).resolve().parent.parent.parent / "families"
-
 
 FAMILIES_DIR = _resolve_families_dir()
 
@@ -491,6 +463,9 @@ def _validate_group(
             _check_split_matches_filename(
                 entries, v, gname, profile_is_vendored=profile_is_vendored
             )
+            _check_labels_match_path(
+                entries, v, gname, profile_is_vendored=profile_is_vendored
+            )
             # prefix is the DATASET prefix, not the group prefix: entry.path already carries
             # the group segment (tokens/train-00000...), so a profile joins prefix+entry.path.
             ctx = GroupContext(
@@ -527,7 +502,7 @@ def _validate_group(
 _DECODE_BOUND_ALIASES = {
     "distinct_ids_min": "min_distinct_ids",
     "eos_fraction_max": "max_eos_fraction",
-    "zero_fraction_max": "max_zero_fraction",
+    "zero_run_max": "max_zero_run",
 }
 
 #: Family ``decode_smoke_test`` keys that intentionally map to nothing, with the reason. Keeping
@@ -775,6 +750,45 @@ def _check_split_matches_filename(
                 f"{observed!r}. One of the two is wrong, and a reader that trusts the manifest "
                 f"would put this object in the wrong split — training on held-out data, or "
                 f"evaluating on data it was trained on.",
+                path=entry.path,
+            ))
+
+
+def _check_labels_match_path(
+    entries: list[Any], v: list[Violation], gname: str, *, profile_is_vendored: bool = False
+) -> None:
+    """Declared ``labels`` must equal the labels RECOMPUTED from the object's own key.
+
+    The same construction as :func:`_check_split_matches_filename`, for the same reason: a
+    label nothing recomputes is a producer assertion, and a consumer slicing a corpus by
+    ``source`` would silently train on the wrong mixture. Here the recompute is free — the
+    directory segments between the group and the basename ARE the claim, so the check is a
+    string comparison against a value the key already carries.
+
+    Deliberately one-directional about absence. An entry with no labels is silent: a flat
+    layout has no segments to describe, and v1 manifests predate the field. What is rejected
+    is a label that CONTRADICTS the key, or a nested key whose labels were omitted — because
+    then a reader partitioning on labels would drop the object from every slice.
+    """
+    if profile_is_vendored:
+        return  # vendored trees keep upstream layout; segments imply nothing about slices
+    for entry in entries:
+        if is_cas_name(entry.path):
+            continue  # a hash-named object sits in no meaningful subtree
+        try:
+            expected = labels_from_path(entry.path)
+        except Exception as e:  # noqa: BLE001 - a deeper tree than we can name
+            v.append(Violation("labels-unnameable-path", f"{entry.path}: {e}", path=entry.path))
+            continue
+        declared = getattr(entry, "labels", None) or {}
+        if not expected and not declared:
+            continue
+        if declared != expected:
+            v.append(Violation(
+                "labels-contradict-path",
+                f"{entry.path}: manifest declares labels={declared or {}} but the key's own "
+                f"segments say {expected}. The path and the label disagree about which slice "
+                f"this object belongs to, so any mixture computed from labels is wrong.",
                 path=entry.path,
             ))
 
@@ -1124,9 +1138,28 @@ def _resolve_tokenizer(s3, data_bucket, group, v, gname) -> dict[str, Any] | Non
 # --------------------------------------------------------------------------------------
 
 
-def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucket: str, now: str | None = None) -> None:
+def promote(
+    result: ValidationResult,
+    s3: S3,
+    *,
+    data_bucket: str,
+    landing_bucket: str,
+    now: str | None = None,
+    copy_workers: int = 1,
+) -> None:
     """Server-side-copy a validated dataset from landing to the published bucket and write
-    its catalog entry. Refuses a failed or incomplete result."""
+    its catalog entry. Refuses a failed or incomplete result.
+
+    ``copy_workers`` > 1 fans the copy loop and the CRC-reference HEADs out over a thread pool.
+    Both are network-bound and each key is independent, so this scales near-linearly. It exists
+    because promotion is ~2 S3 round-trips per object and was strictly sequential: a 6,913-object
+    corpus is ~13,800 serial calls, which overruns the 60-minute Batch job-def limit — the same
+    wall ``publish()`` already has ``hash_workers``/``copy_workers`` for. Default 1 preserves the
+    original ordering exactly.
+
+    Order still holds where it matters: every payload copy completes before any CRC is read
+    (they are separate phases), and the seal is written last, after both.
+    """
     if not result.ok:
         raise ValueError("refusing to promote a dataset that did not pass Gate A")
 
@@ -1164,8 +1197,17 @@ def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucke
             keys.append(_join(prefix, e["path"]))
             payload_paths.append(e["path"])
 
-    for key in keys:
+    def _copy_one(key: str) -> None:
         s3.copy(landing_bucket, key, data_bucket, key)
+
+    if copy_workers > 1 and len(keys) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=copy_workers) as pool:
+            list(pool.map(_copy_one, keys))  # raises if any copy failed
+    else:
+        for key in keys:
+            _copy_one(key)
 
     # CAPTURE THE CRC REFERENCE POST-COPY, FROM THE DESTINATION. This is what lets wu-fsck
     # (Gate B) detect a same-length overwrite of a frozen object for the price of a HEAD, with
@@ -1181,14 +1223,23 @@ def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucke
     # Best-effort and only for paths where S3 actually returned a checksum: objects predating
     # additional-checksum support have none, and a missing reference must mean "not checkable"
     # (fsck skips it silently), never "changed".
-    crc_reference: dict[str, str] = {}
-    for rel in payload_paths:
+    def _crc_for(rel: str) -> tuple[str, str | None]:
         try:
-            crc = s3.head(data_bucket, _join(prefix, rel)).get("crc64nvme")
+            return rel, s3.head(data_bucket, _join(prefix, rel)).get("crc64nvme")
         except (NotFound, OSError):
-            continue
-        if crc:
-            crc_reference[rel] = crc
+            return rel, None
+
+    if copy_workers > 1 and len(payload_paths) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=copy_workers) as pool:
+            crc_pairs = list(pool.map(_crc_for, payload_paths))
+    else:
+        crc_pairs = [_crc_for(rel) for rel in payload_paths]
+
+    # Built in submission order either way, so the reference map is identical regardless of
+    # worker count — it feeds the seal, which must not depend on scheduling.
+    crc_reference: dict[str, str] = {rel: crc for rel, crc in crc_pairs if crc}
 
     # ROOT the hash chain. Each group already carries a manifest_sha256, and dataset.json
     # carries all of them — but nothing hashed dataset.json itself, so the chain had no root
@@ -1323,6 +1374,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--data-bucket", default="edullm-data")
     ap.add_argument("--prefix", help="dataset prefix (<dataset_id>/<version>); omit to self-discover")
     ap.add_argument("--promote", action="store_true")
+    ap.add_argument(
+        "--promote-workers",
+        type=int,
+        default=1,
+        help="threads for promote()'s copy + CRC loops (default 1, sequential). Promotion is "
+             "~2 S3 round-trips per object, so a several-thousand-object corpus needs this to "
+             "finish inside the Batch job-def time limit.",
+    )
     ap.add_argument("--now", default=None, help="ISO-8601 timestamp to stamp markers with")
     args = ap.parse_args(argv)
 
@@ -1342,7 +1401,14 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if result.ok:
             if args.promote:
-                promote(result, s3, data_bucket=args.data_bucket, landing_bucket=args.landing_bucket, now=args.now)
+                promote(
+                    result,
+                    s3,
+                    data_bucket=args.data_bucket,
+                    landing_bucket=args.landing_bucket,
+                    now=args.now,
+                    copy_workers=args.promote_workers,
+                )
             s3.put(args.landing_bucket, f"{prefix}/_VALIDATED.json",
                    canonical_json(result.report()), content_type="application/json")
             print(f"{prefix}: PASS" + (" + promoted" if args.promote else ""))

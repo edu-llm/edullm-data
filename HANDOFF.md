@@ -1,19 +1,56 @@
 # HANDOFF — eduLLM Dataset Standard
 
-Last updated: 2026-07-29 (post olmo30b migration + public release + per-dataset generated READMEs,
-MERGED as `afac933` via PR #1; then the `v0.2.0` release bump — see Next Step #6; then the
-**schema-v2 / validator-recompute-gaps** work, MERGED as `2e561cc` via **PR #4** — see "THIS BRANCH"
-below; then the **31B corpus was DELETED** from `edullm-data`). Author: prior agent. Read this file
-alone and you can continue with no other context.
+Last updated: **2026-07-30** — the 150B migration. Read "THE 150B PUBLISH PLAN" first; it is the
+live work. Everything before it is history that still holds.
 
-> **You are on `main` at `2e561cc`**, pushed, `main == origin/main`. **541 tests passing, 0 ruff
-> errors.** PR #4 merged with `--merge` (not squash), so all 13 commits are preserved in history —
-> the per-fix reasoning and executed proofs live in those messages.
+> **You are on branch `feat/entry-labels-from-path`** (NOT merged, NOT pushed), **564 tests
+> passing, 0 ruff errors**. Commits this session, oldest first:
+> `aa4d509` key-derived `entry.labels` + Gate A recompute · `62c81a4` cut the Batch job defs to
+> the new wheel · `2515f79` `promote(copy_workers=…)` · `d6e8a7f` `--promote-workers` CLI flag +
+> version bump to **0.3.0**. Plus three HANDOFF commits.
 >
-> **`edullm-data` NOW HOLDS ONE DATASET: `tokenizer/dolma2-bpe/v1`.** 11 objects, 6.5 MiB. The
-> 31B corpus was deleted on 2026-07-29 (see "THE 31B DELETION"). **There is currently NO pretrain
-> corpus to train on** — that is expected and was a deliberate choice; the 150B migration is the
-> replacement. Read "THE 31B DELETION" and "DEFERRED DECISIONS" before doing anything else.
+> **DEPLOYED NOW:** `_dist/edullm_data-0.5.0-py3-none-any.whl`, and both job defs are cut over to
+> it — **`edullm-validator:5`** (4 vCPU / 8 GB, `--promote-workers 16`) and **`edullm-fsck:4`**.
+> Each asserts `__version__ == "0.5.0"` at startup; the validator also asserts that
+> `publish.FAMILIES_DIR == validate.FAMILIES_DIR` and that the family's `max_zero_run` bound
+> resolves to 256 — i.e. it fails loudly on exactly the two defects that burned runs below,
+> rather than running with a stale wheel. EventBridge targets both by unversioned name, so a new
+> revision is live the moment it is registered (convenient, and dangerous — always smoke-test
+> with a manual `submit-job`). 0.1.0–0.4.0 remain in `_dist/`; nothing references them.
+>
+> **THE 150B PUBLISH IS IN FLIGHT as of this writing** (job `olmo150-publish-3`, 2 h timeout,
+> wheel **0.5.0**). **6,911** objects (586.6 GiB) staged and verified at
+> `s3://edullm-landing/_migrate/olmo-150b-staged/`; the publish runs ON BATCH, in-region.
+> **If it did not finish, do NOT re-copy anything** — the staged tree is intact and the publish
+> is re-runnable as-is. Verify first with `artifacts/olmo150_verify_staged.py`.
+>
+> **Four failures already burned, do not repeat them.**
+> 1. **Ran the publish on the LAPTOP.** `publish()` GETs every byte to wherever it runs;
+>    measured 0.8 MiB/s ⇒ a 9-day ETA. Killed, no partial state. It must run on Batch, in-region.
+>    A server-side *copy* is fine locally (586.6 GiB in 498 s); *hashing* is not.
+> 2. **`no family.json for 'pretrain'`** on Batch, 2 minutes in — `publish.FAMILIES_DIR` was
+>    still repo-root-relative while `validate` had been fixed. One resolver in `contracts` now,
+>    plus `tests/test_families_dir_resolution.py`, which imports the package from a ROOTLESS
+>    directory (a checkout always finds `families/`, so no ordinary test can see this).
+> 3. **Gate A REJECTED the corpus** — 4 of 6,913. Two were a validator defect
+>    (`zero-fraction-out-of-bounds` on healthy prose: dolma2 maps id 0 to `!`, so a density test
+>    measures punctuation; now a contiguous-RUN test). Two were genuinely degenerate and are
+>    excluded. Full analysis in `artifacts/GATE-A-REJECTION-ANALYSIS.md`. **Nothing was promoted
+>    — the airlock worked.**
+> 4. **Excluding a shard renumbers everything after it.** Gate A names the PUBLISHED key; the
+>    exclusion list keys on the STAGED SOURCE name, and this migration renumbers globally, so
+>    they differ. Map back through the plan (`[p for p in plan if p["dst"].endswith(reported)]`)
+>    or you exclude the wrong shard. The plan generator's exact-drop-count assertion caught it.
+>    Re-staging after an exclusion needs a diff-and-prune (`artifacts/olmo150_prune.py`), not an
+>    additive copy — a stale key fails Gate A as `unlisted-object`, after the expensive publish.
+>
+> The rejected first attempt was deleted from landing rather than left as a dead `v1`: it never
+> reached `edullm-data`, so nothing ever referenced it, and the audit trail lives in the job log,
+> the analysis doc, and the dataset's own `limitations`. The corrected corpus therefore publishes
+> as a clean **v1**.
+>
+> `edullm-data` held only `tokenizer/dolma2-bpe/v1` (11 objects) before this publish. The 31B
+> corpus was deleted 2026-07-29 — see "THE 31B DELETION".
 
 ---
 
@@ -327,6 +364,161 @@ against a ~7.4B Chinchilla budget for 370M. Use scaled weighting or a water-fill
 "natural proportions" for ratios that over-weighted wikipedia ~23×). That is the argument for shipping
 mixtures as **measured counts + label-predicate selectors that Gate A recomputes**, not prose.
 
+## THE 150B PUBLISH PLAN — decided 2026-07-30, verified by four independent audits
+
+**The copy is ALREADY DONE.** `s3://edullm-landing/_migrate/olmo-150b-dolma2/` holds all 6,921
+`.u32le.bin` objects / 630,140,294,600 bytes, finished 2026-07-29 21:24–21:53 UTC. The earlier
+"2.1%, restart the copy" note in this file was wrong — it described the deleted driver, not the
+bytes. **Do not re-copy from the legacy bucket.**
+
+**Layout (user's decision): nested paths AND labels.**
+`tokens/<source>/<domain>/<split>-NNNNN.u32le.bin`, with `labels: {source, domain}` on every
+manifest entry. Verified: nesting is UNSPECIFIED-not-forbidden by the standard (every example is
+flat, but `:624` and `:517` presume trees inside groups); one `tokens/` group for 65 subtrees
+COMPLIES with §4; Gate A, the reader, and an adversarial suite all pass on nested varying-depth
+keys. Note the current staging shape (`<source>/train-N`) would make `publish()` create SIX groups
+named after sources — the rejected plan — so a re-copy into `tokens/` is required either way.
+
+**Four things must happen before the publish, in this order:**
+1. ~~**Reship the 0.2.0 wheel AND cut over to it.**~~ **BOTH DONE 2026-07-30, verified by
+   execution.** `_dist/edullm_data-0.2.0-py3-none-any.whl` is live (117,722 B, sha256
+   `dc726cf6…`, upload byte-identical, clean-venv smoke-tested). `edullm-validator:2` and
+   `edullm-fsck:2` are registered and bootstrap it; each asserts `WHEEL_VERSION==0.2.0` at
+   startup and the validator also asserts `families/` resolves, so a silent fallback to an old
+   wheel now fails loudly. **Proof it is really live:** a real fsck job ran `edullm-fsck:2` and
+   logged `WHEEL_VERSION=0.2.0`, `ok=true`, `FSCK_DONE_RC=0`.
+   Both EventBridge rules target the job def by **unversioned name**, so the new revisions took
+   effect with no rule edit — which also means a bad revision goes live immediately; verify with
+   a manual `submit-job` after any re-register. `_dist/publish_driver.py` was reshipped to assert
+   the families dir rather than trust the env override, and to log derived `split`/`labels`.
+2. **Drop BOTH 20-byte shards** — `s2pdf-redacted/adult_content/train-00057` and
+   `s2pdf-redacted/games/train-00861`. They are byte-identical to each other
+   (`duplicate-shard-digest`) AND `train-00057` is `[58, 793, 77726, 60, 100257]` — it ends in EOS,
+   1/5 = 20% against `eos_fraction_max: 0.05`, so it independently fails
+   `eos-fraction-out-of-bounds`. Either alone would reject the whole 630 GB at `promote()`. Cost:
+   10 tokens of 157,468,740,435. Record both in `limitations`.
+3. **Carve the val split** — per-source, 60 shards renamed `train-*`→`val-*`, 229,894,171 tokens
+   (0.146%). Plan + rationale in the project's `artifacts/VAL-CARVE-PLAN.md` and `val_plan.json`.
+   **The 6 `val-00000` objects already in `_migrate/` must be DELETED** — they came from legacy
+   `heldout-val/` and every one is a duplicate of a train shard (5 exact copies, finemath a
+   byte-prefix). Publishing them is 100% train/val leakage.
+4. **Renumber ordinals globally** across the group (`train-00000`…). `DATASET-STANDARD.md:589-590`
+   says the 5-digit ordinal caps "a group" at 100,000 and exceeding it "is a spec amendment";
+   per-subtree reuse makes that false. Free, since the shards are being renamed anyway. Also
+   removes OLMo-core's basename+size fingerprint hazard (`numpy_dataset.py:221-222` — measured 0
+   collisions on this corpus, but that is a property of the data, not an invariant).
+
+~~**Also queued:** `promote()` copies sequentially with no resume.~~ **FIXED** (`2515f79`) —
+`promote(copy_workers=…)` plus a `--promote-workers` CLI flag (`d6e8a7f`); the deployed job def
+passes 16. Six tests, mutation-checked.
+
+**TWO DEPLOYED-INFRA GAPS found while watching the promotion run. Neither is fixed.**
+
+1. **`edullm-validator` has NO TIMEOUT.** Verified: `timeout: null` on both the job and the job
+   definition. The publish jobs get `--timeout attemptDurationSeconds=7200` because it is passed
+   at submit time, but the EventBridge-triggered validation inherits nothing. A wedged
+   auto-promote would sit `RUNNING` forever and hold queue capacity, with no automatic kill.
+   Set `timeout` on the job definition — 7200 s matches what the publish path already uses.
+2. **The auto-promote validates EVERY pending dataset, not the one that triggered it.** The job
+   def runs `validate --promote` with no `--prefix`, so it calls `discover_pending`, which does
+   `s3.list(landing_bucket, "")` — a full-bucket LIST (21,005 objects / 4.1 s today) followed by
+   Gate A over every unsealed dataset it finds. That is deliberate ("the event is a pure wake-up
+   signal"), and it is why one dataset's promotion time is not bounded by that dataset. Harmless
+   now (the 150B is the only pending one), but it degrades as landing accumulates, and it makes a
+   slow run hard to attribute.
+
+**Gate A timing, measured, so the next person does not misread a slow run as a hang.** A full
+pass over ~6,900 shards is **~55 min** at 8.4 range-reads/s (4 seeded windows per shard ⇒ ~27,600
+reads). It does **not** short-circuit — `ValidationResult`'s docstring is explicit that "checks do
+not short-circuit each other, so one run surfaces the whole list" — so a REJECTED run costs the
+same as a clean one. It prints nothing between `VALIDATOR_START` and its verdict, and writes
+`_VALIDATED.json` / `_REJECTED.json` only at the end. **The live progress signal is the object
+count under `s3://edullm-data/<dataset_id>/`**: zero means still validating, climbing means
+promotion started. Variance of ±25% between runs is ordinary S3 latency, not a fault.
+
+**WHERE THE 2026-07-30 OVERNIGHT RUN STOPPED, and why.** Steps 2–4 all mutate
+`_migrate/olmo-150b-dolma2/` — 6,913 server-side renames plus 8 deletions. That is bulk S3 work,
+and per the `bulk-s3-via-credential-process` memory it must NOT go through the MCP broker
+(~2,100 tokens and ~16 s per object ⇒ ~14.5M tokens for this corpus). The sanctioned path is a local
+threaded boto3 script driven by `sb-aws-creds credential_process`, and **that setup requires the
+user's explicit approval** — the auto-mode classifier blocks it by design, because local credentials
+outside the broker are exactly what the airlock guards against. The classifier did block a scripted
+step during this run; it was not worked around. So the remaining work is queued, not attempted.
+
+**The user APPROVED the credential setup (2026-07-30) and it is DONE and verified.**
+`/tmp/olmo150_aws/config` holds an isolated profile (`credential_process = sb-aws-creds
+credential_process --profile sbsandbox`); `~/.aws/config` is untouched. It resolves to the SAME
+`Intern-eric.wu-sbsandbox` role as the broker — no privilege change — and the airlock was
+re-verified THROUGH those local credentials: `put_object` to `edullm-data` →
+`AccessDenied … explicit deny in a resource-based policy`. Landing writes are permitted, which is
+how the 0.2.0 wheel shipped.
+
+**THE COPY PLAN IS BUILT AND FULLY SELF-CHECKED — but not executed.**
+`artifacts/olmo150_plan.json` (6,913 entries) + `artifacts/olmo150_plan.py` (the generator, which
+re-derives and re-asserts everything) + `artifacts/olmo150_stage.py` (the resumable copier).
+Regenerate any time with `python3 artifacts/olmo150_plan.py` — it moves nothing.
+
+Verified by the generator, all passing: exactly 2 shards dropped; no dropped shard is also a val
+pick; 6,913 unique sources AND 6,913 unique destinations (a dest collision would silently overwrite
+a shard); global ordinals contiguous `0..6912`; every sampled destination passes
+`check_shard_naming`, parses to the right split, and yields exactly the expected
+`labels_from_path`; val is 60 shards / 229,894,171 tokens matching the approved carve; no object
+≥5 GiB (largest 1,446,999,580 B, so every copy is single-part); total 157,468,740,425 tokens
+(= 157,468,740,435 − the 10 dropped); and **no legacy `val-00000` object is in the plan**, so the
+fake-val shards cannot leak in.
+
+Shape: `_migrate/olmo-150b-dolma2/<source>/train-NNNNN.u32le.bin` →
+`_migrate/olmo-150b-staged/tokens/<source>[/<domain>]/<split>-<global-ordinal>.u32le.bin`.
+Both keys are in `edullm-landing`, so this is a same-bucket rename-copy that never touches the
+airlock. 629,874,961,700 bytes / 587 GiB, server-side and in-region — no egress, no bytes through
+this machine.
+
+**THE DRY RUN PASSED — the layout is proven on real bytes.** This is the step the first attempt
+skipped. Five deliberately-chosen shards (the 90-token survivor, the 1.45 GB largest object, a
+carved val shard, and both nesting depths) were staged, published, and run through Gate A:
+
+    ok=True  incomplete=False  violations=0
+
+and the derived fields came out exactly right, with no caller input:
+
+    tokens/all-dressed-snazzy2/adult_content/val-00033.u32le.bin
+        split='val'   labels={'domain': 'adult_content', 'source': 'all-dressed-snazzy2'}
+    tokens/wikipedia/train-06850.u32le.bin
+        split='train' labels={'source': 'wikipedia'}          <- 1-level nesting, no domain key
+    tokens/s2pdf-redacted/food_and_dining/train-04038.u32le.bin
+        split='train' tokens=90                                <- the smallest survivor, clean
+
+`partitions` auto-resolved to `train`/`val` with recomputed rows and `coverage: partition`.
+
+**Landmine found and defused: publishing to landing AUTO-TRIGGERS PROMOTION.** The manifest upload
+fired `edullm-landing-manifest-created` → EventBridge → a `edullm-validate-on-manifest` Batch job,
+which would have promoted a throwaway probe dataset into `edullm-data`. It was caught RUNNABLE and
+cancelled before it ran; `edullm-data` verified still at 11 objects. The probe and the staged
+shards were then deleted from landing. **Anyone doing a landing-only experiment must either cancel
+that job or disable the rule first** — there is no "publish but do not promote" mode.
+
+Then `publish()` against `s3://edullm-landing/_migrate/olmo-150b-staged/` with
+`tokenizer="tokenizer/dolma2-bpe"`, `hash_workers`/`copy_workers=16`, and
+`--timeout attemptDurationSeconds=7200`. It derives `split` and `labels` from the staged keys
+automatically (`aa4d509`) and Gate A recomputes both. **Cut the job def over to the 0.2.0 wheel
+first** or the run executes pre-correctness code.
+
+Leave `_migrate/olmo-150b-dolma2/` in place until the publish is promoted and verified — it is the
+only staged copy, and re-making it is a 630 GB pull from the legacy bucket.
+
+**The domain mapping is recoverable and verified.** `train-NNNNN` is the Nth key in sorted legacy
+order — a strict bijection, confirmed by 6 anchors, all 6,915 shards by size, and a live CRC64NVME
+check. Full inventory in `artifacts/shardmap.json`. Measured: 65 (source, domain) strata,
+all-dressed-snazzy2 has 24 domains and s2pdf-redacted has **23** (this file previously said 24 for
+both); train-only tokens are **157,468,740,435** (the 157,535,073,650 below double-counts the 6
+duplicate val shards).
+
+**Datamix selection is NOT solved and is deliberately out of scope here.** A source-named partition
+trips `empty-split` (`validate.py:677-683`) regardless of `by=`; only `by: "path"` is implemented;
+`by: "label"` exists in neither the code nor the spec's closed four-form set. The standard's own
+answer for a subset is a CHILD dataset (`depends_on[]` + `token-order/v1`, `:836-846`). Decide that
+separately — do not smuggle it into the layout.
+
 ## DEFERRED DECISIONS — explicit user decisions, not open questions
 
 Do not relitigate these; they were decided. Do not act on them without re-asking.
@@ -378,13 +570,13 @@ Do not relitigate these; they were decided. Do not act on them without re-asking
 - **No training-side adapter has been written.** `docs/CONSUMER-CONTRACT.md` is the specification it
   should be written against; the adapter itself does not exist.
 - **No training run has happened** against any `edullm-data` dataset.
-- **`entry.split` is DORMANT.** The v2 field exists, is validated (`manifest.py:215`, `:267-276`), and
-  Gate A checks a declared value against the filename (`validate.py:773`) — but **`publish()` never
-  populates it**: `ManifestEntry(...)` at `publish.py:281-287` passes no `split=`, and
-  `grep -c "split=" publish.py` is 0. Split information in practice comes from partitions and
-  filenames. Populating it in `publish()` is the obvious next step and would make
-  `split-contradicts-filename` actually reachable in production. Same for `entry.labels`, which the
-  150B migration needs (DEFERRED DECISIONS #1).
+- ~~**`entry.split` is DORMANT.**~~ **FIXED 2026-07-30 (`aa4d509`, branch
+  `feat/entry-labels-from-path`).** `publish()` now derives BOTH `split` and `labels` from the
+  object's own key, and Gate A recomputes `labels` against that key
+  (`_check_labels_match_path`), rejecting a lie, an omission on a nested entry, and an extra
+  key the path cannot justify. `split-contradicts-filename` is now reachable in production.
+  A tree deeper than the key vocabulary can name is REFUSED at publish time rather than
+  labelled by guesswork. 557 tests, ruff clean. **Not yet merged, not yet in the `_dist` wheel.**
 - **`sft_conversations_v1._partition_globs` still substring-matches partition names** against
   `heldout|held-out|holdout|test|val|eval` (`profiles/sft_conversations_v1.py:92-117`) instead of
   using `contracts.is_trainable`. So the `SPLITS` docstring (`contracts.py:132-135`), which cites this
@@ -421,7 +613,18 @@ Working tree was CLEAN as of the `a5818ac` handoff; it is not clean now (see THI
   which drops the target and its `RoleArn`. Changing only the expression was the smaller, safer move;
   the reason is recorded in the rule's own live Description so nobody re-litigates it.
 - S3 Inventory (weekly) on `edullm-data`; landing lifecycle scoped to family prefixes (keeps `_dist/`)
-- `s3://edullm-landing/_dist/edullm_data-0.1.0-py3-none-any.whl` — the durable bootstrap wheel
+- `s3://edullm-landing/_dist/edullm_data-0.2.0-py3-none-any.whl` — **SHIPPED 2026-07-30**, 117,722
+  bytes, sha256 `dc726cf6bd24f0cb713972fa6d6f44a772d7e8ffd78bb691c860b44759c090d0`, upload verified
+  byte-identical (MD5 `44b4cdfb…`). Built from `feat/entry-labels-from-path` @ `aa4d509`, so it is
+  the FIRST deployed wheel containing the correctness work (dtype-vs-vocab, validation-by-default,
+  row/coverage recompute, rooted seal, scaled distinct-ids floor, key-derived split+labels).
+  Verified in a clean venv: version 0.2.0, `families/` packaged (7 files) and resolving to
+  `site-packages/edullm_data/families`, `validation_required=True` reaching production,
+  `labels_from_path` working.
+  `edullm_data-0.1.0-py3-none-any.whl` is STILL PRESENT and is still what the live job defs
+  bootstrap **by exact filename** — shipping the new wheel does not switch anything over. Cutting
+  over means editing `_dist/publish_driver.py` and `infra/05-validator-jobdef.md:95` to say `0.2.0`.
+  Until then every Batch run still executes 0.1.0.
 
 **PROVEN end-to-end on live AWS (all cleaned up + re-locked after):**
 1. Deny side: intern session PutObject to `edullm-data` → AccessDenied (repeatedly re-verified)

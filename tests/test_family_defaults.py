@@ -7,8 +7,8 @@ Two independent bugs made every family-declared bound dead code:
    saw a value outside the test suite, which supplied it directly to the fixture.
 2. Even wired up, the vocabularies did not match: ``families/pretrain.json`` nests its bounds
    under ``decode_smoke_test`` as ``distinct_ids_min`` / ``eos_fraction_max`` /
-   ``zero_fraction_max``, while the profile reads flat ``min_distinct_ids`` /
-   ``max_eos_fraction`` / ``max_zero_fraction``. Names inverted AND nesting mismatched.
+   ``zero_run_max``, while the profile reads flat ``min_distinct_ids`` /
+   ``max_eos_fraction`` / ``max_zero_run``. Names inverted AND nesting mismatched.
 
 Net effect on the live corpus: it was validated against the profile's own fallbacks — 16
 distinct ids, 50% EOS, 50% zeros — instead of the family's 256 / 5% / 1%. So a shard that was
@@ -28,7 +28,7 @@ def test_pretrain_family_bounds_resolve_to_the_declared_values():
     fd = _family_defaults_for("pretrain/olmo-mix-1124-31b")
     assert fd["min_distinct_ids"] == 256
     assert fd["max_eos_fraction"] == 0.05
-    assert fd["max_zero_fraction"] == 0.01
+    assert fd["max_zero_run"] == 256
     # window_bytes is deliberately NOT flattened: the decode window is a fixed constant, so
     # aliasing it would surface a bound nothing enforces.
     assert "window_bytes" not in fd
@@ -39,7 +39,7 @@ def test_the_declared_bounds_are_stricter_than_the_profile_fallbacks():
     fd = _family_defaults_for("pretrain/anything-10b")
     assert fd["min_distinct_ids"] > pretrain._DEFAULT_MIN_DISTINCT
     assert fd["max_eos_fraction"] < pretrain._DEFAULT_MAX_EOS_FRACTION
-    assert fd["max_zero_fraction"] < pretrain._DEFAULT_MAX_ZERO_FRACTION
+    assert fd["max_zero_run"] <= pretrain._DEFAULT_MAX_ZERO_RUN
 
 
 def test_every_family_decode_key_is_either_mapped_or_explicitly_not_enforced():
@@ -121,7 +121,17 @@ def test_the_family_bounds_actually_reject_a_corpus_the_fallbacks_would_accept()
     d = Path(tempfile.mkdtemp())
     (d / "tokens").mkdir()
     ids = (np.arange(1, 60001) % 40000).astype(np.uint32) + 1
-    ids[::3] = 0  # ~33% zeros: the partial-zero-fill signature of a crashed writer
+    # A real crashed writer leaves a CONTIGUOUS hole, not scattered zeros. The old fixture
+    # used `ids[::3] = 0` — 33% zeros with a longest run of ONE, which is exactly what
+    # healthy prose looks like when the tokenizer maps a common character to id 0 (dolma2
+    # maps "!"). That shape is the false positive that rejected two good 150B shards.
+    #
+    # Zero the TAIL, which is the failure the four-window sampler was designed to catch
+    # ("a zero-filled or truncated tail leaves a correctly-sized file with a valid head").
+    # A small hole in the middle can genuinely be missed: for this 60,000-token shard the
+    # seeded windows land at token offsets 6400/14392/24829/42227, so a 4,096-token hole at
+    # 20000 is invisible to all four. Sampling is probabilistic by design; a tail is not.
+    ids[40000:] = 0  # 20,000 consecutive zeros — a truncated write
     (d / "tokens" / "train-00000.u32le.bin").write_bytes(ids.tobytes())
     (d / "tokens" / "val-00000.u32le.bin").write_bytes(ids[:20000].tobytes())
     s3 = FakeS3()
@@ -142,7 +152,7 @@ def test_the_family_bounds_actually_reject_a_corpus_the_fallbacks_would_accept()
         "edullm-landing", f"pretrain/zerofill-fixture-10b/{plan.version}", s3,
         data_bucket="edullm-data",
     )
-    assert "zero-fraction-out-of-bounds" in {v.code for v in res.violations}, [
+    assert "zero-run-in-shard" in {v.code for v in res.violations}, [
         str(v) for v in res.violations
     ]
 

@@ -516,8 +516,17 @@ mmap path opens up. That is not the deployment we have.
 So: **use plain `NumpyFSLDatasetConfig`** (`numpy_dataset.py:2522`) with an explicit
 `dtype=` from `r.dtype`. If you genuinely need document boundaries, that is a producer-side change —
 publish real `.csv.gz` sidecars as their own manifest group — not something to hack around in the
-adapter. The 150B migration explicitly **excluded** the 6,915 legacy `.csv.gz` files as non-payload
-(`docs/MIGRATION-olmo-150b-dolma2.md:14-16`), so they do not exist in `edullm-data` today.
+adapter. The 150B migration explicitly **excluded** the 6,915 legacy `.csv.gz` files as non-payload,
+so they do not exist in `edullm-data` today — recorded in the published dataset's own
+`limitations` under `kind: "no-document-boundaries"`, which is the durable statement of it.
+
+One correction worth keeping, because an audit of this file got it backwards: the **composable**
+stack (`NumpyDocumentSource` → `ConcatAndChunkInstanceSource` → `MixingInstanceSource`) is NOT
+exempt. `NumpyDocumentSource.get_document_offsets` calls `iter_document_indices`
+*unconditionally* (`composable/numpy_document_source.py:557-576`), so on an `s3://` path it takes
+the same sidecar branch and fails the same way — verified by execution, `403` on the derived
+`.csv.gz` key. It only appears to work if you never call that method. The local-staging escape
+hatch applies to it too.
 
 Note also that `NumpyFSLDatasetConfig` reaches `NumpyFSLDatasetMixture` whenever
 `source_mixture_config` is set (`numpy_dataset.py:2580-2599`). "Use the plain config" means the plain
