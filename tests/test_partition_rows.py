@@ -121,13 +121,30 @@ def test_a_declared_split_with_no_shards_is_kept_not_silently_dropped():
 
 
 def test_family_default_path_still_works_and_still_drops_absent_splits():
-    """No regression: with no caller partitions, the family default resolves as before."""
+    """No regression: with no caller partitions, the family default resolves as before.
+
+    The family template now declares train AND val, and ``_resolve_path_partitions`` drops a
+    partition whose glob matches nothing — so a corpus with no ``val-*`` shards ships a train
+    partition only, exactly as before. It then fails ``missing-required-split``, which is the
+    point of that rule and is asserted separately below.
+    """
     s3 = FakeS3()
     plan, res = _publish(s3, partitions=None, with_val=False)
-    assert res.ok, [str(v) for v in res.violations]
     ds = R._load_json(s3, "edullm-landing", f"{DSID}/{plan.version}/dataset.json")
     names = [p["name"] for p in ds["groups"][0]["partitions"]]
-    assert names == ["train"]  # family declares train only; nothing empty shipped
+    assert names == ["train"]  # val glob matched nothing, so it was dropped, not shipped empty
+    # the ONLY objection is the missing held-out split — row filling itself is clean
+    assert {v.code for v in res.violations} == {"missing-required-split"}
+
+
+def test_the_family_default_now_declares_a_val_template():
+    """A corpus WITH val-* shards gets both partitions with no caller input at all."""
+    s3 = FakeS3()
+    plan, res = _publish(s3, partitions=None, with_val=True)
+    assert res.ok, [str(v) for v in res.violations]
+    ds = R._load_json(s3, "edullm-landing", f"{DSID}/{plan.version}/dataset.json")
+    parts = {p["name"]: p["rows"] for p in ds["groups"][0]["partitions"]}
+    assert parts == {"train": 100000, "val": 20000}
 
 
 def test_val_split_is_readable_end_to_end():

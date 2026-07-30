@@ -27,7 +27,8 @@
     },
     "tags": {
       "Project": "edullm"
-    }
+    },
+    "validation_required": true
   },
   "notes": "Orderings over an existing token pool - difficulty schedules, easy-to-hard curricula, replay mixes - stored as index vectors, not as copied tokens. This family exists to make referencing cheaper than copying (DATASET-STANDARD.md section 0 rule 3): the audit's 37 GB of duplication was incentive-shaped, and a curriculum that re-emits its parent's tokens is that bug reappearing. Hence the token-order/v1 profile default, which requires depends_on[] pinning the parent pool by manifest_sha256 and runs a permutation check, and hence the single most valuable one-line gate in the standard: no object sha256 may appear in both a dataset and a dataset it depends on. The index vectors are themselves uint32 little-endian headerless (.u32le.bin) so the same alignment arithmetic and the same never-.npy honesty rule apply to them as to tokens. coverage defaults to 'overlapping', NOT 'partition', and that default is load-bearing: curriculum views deliberately repeat blocks - that is what a replay schedule IS - so summing partition rows would double-count, and section 7 requires coverage to tell tools whether summing is legitimate. Override to 'partition' only for a genuinely disjoint schedule. license.basis is 'inherited' with a null id because a curriculum has no license of its own - it inherits whatever the token pool it indexes carries, resolved per dataset from depends_on[]. The tokenizer block is duplicated from pretrain.json rather than cross-referenced so that a curriculum published against a different pool cannot silently drift; validate that it matches the parent. Names carry the difficulty signal plus the schedule shape plus the target model (curriculum/flesch-linear-370m, curriculum/zlib-strict-370m) so siblings read clearly at a glance - see section 2."
 }

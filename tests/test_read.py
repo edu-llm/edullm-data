@@ -23,6 +23,10 @@ def _publish_and_promote(s3: FakeS3) -> str:
     (d / "tokens").mkdir()
     (d / "tokens" / "train-00000.u32le.bin").write_bytes((np.arange(1, 60001, dtype=np.uint32) % 90000).tobytes())
     (d / "tokens" / "train-00001.u32le.bin").write_bytes((np.arange(1, 40001, dtype=np.uint32) % 90000).tobytes())
+    # A val shard: the pretrain family now requires held-out data
+    # (families/pretrain.json validation_required=true), so a train-only
+    # corpus is a missing-required-split violation.
+    (d / "tokens" / "val-00000.u32le.bin").write_bytes((np.arange(1, 20001, dtype=np.uint32) % 90000).tobytes())
     plan = P.publish(
         d,
         dataset_id="pretrain/dolma2-150b",
@@ -99,11 +103,27 @@ def test_can_read_unvalidated_when_explicitly_allowed():
     assert res.dtype == "uint32"
 
 
-def test_unknown_split_raises():
+def test_a_declared_vocabulary_split_this_dataset_lacks_returns_empty_not_raises():
+    """Asking "does this have a test split?" must be a question, not an exception.
+
+    Previously any undeclared split raised, so a caller could not probe optimistically — it had
+    to catch ReadError to find out, which is control flow by exception for an ordinary fact.
+    """
     s3 = FakeS3()
     ver = _publish_and_promote(s3)
-    with pytest.raises(R.ReadError):
-        R.dataset_paths("pretrain/dolma2-150b", ver, split="test", s3=s3)
+    res = R.dataset_paths("pretrain/dolma2-150b", ver, split="test", s3=s3)
+    assert res.paths == []
+    assert res.rows is None
+    assert not res.has_split("test")
+    assert res.has_split("train") and res.has_split("val")  # the ones it does have
+
+
+def test_a_split_outside_the_vocabulary_still_raises():
+    """An undeclared-but-valid split is a fact; a nonexistent word is a mistake."""
+    s3 = FakeS3()
+    ver = _publish_and_promote(s3)
+    with pytest.raises(R.ReadError, match="vocabulary"):
+        R.dataset_paths("pretrain/dolma2-150b", ver, split="heldout", s3=s3)
 
 
 def test_resolve_latest():

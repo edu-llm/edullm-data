@@ -44,6 +44,8 @@ def _tokens_dir(n: int = 60000) -> Path:
     d = Path(tempfile.mkdtemp())
     (d / "tokens").mkdir()
     (d / "tokens" / "train-00000.u32le.bin").write_bytes((np.arange(1, n + 1, dtype=np.uint32) % 90000).tobytes())
+    # val shard: pretrain now requires held-out data (validation_required=true)
+    (d / "tokens" / "val-00000.u32le.bin").write_bytes((np.arange(1, n // 3, dtype=np.uint32) % 90000).tobytes())
     return d
 
 
@@ -111,6 +113,8 @@ def _multishard_tokens_dir(shards: int = 6) -> Path:
         n = 40000 + i * 7000  # distinct sizes per shard
         arr = (np.arange(1, n + 1, dtype=np.uint32) % 90000)
         (d / "tokens" / f"train-{i:05d}.u32le.bin").write_bytes(arr.tobytes())
+    # val shard: pretrain requires held-out data (validation_required=true)
+    (d / "tokens" / "val-00000.u32le.bin").write_bytes((np.arange(1, 20001, dtype=np.uint32) % 90000).tobytes())
     return d
 
 
@@ -152,6 +156,8 @@ def test_publish_from_s3_source():
     # stage payload directly in landing (the AWS-native producer case)
     body = (np.arange(1, 40001, dtype=np.uint32) % 90000).tobytes()
     s3.seed("edullm-landing", "_pending/mcq/tokens/train-00000.u32le.bin", body)
+    # val shard: pretrain requires held-out data (validation_required=true)
+    s3.seed("edullm-landing", "_pending/mcq/tokens/val-00000.u32le.bin", body[: (len(body) // 3 // 4) * 4])
     plan = P.publish(
         "s3://edullm-landing/_pending/mcq/",
         dataset_id="pretrain/fineweb-edu-10b",

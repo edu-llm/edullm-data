@@ -110,6 +110,8 @@ def _publish_pretrain_depending_on_tokenizer(s3: FakeS3, tok_ver: str, *, bad_to
     else:
         arr = (np.arange(1, 40001, dtype=np.uint32) % 90000)
     (d / "tokens" / "train-00000.u32le.bin").write_bytes(arr.tobytes())
+    # val shard: pretrain now requires held-out data (validation_required=true)
+    (d / "tokens" / "val-00000.u32le.bin").write_bytes(arr[: len(arr) // 3].tobytes())
     tok_manifest_sha = json.loads(s3.get("edullm-data", f"tokenizer/dolma2-bpe/{tok_ver}/dataset.json"))["groups"][0]["manifest_sha256"]
     plan = P.publish(
         d,
@@ -179,6 +181,8 @@ def _publish_corpus_with_tokenizer(s3: FakeS3, dsid: str, tokenizer: str, max_id
     arr = (np.arange(40000, dtype=np.uint64) % span).astype(np.uint32) + 1  # 1..max_id, no zeros
     arr[0] = max_id  # ensure the top id appears
     (d / "tokens" / "train-00000.u32le.bin").write_bytes(arr.tobytes())
+    # val shard: pretrain requires held-out data (validation_required=true)
+    (d / "tokens" / "val-00000.u32le.bin").write_bytes(arr[:13332].tobytes())
     plan = P.publish(
         d, dataset_id=dsid,
         purpose="Corpus tokenized with a specific published tokenizer, deriving its vocab bound from that one",

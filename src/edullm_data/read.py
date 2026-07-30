@@ -15,9 +15,10 @@ someone points it at a landing prefix or a hand-assembled directory.
 from __future__ import annotations
 
 import fnmatch
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Mapping
 
+from .contracts import SPLITS, is_trainable
 from .manifest import ManifestEntry
 from .s3 import S3, NotFound
 
@@ -46,6 +47,34 @@ class ResolvedSplit:
     dtype: str | None
     rows: int | None
     kwargs: dict[str, Any]
+    #: Every declared split, keyed by name — ``{"train": [...uris], "val": [...uris]}``.
+    #:
+    #: A dataset returns BOTH by default, which is what a run actually needs (train for the
+    #: dataset config, val for the eval callback). They are kept SEPARATE rather than
+    #: concatenated into ``paths`` because a flat list is precisely the bug: a caller cannot
+    #: tell the two apart, so held-out shards end up in training with nothing to notice.
+    splits: dict[str, list[str]] = field(default_factory=dict)
+    #: Per-split declared row counts, same keys as ``splits``.
+    split_rows: dict[str, int | None] = field(default_factory=dict)
+
+    @property
+    def train(self) -> list[str]:
+        """The trainable URIs. Empty if this dataset declares no trainable split."""
+        return [p for name, ps in self.splits.items() if is_trainable(name) for p in ps]
+
+    @property
+    def val(self) -> list[str] | None:
+        """Held-out URIs, or ``None`` when the dataset has none.
+
+        ``None`` rather than ``[]`` on purpose: "this dataset has no validation data" and "the
+        validation split is empty" are different facts, and a caller that wants to branch on
+        the first should not have to guess. Never raises — asking is not an error.
+        """
+        held = [p for name, ps in self.splits.items() if not is_trainable(name) for p in ps]
+        return held or None
+
+    def has_split(self, name: str) -> bool:
+        return name in self.splits
 
 
 def _load_json(s3: S3, bucket: str, key: str) -> Any:
@@ -76,11 +105,27 @@ def dataset_paths(
     data_bucket: str = DATA_BUCKET,
     require_validated: bool = True,
     group: str | None = None,
+    include_held_out: bool = False,
 ) -> ResolvedSplit:
-    """Resolve a dataset (optionally one split) to concrete object URIs + dtype.
+    """Resolve a dataset to concrete object URIs + dtype.
 
     ``group`` selects which payload group when a dataset has several; defaults to the single
     group if there is exactly one, else raises so the caller is explicit about what they read.
+
+    **``split=None`` returns TRAINABLE data only**, and every declared split separately in
+    ``.splits`` / ``.train`` / ``.val``. Returning everything — which is what this used to do —
+    hands a trainer its own held-out shards with no way to tell them apart. Silence means the
+    safe subset.
+
+    A dataset that declares no trainable split at all (a tokenizer, a vendored tree, an eval
+    set) returns everything: there is nothing to protect, and the whole artifact is the payload.
+
+    ``include_held_out=True`` opts back into the old behaviour for the rare deliberate case.
+    It is spelled out so it shows up in a code review of a training config.
+
+    Asking for a split the dataset does not have returns an EMPTY result rather than raising,
+    so "does this have validation data?" is a question, not an exception. A split outside the
+    vocabulary is still an error.
     """
     prefix = f"{dataset_id}/{version}"
     if require_validated:
@@ -115,30 +160,72 @@ def dataset_paths(
     dtypes = {e.format.dtype for e in entries if e.format.dtype}
     dtype = dtypes.pop() if len(dtypes) == 1 else None
 
-    # split selection via the group's partitions (path form resolvable here; field/range/
-    # indices need the row-level machinery a loader applies, so we return all paths + note it)
-    selected = entries
+    def _uri(entry: Any) -> str:
+        return f"s3://{data_bucket}/{prefix}/{entry.path}"
+
+    def _select(part: Mapping[str, Any]) -> tuple[list[Any], dict[str, Any]]:
+        """Entries belonging to one partition, plus any loader kwargs it implies."""
+        if part.get("by") == "path":
+            glob = part.get("glob", "")
+            return [
+                e for e in entries
+                if fnmatch.fnmatch(e.path.rsplit("/", 1)[-1], glob) or fnmatch.fnmatch(e.path, glob)
+            ], {}
+        # field/range/indices: the split is a row predicate, not a file subset. Return all
+        # shards plus the predicate so the loader applies it — never silently return the whole
+        # set as if it were the split.
+        return list(entries), {"row_predicate": {k: part[k] for k in part if k not in {"name"}}}
+
+    # Resolve EVERY declared split, always. This is what makes "a dataset returns train and
+    # val" true without flattening them together.
+    declared = [p for p in (chosen.get("partitions") or []) if isinstance(p, Mapping) and p.get("name")]
+    splits: dict[str, list[str]] = {}
+    split_rows: dict[str, int | None] = {}
+    for part in declared:
+        name = str(part["name"])
+        sel, _ = _select(part)
+        splits[name] = [_uri(e) for e in sel]
+        split_rows[name] = part.get("rows")
+
     rows: int | None = None
     kwargs: dict[str, Any] = {}
     if split is not None:
         part = _find_partition(chosen, split)
         if part is None:
-            raise ReadError(f"split {split!r} not declared in group {gname!r} partitions")
+            # Deliberately NOT an error when the dataset simply has no such split: asking "does
+            # this have validation data?" must not require catching an exception. An unknown
+            # word — one outside the vocabulary — is still a mistake worth reporting.
+            if split in SPLITS:
+                return ResolvedSplit(
+                    dataset_id=dataset_id, version=version, split=split, paths=[], dtype=dtype,
+                    rows=None, kwargs={}, splits=splits, split_rows=split_rows,
+                )
+            raise ReadError(
+                f"split {split!r} is not in the vocabulary {sorted(SPLITS)}; group {gname!r} "
+                f"declares {sorted(splits)}"
+            )
         rows = part.get("rows")
-        by = part.get("by")
-        if by == "path":
-            glob = part.get("glob", "")
-            selected = [
-                e for e in entries
-                if fnmatch.fnmatch(e.path.rsplit("/", 1)[-1], glob) or fnmatch.fnmatch(e.path, glob)
-            ]
+        selected, kwargs = _select(part)
+    else:
+        # THE V9 FIX. This used to return every entry, so a caller who asked for no split in
+        # particular was handed the held-out shards along with the training ones and had no way
+        # to tell which was which — i.e. train on your own validation set, silently.
+        #
+        # Now: trainable data only. Silence means the SAFE subset, never "everything".
+        trainable = [name for name in splits if is_trainable(name)]
+        if trainable:
+            if not include_held_out:
+                selected = [e for name in trainable for e in _select(_find_partition(chosen, name))[0]]
+            else:
+                selected = list(entries)
         else:
-            # field/range/indices: the split is a row predicate, not a file subset. Return
-            # all shards plus the predicate so the loader applies it — never silently return
-            # the whole set as if it were the split.
-            kwargs["row_predicate"] = {k: part[k] for k in part if k not in {"name"}}
+            # No trainable split declared at all — a tokenizer, a vendored tree, an eval set.
+            # There is no held-out data to protect here; the whole artifact IS the payload, so
+            # returning everything is correct. This is what keeps the change a no-op for the
+            # four families that legitimately have no train side.
+            selected = list(entries)
 
-    paths = [f"s3://{data_bucket}/{prefix}/{e.path}" for e in selected]
+    paths = [_uri(e) for e in selected]
     return ResolvedSplit(
         dataset_id=dataset_id,
         version=version,
@@ -147,6 +234,8 @@ def dataset_paths(
         dtype=dtype,
         rows=rows,
         kwargs=kwargs,
+        splits=splits,
+        split_rows=split_rows,
     )
 
 

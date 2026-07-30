@@ -24,6 +24,10 @@ def _publish_promote(s3: FakeS3, dataset_id: str = DID) -> str:
     d = Path(tempfile.mkdtemp())
     (d / "tokens").mkdir()
     (d / "tokens" / "train-00000.u32le.bin").write_bytes((np.arange(1, 60001, dtype=np.uint32) % 90000).tobytes())
+    # A val shard: the pretrain family now requires held-out data
+    # (families/pretrain.json validation_required=true), so a train-only
+    # corpus is a missing-required-split violation.
+    (d / "tokens" / "val-00000.u32le.bin").write_bytes((np.arange(1, 20001, dtype=np.uint32) % 90000).tobytes())
     plan = P.publish(
         d,
         dataset_id=dataset_id,

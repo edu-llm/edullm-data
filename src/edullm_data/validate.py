@@ -27,6 +27,9 @@ from typing import Any, Mapping
 
 from .contracts import (
     FAMILIES,
+    SPLITS,
+    TRAINABLE_SPLITS,
+    is_trainable,
     READABLE_SCHEMA_VERSIONS,
     NamingError,
     SCHEMA_VERSION,
@@ -224,6 +227,11 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
     if not isinstance(groups, list) or not groups:
         v.append(Violation("no-groups", "dataset.json has no groups[]"))
         return ValidationResult(dataset_id, version_id, v)
+
+    # -- dataset-level: is held-out data present when the family requires it? --
+    # Checked across ALL groups, not per group: splits are a property of the dataset, and a
+    # multi-group dataset may legitimately keep its val shards in one group.
+    _check_validation_present(groups, _family_defaults_for(dataset_id), v, dataset_id)
 
     # -- per-group validation --
     total_objects = 0
@@ -495,6 +503,49 @@ def _family_defaults_for(dataset_id: str) -> dict[str, Any]:
             if fam_key in smoke:
                 flat[profile_key] = smoke[fam_key]
     return flat
+
+
+def _check_validation_present(
+    groups: list[Any], family_defaults: Mapping[str, Any], v: list[Violation], dataset_id: str
+) -> None:
+    """A dataset must carry held-out data unless its family explicitly opts out.
+
+    Opt-OUT, not opt-in, and that polarity is the whole design. Under opt-in, a corpus with no
+    validation split is indistinguishable from one where nobody thought about it — and the
+    second is a mistake you find out about weeks later, from a suspiciously good eval. Under
+    opt-out, "this dataset has no held-out data" becomes a claim some family file states with a
+    reason attached, which a reviewer can disagree with.
+
+    Four families legitimately have nothing to hold out and say so in their own file: ``eval``
+    and ``probe`` are held out in their entirety (anything trained on stops being a probe),
+    ``tokenizer`` is a model artifact with no rows, and ``vendor`` keeps upstream's structure
+    byte-for-byte.
+    """
+    if family_defaults.get("validation_required") is not True:
+        return
+    # A group with no partitions at all declares no splits; that is caught by the
+    # partitions-required rule, not here, so this check only reads declared partition names.
+    declared: set[str] = set()
+    for group in groups:
+        for part in (group.get("partitions") or []):
+            if isinstance(part, Mapping) and part.get("name"):
+                declared.add(str(part["name"]))
+    if not declared:
+        return  # nothing declares splits; a different check owns that
+    held_out = {s for s in declared if not is_trainable(s)}
+    if held_out:
+        return
+    v.append(Violation(
+        "missing-required-split",
+        f"{dataset_id} declares splits {sorted(declared)} but none of them is held out. Its "
+        f"family requires validation data: a corpus you cannot measure held-out loss on cannot "
+        f"support any claim about the model trained on it. Add a {sorted(SPLITS - TRAINABLE_SPLITS)} "
+        f"split (name the shards e.g. 'val-00000.<ext>' and declare a matching partition), or — "
+        f"if this family genuinely has nothing to hold out — set validation_required=false in "
+        f"families/<family>.json with a reason. NOTE: pretrain/olmo-mix-1124-31b/v1 is EXPECTED "
+        f"to fail this; it predates the rule, is frozen (so it cannot gain a split in place), and "
+        f"is slated for replacement.",
+    ))
 
 
 def _check_split_matches_filename(
