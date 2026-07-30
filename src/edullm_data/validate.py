@@ -1167,9 +1167,28 @@ def _resolve_tokenizer(s3, data_bucket, group, v, gname) -> dict[str, Any] | Non
 # --------------------------------------------------------------------------------------
 
 
-def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucket: str, now: str | None = None) -> None:
+def promote(
+    result: ValidationResult,
+    s3: S3,
+    *,
+    data_bucket: str,
+    landing_bucket: str,
+    now: str | None = None,
+    copy_workers: int = 1,
+) -> None:
     """Server-side-copy a validated dataset from landing to the published bucket and write
-    its catalog entry. Refuses a failed or incomplete result."""
+    its catalog entry. Refuses a failed or incomplete result.
+
+    ``copy_workers`` > 1 fans the copy loop and the CRC-reference HEADs out over a thread pool.
+    Both are network-bound and each key is independent, so this scales near-linearly. It exists
+    because promotion is ~2 S3 round-trips per object and was strictly sequential: a 6,913-object
+    corpus is ~13,800 serial calls, which overruns the 60-minute Batch job-def limit — the same
+    wall ``publish()`` already has ``hash_workers``/``copy_workers`` for. Default 1 preserves the
+    original ordering exactly.
+
+    Order still holds where it matters: every payload copy completes before any CRC is read
+    (they are separate phases), and the seal is written last, after both.
+    """
     if not result.ok:
         raise ValueError("refusing to promote a dataset that did not pass Gate A")
 
@@ -1207,8 +1226,17 @@ def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucke
             keys.append(_join(prefix, e["path"]))
             payload_paths.append(e["path"])
 
-    for key in keys:
+    def _copy_one(key: str) -> None:
         s3.copy(landing_bucket, key, data_bucket, key)
+
+    if copy_workers > 1 and len(keys) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=copy_workers) as pool:
+            list(pool.map(_copy_one, keys))  # raises if any copy failed
+    else:
+        for key in keys:
+            _copy_one(key)
 
     # CAPTURE THE CRC REFERENCE POST-COPY, FROM THE DESTINATION. This is what lets wu-fsck
     # (Gate B) detect a same-length overwrite of a frozen object for the price of a HEAD, with
@@ -1224,14 +1252,23 @@ def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucke
     # Best-effort and only for paths where S3 actually returned a checksum: objects predating
     # additional-checksum support have none, and a missing reference must mean "not checkable"
     # (fsck skips it silently), never "changed".
-    crc_reference: dict[str, str] = {}
-    for rel in payload_paths:
+    def _crc_for(rel: str) -> tuple[str, str | None]:
         try:
-            crc = s3.head(data_bucket, _join(prefix, rel)).get("crc64nvme")
+            return rel, s3.head(data_bucket, _join(prefix, rel)).get("crc64nvme")
         except (NotFound, OSError):
-            continue
-        if crc:
-            crc_reference[rel] = crc
+            return rel, None
+
+    if copy_workers > 1 and len(payload_paths) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=copy_workers) as pool:
+            crc_pairs = list(pool.map(_crc_for, payload_paths))
+    else:
+        crc_pairs = [_crc_for(rel) for rel in payload_paths]
+
+    # Built in submission order either way, so the reference map is identical regardless of
+    # worker count — it feeds the seal, which must not depend on scheduling.
+    crc_reference: dict[str, str] = {rel: crc for rel, crc in crc_pairs if crc}
 
     # ROOT the hash chain. Each group already carries a manifest_sha256, and dataset.json
     # carries all of them — but nothing hashed dataset.json itself, so the chain had no root
