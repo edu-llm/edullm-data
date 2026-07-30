@@ -76,6 +76,11 @@ Motivating audit: `../docs/dataset-creation/s3-dataset-audit-2026-07-28.md` (23 
 ~2.53 TB, sprawl + broken metadata). Full spec: `../docs/dataset-creation/DATASET-STANDARD.md`
 + `...-DIAGRAMS.md`.
 
+**Where that goal stands: the produce → validate → publish → read loop is CLOSED.** A 157.5B-token
+corpus is published, sealed, verified, and sliceable from the reader. The one thing still missing
+is a *consumer*: no training run has read it, and the four things blocking that live in
+`edu-llm/platform`, not here (see "WHAT IS ACTUALLY LEFT" #1).
+
 ---
 
 ## Current Progress — BUILT, DEPLOYED, PROVEN AUTOMATIC, PUBLIC, and carrying REAL DATA
@@ -83,6 +88,18 @@ Motivating audit: `../docs/dataset-creation/s3-dataset-audit-2026-07-28.md` (23 
 The full pipeline is proven end-to-end on live AWS with real data, including fully-automatic
 event-triggered validation. The repo is **public at `https://github.com/edu-llm/edullm-data`**.
 The first real migration was completed and then **deliberately rolled back** — see below.
+
+### 2026-07-30 session, in one paragraph
+
+Published the 150B corpus (6,911 shards / 586.6 GiB / 157,467,202,883 tokens) after four burned
+attempts, each of which found a real defect: publishing from a laptop (`publish()` pulls every
+byte — 0.8 MiB/s, a 9-day ETA), `families/` unresolvable inside an installed wheel on the producer
+side, Gate A rejecting 4 of 6,913 shards, and a renumbering trap where Gate A names the *published*
+key while the exclusion list keys on the *staged source* name. Two of those four rejections were a
+**validator defect** — `max_zero_fraction` measured punctuation density because dolma2 maps token
+id 0 to `!` — now a contiguous-run test. Then added the read side: `labels=` selection and a
+seeded `build_mixture()`, so a training set is described by six values instead of 6,911 URIs.
+Everything is merged to `main` and pushed; 626 tests, 0 ruff errors.
 
 **WHAT IS IN `edullm-data` RIGHT NOW — one dataset, 11 objects, 6.5 MiB (verified 2026-07-29):**
 - `tokenizer/dolma2-bpe/v1` — the real `allenai/dolma2-tokenizer` (tokenizer.json + merges.txt +
@@ -693,6 +710,30 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## What Worked
 
+### From the 150B publish session (2026-07-30)
+
+- **Building the copy plan as a self-checking artifact BEFORE moving bytes.**
+  `artifacts/olmo150_plan.py` regenerates the whole 6,911-entry plan and asserts: exact drop count,
+  unique sources AND unique destinations (a dest collision silently overwrites a shard), contiguous
+  global ordinals, legal shard names, `labels_from_path` matching intent, the val carve totalling
+  the approved figure, nothing ≥5 GiB, and no legacy `val-00000` object anywhere. **Two real
+  mistakes were caught by those assertions rather than by a 587 GiB copy.**
+- **A dry run on 5 deliberately-chosen shards** — the smallest survivor, the largest object, a
+  carved val shard, and both nesting depths — published and run through Gate A before the full
+  copy. That is the step the first migration attempt skipped.
+- **Mutation-testing every new test.** Ten mutations against the mixture work; two SURVIVED first
+  time and both were tests that proved nothing. A test suite that goes green on a broken
+  implementation is worse than no suite, and reading the tests would not have revealed it.
+- **Verifying claims by execution, including my own.** The "adapter is ~8 lines" figure appears in
+  no document — it was folklore I repeated. Written and run, it is 15 lines. Likewise "the 3600 s
+  timeout blocks a 16 h run": `execution.py` sends `AttemptDurationSeconds` from a form field on
+  every submit, so a submitter overrides it with no repo change.
+- **Reading the live resource instead of the template.** The deployed GPU role scopes to
+  `teams/*/runs/*` while the committed template says `teams/platform/runs/*` — the template's
+  central isolation argument does not describe what is deployed.
+
+### Carried forward from earlier sessions
+
 - **The airlock model** (two buckets, IAM Deny on the read bucket) — enforcement that can't be
   routed around, unlike the previous written-policy-only approach that was 100% ignored.
 - **Reusing the existing `<BATCH_JOB_ROLE>` role** instead of creating one
@@ -729,6 +770,49 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
   reading `pyproject.toml` both said `families/` shipped. Installing proved it did not.
 
 ## What Didn't Work (and the fix)
+
+### From the 150B publish session (2026-07-30) — four burned runs, each a real defect
+
+- **Ran `publish()` on the laptop.** It stream-hashes every object, and "never holds a payload
+  whole" means bounded RAM, not no transfer — it PULLS all 587 GiB to wherever it runs. Measured
+  2.7 GiB in 61 min = **0.8 MiB/s ⇒ a 9-day ETA**. Killed; no partial state, because `publish()`
+  writes nothing until hashing completes. `s3.hash_object`'s own docstring says bytes never leave
+  AWS *"when this runs on Batch in-region"* — I read past the conditional. **Distinction that
+  matters: a server-side `copy_object` is fine locally (586.6 GiB in 498 s, zero bytes through the
+  laptop); hashing is not.** Diagnosis tool: `nettop -P -l 1 -x | grep python` against elapsed —
+  5% CPU and silence looks identical to a hang.
+- **Fixed `families/` in the validator and not the producer.** The Batch publish died in 2 minutes:
+  `no family.json for 'pretrain' (looked in /usr/local/lib/python3.12/families)`. Same bug I had
+  already fixed once, in the other module. The two halves fail *differently*: the validator's was
+  SILENT (bounds fell back to laxer constants), the producer's is LOUD but only after a full run
+  reaches that line. One resolver in `contracts` now. **A checkout always finds `families/`, so no
+  ordinary test can see this class of bug** — the test that works copies the package into a
+  rootless tmpdir and imports it in a subprocess. Lesson: grep for the pattern *everywhere* before
+  calling a bug fixed.
+- **Gate A rejected the corpus, and it was half right.** 4 of 6,913 shards. Two were genuinely
+  degenerate (a 21-distinct-id repeating SQL cycle; a 68-distinct 1,010-token shard) and are now
+  excluded. Two were a **validator defect**: `max_zero_fraction` fired at 0.0106 against a 0.010
+  bound, claiming "partial zero-fill from a crashed writer" — but **dolma2 maps token id 0 to
+  `!`**, so the check was measuring punctuation density. The zeros were 30 scattered singletons,
+  longest run **1**. Replaced with a contiguous-run test, which is tokenizer-independent and
+  *strictly more sensitive* (a 256-token hole is 1.56% of a sample and slipped under the old
+  density bound). **My first inspection read the shard HEADS and disagreed with the validator** —
+  it samples 4 seeded *random* windows precisely because a zero-filled tail leaves a valid head.
+- **Excluded the wrong shard, nearly.** Gate A names the **published** key
+  (`stack-edu/SQL/train-06681`); the exclusion list keys on the **staged source** name
+  (`stack-edu/train-00811`). Different ordinals, because the migration renumbers globally. The
+  first attempt matched nothing and was caught only by the plan generator's exact-drop-count
+  assertion. Also: excluding a shard shifts every later ordinal, so restaging needs a
+  diff-and-prune (118 stale keys), not an additive copy.
+- **Registered a job definition against a CLI flag that did not exist.** `--promote-workers` was
+  in the job def before it was in `argparse`. Argparse exits non-zero on an unrecognized argument,
+  so the validator would have crashed on its next run — in production, on the flag added
+  specifically to make promotion finish.
+- **Two tests that passed while testing nothing.** (a) A determinism test survived mutating
+  `pool.map` → `as_completed`, because the seal is written through `canonical_json`, which sorts
+  keys — insertion order could never reach the bytes. (b) A `max_source_fraction` cap test used
+  25%, which on a 20×50,000 pool is *exactly* 5 shards, so the boundary guard was never exercised;
+  moved to 22%, which falls between shards. **Both found by mutation testing, not by reading.**
 
 ### From the schema-v2 / recompute-gaps session (PR #4)
 
@@ -814,6 +898,36 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## Key Decisions
 
+### 2026-07-30 — the 150B layout and the reader
+
+- **Nested `tokens/<source>/<domain>/` AND `entry.labels`, not one or the other** (user's call).
+  Nesting is UNSPECIFIED-not-forbidden by the standard; one group for 65 subtrees COMPLIES with §4
+  (a group is a unit of *validation*, not selection). Labels are populated **because they are
+  inside `manifest_sha256` and cannot be backfilled** — adding them later means republishing 587
+  GiB. That asymmetry, not elegance, is why both.
+- **Ordinals renumbered GLOBALLY across the group.** `DATASET-STANDARD.md:589-590` caps "a group"
+  at 100,000 shards via the 5-digit ordinal and says exceeding it "is a spec amendment"; per-subtree
+  reuse makes that arithmetic false. Free to fix, since the shards were being renamed anyway.
+- **Validation carved per SOURCE, not per stratum** (user's call). A per-stratum carve was computed
+  and rejected: 45 of 65 strata cannot donate a shard >1M tokens and one could offer only 90.
+  60 shards / 229,894,171 tokens / 0.146%, incidentally covering 43 of 65 domains.
+- **The upstream `heldout-val/` was NOT used.** All six of its shards duplicate train shards — five
+  byte-identical, one a byte-prefix. Publishing them would have made every held-out number
+  meaningless. Recorded in the dataset's own `limitations`.
+- **Mixtures resolve LIVE, whole-shard, seeded** (user's call). Not published as child datasets.
+  The seed shuffles *which shards*, deliberately unlike the reference implementation, which takes
+  the head of every shard and never reads a tail — and whose own `seed` field is dead code.
+  Cost: budgets land ~2% over target instead of exactly on it, which buys not needing partial-file
+  reads that neither `ResolvedSplit` nor OLMo-core can express.
+- **Single-dataset mixing only** (user's constraint). Mixing two corpora could combine different
+  tokenizers whose vocab sizes are close enough that every id still looks valid — silent and wrong.
+  If that ever changes, the guard is comparing `depends_on` tokenizer `manifest_sha256`.
+- **`max_source_fraction` is a hard cap; the budget is not.** Letting the last shard straddle the
+  line turned a 10% cap into 13.5% on the live corpus. A limit the caller asked not to exceed must
+  not overshoot; a goal may.
+
+### Carried forward
+
 - **SSE-S3 (AES256), not SSE-KMS** — decided, not placeholder. KMS's second auth system can make an
   intact bucket unreadable; no PII in scope, so KMS's revocation/audit buys nothing here.
 - **No Object Lock** — protects a version not a path, blocks lifecycle, irreversible. Immutability
@@ -863,9 +977,32 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## Next Steps (priority order)
 
-DONE this session: first tokenizer published (`tokenizer/dolma2-bpe/v1`); first pretrain corpus
-migrated + published + promoted + readable (`pretrain/olmo-mix-1124-31b/v1`, 31.334B tokens); repo
-pushed public with `v0.1.0` tag + real install URLs. The pipeline is proven with real data end to end.
+> **START AT "WHAT IS ACTUALLY LEFT" (above).** It is the current, live-verified priority list.
+> Everything in *this* section from here down is a historical log of previous sessions, kept for
+> the reasoning it records. Several entries describe work already finished; each is struck through
+> where that is the case. The one-line version of the current list:
+>
+> 1. **Hand `docs/PLATFORM-INTEGRATION.md` to whoever owns `edu-llm/platform`** — the four
+>    blockers to a training run all live there, and its banner is now re-audited against live
+>    state. Not this repo's to fix, and the long pole.
+> 2. **Deploy bucket-policy v2** (`infra/DEPLOY.md:256+`) — the live policy is still
+>    `airlock-v1`, one Deny covering Put *and* Delete with the validator exempt from both. That
+>    was a small risk over 11 objects; it now guards 587 GiB.
+> 3. **Set a timeout on the `edullm-validator` job def** — it has none, so a wedged auto-promote
+>    holds the queue forever.
+> 4. **`sft_conversations_v1` still substring-matches split names** instead of using
+>    `contracts.is_trainable`.
+> 5. **Write the adapter** once #1 unblocks — 15 lines, executed and proven against real bytes.
+>
+> Also queued, small: reship the `_dist` wheel if anything ever runs the READER on Batch
+> (`labels=`/`build_mixture` postdate the deployed 0.5.0; validate/publish don't use them, so it
+> is currently harmless), and delete the now-redundant staged tree at
+> `s3://edullm-landing/_migrate/olmo-150b-staged/`.
+
+DONE in an earlier session: first tokenizer published (`tokenizer/dolma2-bpe/v1`); first pretrain
+corpus migrated + published + promoted + readable (`pretrain/olmo-mix-1124-31b/v1`, 31.334B tokens
+— **since deleted**, see "THE 31B DELETION"); repo pushed public with `v0.1.0` tag + real install
+URLs. The pipeline is proven with real data end to end.
 
 DONE (per-dataset README, this session): added `readme.py` (`render_readme`), wired `promote()` to
 write a generated `README.md` into edullm-data for EVERY promotion, extended `publish()` with
