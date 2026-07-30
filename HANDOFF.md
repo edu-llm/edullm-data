@@ -9,27 +9,45 @@ live work. Everything before it is history that still holds.
 > the new wheel · `2515f79` `promote(copy_workers=…)` · `d6e8a7f` `--promote-workers` CLI flag +
 > version bump to **0.3.0**. Plus three HANDOFF commits.
 >
-> **DEPLOYED NOW:** `_dist/edullm_data-0.4.0-py3-none-any.whl`, and both job defs are cut over to
-> it — **`edullm-validator:4`** (4 vCPU / 8 GB, `--promote-workers 16`) and **`edullm-fsck:3`**.
-> Each asserts `__version__ == "0.4.0"` at startup, and the validator additionally asserts that
-> `publish.FAMILIES_DIR == validate.FAMILIES_DIR`, is a real directory, and that
-> `_load_family("pretrain")` actually loads — the three things whose absence caused the two
-> failures below. EventBridge targets both by unversioned name, so the new revisions are live.
-> 0.1.0–0.3.0 remain in `_dist/` but nothing references them.
+> **DEPLOYED NOW:** `_dist/edullm_data-0.5.0-py3-none-any.whl`, and both job defs are cut over to
+> it — **`edullm-validator:5`** (4 vCPU / 8 GB, `--promote-workers 16`) and **`edullm-fsck:4`**.
+> Each asserts `__version__ == "0.5.0"` at startup; the validator also asserts that
+> `publish.FAMILIES_DIR == validate.FAMILIES_DIR` and that the family's `max_zero_run` bound
+> resolves to 256 — i.e. it fails loudly on exactly the two defects that burned runs below,
+> rather than running with a stale wheel. EventBridge targets both by unversioned name, so a new
+> revision is live the moment it is registered (convenient, and dangerous — always smoke-test
+> with a manual `submit-job`). 0.1.0–0.4.0 remain in `_dist/`; nothing references them.
 >
-> **THE 150B PUBLISH IS IN FLIGHT as of this writing** (job `olmo150-publish-2`, RUNNING, 2 h
-> timeout). All 6,913 objects (586.6 GiB) are staged and verified at
+> **THE 150B PUBLISH IS IN FLIGHT as of this writing** (job `olmo150-publish-3`, 2 h timeout,
+> wheel **0.5.0**). **6,911** objects (586.6 GiB) staged and verified at
 > `s3://edullm-landing/_migrate/olmo-150b-staged/`; the publish runs ON BATCH, in-region.
 > **If it did not finish, do NOT re-copy anything** — the staged tree is intact and the publish
-> is re-runnable as-is; see "THE 150B PUBLISH PLAN".
+> is re-runnable as-is. Verify first with `artifacts/olmo150_verify_staged.py`.
 >
-> **Two failures already burned, do not repeat them.** (1) The first publish attempt ran on the
-> LAPTOP: `publish()` GETs every byte to wherever it runs, measured 0.8 MiB/s ⇒ a 9-day ETA.
-> Killed; no partial state. It must run on Batch. (2) The first Batch attempt died in 2 minutes
-> with `no family.json for 'pretrain' (looked in /usr/local/lib/python3.12/families)` —
-> `publish.FAMILIES_DIR` was still repo-root-relative while `validate` had been fixed. Both now
-> share one resolver in `contracts`, with a test that imports the package from a rootless
-> directory (`tests/test_families_dir_resolution.py`); reverting the fix fails it.
+> **Four failures already burned, do not repeat them.**
+> 1. **Ran the publish on the LAPTOP.** `publish()` GETs every byte to wherever it runs;
+>    measured 0.8 MiB/s ⇒ a 9-day ETA. Killed, no partial state. It must run on Batch, in-region.
+>    A server-side *copy* is fine locally (586.6 GiB in 498 s); *hashing* is not.
+> 2. **`no family.json for 'pretrain'`** on Batch, 2 minutes in — `publish.FAMILIES_DIR` was
+>    still repo-root-relative while `validate` had been fixed. One resolver in `contracts` now,
+>    plus `tests/test_families_dir_resolution.py`, which imports the package from a ROOTLESS
+>    directory (a checkout always finds `families/`, so no ordinary test can see this).
+> 3. **Gate A REJECTED the corpus** — 4 of 6,913. Two were a validator defect
+>    (`zero-fraction-out-of-bounds` on healthy prose: dolma2 maps id 0 to `!`, so a density test
+>    measures punctuation; now a contiguous-RUN test). Two were genuinely degenerate and are
+>    excluded. Full analysis in `artifacts/GATE-A-REJECTION-ANALYSIS.md`. **Nothing was promoted
+>    — the airlock worked.**
+> 4. **Excluding a shard renumbers everything after it.** Gate A names the PUBLISHED key; the
+>    exclusion list keys on the STAGED SOURCE name, and this migration renumbers globally, so
+>    they differ. Map back through the plan (`[p for p in plan if p["dst"].endswith(reported)]`)
+>    or you exclude the wrong shard. The plan generator's exact-drop-count assertion caught it.
+>    Re-staging after an exclusion needs a diff-and-prune (`artifacts/olmo150_prune.py`), not an
+>    additive copy — a stale key fails Gate A as `unlisted-object`, after the expensive publish.
+>
+> The rejected first attempt was deleted from landing rather than left as a dead `v1`: it never
+> reached `edullm-data`, so nothing ever referenced it, and the audit trail lives in the job log,
+> the analysis doc, and the dataset's own `limitations`. The corrected corpus therefore publishes
+> as a clean **v1**.
 >
 > `edullm-data` held only `tokenizer/dolma2-bpe/v1` (11 objects) before this publish. The 31B
 > corpus was deleted 2026-07-29 — see "THE 31B DELETION".
