@@ -269,12 +269,9 @@ correspondence that makes it verifiable).
   remaining), and the suite was verified green on real CPython 3.10.20 rather than grepped for 3.11
   constructs.
 
-**Working tree at the time of writing:** `HANDOFF.md` modified. Untracked:
-`docs/CONSUMER-CONTRACT.md` + `docs/PLATFORM-INTEGRATION.md` (new this session), and the
-150B-migration working state — `docs/MIGRATION-olmo-150b-dolma2.md`,
-`docs/olmo-150b-publish-spec.json`, `infra/publish_driver_v2.py`, `infra/submit-olmo150-publish.md`
-(see DEFERRED DECISIONS #1). Two agents were editing this repo concurrently, so re-run
-`git status` rather than trusting this list.
+**Working tree: CLEAN**, `main == origin/main` at `34dd868`. Everything above is committed and
+pushed. `docs/CONSUMER-CONTRACT.md` and `docs/PLATFORM-INTEGRATION.md` landed in `bb6eaaf`. The four
+150B working files are **deleted** — see "THE 150B SOURCE DATA" for what was salvaged from them.
 
 ---
 
@@ -334,13 +331,16 @@ mixtures as **measured counts + label-predicate selectors that Gate A recomputes
 
 Do not relitigate these; they were decided. Do not act on them without re-asking.
 
-1. **The 150B migration is PAUSED BY CHOICE** (the user's own migration; state in
-   `docs/MIGRATION-olmo-150b-dolma2.md` — Phase 2 halted at 147/6,921 objects on a throughput wall).
-   **When resumed: ONE `tokens/` group + labels, NOT six groups per source.** Reason: a group is a
-   unit of **validation**, not of selection. Six sources with identical checks and one tokenizer pay
-   six manifests and buy nothing — and six groups **permanently loses the 24 domain labels**, which
-   `entry.labels` (schema v2) is exactly the right carrier for. The runbook's "LOCKED STRUCTURE"
-   section still describes the six-group plan; **that is superseded by this decision.**
+1. **The 150B migration is RESTARTING FROM SCRATCH** (2026-07-29, the user's call). The first
+   attempt reached 147/6,921 objects (2.1%) on a throughput wall and its four working files were
+   deleted — the measurements worth keeping are in "THE 150B SOURCE DATA" above, and the old
+   `LOCKED STRUCTURE` six-group plan died with them.
+   **The structure decision stands and is not open: ONE `tokens/` group + labels, NOT six groups per
+   source.** Reason: a group is a unit of **validation**, not of selection. Six sources with identical
+   checks and one tokenizer pay six manifests and buy nothing — and six groups **permanently loses the
+   24 domain labels**, which `entry.labels` (schema v2) is exactly the right carrier for.
+   Carrying `labels` on manifest entries needs `publish()` to populate them; it currently does not
+   (see "What is NOT done"), so that is real work, not a config flag.
 2. **Slurm/ORCD is OUT OF SCOPE entirely.** Training goes through `edu-llm/platform` → AWS Batch.
    Do not write Slurm submission scripts, sbatch wrappers, or ORCD docs.
 3. ~~**The 31B corpus is EXPECTED to fail `missing-required-split`**, slated for deletion.~~
@@ -636,14 +636,33 @@ outstanding to commit for this feature.
    `2e561cc` with `--merge` (13 commits preserved individually), branch deleted local + remote.
    Then `38c4a0b` refreshed this file. `main == origin/main`, 541 tests, 0 ruff errors.
 
-   **THE ACTUAL #1 NOW: publish a pretrain corpus.** `edullm-data` holds only the tokenizer, so
-   there is nothing to train on. The 150B is the intended replacement and its structural decision is
-   already made (ONE `tokens/` group + labels — see DEFERRED DECISIONS #1). Two blockers that used to
-   stop it are fixed on `main`: caller-supplied partitions now get `rows` filled (`c9d2816`, which
-   otherwise rejected the whole publish AFTER the 630 GB copy), and the distinct-ids floor scales with
-   sample size (`72df9f7`, which otherwise blocked 630 GB over two 20-byte shards). Re-run the Gate A
-   dry-run that produced 12 `partition-no-rows` violations and confirm it is clean before spending the
-   copy.
+   **THE ACTUAL #1 NOW: publish a pretrain corpus — the 150B, from scratch.** `edullm-data` holds
+   only the tokenizer, so there is nothing to train on and nothing else in this file matters as much.
+
+   You are starting clean: the first attempt's driver, spec, and runbook were deleted. What survives
+   is (a) the measured source facts in "THE 150B SOURCE DATA" above, (b) the structure decision
+   (ONE `tokens/` group + labels), and (c) a validator that no longer has the two defects that would
+   have wasted the whole run:
+   - caller-supplied partitions now get `rows` filled (`c9d2816`) — without this the publish is
+     rejected at `promote()`, i.e. AFTER the 630 GB copy and the hash;
+   - the distinct-ids floor scales with the sampled size (`72df9f7`) — without this two 20-byte shards
+     fail `distinct-too-few` and `promote()`'s all-or-nothing rule discards all 630 GB.
+
+   Order that avoids re-learning what the first attempt learned:
+   1. **Dry-run Gate A on a handful of shards BEFORE the copy.** The first attempt discovered its
+      blockers only after 2.1% of a 630 GB copy. Publish ~5 real shards (including
+      `s2pdf-redacted/adult_content/part-57`, the 20-byte one) through landing → validate → confirm
+      clean. Cheap, and it exercises the two fixes above on real bytes.
+   2. **Decide the `.csv.gz` sidecars deliberately.** The first attempt excluded all 6,915 silently.
+      That is what makes OLMo-core's VSL/packed/padded classes unusable on these shards
+      (`docs/CONSUMER-CONTRACT.md`). Excluding is defensible for plain FSL training; inheriting the
+      decision by accident is not.
+   3. **`publish()` does not populate `entry.split` or `entry.labels`** (see "What is NOT done"). The
+      one-group-plus-labels structure REQUIRES labels, so this is a code change on the write path
+      before the real copy — not a publish-time argument.
+   4. Then the copy + publish on Batch, with `hash_workers`/`copy_workers` and
+      `--timeout attemptDurationSeconds=7200`; a 633 GB single-threaded publish times out.
+   5. Re-verify the airlock afterwards (intern `PutObject` → `AccessDenied`), per CLAUDE.md.
 1. ~~Package `families/` INTO the wheel.~~ **DONE on this branch** (`ad75062`) via
    `[tool.hatch.build.targets.wheel.force-include]` in `pyproject.toml:42-43`. **Still outstanding:**
    rebuild the wheel + `aws s3 cp` it to `_dist/`, then simplify `_dist/publish_driver.py` to drop the
@@ -689,8 +708,9 @@ outstanding to commit for this feature.
 7. **Migrate more high-value legacy datasets** using the proven playbook: server-side rename any
    headerless `.npy`→`.u32le.bin` into `s3://edullm-landing/_migrate/<name>/`, then run the Batch
    publish driver with `PUB_HASH_WORKERS`/`PUB_COPY_WORKERS=16`. (Verify each shard is headerless first:
-   first bytes ≠ `\x93NUMPY` and `tokens×dtype_size == bytes`.) **The 150B corpus is PAUSED BY CHOICE
-   — see DEFERRED DECISIONS #1 before touching it, including the one-group-not-six decision.**
+   first bytes ≠ `\x93NUMPY` and `tokens×dtype_size == bytes`.) **The 150B corpus is Next Step #0's
+   restart, not a "more legacy dataset" — see DEFERRED DECISIONS #1 for the one-group-not-six
+   decision, and note the deleted first attempt's driver is gone, so the copy plan is rebuilt.**
 8. **Populate `entry.split` in `publish()`.** The v2 field, its validation, and the
    `split-contradicts-filename` gate all exist; the producer never writes it, so the gate is
    unreachable in production. See "What is NOT done".
