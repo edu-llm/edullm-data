@@ -343,13 +343,17 @@ keys. Note the current staging shape (`<source>/train-N`) would make `publish()`
 named after sources — the rejected plan — so a re-copy into `tokens/` is required either way.
 
 **Four things must happen before the publish, in this order:**
-1. ~~**Reship the 0.2.0 wheel.**~~ **DONE 2026-07-30** — `_dist/edullm_data-0.2.0-py3-none-any.whl`
-   is live (117,722 B, sha256 `dc726cf6…`, upload verified byte-identical, clean-venv smoke-tested).
-   **STILL TO DO: cut over to it.** The job defs bootstrap `0.1.0` BY EXACT FILENAME, so nothing
-   uses the new wheel until `_dist/publish_driver.py` and `infra/05-validator-jobdef.md:95` are
-   edited to say `0.2.0`. Until that edit, a Batch publish still runs code that predates every
-   correctness fix. Also: 0.2.0 packages `families/`, so the driver's `EDULLM_FAMILIES_DIR`
-   override becomes unnecessary (harmless to leave).
+1. ~~**Reship the 0.2.0 wheel AND cut over to it.**~~ **BOTH DONE 2026-07-30, verified by
+   execution.** `_dist/edullm_data-0.2.0-py3-none-any.whl` is live (117,722 B, sha256
+   `dc726cf6…`, upload byte-identical, clean-venv smoke-tested). `edullm-validator:2` and
+   `edullm-fsck:2` are registered and bootstrap it; each asserts `WHEEL_VERSION==0.2.0` at
+   startup and the validator also asserts `families/` resolves, so a silent fallback to an old
+   wheel now fails loudly. **Proof it is really live:** a real fsck job ran `edullm-fsck:2` and
+   logged `WHEEL_VERSION=0.2.0`, `ok=true`, `FSCK_DONE_RC=0`.
+   Both EventBridge rules target the job def by **unversioned name**, so the new revisions took
+   effect with no rule edit — which also means a bad revision goes live immediately; verify with
+   a manual `submit-job` after any re-register. `_dist/publish_driver.py` was reshipped to assert
+   the families dir rather than trust the env override, and to log derived `split`/`labels`.
 2. **Drop BOTH 20-byte shards** — `s2pdf-redacted/adult_content/train-00057` and
    `s2pdf-redacted/games/train-00861`. They are byte-identical to each other
    (`duplicate-shard-digest`) AND `train-00057` is `[58, 793, 77726, 60, 100257]` — it ends in EOS,
