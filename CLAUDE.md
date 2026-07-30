@@ -64,11 +64,17 @@ intern role (11 known false denials) — smoke-test a permission live, never tru
 
 If you ship a wheel-from-S3 Batch job (validate/publish/backfill), all four bite:
 1. The Batch image has **no `aws` CLI** — download the wheel/driver/families with **boto3**.
-2. `families/` is **not in the wheel** (only `src/edullm_data`) — `publish()` raises
-   `no family.json`. Ship `families/` to `s3://edullm-landing/_dist/families/` and set
-   `P.FAMILIES_DIR` before calling. (Proper fix, TODO: package families into the wheel.)
-3. **pip requires the PEP-427 wheel filename** — keep `edullm_data-0.1.0-py3-none-any.whl`
-   end-to-end; a renamed `w.whl` is rejected.
+2. ~~`families/` is **not in the wheel**~~ **FIXED** — `pyproject.toml` force-includes it, and
+   `_resolve_families_dir()` finds it inside an installed package. Verified in a clean venv on
+   `0.2.0`. The `EDULLM_FAMILIES_DIR` override in the publish driver is now redundant (harmless).
+   Why it mattered: a missing families dir does not raise, it silently falls back to each
+   profile's laxer constant — so it fails **only in production**, which is how the live corpus
+   came to be validated at 50% EOS instead of the declared 5%.
+3. **pip requires the PEP-427 wheel filename** — keep `edullm_data-<version>-py3-none-any.whl`
+   end-to-end; a renamed `w.whl` is rejected. **The live job defs (`edullm-validator:2`,
+   `edullm-fsck:2`) bootstrap `0.2.0` by exact filename**, so shipping a new wheel changes
+   nothing until those are re-registered. Both EventBridge rules target the job def by
+   unversioned name, so a new revision cuts over immediately — for better and worse.
 4. Single-threaded publish **times out** on large corpora (the 218-shard/125GB olmo run hit the
    60-min job-def limit). Use `hash_workers`/`copy_workers` and pass
    `--timeout attemptDurationSeconds=7200`.

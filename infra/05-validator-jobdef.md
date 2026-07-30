@@ -13,11 +13,11 @@ needing something this workstation does not have:
 
 1. **Bake it into an image** (`infra/Dockerfile.validator`) and push to ECR. Needs Docker
    (not installed here) and `ecr:PutImage` (untested).
-2. **`pip install "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.1.0"`** at
+2. **`pip install "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.2.0"`** at
    container start (the repo is public, so no auth needed).
 
 The wheel itself builds cleanly (`python -m pip wheel . --no-deps` →
-`edullm_data-0.1.0-py3-none-any.whl`, ~62 KB), so nothing about the package blocks this.
+`edullm_data-0.2.0-py3-none-any.whl`, ~115 KB), so nothing about the package blocks this.
 
 ## What is verified and ready
 
@@ -41,9 +41,9 @@ aws ecr get-login-password --region us-east-1 \
 # A dedicated repo is cleaner than reusing olmo-core; create it if allowed:
 aws ecr create-repository --repository-name <VALIDATOR_JOBDEF> || true
 docker build -f infra/Dockerfile.validator -t \
-  <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/<VALIDATOR_JOBDEF>:v0.1.0 .
+  <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/<VALIDATOR_JOBDEF>:v0.2.0 .
 docker push \
-  <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/<VALIDATOR_JOBDEF>:v0.1.0
+  <ACCOUNT_ID>.dkr.ecr.us-east-1.amazonaws.com/<VALIDATOR_JOBDEF>:v0.2.0
 ```
 
 Then register the job definition (run through the sb-aws broker; all args verified-allowed):
@@ -92,8 +92,23 @@ installs it first:
 
 ```
 command: ["sh","-lc",
-  "pip install -q boto3 numpy && aws s3 cp s3://edullm-landing/_dist/edullm_data-0.1.0-py3-none-any.whl /tmp/ && pip install -q /tmp/edullm_data-0.1.0-py3-none-any.whl && python -m edullm_data.validate --promote"]
+  "pip install -q boto3 numpy && aws s3 cp s3://edullm-landing/_dist/edullm_data-0.2.0-py3-none-any.whl /tmp/ && pip install -q /tmp/edullm_data-0.2.0-py3-none-any.whl && python -m edullm_data.validate --promote"]
 ```
+
+> **The live job defs are at revision 2 and bootstrap `0.2.0` (cut over 2026-07-30).** Both
+> `edullm-validator:2` and `edullm-fsck:2` also assert the version and the presence of
+> `families/` immediately after install, and exit non-zero if either is wrong — a silent
+> fallback to an old wheel is what let the live corpus be validated against the wrong bounds
+> once already. The image has no `aws` CLI, so the deployed command downloads with boto3
+> rather than `aws s3 cp` as sketched above.
+>
+> Both EventBridge rules target the job definition by **unversioned name**
+> (`edullm-validator`, `edullm-fsck`), so registering a new revision cuts traffic over with no
+> rule edit. That also means a bad revision takes effect immediately — verify with a manual
+> `submit-job` before relying on it.
+>
+> `0.2.0` packages `families/` into the wheel, so the `EDULLM_FAMILIES_DIR` override the
+> publish driver sets is no longer required (harmless to leave).
 
 with `--container-overrides` supplying `vcpus`/`memory`. This works today with zero new
 infra, at the cost of a pip install per run. Good enough to run the validator manually or on
