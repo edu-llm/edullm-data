@@ -278,6 +278,58 @@ correspondence that makes it verifiable).
 
 ---
 
+## THE 150B SOURCE DATA — measured facts, preserved from the discarded first attempt
+
+The first migration attempt's working notes (`docs/MIGRATION-olmo-150b-dolma2.md`,
+`docs/olmo-150b-publish-spec.json`, `infra/publish_driver_v2.py`,
+`infra/submit-olmo150-publish.md`) were **deleted 2026-07-29** — the user is starting the migration
+fresh. They were never committed, so they are gone. These measurements cost a full read-only sweep of
+13,840 objects to obtain, so they are recorded here rather than re-measured.
+
+**Source:** `s3://edullm-datasets/` (the legacy tree). 13,840 objects =
+**6,921 `.npy`** payload + **6,915 `.csv.gz`** sidecars. The `.csv.gz` files are per-shard
+document-boundary metadata keyed to decommissioned paths; the first attempt EXCLUDED them. Note the
+trade-off that excluding them makes: they are the only thing enabling OLMo-core's VSL / packed /
+padded dataset classes, which hard-fail on remote shards without them (see `docs/CONSUMER-CONTRACT.md`).
+
+**Structure:** `configs/` + `data/…/<6 sources>/` + **`heldout-val/`** (6 `.npy`, 265 MB, one per
+source). So the real shape is **6 sources × {train, val}** — 6,915 train + 6 heldout = 6,921.
+**This corpus HAS validation data**, unlike the deleted 31B.
+
+**Per-source token counts (measured, not declared):**
+
+| source | tokens | note |
+| --- | --- | --- |
+| all-dressed-snazzy2 | 119.3 B | 24 topic domains (adult_content … travel_and_tourism) |
+| s2pdf-redacted | 19.8 B | same 24 domains; holds almost all the tiny shards |
+| stack-edu | 11.1 B | ~15 languages |
+| finemath-3plus | 4.06 B | |
+| arxiv | 1.25 B | |
+| wikipedia | 0.064 B | 63 shards, part-00..part-62 |
+
+**Total = 157,535,073,650 tokens (157.5B)** vs a declared 155.6B → **+1.24%, actual EXCEEDS
+declared**, so there is no truncation. The name "150b" is nominal (cf. olmo-mix-1124-31b = 31.334B).
+Report the real 157.5B in the README. Arithmetic sweep also confirmed: all sizes % 4 == 0
+(uint32-consistent), no zero-byte shards, no `\x93NUMPY` header in a 72-shard sample.
+
+**The tiny-shard blocker — NOW FIXED, do not re-litigate it.** 310 shards are smaller than one 64 KB
+decode window, and **2 are 20 bytes = 5 tokens** (`s2pdf-redacted/adult_content/part-57`,
+`s2pdf-redacted/games/part-020`). Under the old absolute `min_distinct_ids` floor those two were
+GUARANTEED `distinct-too-few` violations, and because `promote()` is all-or-nothing they would have
+blocked 630 GB over 10 tokens. `72df9f7` scaled the floor to the sampled size, so **no shard needs
+dropping and no per-group bound needs weakening** — the three options the first attempt was weighing
+are moot. A degenerate tiny shard is still caught (the floor of 2 is load-bearing).
+
+**Equal weighting across the 6 sources is arithmetically impossible.** Wikipedia has 64.6M tokens and
+source mixtures enforce `target_ratio` exactly, so 1/6-each caps the whole mixture at ~0.38B tokens —
+against a ~7.4B Chinchilla budget for 370M. Use scaled weighting or a water-fill, not uniform.
+
+**One caution about the discarded spec:** its prose had already drifted from itself before publication
+(`limitations` said `min_distinct_ids` was lowered to 4 while `group_meta` set 1; `sources[]` summed
+66,333,215 tokens short of the total — exactly the 6 val shards, undocumented; and `notes` claimed
+"natural proportions" for ratios that over-weighted wikipedia ~23×). That is the argument for shipping
+mixtures as **measured counts + label-predicate selectors that Gate A recomputes**, not prose.
+
 ## DEFERRED DECISIONS — explicit user decisions, not open questions
 
 Do not relitigate these; they were decided. Do not act on them without re-asking.
