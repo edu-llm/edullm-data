@@ -27,6 +27,7 @@ from typing import Any, Mapping
 
 from .contracts import (
     FAMILIES,
+    READABLE_SCHEMA_VERSIONS,
     NamingError,
     SCHEMA_VERSION,
     Version,
@@ -44,6 +45,7 @@ from .manifest import (
     diff_paths,
     is_cas_name,
     manifest_sha256,
+    parse_shard_name,
     verify_arithmetic,
 )
 from .profiles import registry
@@ -174,8 +176,17 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
         if f_ not in ds:
             v.append(Violation("missing-core-field", f"dataset.json is missing required field {f_!r}"))
 
-    if ds.get("schema_version") != SCHEMA_VERSION:
-        v.append(Violation("schema-version", f"schema_version is {ds.get('schema_version')!r}, expected {SCHEMA_VERSION!r}"))
+    # READABLE_SCHEMA_VERSIONS, not an equality check against the current one. Gate A re-runs
+    # against already-published datasets (the in-place README backfill did exactly that), so an
+    # exact match would make every v1 dataset fail the moment the writer moved to v2 — the
+    # retroactive invalidation CONTRIBUTING forbids. New datasets are written at SCHEMA_VERSION;
+    # older ones remain readable and validatable at the version they were sealed with.
+    if ds.get("schema_version") not in READABLE_SCHEMA_VERSIONS:
+        v.append(Violation(
+            "schema-version",
+            f"schema_version is {ds.get('schema_version')!r}, expected one of "
+            f"{sorted(READABLE_SCHEMA_VERSIONS)} (new datasets are written at {SCHEMA_VERSION!r})",
+        ))
 
     # -- identity: dataset_id/version valid AND equal to the prefix (§7) --
     try:
@@ -417,6 +428,10 @@ def _validate_group(
             tok_for_width = tok_derived if tok_derived else group.get("tokenizer")
             if isinstance(tok_for_width, Mapping):
                 _check_dtype_width_vs_vocab(entries, tok_for_width, v, gname)
+            # A declared split must agree with the filename it was derived from.
+            _check_split_matches_filename(
+                entries, v, gname, profile_is_vendored=profile_is_vendored
+            )
             # prefix is the DATASET prefix, not the group prefix: entry.path already carries
             # the group segment (tokens/train-00000...), so a profile joins prefix+entry.path.
             ctx = GroupContext(
@@ -480,6 +495,44 @@ def _family_defaults_for(dataset_id: str) -> dict[str, Any]:
             if fam_key in smoke:
                 flat[profile_key] = smoke[fam_key]
     return flat
+
+
+def _check_split_matches_filename(
+    entries: list[Any], v: list[Violation], gname: str, *, profile_is_vendored: bool = False
+) -> None:
+    """A declared ``split`` must equal the split RECOMPUTED from the object's own filename.
+
+    This is what makes the field unfakeable, and it is the reason a profile may trust it.
+    ``parse_shard_name`` has always returned the split word — the gate simply threw it away
+    (it called ``check_shard_naming`` for the pattern and dropped the parse). So the fix is to
+    stop discarding a value the code already computed.
+
+    Silent on an entry with no declared split (a v1 manifest, a tokenizer file, a vendored
+    blob) and on a name that does not parse as a shard: those are handled by
+    ``check_shard_naming`` and by the missing-required-split check, not here. This check has
+    exactly one job — catch a declaration that contradicts the bytes' own name.
+    """
+    if profile_is_vendored:
+        return  # vendored trees keep upstream names, so a filename implies nothing about split
+    for entry in entries:
+        declared = getattr(entry, "split", None)
+        if declared is None:
+            continue
+        if is_cas_name(entry.path):
+            continue  # a content-addressed name carries no split by construction
+        parsed = parse_shard_name(entry.path)
+        if parsed is None:
+            continue
+        observed = parsed[0]
+        if observed != declared:
+            v.append(Violation(
+                "split-contradicts-filename",
+                f"{entry.path}: manifest declares split={declared!r} but the filename says "
+                f"{observed!r}. One of the two is wrong, and a reader that trusts the manifest "
+                f"would put this object in the wrong split — training on held-out data, or "
+                f"evaluating on data it was trained on.",
+                path=entry.path,
+            ))
 
 
 def _min_dtype_size_for_vocab(vocab_size: int) -> int:

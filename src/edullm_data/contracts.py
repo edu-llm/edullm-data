@@ -21,8 +21,12 @@ from typing import Any, Literal, get_args
 
 __all__ = [
     "SCHEMA_VERSION",
+    "READABLE_SCHEMA_VERSIONS",
     "FAMILIES",
     "RELATIONS",
+    "SPLITS",
+    "TRAINABLE_SPLITS",
+    "is_trainable",
     "NamingError",
     "canonical_json",
     "sha256_bytes",
@@ -37,8 +41,20 @@ __all__ = [
 # Schema identity
 # --------------------------------------------------------------------------------------
 
-#: §3 — the value of ``schema_version`` in every ``dataset.json`` and ``manifest.json``.
-SCHEMA_VERSION = "edullm-dataset/v1"
+#: §3 — the value of ``schema_version`` written into every NEW ``dataset.json`` and
+#: ``manifest.json``.
+#:
+#: v2 adds two optional manifest-entry fields, ``split`` and ``labels``. Both are omitted when
+#: absent, so a v1-shaped manifest re-serializes byte-identically and ``manifest_sha256`` does
+#: not move — verified against the 218-entry live corpus.
+SCHEMA_VERSION = "edullm-dataset/v2"
+
+#: Versions Gate A and the reader accept. A published dataset is frozen at the version it was
+#: sealed with, and Gate A re-runs against published datasets (the in-place README backfill did
+#: exactly that), so dropping v1 here would retroactively invalidate every existing dataset —
+#: which CONTRIBUTING forbids ("a field added in v2 must not retroactively invalidate every v1
+#: dataset"). Removing a version from this set is a breaking change to the standard.
+READABLE_SCHEMA_VERSIONS = frozenset({"edullm-dataset/v1", "edullm-dataset/v2"})
 
 # --------------------------------------------------------------------------------------
 # Canonical JSON + hashing
@@ -108,6 +124,34 @@ class NamingError(ValueError):
 
 #: §2 — a fixed enum, on purpose. Adding a family is a deliberate edit to the standard.
 FAMILIES = frozenset({"pretrain", "curriculum", "sft", "eval", "probe", "vendor", "tokenizer"})
+
+#: §7 — the CLOSED split vocabulary. Three words, and the enum is the point.
+#:
+#: Before this, families disagreed: pretrain said ``train``, sft said ``heldout``, probe said
+#: ``test``, and the 150B migration plan said ``val``. Because nothing constrained the word,
+#: ``sft-conversations/v1`` had to guess which side was held out by substring-matching the
+#: partition name against ``heldout|held-out|holdout|test|val|eval`` — which classifies a
+#: partition named ``trainval`` as HELD OUT (it contains "val"), so the leakage check then
+#: compares training data against itself, and rejects a perfectly ordinary ``dev`` outright.
+#:
+#: A closed enum makes "is this trainable?" a set lookup instead of a pattern guess.
+SPLITS = frozenset({"train", "val", "test"})
+
+#: Splits a training run may consume. Everything else is held out BY DERIVATION — there is no
+#: ``heldout`` split name to get wrong, and no second place to state the same fact.
+TRAINABLE_SPLITS = frozenset({"train"})
+
+
+def is_trainable(split: str | None) -> bool:
+    """Whether a split may be fed to a training run.
+
+    ``None`` (a v1 manifest, or an object with no split at all) is NOT trainable-by-assumption:
+    an unlabelled object is unknown, and treating unknown as safe-to-train is the failure this
+    vocabulary exists to prevent. Callers that legitimately read whole unsplit datasets — a
+    tokenizer, a vendored blob — go through the reader's "no trainable split declared" path
+    rather than relying on ``None`` meaning "train".
+    """
+    return split in TRAINABLE_SPLITS
 
 #: §2 — kebab-case, lowercase, and nothing else. Rejects ``dolma2_150B``.
 _WORD_RE = re.compile(r"^[a-z0-9]+$")

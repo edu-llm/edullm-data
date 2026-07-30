@@ -10,6 +10,7 @@ import pytest
 from edullm_data.contracts import (
     FAMILIES,
     RELATIONS,
+    READABLE_SCHEMA_VERSIONS,
     SCHEMA_VERSION,
     NamingError,
     Version,
@@ -93,7 +94,20 @@ def test_canonical_json_list_order_is_significant():
 
 
 def test_schema_version_constant():
-    assert SCHEMA_VERSION == "edullm-dataset/v1"
+    """New artifacts are written at v2 (adds optional entry.split / entry.labels)."""
+    assert SCHEMA_VERSION == "edullm-dataset/v2"
+
+
+def test_v1_stays_readable_after_the_bump():
+    """A published dataset is frozen at the version it was sealed with.
+
+    Gate A re-runs against published datasets (the in-place README backfill did exactly that),
+    so dropping v1 would retroactively invalidate every existing dataset. Removing a version
+    from this set is a breaking change to the standard, and this test is where that decision
+    has to be made on purpose.
+    """
+    assert READABLE_SCHEMA_VERSIONS == {"edullm-dataset/v1", "edullm-dataset/v2"}
+    assert SCHEMA_VERSION in READABLE_SCHEMA_VERSIONS
 
 
 # ======================================================================================
