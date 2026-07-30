@@ -31,6 +31,7 @@ from .contracts import (
     SCHEMA_VERSION,
     Version,
     canonical_json,
+    sha256_bytes,
     validate_dataset_id,
     validate_purpose,
 )
@@ -651,6 +652,13 @@ def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucke
     for key in keys:
         s3.copy(landing_bucket, key, data_bucket, key)
 
+    # ROOT the hash chain. Each group already carries a manifest_sha256, and dataset.json
+    # carries all of them — but nothing hashed dataset.json itself, so the chain had no root
+    # and neither the seal nor the catalog bound to any content. "Frozen means frozen" was
+    # therefore unfalsifiable: you could not tell a tampered dataset.json from the sealed one.
+    # With a root, a reader confirms the whole tree with one HEAD + one GET.
+    dataset_sha256 = sha256_bytes(s3.get(landing_bucket, f"{prefix}/dataset.json"))
+
     catalog = {
         "schema_version": "edullm-catalog/v1",
         "dataset_id": result.dataset_id,
@@ -658,6 +666,7 @@ def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucke
         "uri": f"s3://{data_bucket}/{prefix}/",
         "objects": ds.get("inventory", {}).get("objects"),
         "bytes": ds.get("inventory", {}).get("bytes"),
+        "dataset_sha256": dataset_sha256,
     }
     if now is not None:
         catalog["promoted_at"] = now
@@ -695,11 +704,22 @@ def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucke
     # an already-done prefix) and expires with landing's 14-day lifecycle; this copy is durable
     # and is what makes a promoted dataset actually readable. Written LAST, after the payload +
     # catalog are in place, so the marker's presence always implies a complete, readable dataset.
+    #
+    # The seal carries dataset_sha256 + every group's manifest_sha256, which is what makes it
+    # a claim about CONTENT rather than a bare "someone ran the validator". A reader (or fsck)
+    # recomputes sha256(dataset.json) and compares; from there the per-group manifest_sha256
+    # values in that file chain down to every payload digest.
     seal = {
         "dataset_id": result.dataset_id,
         "version": result.version,
         "objects": ds.get("inventory", {}).get("objects"),
         "bytes": ds.get("inventory", {}).get("bytes"),
+        "dataset_sha256": dataset_sha256,
+        "manifest_sha256": {
+            str(g.get("name")): g.get("manifest_sha256")
+            for g in ds.get("groups", [])
+            if g.get("manifest_sha256")
+        },
     }
     if now is not None:
         seal["validated_at"] = now

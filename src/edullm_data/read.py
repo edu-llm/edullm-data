@@ -171,4 +171,90 @@ def resolve_latest(dataset_id: str, *, s3: S3, data_bucket: str = DATA_BUCKET) -
     return f"v{highest}" if found else None
 
 
-__all__ = ["dataset_paths", "resolve_latest", "ResolvedSplit", "ReadError", "NotValidated"]
+def verify_seal(
+    dataset_id: str,
+    version: str,
+    *,
+    s3: S3,
+    data_bucket: str = DATA_BUCKET,
+) -> list[str]:
+    """Recompute the sealed hashes and report every mismatch. Empty list = intact.
+
+    The seal written by ``promote()`` carries ``dataset_sha256`` (the root) and each group's
+    ``manifest_sha256``. This walks the chain the way a verifier should: recompute
+    ``sha256(dataset.json)`` from the bytes and compare to the root; then, for each group in
+    that file, recompute ``sha256(manifest.json)`` and compare to both the seal's copy and
+    ``dataset.json``'s own copy. Payload digests hang off the manifests from there.
+
+    Recompute, never trust — a seal that merely asserts "someone validated this" is
+    decoration. This is the check that makes "frozen means frozen" falsifiable, and it is
+    cheap: two small GETs per group, no payload bytes.
+
+    Returns human-readable mismatch descriptions rather than raising, so a caller can report
+    all of them at once (an fsck sweep wants the full picture, not the first failure).
+    """
+    import json
+
+    from .contracts import sha256_bytes
+
+    prefix = f"{dataset_id}/{version}"
+    problems: list[str] = []
+
+    try:
+        seal = _load_json(s3, data_bucket, f"{prefix}/_VALIDATED.json")
+    except NotFound:
+        raise NotValidated(f"{data_bucket}/{prefix} has no _VALIDATED.json") from None
+
+    try:
+        ds_bytes = s3.get(data_bucket, f"{prefix}/dataset.json")
+    except NotFound:
+        return [f"{prefix}: sealed but dataset.json is absent"]
+
+    sealed_root = seal.get("dataset_sha256")
+    actual_root = sha256_bytes(ds_bytes)
+    if sealed_root is None:
+        # Pre-root seal (written before the chain had a root). Say so rather than passing
+        # silently: an unverifiable seal is a different state from a verified one.
+        problems.append(
+            f"{prefix}: seal carries no dataset_sha256 — written before the chain was rooted, "
+            f"so it cannot be verified (recomputed root is {actual_root})"
+        )
+    elif sealed_root != actual_root:
+        problems.append(
+            f"{prefix}/dataset.json: sealed dataset_sha256={sealed_root} but recomputed "
+            f"{actual_root} — the sealed dataset.json is NOT the one published"
+        )
+
+    ds = json.loads(ds_bytes.decode("utf-8"))
+    sealed_manifests = seal.get("manifest_sha256") or {}
+    for group in ds.get("groups", []):
+        gname = str(group.get("name"))
+        man_rel = group.get("manifest") or "manifest.json"
+        declared = group.get("manifest_sha256")
+        try:
+            man_bytes = s3.get(data_bucket, f"{prefix}/{man_rel}")
+        except NotFound:
+            problems.append(f"{prefix}/{man_rel}: group {gname!r} manifest is absent")
+            continue
+        actual = sha256_bytes(man_bytes)
+        if declared and declared != actual:
+            problems.append(
+                f"{prefix}/{man_rel}: dataset.json declares manifest_sha256={declared} but "
+                f"recomputed {actual}"
+            )
+        sealed = sealed_manifests.get(gname)
+        if sealed and sealed != actual:
+            problems.append(
+                f"{prefix}/{man_rel}: seal records manifest_sha256={sealed} but recomputed {actual}"
+            )
+    return problems
+
+
+__all__ = [
+    "dataset_paths",
+    "resolve_latest",
+    "verify_seal",
+    "ResolvedSplit",
+    "ReadError",
+    "NotValidated",
+]
