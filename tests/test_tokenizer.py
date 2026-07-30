@@ -166,10 +166,17 @@ def _publish_named_tokenizer(s3: FakeS3, name: str, *, base_vocab: int, eos_id: 
 def _publish_corpus_with_tokenizer(s3: FakeS3, dsid: str, tokenizer: str, max_id: int):
     d = Path(tempfile.mkdtemp())
     (d / "tokens").mkdir()
-    # Varied ids in [0, max_id] (enough distinct values to clear the distinct-ids check),
-    # with max_id present — so the ONLY thing under test is the vocab-range bound derived
-    # from the named tokenizer. Fine under a big-vocab tokenizer, out-of-range under a small one.
-    arr = np.arange(40000, dtype=np.uint32) % (max_id + 1)
+    # Varied ids in [1, max_id] with max_id present — so the ONLY thing under test is the
+    # vocab-range bound derived from the named tokenizer. Fine under a big-vocab tokenizer,
+    # out-of-range under a small one.
+    #
+    # Two properties this fixture must hold so unrelated checks stay quiet, both of which are
+    # the FAMILY's bounds (families/pretrain.json defaults.decode_smoke_test), not the
+    # profile's laxer fallbacks: >= 256 distinct ids in any 64 KB window, and a zero fraction
+    # under 0.01. Before family defaults were wired into the gate, the profile fell back to
+    # 16 distinct / 0.5 zeros and this fixture passed while violating both.
+    span = max(max_id, 1)
+    arr = (np.arange(40000, dtype=np.uint64) % span).astype(np.uint32) + 1  # 1..max_id, no zeros
     arr[0] = max_id  # ensure the top id appears
     (d / "tokens" / "train-00000.u32le.bin").write_bytes(arr.tobytes())
     plan = P.publish(
@@ -201,7 +208,9 @@ def test_tokenizer_arg_resolves_latest_version():
     s3 = FakeS3()
     _publish_named_tokenizer(s3, "tokenizer/dolma2-bpe", base_vocab=50000, eos_id=50000)
     # reference without a version → resolves the published latest
-    ok = _publish_corpus_with_tokenizer(s3, "pretrain/dolma2-corpus-10b", "tokenizer/dolma2-bpe", max_id=100)
+    # max_id must clear the family's distinct-ids floor (256) while staying under the
+    # tokenizer's derived vocab (50001) — the bound actually under test here is vocab-range.
+    ok = _publish_corpus_with_tokenizer(s3, "pretrain/dolma2-corpus-10b", "tokenizer/dolma2-bpe", max_id=1000)
     assert ok.ok, [str(v) for v in ok.violations]
 
 

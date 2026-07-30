@@ -21,10 +21,12 @@ import fnmatch
 import hashlib
 import json
 import sys
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from .contracts import (
+    FAMILIES,
     NamingError,
     SCHEMA_VERSION,
     Version,
@@ -33,6 +35,7 @@ from .contracts import (
     validate_purpose,
 )
 from .manifest import (
+    FIXED_WIDTH_CONTAINERS,
     ManifestEntry,
     build_manifest,
     check_extension_matches_format,
@@ -52,6 +55,12 @@ CONTROL_BASENAMES = frozenset(
     {"dataset.json", "manifest.json", "_SUCCESS", "_VALIDATED.json", "_REJECTED.json", "README.md"}
 )
 CONTROL_PREFIXES = ("_catalog/", "dependents/")
+
+#: Where ``families/*.json`` lives when running from a checkout. Deliberately resolved the
+#: same way ``publish.py`` does rather than imported from it, so the gate does not pull the
+#: publisher in. Absent inside the Batch image (the wheel ships only ``src/edullm_data``),
+#: which ``_family_defaults_for`` handles by returning no defaults instead of raising.
+FAMILIES_DIR = Path(__file__).resolve().parent.parent.parent / "families"
 
 # Core fields every dataset.json must carry (§3). Profile-specific fields live on the group.
 REQUIRED_CORE_FIELDS = (
@@ -393,6 +402,20 @@ def _validate_group(
             tok_derived = _resolve_tokenizer(s3, data_bucket, group, v, gname)
             if tok_derived is not None:
                 resolved["tokenizer"] = tok_derived
+            # The dtype width is DERIVED from the vocab, never trusted from the manifest.
+            # This is the one check that catches a dtype NARROWING lie, and nothing else
+            # can: verify_arithmetic is tautological on a manifest publish() built (count is
+            # computed FROM size using the same dtype it is later checked against), the
+            # extension check is self-consistent with the lie, and the decode smoke test only
+            # ever sees ids that are in range. Narrowing is also the dangerous direction — it
+            # INFLATES the declared token count, silently changing the training budget.
+            #
+            # Prefer the derived vocab, but fall back to a declared `tokenizer` block the same
+            # way the pretrain profile does: a dataset that predates the depends_on convention
+            # should still get the check rather than silently skip it.
+            tok_for_width = tok_derived if tok_derived else group.get("tokenizer")
+            if isinstance(tok_for_width, Mapping):
+                _check_dtype_width_vs_vocab(entries, tok_for_width, v, gname)
             # prefix is the DATASET prefix, not the group prefix: entry.path already carries
             # the group segment (tokens/train-00000...), so a profile joins prefix+entry.path.
             ctx = GroupContext(
@@ -404,6 +427,7 @@ def _validate_group(
                 manifest=manifest,
                 s3=s3,
                 rng_seed=rng_seed,
+                family_defaults=_family_defaults_for(dataset_id),
                 resolved=resolved,
             )
             for check in profile.CHECKS:
@@ -413,6 +437,95 @@ def _validate_group(
                     v.append(Violation("profile-check-error", f"group {gname!r} check {getattr(check,'__name__','?')}: {e}", path=gname))
 
     return (rebuilt["objects"], rebuilt["bytes"])
+
+
+#: Family ``defaults.decode_smoke_test.<key>`` -> the flat key a profile's ``_bound()`` reads.
+#: These two vocabularies drifted apart: the family nests its bounds under
+#: ``decode_smoke_test`` and names them ``<thing>_<bound>``, while every profile reads a
+#: top-level ``<bound>_<thing>``. Both halves were wrong at once, so wiring family defaults
+#: through without this mapping would still have resolved nothing.
+_DECODE_BOUND_ALIASES = {
+    "distinct_ids_min": "min_distinct_ids",
+    "eos_fraction_max": "max_eos_fraction",
+    "zero_fraction_max": "max_zero_fraction",
+    "window_bytes": "window_bytes",
+}
+
+
+def _family_defaults_for(dataset_id: str) -> dict[str, Any]:
+    """The family's ``defaults`` block, flattened into the keys profiles actually read.
+
+    Returns ``{}`` rather than raising when ``families/`` is not on disk: the wheel ships
+    only ``src/edullm_data``, so a Batch validator has no families directory (see CLAUDE.md).
+    A profile falls back to its own conservative constant in that case, which is the same
+    behaviour as before this was wired up — never a crash, and never a *laxer* bound than the
+    family asks for.
+    """
+    family_name = str(dataset_id).split("/", 1)[0]
+    if family_name not in FAMILIES:
+        return {}
+    path = FAMILIES_DIR / f"{family_name}.json"
+    try:
+        family = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return {}
+    defaults = family.get("defaults")
+    if not isinstance(defaults, Mapping):
+        return {}
+    flat: dict[str, Any] = {k: val for k, val in defaults.items() if k != "decode_smoke_test"}
+    smoke = defaults.get("decode_smoke_test")
+    if isinstance(smoke, Mapping):
+        for fam_key, profile_key in _DECODE_BOUND_ALIASES.items():
+            if fam_key in smoke:
+                flat[profile_key] = smoke[fam_key]
+    return flat
+
+
+def _min_dtype_size_for_vocab(vocab_size: int) -> int:
+    """Smallest unsigned width, in bytes, that can represent every id in [0, vocab_size).
+
+    Mirrors ``numpy.min_scalar_type(vocab_size - 1).itemsize`` without importing numpy, so
+    this module stays importable in a metadata-only environment (see ``read.py``'s docstring
+    for why that constraint exists). dolma derives the write dtype the same way and refuses
+    to let a caller override it — this restores that guarantee on the read side.
+    """
+    highest = max(int(vocab_size) - 1, 0)
+    for size in (1, 2, 4, 8):
+        if highest <= (1 << (8 * size)) - 1:
+            return size
+    return 8
+
+
+def _check_dtype_width_vs_vocab(
+    entries: list[Any], tok_derived: Mapping[str, Any], v: list[Violation], gname: str
+) -> None:
+    """Every fixed-width shard's dtype must be wide enough for the tokenizer's vocab.
+
+    One-sided on purpose. Declaring a WIDER dtype than strictly necessary is legal (it wastes
+    space but reads correctly), so only too-narrow is a violation. Too-narrow is impossible to
+    read correctly and is exactly the lie every other check misses.
+    """
+    vocab_size = tok_derived.get("vocab_size")
+    if not isinstance(vocab_size, int) or vocab_size <= 0:
+        return  # nothing derived to compare against; _resolve_tokenizer already flagged it
+    required = _min_dtype_size_for_vocab(vocab_size)
+    for entry in entries:
+        fmt = entry.format
+        declared = fmt.dtype_size
+        if not declared or fmt.container not in FIXED_WIDTH_CONTAINERS:
+            continue  # jsonl/tar and friends have no token width to check
+        if declared < required:
+            v.append(Violation(
+                "dtype-too-narrow-for-vocab",
+                f"{entry.path}: declared dtype {fmt.dtype!r} is {declared} bytes, but the "
+                f"tokenizer this group depends_on has vocab_size={vocab_size}, which needs "
+                f"at least {required} bytes per token. A {declared}-byte read of these bytes "
+                f"cannot represent every id, and the declared count "
+                f"({entry.count.get('value') if isinstance(entry.count, Mapping) else '?'}) "
+                f"is inflated by {required // declared}x. Arithmetic and extension checks "
+                f"CANNOT catch this — they are self-consistent with the wrong dtype.",
+                path=entry.path,
+            ))
 
 
 def _validate_partitions(group: Mapping[str, Any], v: list[Violation], gname: str, manifest_paths: set[str]) -> None:
