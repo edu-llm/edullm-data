@@ -75,10 +75,24 @@ Absence is treated one-directionally: a flat layout produces no labels and that 
 legal. What is rejected is a *nested* key whose labels don't match — because a reader slicing on
 labels would drop that object from every slice.
 
-**One caveat:** `partitions[]` still cannot express "select by label", and `read.py` doesn't
-consume labels at all. So labels today are *descriptive* (queryable metadata, and now verified
-against the key) rather than a reader-level selector. Structure the tree anyway — the expensive
-direction is wanting the slice later and not having it.
+**Labels ARE a reader-level selector.** `dataset_paths(..., labels={"source": "arxiv"})` narrows a
+read to the shards carrying those keys, and `build_mixture(...)` uses the same predicate to
+assemble a weighted, seeded subset — so how you nest your tree at publish time decides what a
+trainer can ask for later:
+
+```python
+r = dataset_paths(ds, ver, labels={"source": "arxiv"}, s3=s3)
+m = build_mixture(ds, ver, s3=s3, seed=42, total=2_000_000_000, sources=[
+    MixtureSource({"source": "arxiv"}, 0.3), MixtureSource({"source": "stack-edu"}, 0.7)])
+```
+
+**The one real caveat:** `partitions[]` still cannot express "select by label" — the empty-split
+check fires regardless of the `by` field, so a label-named partition is rejected. Selection is a
+*read-side* concern, not a declared partition. That distinction costs you nothing as a producer;
+it just means the slice lives in the key and the manifest, not in `dataset.json`.
+
+This is exactly why the nesting decision is expensive to get wrong: a flat tree yields no labels,
+and there is then nothing for either API to select on.
 
 ### 0.2 Held-out data must come from a different place than train
 

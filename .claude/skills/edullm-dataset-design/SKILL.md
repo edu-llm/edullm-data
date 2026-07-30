@@ -130,10 +130,14 @@ Absence is one-directional: a flat layout yields no labels, silently and legally
 key with mismatched labels is rejected — a reader slicing on labels would drop that object from
 every slice.
 
-**Also be honest:** `partitions[]` cannot express a label-based selector (the empty-split check
-fires regardless of `by`), and `read.py` doesn't consume labels at all. They are descriptive
-metadata — now verified against the key — not a reader selector. Structure the tree anyway; the
-expensive direction is wanting the slice later.
+**Labels are a real reader selector**, so the tree you nest decides what a trainer can later ask
+for: `dataset_paths(..., labels={"source": "arxiv"})` narrows a read, and `build_mixture(...)`
+uses the same predicate to build a weighted, seeded subset. A flat tree yields no labels and
+there is nothing to select on.
+
+**The one caveat:** `partitions[]` still cannot express a label selector — the empty-split check
+fires regardless of `by`, so selection is a read-side concern rather than a declared partition.
+That costs a producer nothing; the slice lives in the key and the manifest.
 
 ## Question 5 — where does held-out data come from?
 
