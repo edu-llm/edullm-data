@@ -101,35 +101,39 @@ identity. Re-pathing later means republishing, which means **re-copying every pa
 This is exactly where the 150B corpus ended up; its mapping was recoverable only because sorted
 order happened to be bijective, which is luck, not a plan.
 
-**Tell them two levels, `<source>/<domain>`.** Verify nesting still passes:
+**Tell them two levels, `<source>/<domain>` — that is the whole budget.** `publish()` derives
+`entry.labels` from exactly those segments, and exactly two are named. Show them, don't assert it:
 
 ```bash
 python3 -c "
-from edullm_data.manifest import check_shard_naming
-print(check_shard_naming('tokens/arxiv/science/train-00000.u32le.bin') or 'OK')"
+from edullm_data.manifest import PATH_LABEL_KEYS, labels_from_path
+print('keys:', PATH_LABEL_KEYS)
+for p in ['tokens/train-00000.u32le.bin',
+          'tokens/arxiv/train-00000.u32le.bin',
+          'tokens/arxiv/science/train-00000.u32le.bin']:
+    print(' ', p, '->', labels_from_path(p))
+try: labels_from_path('tokens/a/b/c/train-00000.u32le.bin')
+except Exception as e: print('  3 levels ->', type(e).__name__)"
 ```
 
-Two is the right budget because a pending change (`feat/entry-labels-from-path`) derives
-`entry.labels` from exactly these segments and names exactly two
-(`PATH_LABEL_KEYS = ("source", "domain")`), raising rather than inventing a `level_3` if the tree
-is deeper. So two levels is free now and forward-compatible; three is a bet.
+A third level **raises** rather than inventing a `level_3` — deliberately, because labels are
+inside `manifest_sha256` and a wrong one can't be fixed without republishing.
 
-**State plainly what `main` does today:** `publish()` has **no `labels` parameter** and does not
-populate `entry.labels`. Check before you claim otherwise:
+**Do not tell them to pass labels to `publish()`.** There is no `labels` parameter and there is
+not meant to be one — a hand-typed label would be a producer assertion nothing falsifies, which
+the golden rule forbids. `publish()` reads them off the key; Gate A **recomputes** them from that
+same key (`_check_labels_match_path`) and rejects a label contradicting the path, or a nested
+entry whose labels were omitted. The path is the single source of truth; the only thing they
+control is how they name files.
 
-```bash
-python3 -c "
-import inspect; from edullm_data.publish import publish
-print('labels param:', 'labels' in inspect.signature(publish).parameters)"
-```
-
-So do **not** tell them to pass labels to `publish()` — they can't. The slice lives in the path
-and nowhere else, and the path is what the pending change reads. They should not wait for the
-feature; they just must not flatten.
+Absence is one-directional: a flat layout yields no labels, silently and legally. Only a *nested*
+key with mismatched labels is rejected — a reader slicing on labels would drop that object from
+every slice.
 
 **Also be honest:** `partitions[]` cannot express a label-based selector (the empty-split check
-fires regardless of `by`). Even once labels land they are descriptive metadata, not a reader
-selector. Structure the tree anyway — the expensive direction is wanting the slice later.
+fires regardless of `by`), and `read.py` doesn't consume labels at all. They are descriptive
+metadata — now verified against the key — not a reader selector. Structure the tree anyway; the
+expensive direction is wanting the slice later.
 
 ## Question 5 — where does held-out data come from?
 
