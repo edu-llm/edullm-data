@@ -6,6 +6,15 @@ manifest shape, the airlock, profiles, validation gates — lives at
 package is code that implements that document; it is not a second source of truth. If the two disagree,
 the standard wins and this package has a bug.
 
+## Start here
+
+| You are… | Read |
+| --- | --- |
+| brand new to this | [`docs/ONBOARDING.md`](docs/ONBOARDING.md) — the 2-minute mental model |
+| **about to build a dataset** (no bytes yet) | [`docs/DESIGN-A-DATASET.md`](docs/DESIGN-A-DATASET.md) — the decisions that can't be undone later |
+| publishing or reading data that exists | [`USAGE.md`](USAGE.md) |
+| adding a profile / changing a check | [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+
 ## What is in `s3://edullm-data` right now
 
 One dataset. **11 objects, 6.5 MiB** (as of 2026-07-29):
