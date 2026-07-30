@@ -12,7 +12,6 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from edullm_data import publish as P
 from edullm_data import validate as V

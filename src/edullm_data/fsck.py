@@ -1,14 +1,38 @@
 """wu-fsck — Gate B, the post-publish decay sweep (§7). Owner: Eric Wu.
 
 Every failure in the audit happened *after* publication — a source bucket deleted, a parent
-dataset removed, a catalog drifted from reality, an ECR image expired. No publish-time gate
-can catch those, because at publish time they were fine. So this runs nightly over the whole
-published catalog and re-checks the references that rot.
+dataset removed, an object truncated, an ECR image expired. No publish-time gate can catch
+those, because at publish time they were fine. So this sweeps the whole published catalog and
+re-checks the references that rot.
+
+**WEEKLY, not nightly.** Every check here recomputes a fact that can only change when
+something mutates a *frozen* prefix or removes a parent — events that are rare and, when they
+do happen, are not more urgent at 24-hour granularity than at 7-day. Running nightly bought
+nothing but seven times the chance of a false alarm, and a noisy job gets muted. The sweep is
+cheap either way; the scarce resource is the owner's attention, so spend it once a week.
+
+What is checked, and why each one can actually fire:
+
+* **object presence + size** — an object deleted or truncated after publish. Real S3 state vs
+  the manifest's claim.
+* **CRC64NVME** — the bytes were *replaced* at the same length. Nothing else here notices
+  that: size matches, the manifest is untouched, and re-hashing 125 GB of payload is not a
+  metadata sweep. S3 hands back its own stored checksum on a HEAD, so this is the one way to
+  compare content for the price of a HEAD.
+* **depends_on** — a parent republished or removed out from under a child. The only genuinely
+  *time-varying* fact in the set: it depends on another dataset's lifecycle, not on this one's.
+* **ECR image digest** — lifecycle policies expire untagged images silently.
+
+A check that compared ``dataset.json``'s declared inventory against a re-sum of the group
+manifests' declared ``bytes`` used to live here and was removed: both sides are frozen control
+files that Gate A already reconciled against each other, so the only way they can disagree is
+if one of them was rewritten — and ``read.verify_seal`` catches that cryptographically via the
+``dataset_sha256`` root rather than by arithmetic coincidence.
 
 It reads only metadata — LIST and HEAD, never a payload byte — so it costs cents per run
 regardless of corpus size. It emits a report; it does not delete or quarantine (a false
 alarm must never destroy data). Findings are for a human, and the job needs a named owner or
-it gets muted after its first noisy night and becomes decoration.
+it gets muted after its first noisy run and becomes decoration.
 """
 
 from __future__ import annotations
@@ -17,7 +41,6 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from .manifest import ManifestEntry
 from .s3 import S3, NotFound
 
 DATA_BUCKET = "edullm-data"
@@ -86,13 +109,15 @@ def _catalog_datasets(s3: S3, data_bucket: str) -> list[tuple[str, str]]:
 # --------------------------------------------------------------------------------------
 
 
-def _check_objects_present(s3, data_bucket, dataset_id, version, ds, findings) -> tuple[int, int]:
+def _check_objects_present(s3, data_bucket, dataset_id, version, ds, findings) -> dict[str, str | None]:
     """Every manifest object still exists at its declared size. Catches an object deleted or
-    truncated after publish. Returns (recomputed_objects, recomputed_bytes) for the catalog
-    cross-check."""
+    truncated after publish.
+
+    Returns ``{path: crc64nvme|None}`` observed on the HEADs it already issued, so the CRC
+    comparison below costs no extra request. One HEAD per object, per sweep, total.
+    """
     prefix = f"{dataset_id}/{version}"
-    total_obj = 0
-    total_bytes = 0
+    observed: dict[str, str | None] = {}
     for group in ds.get("groups", []):
         gname = group.get("name", "?")
         try:
@@ -101,27 +126,59 @@ def _check_objects_present(s3, data_bucket, dataset_id, version, ds, findings) -
             findings.append(Finding("manifest-gone", "error", prefix, f"group {gname!r} manifest missing or unreadable"))
             continue
         for e in man.get("entries", []):
-            total_obj += 1
-            total_bytes += int(e.get("bytes", 0))
             try:
                 head = s3.head(data_bucket, f"{prefix}/{e['path']}")
             except NotFound:
                 findings.append(Finding("object-gone", "error", prefix, f"{e['path']} no longer exists"))
                 continue
+            observed[e["path"]] = head.get("crc64nvme")
             if head["size"] != e.get("bytes"):
                 findings.append(Finding("object-resized", "error", prefix, f"{e['path']} size {head['size']} != manifest {e.get('bytes')}"))
-    return total_obj, total_bytes
+    return observed
 
 
-def _check_catalog_matches(s3, data_bucket, dataset_id, version, ds, recomputed, findings) -> None:
-    """The catalog's object/byte counts equal reality — the inventory.json failure, checked
-    continuously rather than only at publish."""
-    inv = ds.get("inventory", {})
-    r_obj, r_bytes = recomputed
-    if inv.get("objects") != r_obj:
-        findings.append(Finding("catalog-object-drift", "warn", f"{dataset_id}/{version}", f"inventory.objects={inv.get('objects')} but {r_obj} present"))
-    if inv.get("bytes") != r_bytes:
-        findings.append(Finding("catalog-byte-drift", "warn", f"{dataset_id}/{version}", f"inventory.bytes={inv.get('bytes')} but {r_bytes} present"))
+def _check_crc64nvme(s3, data_bucket, dataset_id, version, seal, observed, findings) -> None:
+    """The bytes on the shelf are still the bytes that were promoted — compared via S3's own
+    stored CRC64NVME, for the price of a HEAD.
+
+    This is the only check that sees a same-length REPLACEMENT. An overwrite that preserves the
+    object size leaves the manifest untouched, the presence/size check happy, and every hash in
+    the chain describing bytes that are no longer there. The alternative — re-hashing the
+    payload — is a full GET of the whole corpus, which is not a metadata sweep.
+
+    SUBTLETY, and the reason the reference lives in the seal: **``CopyObject`` recomputes the
+    checksum server-side.** The CRC an object carries in ``edullm-data`` is therefore a property
+    of the promoted copy, not of the landing object it came from — and landing is write-anything
+    by design and expires after 14 days, so a CRC inherited from the landing HEAD would be
+    describing bytes nobody can produce again. The reference MUST be captured at PROMOTE time,
+    post-copy, HEADing the destination in the data bucket. ``promote()`` does exactly that and
+    records it in ``_VALIDATED.json`` under ``crc64nvme``.
+
+    A path with no recorded reference is SKIPPED SILENTLY, not warned about. Every dataset
+    promoted before the seal carried ``crc64nvme`` has no reference for any of its objects, so
+    warning would emit one finding per object per week, forever, on data that is fine — the
+    definition of the noise that gets a job muted. (``read.verify_seal`` does report its
+    pre-root-seal equivalent, but that is a single per-dataset line a human reads once, not a
+    per-object flood in a recurring sweep.) The same silence covers a bucket whose objects
+    predate additional-checksum support and hand back no ``ChecksumCRC64NVME`` at all.
+    """
+    reference = seal.get("crc64nvme") if isinstance(seal, dict) else None
+    if not isinstance(reference, dict) or not reference:
+        return
+    prefix = f"{dataset_id}/{version}"
+    for path, ref in reference.items():
+        if not ref:
+            continue
+        actual = observed.get(path)
+        if actual is None:
+            continue  # object missing (already reported) or S3 returned no checksum
+        if actual != ref:
+            findings.append(Finding(
+                "object-content-changed", "error", prefix,
+                f"{path} CRC64NVME {actual} != {ref} recorded at promote — the bytes were "
+                f"replaced without changing the object size; the manifest's sha256 no longer "
+                f"describes what is on the shelf. Do not train on it.",
+            ))
 
 
 def _check_depends_on(s3, data_bucket, dataset_id, version, ds, findings) -> None:
@@ -172,7 +229,12 @@ def _check_image_digest(s3, ecr_client, dataset_id, version, ds, findings) -> No
         findings.append(Finding("image-digest-gone", "error", f"{dataset_id}/{version}", f"image {repo}@{digest} no longer in ECR — build not reproducible"))
 
 
-CHECKS: list[Callable] = [_check_objects_present, _check_catalog_matches, _check_depends_on]
+CHECKS: list[Callable] = [
+    _check_objects_present,
+    _check_crc64nvme,
+    _check_depends_on,
+    _check_image_digest,
+]
 
 
 def fsck(s3: S3, *, data_bucket: str = DATA_BUCKET, ecr_client: Any = None) -> FsckReport:
@@ -186,8 +248,15 @@ def fsck(s3: S3, *, data_bucket: str = DATA_BUCKET, ecr_client: Any = None) -> F
         except (NotFound, ValueError):
             report.findings.append(Finding("dataset-json-gone", "error", prefix, "catalog entry exists but dataset.json is missing/unreadable"))
             continue
-        recomputed = _check_objects_present(s3, data_bucket, dataset_id, version, ds, report.findings)
-        _check_catalog_matches(s3, data_bucket, dataset_id, version, ds, recomputed, report.findings)
+        # The seal is the source of the promote-time CRC reference. Absent (or unreadable) is
+        # not a finding here — an unsealed published prefix is read.dataset_paths()'s refusal
+        # to report, and duplicating it would double every alarm.
+        try:
+            seal = _load_json(s3, data_bucket, f"{prefix}/_VALIDATED.json")
+        except (NotFound, ValueError):
+            seal = {}
+        observed = _check_objects_present(s3, data_bucket, dataset_id, version, ds, report.findings)
+        _check_crc64nvme(s3, data_bucket, dataset_id, version, seal, observed, report.findings)
         _check_depends_on(s3, data_bucket, dataset_id, version, ds, report.findings)
         _check_image_digest(s3, ecr_client, dataset_id, version, ds, report.findings)
     return report

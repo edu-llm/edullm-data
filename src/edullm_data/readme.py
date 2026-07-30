@@ -208,13 +208,13 @@ def _license_section(ds: Mapping[str, Any]) -> list[str]:
 
 def _limitations_section(ds: Mapping[str, Any]) -> list[str]:
     lims = ds.get("limitations") or []
-    rows = [l for l in lims if isinstance(l, Mapping)]
+    rows = [lim for lim in lims if isinstance(lim, Mapping)]
     if not rows:
         return []
     lines = ["## Limitations", ""]
-    for l in rows:
-        kind = l.get("kind", "note")
-        rest = {k: v for k, v in l.items() if k != "kind"}
+    for lim in rows:
+        kind = lim.get("kind", "note")
+        rest = {k: v for k, v in lim.items() if k != "kind"}
         detail = ", ".join(f"{k}={v}" for k, v in rest.items())
         lines.append(f"- **{kind}**" + (f": {detail}" if detail else ""))
     lines.append("")
@@ -243,23 +243,40 @@ def _how_to_read_section(ds: Mapping[str, Any]) -> list[str]:
     dataset_id = ds.get("dataset_id", "<family>/<name>")
     ver = ds.get("version") or {}
     version_id = ver.get("id", "vN") if isinstance(ver, Mapping) else "vN"
-    groups = ds.get("groups") or []
-    # only offer a split= arg if a group actually declares path partitions
+    groups = [g for g in (ds.get("groups") or []) if isinstance(g, Mapping)]
+
+    # THE SNIPPET MUST RUN. `dataset_paths` RAISES on a dataset with >1 groups unless `group=`
+    # is passed ("pass group= to choose one" — read.py), so a multi-group README was publishing
+    # a copy-pasteable example whose only outcome is a traceback. A generated snippet that
+    # cannot execute is worse than no snippet: it is the documented path, so the first thing a
+    # new reader does is hit an error the README told them to hit.
+    #
+    # Pick the FIRST group deterministically (dataset.json group order is stable, and the file
+    # is frozen) rather than inventing a "primary" notion the standard does not have. It is an
+    # example, and the comment below points at the alternatives so the choice is visible rather
+    # than silently authoritative.
+    group_name = groups[0].get("name") if len(groups) > 1 else None
+    other_groups = [g.get("name") for g in groups[1:]] if len(groups) > 1 else []
+
+    # Only offer a split= arg if a group actually declares path partitions — and take it from
+    # the group the snippet actually reads, since a split declared by a DIFFERENT group would
+    # resolve to an empty result in this call.
     split = None
-    for g in groups:
-        if isinstance(g, Mapping):
-            for p in g.get("partitions") or []:
-                if isinstance(p, Mapping) and p.get("name"):
-                    split = p["name"]
-                    break
+    for g in ([groups[0]] if group_name is not None else groups):
+        for p in g.get("partitions") or []:
+            if isinstance(p, Mapping) and p.get("name"):
+                split = p["name"]
+                break
         if split:
             break
+
     call = (
         f'dataset_paths("{dataset_id}", "{version_id}", '
+        + (f'group="{group_name}", ' if group_name else "")
         + (f'split="{split}", ' if split else "")
         + "s3=Boto3S3.default())"
     )
-    return [
+    lines = [
         "## How to read it",
         "",
         "```python",
@@ -269,9 +286,15 @@ def _how_to_read_section(ds: Mapping[str, Any]) -> list[str]:
         f"r = {call}",
         "# r.paths  -> the object URIs to feed the loader",
         "# r.dtype  -> read this; do NOT let the loader default to uint16",
-        "```",
-        "",
+        "# r.numpy_dtype -> byte-order-qualified (e.g. \"<u4\"); correct on any host",
     ]
+    if other_groups:
+        listed = ", ".join(f'"{n}"' for n in other_groups if n)
+        lines.append(
+            f"# group= is REQUIRED here: this dataset has {len(groups)} groups. Others: {listed}"
+        )
+    lines += ["```", ""]
+    return lines
 
 
 def render_readme(ds: Mapping[str, Any], *, generator_version: str | None = None) -> str:

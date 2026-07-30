@@ -196,8 +196,9 @@ def _publish_corpus_with_tokenizer(s3: FakeS3, dsid: str, tokenizer: str, max_id
 def test_two_datasets_two_different_tokenizers_each_derive_own_vocab():
     s3 = FakeS3()
     # big tokenizer: vocab 50001; small tokenizer: vocab 5001
-    big = _publish_named_tokenizer(s3, "tokenizer/dolma2-bpe", base_vocab=50000, eos_id=50000)
-    small = _publish_named_tokenizer(s3, "tokenizer/gpt2-bpe", base_vocab=5000, eos_id=5000)
+    # published for their side effect (they must exist in edullm-data to be resolvable)
+    _publish_named_tokenizer(s3, "tokenizer/dolma2-bpe", base_vocab=50000, eos_id=50000)
+    _publish_named_tokenizer(s3, "tokenizer/gpt2-bpe", base_vocab=5000, eos_id=5000)
 
     # a corpus with ids up to 40000: valid under big-bpe (vocab 50001), INVALID under small-bpe (5001)
     ok = _publish_corpus_with_tokenizer(s3, "pretrain/dolma2-corpus-40k", "tokenizer/dolma2-bpe", max_id=40000)

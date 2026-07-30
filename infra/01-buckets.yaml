@@ -130,7 +130,7 @@ Resources:
           # §10 says "Expiry: none" for the published bucket. Consequence to be aware of:
           # with versioning on and no noncurrent expiry, superseded versions accumulate
           # forever. That is the intended trade (a published dataset must never evaporate);
-          # noncurrent-version growth is monitored by wu-fsck (Gate B, §7) and S3 Inventory
+          # noncurrent-version growth is monitored by wu-fsck (Gate B, §7, weekly) and S3 Inventory
           # (§13 step 10), not by lifecycle.
           - Id: abort-incomplete-multipart-uploads-7d
             Status: Enabled

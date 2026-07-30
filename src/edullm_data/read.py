@@ -24,6 +24,19 @@ from .s3 import S3, NotFound
 
 DATA_BUCKET = "edullm-data"
 
+#: dtype name -> numpy type CHARACTER, for building a byte-order-qualified dtype string.
+#: Necessary because numpy accepts ``"<u4"`` but REJECTS ``"<uint32"`` — the long names carry
+#: no order prefix. Verified: ``np.dtype("<uint32")`` raises "data type not understood".
+#: A name absent from this map falls through unqualified rather than producing a string numpy
+#: would reject.
+_NUMPY_CHAR = {
+    "uint8": "u1", "int8": "i1",
+    "uint16": "u2", "int16": "i2",
+    "uint32": "u4", "int32": "i4",
+    "uint64": "u8", "int64": "i8",
+    "float16": "f2", "float32": "f4", "float64": "f8",
+}
+
 
 class ReadError(RuntimeError):
     """Cannot resolve the requested dataset/split for reading."""
@@ -41,6 +54,29 @@ class SealMismatch(ReadError):
     """
 
 
+class MixedFormat(ReadError):
+    """A group's fixed-width shards do not agree on how to decode them.
+
+    RAISED rather than reported as a ``dtype=None`` / ``"mixed"`` value, which is what this
+    used to do. The reason is that there is nothing a caller can *do* with the softer answer:
+    ``ResolvedSplit`` hands back ONE dtype for the whole group because a loader memmaps the
+    shards as one array, so "these shards are uint16 and those are uint32" has no valid
+    resolution — a caller receiving it must either raise itself or pick one, and picking one is
+    precisely the silent-halving bug this module exists to prevent (§5, and the module
+    docstring: OLMo-core's ``uint16`` default). ``dtype=None`` was the worst of both: it looks
+    like the legitimate "this container carries its own typing" answer, so it flows into a
+    loader and gets defaulted.
+
+    The recourse is structural and already in the standard: put the differently-typed shards in
+    separate GROUPS and pass ``group=``. That is what groups are for, and it makes the choice
+    visible in a training config instead of resolved by a coin flip.
+
+    Note that a group whose entries ALL carry no dtype (parquet, jsonl, a tokenizer tree, a
+    vendored directory) is not mixed and does not raise — ``dtype`` is legitimately ``None``
+    there, because the container does its own typing.
+    """
+
+
 @dataclass
 class ResolvedSplit:
     """What a trainer needs: the object URIs to read, the numpy dtype to read them as, and
@@ -55,6 +91,20 @@ class ResolvedSplit:
     dtype: str | None
     rows: int | None
     kwargs: dict[str, Any]
+    #: ``"little"`` / ``"big"``, or ``None`` for a container that carries its own typing.
+    #:
+    #: Carried because the manifest declares it and DISCARDING it made the reader lossy in the
+    #: one way that silently corrupts data: ``np.memmap(path, dtype="uint32")`` uses the HOST's
+    #: byte order, so a big-endian shard read on a little-endian host (or the reverse) decodes
+    #: every token to a different, in-range-looking id. Nothing downstream notices — the token
+    #: count is right, the ids are plausible, the loss curve is merely bad. ``dtype`` alone is
+    #: not enough to read the bytes correctly; see :attr:`numpy_dtype`.
+    byte_order: str | None = None
+    #: Leading bytes to skip before the first element (0 for the headerless ``.u32le.bin``
+    #: form). A ``.npy``-style header is nonzero, and a reader that memmaps from offset 0
+    #: decodes the header AS DATA — the exact ".npy lie" the standard was written against. A
+    #: loader must honour this; it is not decoration.
+    header_bytes: int = 0
     #: Every declared split, keyed by name — ``{"train": [...uris], "val": [...uris]}``.
     #:
     #: A dataset returns BOTH by default, which is what a run actually needs (train for the
@@ -83,6 +133,26 @@ class ResolvedSplit:
 
     def has_split(self, name: str) -> bool:
         return name in self.splits
+
+    @property
+    def numpy_dtype(self) -> str | None:
+        """``dtype`` and ``byte_order`` combined into a numpy dtype string — ``"<u4"``, ``">u4"``.
+
+        The whole point of carrying ``byte_order`` is that it must reach the loader, and a
+        caller doing ``np.dtype(r.dtype)`` gets NATIVE order, which is only accidentally
+        correct. This is the string that is correct on any host: pass it straight to
+        ``np.dtype`` / ``np.memmap(..., dtype=...)``.
+
+        ``None`` when there is no fixed-width dtype (a container that types itself). Falls back
+        to the bare dtype name when the manifest declared no byte order, which is honest —
+        that dataset genuinely does not say, so native is the only available reading.
+        """
+        if self.dtype is None:
+            return None
+        prefix = {"little": "<", "big": ">"}.get(self.byte_order or "")
+        if not prefix:
+            return self.dtype
+        return prefix + _NUMPY_CHAR.get(self.dtype, self.dtype)
 
 
 def _load_json(s3: S3, bucket: str, key: str) -> Any:
@@ -185,9 +255,11 @@ def dataset_paths(
     manifest = _load_json(s3, data_bucket, f"{prefix}/{chosen.get('manifest', f'{gname}/manifest.json')}")
     entries = [ManifestEntry.from_dict(e) for e in manifest.get("entries", [])]
 
-    # dtype: uniform across the group's raw shards, read from the manifest, never inferred
-    dtypes = {e.format.dtype for e in entries if e.format.dtype}
-    dtype = dtypes.pop() if len(dtypes) == 1 else None
+    # The FULL format triple, read from the manifest and never inferred (§5). dtype alone does
+    # not let a caller read the bytes: byte_order decides how each element is assembled and
+    # header_bytes decides where the elements start. Both were being dropped on the floor here
+    # while the manifest declared them.
+    dtype, byte_order, header_bytes = _resolve_format(entries, prefix, gname)
 
     def _uri(entry: Any) -> str:
         return f"s3://{data_bucket}/{prefix}/{entry.path}"
@@ -228,6 +300,7 @@ def dataset_paths(
                 return ResolvedSplit(
                     dataset_id=dataset_id, version=version, split=split, paths=[], dtype=dtype,
                     rows=None, kwargs={}, splits=splits, split_rows=split_rows,
+                    byte_order=byte_order, header_bytes=header_bytes,
                 )
             raise ReadError(
                 f"split {split!r} is not in the vocabulary {sorted(SPLITS)}; group {gname!r} "
@@ -281,6 +354,43 @@ def dataset_paths(
         kwargs=kwargs,
         splits=splits,
         split_rows=split_rows,
+        byte_order=byte_order,
+        header_bytes=header_bytes,
+    )
+
+
+def _resolve_format(
+    entries: list[Any], prefix: str, gname: str
+) -> tuple[str | None, str | None, int]:
+    """The one ``(dtype, byte_order, header_bytes)`` that describes every fixed-width shard in a
+    group — or :class:`MixedFormat` if there is no such single answer.
+
+    DISAGREEMENT IS AN ERROR, not a ``None``. See :class:`MixedFormat`: the caller gets one
+    triple because the loader memmaps the group as one array, so an ambiguous group has no
+    correct single answer and the softer signals (``None``, ``"mixed"``) are indistinguishable
+    from the legitimate "container types itself" answer and get defaulted by the loader.
+
+    Only fixed-width entries participate: an entry with ``dtype=None`` is a self-typing
+    container (parquet/jsonl/csv/text) or a tokenizer/vendored file and makes no claim, so it
+    can neither set nor contradict the group's dtype. A group of ONLY such entries resolves to
+    ``(None, None, 0)`` — legitimately untyped, not mixed.
+
+    ``header_bytes`` is checked alongside dtype for the same reason: two shards with the same
+    dtype but different header sizes cannot be read by one memmap stride either, and a
+    disagreement there is the ".npy lie" shape (some shards headerless, some not).
+    """
+    typed = [e for e in entries if e.format.dtype]
+    if not typed:
+        return None, None, 0
+    triples = {(e.format.dtype, e.format.byte_order, e.format.header_bytes) for e in typed}
+    if len(triples) == 1:
+        return triples.pop()
+    raise MixedFormat(
+        f"{prefix} group {gname!r} declares {len(triples)} different fixed-width formats "
+        f"{sorted(str(t) for t in triples)}; there is no single dtype/byte_order/header_bytes "
+        f"that reads all of its shards. A loader memmaps a group as one array, so this cannot "
+        f"be resolved here — split the differently-typed shards into separate groups and select "
+        f"one with group=."
     )
 
 
@@ -386,6 +496,7 @@ def verify_seal(
 
 __all__ = [
     "dataset_paths",
+    "MixedFormat",
     "SealMismatch",
     "resolve_latest",
     "verify_seal",

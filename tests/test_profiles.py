@@ -230,7 +230,6 @@ def _jsonl(rows: list[dict]) -> bytes:
 
 
 def _eval_entry(path: str, body: bytes) -> ManifestEntry:
-    ext = ".jsonl.gz" if path.endswith(".gz") else (".jsonl" if path.endswith(".jsonl") else ".csv")
     fmt = Format(
         container="jsonl" if "jsonl" in path else "csv",
         codec="gzip" if path.endswith(".gz") else "none",

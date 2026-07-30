@@ -55,7 +55,7 @@ from .manifest import (
 )
 from .profiles import registry
 from .profiles.base import GroupContext, Violation
-from .s3 import S3, NotFound, S3Error
+from .s3 import S3, NotFound
 
 # Control files that live under a dataset prefix but are not group payload — excluded from
 # the manifest-exhaustiveness comparison so they never read as "extra".
@@ -279,7 +279,10 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
 
     for group in groups:
         gname = str(group.get("name", "?"))
-        gprefix = group.get("prefix", "")
+        # NB: no gprefix here on purpose. The group-prefix LIST it looks like it was meant for
+        # already lives inside _validate_group, which derives its own (stripped) gprefix and
+        # LISTs `<prefix>/<gprefix>/` for the exhaustiveness diff. A second copy at this level
+        # would only be a second source of truth for the same string.
         gres = _validate_group(
             s3, landing_bucket, prefix, dataset_id, version_id, group, v, all_shas, my_shas,
             data_bucket=data_bucket, collect_paths=group_manifest_paths,
@@ -1152,15 +1155,40 @@ def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucke
     # copy dataset.json + every group manifest + every payload object
     ds = _load_json(s3, landing_bucket, f"{prefix}/dataset.json")
     keys: list[str] = [f"{prefix}/dataset.json"]
+    payload_paths: list[str] = []  # manifest-relative, for the CRC reference below
     for group in ds.get("groups", []):
         manifest_rel = group.get("manifest") or "manifest.json"
         keys.append(f"{prefix}/{manifest_rel}")
         man = _load_json(s3, landing_bucket, f"{prefix}/{manifest_rel}")
         for e in man.get("entries", []):
             keys.append(_join(prefix, e["path"]))
+            payload_paths.append(e["path"])
 
     for key in keys:
         s3.copy(landing_bucket, key, data_bucket, key)
+
+    # CAPTURE THE CRC REFERENCE POST-COPY, FROM THE DESTINATION. This is what lets wu-fsck
+    # (Gate B) detect a same-length overwrite of a frozen object for the price of a HEAD, with
+    # no payload GET — see fsck._check_crc64nvme.
+    #
+    # It MUST be HEADed here, on `data_bucket`, after the copy, and never inherited from the
+    # landing object: `CopyObject` RECOMPUTES the checksum server-side, so the value the
+    # promoted copy carries is a property of the copy. A CRC read from landing would describe
+    # bytes that (a) may not be the ones that landed in the data bucket and (b) are gone in 14
+    # days when landing expires — an unfalsifiable reference, which is the decoration the
+    # standard exists to remove.
+    #
+    # Best-effort and only for paths where S3 actually returned a checksum: objects predating
+    # additional-checksum support have none, and a missing reference must mean "not checkable"
+    # (fsck skips it silently), never "changed".
+    crc_reference: dict[str, str] = {}
+    for rel in payload_paths:
+        try:
+            crc = s3.head(data_bucket, _join(prefix, rel)).get("crc64nvme")
+        except (NotFound, OSError):
+            continue
+        if crc:
+            crc_reference[rel] = crc
 
     # ROOT the hash chain. Each group already carries a manifest_sha256, and dataset.json
     # carries all of them — but nothing hashed dataset.json itself, so the chain had no root
@@ -1236,6 +1264,10 @@ def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucke
             if g.get("manifest_sha256")
         },
     }
+    # Only emit the key when there is something in it, so an old seal and a new seal on a
+    # bucket without checksums are the same document rather than differing by an empty dict.
+    if crc_reference:
+        seal["crc64nvme"] = crc_reference
     if now is not None:
         seal["validated_at"] = now
     s3.put(

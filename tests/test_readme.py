@@ -143,3 +143,79 @@ def test_pipe_in_source_name_does_not_break_table():
     ds["sources"] = [{"name": "weird|name", "tokens": 5}]
     md = render_readme(ds)
     assert "weird\\|name" in md  # escaped, so the column count is preserved
+
+
+# --------------------------------------------------------------------------------------
+# the generated snippet must actually RUN
+# --------------------------------------------------------------------------------------
+
+# Two groups: exactly the shape where `dataset_paths(id, ver, s3=...)` RAISES.
+MULTIGROUP = {
+    "schema_version": "edullm-dataset/v1",
+    "dataset_id": "eval/mmlu-suite",
+    "version": {"id": "v2", "relation": "supersedes", "of": "v1"},
+    "mutability": "frozen",
+    "inventory": {"objects": 6, "bytes": 4096},
+    "groups": [
+        {"name": "results", "profile": "eval-results/v1", "prefix": "results/",
+         "manifest": "results/manifest.json", "manifest_sha256": "11" * 32,
+         "partitions": [{"name": "test", "by": "path", "glob": "test-*.jsonl"}]},
+        {"name": "predictions", "profile": "eval-results/v1", "prefix": "predictions/",
+         "manifest": "predictions/manifest.json", "manifest_sha256": "22" * 32,
+         "partitions": [{"name": "test", "by": "path", "glob": "test-*.jsonl"}]},
+    ],
+}
+
+
+def test_multigroup_snippet_passes_group_so_it_does_not_raise():
+    """Without group=, this exact call raises ("pass group= to choose one" — read.py).
+
+    A generated snippet that cannot execute is worse than none: it is the documented path, so
+    the first thing a reader does is hit the error the README told them to.
+    """
+    md = render_readme(MULTIGROUP)
+    assert 'dataset_paths("eval/mmlu-suite", "v2", group="results"' in md
+    # and it names the alternatives rather than presenting the pick as authoritative
+    assert '"predictions"' in md
+    assert "group= is REQUIRED here" in md
+
+
+def test_single_group_snippet_omits_group_arg():
+    """One group needs no group= — dataset_paths defaults to it. Adding it would be noise."""
+    md = render_readme(RICH)
+    assert "group=" not in md
+    assert 'dataset_paths("pretrain/olmo-mix-1124-31b", "v1", split="train"' in md
+
+
+def test_multigroup_split_comes_from_the_group_the_snippet_reads():
+    """A split declared only by a DIFFERENT group would resolve to an empty result in this call,
+    so the split= must be taken from the chosen group, not from any group."""
+    ds = dict(MULTIGROUP)
+    ds["groups"] = [
+        # chosen group declares NO partitions ...
+        {"name": "vendored", "profile": "vendored/v1", "prefix": "vendored/",
+         "manifest": "vendored/manifest.json", "manifest_sha256": "33" * 32},
+        # ... while a later one does. split= must not be borrowed from it.
+        {"name": "results", "profile": "eval-results/v1", "prefix": "results/",
+         "manifest": "results/manifest.json", "manifest_sha256": "44" * 32,
+         "partitions": [{"name": "test", "by": "path", "glob": "test-*.jsonl"}]},
+    ]
+    md = render_readme(ds)
+    assert 'group="vendored"' in md
+    assert "split=" not in md
+
+
+def test_generated_snippet_is_executable_python():
+    """Parse the fenced block. Catches an unbalanced quote or a stray comma in the call."""
+    import ast
+
+    for ds in (RICH, THIN, MULTIGROUP):
+        md = render_readme(ds)
+        block = md.split("```python", 1)[1].split("```", 1)[0]
+        ast.parse(block)  # raises SyntaxError if the generator emitted broken code
+
+
+def test_snippet_mentions_numpy_dtype_for_byte_order():
+    """dtype alone is not enough to read the bytes on an arbitrary host."""
+    md = render_readme(RICH)
+    assert "r.numpy_dtype" in md

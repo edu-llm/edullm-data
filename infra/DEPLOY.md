@@ -730,5 +730,42 @@ and `iam:CreateRole` is denied, so deleting it would be unrecoverable from an in
 | Enabled EventBridge rule | Two reasons, both real: `BatchParameters` cannot express `containerOverrides` *or* pass `detail.object.key`, and `<BATCH_JOB_ROLE>` is not assumable by `events.amazonaws.com` (use `<EVENTBRIDGE_INVOKE_ROLE>` as the rule's `RoleArn` — verified to trust `events.amazonaws.com`). Enable only once the self-discovering job definition exists. See step 5. |
 | DLQ on the rule target | `sqs:CreateQueue` not in §1's verified table. Watch `FailedInvocations` until it exists. |
 | S3 Inventory on `edullm-data` | §13 step 10, after the package. |
-| `wu-fsck` schedule (Gate B) | §13 step 11. Needs the package. Owner: Eric Wu — §7 is explicit that an unowned nightly job gets muted and becomes decoration. |
+| `wu-fsck` schedule (Gate B) | §13 step 11. Needs the package. Owner: Eric Wu — §7 is explicit that an unowned recurring job gets muted and becomes decoration. **Cadence is WEEKLY** (see below); the rule currently live in EventBridge is still the nightly `cron(6 9 * * ? *)` and is NOT changed by a code deploy. |
 | Object Lock | §10 rejects it: protects a version not a path, blocks lifecycle, irreversible. |
+
+---
+
+## wu-fsck cadence — nightly → weekly (MANUAL, not covered by a code deploy)
+
+`fsck.py` now documents itself as a **weekly** sweep. That is a code/doc change only. The live
+schedule rule is EventBridge state, so **nothing in a package release moves it** — a released wheel
+with the new docstring and an unchanged rule will still fire every night.
+
+The rule currently deployed and ENABLED is:
+
+| | |
+|---|---|
+| Name | `edullm-wu-fsck-nightly` |
+| Schedule | `cron(6 9 * * ? *)` UTC (04:06 local), i.e. daily |
+| Target | the `edullm-fsck` Batch job definition |
+| Owner | Eric Wu (in the name, deliberately — ownership transfers by renaming, not by editing a field) |
+
+To move it, from a session with `events:PutRule`:
+
+```
+events put-rule --name edullm-wu-fsck-nightly \
+  --schedule-expression "cron(6 9 ? * MON *)" --state ENABLED
+```
+
+`cron(6 9 ? * MON *)` = Mondays 09:06 UTC. Keep the same minute/hour so a comparison against the
+old runs is like-for-like.
+
+**The name should be renamed too** (`edullm-wu-fsck-weekly`), but renaming an EventBridge rule means
+delete + recreate *with its target re-attached*, and the target `RoleArn` question in step 5 applies —
+so changing only the schedule expression is the smaller move. If you do rename it, keep `wu-` in the
+name: the owner prefix is the mechanism that stops this becoming an unowned job that gets muted.
+
+Rationale for weekly is in `fsck.py`'s module docstring: every fact the sweep re-checks changes only
+when something mutates a frozen prefix or another dataset's lifecycle. Those are rare and no more
+urgent at 24-hour granularity than at 7-day, and nightly bought seven times the false-alarm exposure
+for the same information.

@@ -7,11 +7,20 @@ name = "edullm-data"
 version = "0.2.0"
 description = "Publisher, validator, and reader for the eduLLM Dataset Standard v1"
 readme = "README.md"
-requires-python = ">=3.11"
+# 3.10, not 3.11. The floor exists to be installable ALONGSIDE OLMo-core, whose own floor is
+# 3.10 (pinned by one of its tests), and a 3.11 pin here makes the two uninstallable in one
+# environment — which is the environment that actually trains on these datasets.
+#
+# Verified, not assumed: the full suite passes on CPython 3.10.20, and the package uses no
+# 3.11-only construct (no ExceptionGroup/except*, no typing.Self, no tomllib, no StrEnum, no
+# assert_never, no @override, no datetime.UTC). `from __future__ import annotations` is at the
+# top of every module, so the PEP-604/585 annotations are strings at runtime on 3.10.
+requires-python = ">=3.10"
 license = { text = "Proprietary" }
 authors = [{ name = "eduLLM", email = "edullm-data@alphaaiengineering.com" }]
 keywords = ["dataset", "manifest", "validation", "s3"]
 classifiers = [
+  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Private :: Do Not Upload",
 ]
@@ -24,7 +33,21 @@ dependencies = [
 test = ["pytest>=7.0"]
 
 [project.scripts]
-edullm-data = "edullm_data.cli:main"
+# `edullm-data = "edullm_data.cli:main"` used to be declared here and `edullm_data/cli.py` HAS
+# NEVER EXISTED (no such file in any commit). `pip install` succeeded and the installed script
+# died with ModuleNotFoundError the first time anyone ran it — a console script that has never
+# been executed once, which is precisely the "asserts a field is present" decoration the golden
+# rule is against, in packaging form.
+#
+# Replaced with the two entry points that are REAL: both are tested `main()` functions, and
+# both already announce these exact names via argparse `prog=`, so the names were being promised
+# to anyone who ran `--help` while resolving to nothing on the PATH. Now the declaration is
+# checkable — `pip install <wheel> && wu-fsck --help` either works or the build is broken.
+#
+# `python -m edullm_data.validate` (what the Batch job definitions and the Dockerfile
+# ENTRYPOINT actually invoke) is unaffected — these are an addition, not a replacement.
+edullm-data-validate = "edullm_data.validate:main"
+wu-fsck = "edullm_data.fsck:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/edullm_data"]

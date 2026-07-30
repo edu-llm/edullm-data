@@ -249,7 +249,7 @@ def test_version_auto_increments():
     assert P.publish(_tokens_dir(), **kw).version == "v1"
     p2 = P.publish(_tokens_dir(), **kw)
     assert p2.version == "v2"
-    ds2 = json.loads(s3.get("edullm-landing", f"pretrain/dolma2-150b/v2/dataset.json"))
+    ds2 = json.loads(s3.get("edullm-landing", "pretrain/dolma2-150b/v2/dataset.json"))
     assert ds2["version"] == {"id": "v2", "relation": "supersedes", "of": "v1"}
 
 
