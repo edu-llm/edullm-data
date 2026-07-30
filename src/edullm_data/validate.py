@@ -41,6 +41,7 @@ from .contracts import (
 )
 from .manifest import (
     FIXED_WIDTH_CONTAINERS,
+    FIXED_WIDTH_UNITS,
     ManifestEntry,
     build_manifest,
     check_extension_matches_format,
@@ -62,11 +63,36 @@ CONTROL_BASENAMES = frozenset(
 )
 CONTROL_PREFIXES = ("_catalog/", "dependents/")
 
-#: Where ``families/*.json`` lives when running from a checkout. Deliberately resolved the
-#: same way ``publish.py`` does rather than imported from it, so the gate does not pull the
-#: publisher in. Absent inside the Batch image (the wheel ships only ``src/edullm_data``),
-#: which ``_family_defaults_for`` handles by returning no defaults instead of raising.
-FAMILIES_DIR = Path(__file__).resolve().parent.parent.parent / "families"
+def _resolve_families_dir() -> Path:
+    """Where ``families/*.json`` lives, across all three ways this code runs.
+
+    This is load-bearing and got it wrong once. The family files hold the bounds Gate A
+    enforces, so if the directory is not found every bound silently falls back to the profile's
+    own laxer constant — and it fails *only in production*, because a checkout finds it and the
+    test suite passes. That is precisely how the live corpus came to be validated at 50% EOS /
+    50% zeros instead of the family's declared 5% / 1%.
+
+    Three layouts, checked in order:
+
+    1. ``EDULLM_FAMILIES_DIR`` — an explicit override, mirroring the ``P.FAMILIES_DIR`` override
+       the publish driver already needs on Batch. Wins so an operator can always point at a
+       staged copy without a rebuild.
+    2. ``<package>/families/`` — an installed wheel. ``pyproject.toml`` force-includes the
+       directory into the package for exactly this case.
+    3. ``<repo>/families/`` — a source checkout, where it sits at the repo root.
+    """
+    import os
+
+    override = os.environ.get("EDULLM_FAMILIES_DIR")
+    if override:
+        return Path(override)
+    packaged = Path(__file__).resolve().parent / "families"
+    if packaged.is_dir():
+        return packaged
+    return Path(__file__).resolve().parent.parent.parent / "families"
+
+
+FAMILIES_DIR = _resolve_families_dir()
 
 # Core fields every dataset.json must carry (§3). Profile-specific fields live on the group.
 REQUIRED_CORE_FIELDS = (
@@ -480,11 +506,21 @@ def _validate_group(
 #: ``decode_smoke_test`` and names them ``<thing>_<bound>``, while every profile reads a
 #: top-level ``<bound>_<thing>``. Both halves were wrong at once, so wiring family defaults
 #: through without this mapping would still have resolved nothing.
+#: ``window_bytes`` is deliberately ABSENT. The family files declare it, but the decode window
+#: is the hard constant ``profiles.base.DECODE_SAMPLE_BYTES`` (64 KiB) and no profile reads a
+#: configurable value — so aliasing it would flatten a key nobody enforces, which is the
+#: decoration this module exists to remove. ``_check_alias_map_covers_family_keys`` asserts the
+#: gap is deliberate rather than forgotten.
 _DECODE_BOUND_ALIASES = {
     "distinct_ids_min": "min_distinct_ids",
     "eos_fraction_max": "max_eos_fraction",
     "zero_fraction_max": "max_zero_fraction",
-    "window_bytes": "window_bytes",
+}
+
+#: Family ``decode_smoke_test`` keys that intentionally map to nothing, with the reason. Keeping
+#: this explicit means a NEW unmapped key is a test failure rather than a silent no-op.
+_DECODE_BOUNDS_NOT_ENFORCED = {
+    "window_bytes": "the decode window is the fixed DECODE_SAMPLE_BYTES constant, not tunable",
 }
 
 
@@ -699,7 +735,7 @@ def _min_dtype_size_for_vocab(vocab_size: int) -> int:
 
 
 def _check_dtype_width_vs_vocab(
-    entries: list[Any], tok_derived: Mapping[str, Any], v: list[Violation], gname: str
+    entries: list[ManifestEntry], tok_derived: Mapping[str, Any], v: list[Violation], gname: str
 ) -> None:
     """Every fixed-width shard's dtype must be wide enough for the tokenizer's vocab.
 
@@ -708,7 +744,10 @@ def _check_dtype_width_vs_vocab(
     read correctly and is exactly the lie every other check misses.
     """
     vocab_size = tok_derived.get("vocab_size")
-    if not isinstance(vocab_size, int) or vocab_size <= 0:
+    # `isinstance(True, int)` is True in Python, so exclude bool explicitly — the same idiom
+    # pretrain_tokens_v1 uses for its tokenizer fields. Without it, vocab_size=True yields
+    # required=1 and the check silently passes everything.
+    if isinstance(vocab_size, bool) or not isinstance(vocab_size, int) or vocab_size <= 0:
         return  # nothing derived to compare against; _resolve_tokenizer already flagged it
     required = _min_dtype_size_for_vocab(vocab_size)
     for entry in entries:
@@ -716,6 +755,14 @@ def _check_dtype_width_vs_vocab(
         declared = fmt.dtype_size
         if not declared or fmt.container not in FIXED_WIDTH_CONTAINERS:
             continue  # jsonl/tar and friends have no token width to check
+        # Only entries whose count is in TOKEN units are token arrays. A group can legitimately
+        # carry a fixed-width sidecar that is NOT tokens — float16 activations, a uint8 blob —
+        # and a *vocab* bound says nothing about those. `verify_arithmetic` scopes itself the
+        # same way (manifest.py: `unit not in FIXED_WIDTH_UNITS`), so this mirrors it rather
+        # than inventing a second notion of "is this a token array".
+        unit = entry.count.get("unit") if isinstance(entry.count, Mapping) else None
+        if unit not in FIXED_WIDTH_UNITS:
+            continue
         if declared < required:
             v.append(Violation(
                 "dtype-too-narrow-for-vocab",
@@ -723,7 +770,7 @@ def _check_dtype_width_vs_vocab(
                 f"tokenizer this group depends_on has vocab_size={vocab_size}, which needs "
                 f"at least {required} bytes per token. A {declared}-byte read of these bytes "
                 f"cannot represent every id, and the declared count "
-                f"({entry.count.get('value') if isinstance(entry.count, Mapping) else '?'}) "
+                f"({entry.count['value']:,}) "
                 f"is inflated by {required // declared}x. Arithmetic and extension checks "
                 f"CANNOT catch this — they are self-consistent with the wrong dtype.",
                 path=entry.path,

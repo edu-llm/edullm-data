@@ -22,10 +22,13 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from edullm_data import publish as P
 from edullm_data import validate as V
+from edullm_data.manifest import ManifestEntry
 from edullm_data.s3 import FakeS3
+from edullm_data.validate import _check_dtype_width_vs_vocab
 
 CREATED = "2026-07-29T12:00:00Z"
 ENV = {"EDULLM_CODE_SHA256": "a" * 64, "EDULLM_PACKAGES_LOCK_SHA256": "b" * 64}
@@ -111,3 +114,69 @@ def test_the_violation_explains_the_inflated_count():
     assert "100278" in msg
     assert "2 bytes" in msg and "4 bytes" in msg
     assert "inflated" in msg
+
+
+# ======================================================================================
+# Scoping: the check is about TOKEN arrays, not every fixed-width payload.
+# ======================================================================================
+#
+# BUG-2 from the Phase 1 review. The check filtered only on `container in
+# FIXED_WIDTH_CONTAINERS` ({"raw"}) and a truthy dtype_size, so ANY raw fixed-width entry in a
+# group carrying a tokenizer dependency got a *vocab* bound applied to it — including float16
+# activations and uint8 blobs, which have nothing to do with token ids. `verify_arithmetic`
+# already scopes itself with FIXED_WIDTH_UNITS; this now mirrors it.
+
+_DOLMA2 = {"vocab_size": DOLMA2_VOCAB}
+
+
+def _check_one(path: str, dtype: str, size: int, unit: str | None, value: int = 1000):
+    entry = ManifestEntry.from_dict({
+        "path": path, "sha256": "a" * 64, "bytes": value * size,
+        "count": {"unit": unit, "value": value} if unit else None,
+        "format": {"container": "raw", "dtype": dtype, "byte_order": "little",
+                   "header_bytes": 0, "codec": "none"},
+    })
+    v: list = []
+    _check_dtype_width_vs_vocab([entry], _DOLMA2, v, "g")
+    return [x.code for x in v]
+
+
+@pytest.mark.parametrize(
+    "path,dtype,size,unit",
+    [
+        ("probe/act-00000.f16le.bin", "float16", 2, "items"),
+        ("raw/blob-00000.u8.bin", "uint8", 1, "bytes"),
+        ("tokens/train-00000.u16le.bin", "uint16", 2, None),  # a sentinel with no honest count
+    ],
+)
+def test_a_non_token_payload_does_not_get_a_token_vocab_bound(path, dtype, size, unit):
+    """A group may legitimately carry a fixed-width sidecar that is not tokens."""
+    assert _check_one(path, dtype, size, unit) == []
+
+
+def test_a_real_uint16_token_array_is_still_rejected():
+    """Scoping must not have disarmed the check for the case it exists to catch."""
+    assert _check_one("tokens/train-00000.u16le.bin", "uint16", 2, "tokens") == [
+        "dtype-too-narrow-for-vocab"
+    ]
+
+
+def test_indices_count_as_a_fixed_width_unit_too():
+    """token-order/v1 stores index vectors; the same width logic applies."""
+    assert _check_one("order/train-00000.u16le.bin", "uint16", 2, "indices") == [
+        "dtype-too-narrow-for-vocab"
+    ]
+
+
+def test_a_bool_vocab_size_does_not_silently_disable_the_check():
+    """BUG-3: isinstance(True, int) is True in Python, so True would give required=1."""
+    entry = ManifestEntry.from_dict({
+        "path": "tokens/train-00000.u16le.bin", "sha256": "a" * 64, "bytes": 2000,
+        "count": {"unit": "tokens", "value": 1000},
+        "format": {"container": "raw", "dtype": "uint16", "byte_order": "little",
+                   "header_bytes": 0, "codec": "none"},
+    })
+    v: list = []
+    _check_dtype_width_vs_vocab([entry], {"vocab_size": True}, v, "g")
+    # treated as absent (no derived vocab to compare against), NOT as vocab_size=1
+    assert v == []
