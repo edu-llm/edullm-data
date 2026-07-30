@@ -17,14 +17,26 @@ the standard wins and this package has a bug.
 
 ## What is in `s3://edullm-data` right now
 
-One dataset. **11 objects, 6.5 MiB** (as of 2026-07-29):
+Two datasets. **6,927 objects, 586.6 GiB** (as of 2026-07-30):
 
 | Dataset | Contents |
 | --- | --- |
-| `tokenizer/dolma2-bpe/v1` | `allenai/dolma2-tokenizer` — tokenizer.json, merges.txt, vocab.json, configs. `vocab_size 100278` / `eos 100257` **derived** from tokenizer.json, never typed. |
+| `pretrain/olmo-150b-dolma2/v1` | **157,467,202,883 dolma2 tokens** across 6,911 headerless uint32 shards — 6,851 `train` + 60 `val`. One `tokens/` group nested `<source>/<domain>/`, so every shard's provenance is in its key and mirrored into `entry.labels` (which Gate A recomputes from that key). 6 sources / 65 source-domain strata. |
+| `tokenizer/dolma2-bpe/v1` | `allenai/dolma2-tokenizer` — tokenizer.json, merges.txt, vocab.json, configs. `vocab_size 100278` / `eos 100257` **derived** from tokenizer.json, never typed. The corpus above pins it by `manifest_sha256`. |
 
-**There is currently no pretrain corpus.** `pretrain/olmo-mix-1124-31b/v1` (31.3B tokens, 218 shards)
-was deleted on 2026-07-29: it had no `val` split and, being frozen, could not gain one, so under
+Read it the way a trainer does — **always pass `r.dtype` to the loader**, because OLMo-core
+defaults to `uint16` and reading these `uint32` shards as `uint16` does not raise, it silently
+doubles the token count:
+
+```python
+r = dataset_paths("pretrain/olmo-150b-dolma2", "v1")   # trainable data only
+r.dtype        # "uint32"   -> pass this explicitly
+r.numpy_dtype  # "<u4"      -> little-endian is explicit; np.dtype("uint32") is host order
+r.train, r.val # 6,851 and 60 shards, disjoint
+```
+
+An earlier corpus, `pretrain/olmo-mix-1124-31b/v1` (31.3B tokens, 218 shards), was deleted on
+2026-07-29: it had no `val` split and, being frozen, could not gain one, so under
 validation-required-by-default it failed permanently. Its bytes remain recoverable two ways — a
 byte-identical legacy copy at `s3://edullm-datasets/olmo30b/` (218 `.npy` shards,
 125,336,003,336 bytes) and 342 noncurrent versions in the bucket itself.
