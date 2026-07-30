@@ -17,6 +17,7 @@ corpus size. ``get_range`` keeps it flat.
 
 from __future__ import annotations
 
+import hashlib
 import io
 from typing import Protocol, runtime_checkable
 
@@ -292,7 +293,18 @@ class FakeS3:
         if (bucket, key) not in self._store:
             raise NotFound(f"s3://{bucket}/{key}")
         body = self._store[(bucket, key)]
-        base = {"size": len(body), "crc64nvme": None, "etag": None, "content_type": None}
+        base = {
+            "size": len(body),
+            # A CONTENT-DERIVED stand-in for S3's stored CRC64NVME, not the real polynomial.
+            # It has to be derived from the bytes for the fake to model the property that
+            # matters: real S3 RECOMPUTES the checksum on CopyObject and on any overwrite, so a
+            # same-length replacement changes it. A hardcoded None made
+            # fsck._check_crc64nvme untestable and a constant would have made it vacuous.
+            # Truncated + labelled so nobody mistakes it for a real CRC64NVME value.
+            "crc64nvme": "fake64:" + hashlib.sha256(body).hexdigest()[:16],
+            "etag": None,
+            "content_type": None,
+        }
         base.update(self._head_overrides.get((bucket, key), {}))
         return base
 

@@ -253,6 +253,57 @@ mcp__sb-aws__aws(account="sbsandbox", command=[
 ])
 ```
 
+### Deploying the split Delete Deny (policy v2 — PENDING)
+
+`02-bucket-policy.json` in this repo is now **v2** (`Id: edullm-data-airlock-v2`, three
+statements). The live bucket still carries v1. Applying it is the ordinary
+`put-bucket-policy` call below — but understand what changes before you run it.
+
+**What v1 got wrong.** One Deny covered `PutObject` *and* `DeleteObject`/`DeleteObjectVersion`,
+and exempted `<BATCH_JOB_ROLE>` + `<INFRA_DEPLOYER_ROLE>` from **all five actions**. So the
+bucket policy permitted the validator to delete published data, and the only thing stopping it
+was that `03-validator-policy.json` grants `PutObject` and not `Delete*`.
+
+That is an *identity* policy on a role whose inline policies are editable with
+`iam:PutRolePolicy` — which the intern session has (see §"the simulator lies"). One
+`put-role-policy` call away from a principal that can erase a published, frozen dataset.
+"Frozen means frozen" was resting on the wrong kind of control.
+
+**v2 splits it in two:**
+
+| Sid | Actions | Exempt |
+| --- | --- | --- |
+| `OnlyValidatorWrites` | `PutObject`, `PutObjectTagging`, `AbortMultipartUpload` | validator + deployer |
+| `NobodyDeletesPublishedData` | `DeleteObject`, `DeleteObjectVersion` | **nobody** |
+
+A resource-based Deny with no principal exemption cannot be escaped by editing any identity
+policy, because an explicit Deny always wins. This is Object Lock's guarantee without Object
+Lock's four failure modes (§"why not Object Lock").
+
+**Consequences to accept before applying:**
+
+- **Deleting a published dataset becomes a two-step, deliberate act**: edit the bucket policy
+  first, then delete. That is the point — it cannot happen as a side effect of a buggy job.
+- **Lifecycle expiry still works.** Lifecycle runs as the S3 service, and every statement
+  carries `BoolIfExists aws:PrincipalIsAWSService=false`. `edullm-data` has no expiry rule
+  anyway; landing's is on a different bucket and unaffected.
+- **`AbortMultipartUpload` stays on the write side deliberately.** It is cleanup of an
+  in-flight upload, not deletion of published data, and the validator needs it to retry a
+  failed large copy.
+- **Planned deletion of the 31B corpus will require this two-step.** That is a real cost and
+  the correct one; note it in the deletion runbook when that happens.
+
+Verify after applying — the Deny must now fire for the validator role too, not just interns:
+
+```
+mcp__sb-aws__aws(account="sbsandbox", command=[
+  "s3api","get-bucket-policy","--bucket","edullm-data","--output","text"
+])
+```
+
+Expect three statements and `edullm-data-airlock-v2`. Then re-run the intern `PutObject` check
+below; it must still be an explicit deny (v2 must not have widened write access by accident).
+
 ### Before you run this, re-read the three footguns
 
 JSON cannot carry comments, so `02-bucket-policy.json` is bare. §1's warnings, restated:
@@ -261,7 +312,8 @@ JSON cannot carry comments, so `02-bucket-policy.json` is bare. §1's warnings, 
    `arn:aws:sts::<ACCOUNT_ID>:assumed-role/Role/session` makes the condition *always true* and the Deny
    fires on **everyone**, including you. The file has the `arn:aws:iam::…:role/…` form. Keep it.
 2. **Never `s3:*` or `s3:Put*` in the Deny.** That catches `PutBucketPolicy` itself — a hard lockout
-   that binds root and needs AWS Support to undo. The file lists five data-plane actions only.
+   that binds root and needs AWS Support to undo. The file lists five data-plane actions only,
+   now split across two Deny statements (three write actions + two delete actions).
 3. **`ArnNotEqualsIfExists`, not `ArnNotEquals`.** The `IfExists` suffix matters for requests where
    `aws:PrincipalArn` is absent.
 
@@ -678,5 +730,42 @@ and `iam:CreateRole` is denied, so deleting it would be unrecoverable from an in
 | Enabled EventBridge rule | Two reasons, both real: `BatchParameters` cannot express `containerOverrides` *or* pass `detail.object.key`, and `<BATCH_JOB_ROLE>` is not assumable by `events.amazonaws.com` (use `<EVENTBRIDGE_INVOKE_ROLE>` as the rule's `RoleArn` — verified to trust `events.amazonaws.com`). Enable only once the self-discovering job definition exists. See step 5. |
 | DLQ on the rule target | `sqs:CreateQueue` not in §1's verified table. Watch `FailedInvocations` until it exists. |
 | S3 Inventory on `edullm-data` | §13 step 10, after the package. |
-| `wu-fsck` schedule (Gate B) | §13 step 11. Needs the package. Owner: Eric Wu — §7 is explicit that an unowned nightly job gets muted and becomes decoration. |
+| `wu-fsck` schedule (Gate B) | §13 step 11. Needs the package. Owner: Eric Wu — §7 is explicit that an unowned recurring job gets muted and becomes decoration. **Cadence is WEEKLY** (see below); the rule currently live in EventBridge is still the nightly `cron(6 9 * * ? *)` and is NOT changed by a code deploy. |
 | Object Lock | §10 rejects it: protects a version not a path, blocks lifecycle, irreversible. |
+
+---
+
+## wu-fsck cadence — nightly → weekly (MANUAL, not covered by a code deploy)
+
+`fsck.py` now documents itself as a **weekly** sweep. That is a code/doc change only. The live
+schedule rule is EventBridge state, so **nothing in a package release moves it** — a released wheel
+with the new docstring and an unchanged rule will still fire every night.
+
+The rule currently deployed and ENABLED is:
+
+| | |
+|---|---|
+| Name | `edullm-wu-fsck-nightly` |
+| Schedule | `cron(6 9 * * ? *)` UTC (04:06 local), i.e. daily |
+| Target | the `edullm-fsck` Batch job definition |
+| Owner | Eric Wu (in the name, deliberately — ownership transfers by renaming, not by editing a field) |
+
+To move it, from a session with `events:PutRule`:
+
+```
+events put-rule --name edullm-wu-fsck-nightly \
+  --schedule-expression "cron(6 9 ? * MON *)" --state ENABLED
+```
+
+`cron(6 9 ? * MON *)` = Mondays 09:06 UTC. Keep the same minute/hour so a comparison against the
+old runs is like-for-like.
+
+**The name should be renamed too** (`edullm-wu-fsck-weekly`), but renaming an EventBridge rule means
+delete + recreate *with its target re-attached*, and the target `RoleArn` question in step 5 applies —
+so changing only the schedule expression is the smaller move. If you do rename it, keep `wu-` in the
+name: the owner prefix is the mechanism that stops this becoming an unowned job that gets muted.
+
+Rationale for weekly is in `fsck.py`'s module docstring: every fact the sweep re-checks changes only
+when something mutates a frozen prefix or another dataset's lifecycle. Those are rare and no more
+urgent at 24-hour granularity than at 7-day, and nightly bought seven times the false-alarm exposure
+for the same information.

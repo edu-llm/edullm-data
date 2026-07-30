@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
-from .contracts import SCHEMA_VERSION, canonical_json, sha256_bytes
+from .contracts import SCHEMA_VERSION, SPLITS, canonical_json, sha256_bytes
 
 __all__ = [
     "DTYPE_SIZES",
@@ -208,6 +208,15 @@ class ManifestEntry:
     bytes: int
     count: dict[str, Any] | None = None
     format: Format = field(default_factory=lambda: Format(container="raw"))
+    #: Which split this object belongs to, from the closed vocabulary in ``contracts.SPLITS``.
+    #: ``None`` on a v1 manifest (the field did not exist) and on an object that has no split —
+    #: a tokenizer file or a vendored blob. A v2 manifest for a split-bearing group declares it
+    #: on every entry, and Gate A recomputes it from the filename, so it cannot be faked.
+    split: str | None = None
+    #: Free-form slice labels, e.g. ``{"source": "arxiv", "domain": "science"}``. Flat and
+    #: string-valued ONLY, deliberately: a partition selects by exact label match, so a nested
+    #: or richly-typed value would need a query language and a validator nobody has written.
+    labels: dict[str, str] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.path, str) or not self.path:
@@ -255,6 +264,38 @@ class ManifestEntry:
         if not isinstance(self.format, Format):
             raise ValueError(f"entry.format for {self.path!r} must be a Format")
 
+        if self.split is not None:
+            if not isinstance(self.split, str):
+                raise ValueError(f"entry.split for {self.path!r} must be a string or null")
+            if self.split not in SPLITS:
+                raise ValueError(
+                    f"entry.split for {self.path!r} must be one of {sorted(SPLITS)}; "
+                    f"got {self.split!r}. The vocabulary is closed so that 'is this trainable?' "
+                    f"is a lookup rather than a guess — a substring test over free-form names "
+                    f"misreads 'trainval' as held-out and rejects 'dev' outright."
+                )
+
+        if self.labels is not None:
+            if not isinstance(self.labels, Mapping):
+                raise ValueError(f"entry.labels for {self.path!r} must be an object or null")
+            for key, val in self.labels.items():
+                if not isinstance(key, str) or not key:
+                    raise ValueError(
+                        f"entry.labels for {self.path!r} has a non-string or empty key {key!r}"
+                    )
+                if key == "split":
+                    raise ValueError(
+                        f"entry.labels for {self.path!r} must not carry a 'split' key — split is "
+                        f"a reserved top-level field, and two places to state it is two places "
+                        f"to disagree"
+                    )
+                if not isinstance(val, str):
+                    raise ValueError(
+                        f"entry.labels[{key!r}] for {self.path!r} must be a string; got "
+                        f"{type(val).__name__}. Labels are flat strings so a partition can "
+                        f"select by exact match without a query language."
+                    )
+
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
             "path": self.path,
@@ -266,25 +307,38 @@ class ManifestEntry:
         # invites a reader to treat "no honest count" as "count of nothing".
         if self.count is not None:
             d["count"] = {"unit": self.count["unit"], "value": self.count["value"]}
+        # Same reasoning for the v2 fields, and one more: omitting them keeps a v1-shaped
+        # dataset's manifest BYTE-IDENTICAL after the schema bump, so `manifest_sha256` does
+        # not move and an already-published dataset is not retroactively invalidated.
+        if self.split is not None:
+            d["split"] = self.split
+        if self.labels:
+            d["labels"] = {k: self.labels[k] for k in sorted(self.labels)}
         return d
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> "ManifestEntry":
         if not isinstance(d, Mapping):
             raise ValueError(f"manifest entry must be an object; got {type(d).__name__}")
-        unknown = set(d) - {"path", "sha256", "bytes", "count", "format"}
+        unknown = set(d) - {"path", "sha256", "bytes", "count", "format", "split", "labels"}
         if unknown:
             raise ValueError(f"manifest entry has unknown key(s) {sorted(unknown)}")
         for required in ("path", "sha256", "bytes", "format"):
             if required not in d:
                 raise ValueError(f"manifest entry is missing required key {required!r}")
         count = d.get("count")
+        labels = d.get("labels")
         return cls(
             path=d["path"],
             sha256=d["sha256"],
             bytes=d["bytes"],
             count=dict(count) if isinstance(count, Mapping) else count,
             format=Format.from_dict(d["format"]),
+            # A v1 manifest has neither field. Reading it as "split unknown, no labels" rather
+            # than rejecting it is the compatibility rule CONTRIBUTING states: a field added in
+            # v2 must not retroactively invalidate every v1 dataset.
+            split=d.get("split"),
+            labels=dict(labels) if isinstance(labels, Mapping) else labels,
         )
 
 
@@ -539,8 +593,13 @@ def verify_arithmetic(entry: ManifestEntry) -> list[str]:
             f"{dtype_size} bytes/{entry.format.dtype}"
             + (f" + {entry.format.header_bytes} header bytes" if entry.format.header_bytes else "")
             + f" = {expected_bytes}, but bytes={entry.bytes} "
-            f"({delta:+d}). Either the count is wrong, the dtype is wrong "
-            f"(uint16-vs-uint32 halves the count), or the object is truncated"
+            f"({delta:+d}). The object is truncated (or grew) relative to the declared "
+            f"count, or its size is not a whole multiple of the item width — a raw "
+            f"fixed-width array must end on an element boundary. This is NOT a dtype "
+            f"check: publish() derives count = bytes // dtype_size (publish.py:134), so "
+            f"the identity collapses to bytes % dtype_size == 0, which uint16 and uint32 "
+            f"satisfy equally for the same bytes. A too-narrow dtype is caught separately, "
+            f"by 'dtype-too-narrow-for-vocab' against the tokenizer's derived vocab_size"
         )
     return violations
 

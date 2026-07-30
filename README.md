@@ -75,7 +75,7 @@ edullm-data/                    ← git root
 │   ├── read.py                 dataset_paths() reader                            done
 │   ├── validate.py             Gate A + promote() (writes the generated README)  done
 │   ├── readme.py               render_readme() — README generated from dataset.json  done
-│   ├── fsck.py                 wu-fsck, Gate B, nightly integrity re-check       done
+│   ├── fsck.py                 wu-fsck, Gate B, weekly integrity re-check        done
 │   └── profiles/
 │       ├── base.py             Violation / GroupContext / sample_offsets         done
 │       ├── registry.py         profile lookup by name                            done
@@ -102,7 +102,7 @@ edullm-data/                    ← git root
 | 8 | six `family.json` files | done |
 | 9 | event wiring (EventBridge on landing → Batch queue), deployed DISABLED | **done — deployed live** |
 | 10 | S3 Inventory on `edullm-data` | **done — deployed live** |
-| 11 | `wu-fsck` (Gate B), nightly, owner **Eric Wu** | done (code); scheduling TODO |
+| 11 | `wu-fsck` (Gate B), weekly, owner **Eric Wu** | done (code); re-scheduling TODO |
 | 12 | generate the agent skill from the profile registry | todo |
 
 **One packaging step remains before the validator runs in-cluster** (`infra/05-validator-jobdef.md`):
@@ -110,5 +110,11 @@ the container needs the package, which requires either a Docker host + ECR push,
 `pip install` from — neither available from the build workstation. The wheel builds cleanly; two deploy
 paths are documented. The airlock itself is proven end-to-end (live promotion test).
 
-`wu-fsck` is named for its owner deliberately — an unowned nightly job gets muted after its first false
-alarm. Ownership transfers by renaming the job, not by editing a config field.
+`wu-fsck` is named for its owner deliberately — an unowned recurring job gets muted after its first
+false alarm. Ownership transfers by renaming the job, not by editing a config field.
+
+It runs **weekly**, not nightly. Every fact it re-checks (an object deleted or truncated, a payload
+overwritten at the same length, a `depends_on` parent republished or removed, an ECR image expired)
+changes only when something mutates a frozen prefix or another dataset's lifecycle — rare, and no more
+urgent at 24-hour granularity than at 7-day. The sweep is cheap either way; the scarce resource is the
+owner's attention, and nightly spent it seven times over for the same information.

@@ -15,13 +15,27 @@ someone points it at a landing prefix or a hand-assembled directory.
 from __future__ import annotations
 
 import fnmatch
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, Mapping
 
-from .manifest import ManifestEntry
+from .contracts import SPLITS, is_trainable
+from .manifest import ManifestEntry, parse_shard_name
 from .s3 import S3, NotFound
 
 DATA_BUCKET = "edullm-data"
+
+#: dtype name -> numpy type CHARACTER, for building a byte-order-qualified dtype string.
+#: Necessary because numpy accepts ``"<u4"`` but REJECTS ``"<uint32"`` — the long names carry
+#: no order prefix. Verified: ``np.dtype("<uint32")`` raises "data type not understood".
+#: A name absent from this map falls through unqualified rather than producing a string numpy
+#: would reject.
+_NUMPY_CHAR = {
+    "uint8": "u1", "int8": "i1",
+    "uint16": "u2", "int16": "i2",
+    "uint32": "u4", "int32": "i4",
+    "uint64": "u8", "int64": "i8",
+    "float16": "f2", "float32": "f4", "float64": "f8",
+}
 
 
 class ReadError(RuntimeError):
@@ -30,6 +44,37 @@ class ReadError(RuntimeError):
 
 class NotValidated(ReadError):
     """The prefix carries no validation marker — refuse to read (§9)."""
+
+
+class SealMismatch(ReadError):
+    """The dataset's bytes do not match the seal written when it was validated.
+
+    Distinct from :class:`NotValidated`: the marker IS there, and it disagrees with what is on
+    the shelf. That is a stronger signal than absence — something changed a frozen dataset.
+    """
+
+
+class MixedFormat(ReadError):
+    """A group's fixed-width shards do not agree on how to decode them.
+
+    RAISED rather than reported as a ``dtype=None`` / ``"mixed"`` value, which is what this
+    used to do. The reason is that there is nothing a caller can *do* with the softer answer:
+    ``ResolvedSplit`` hands back ONE dtype for the whole group because a loader memmaps the
+    shards as one array, so "these shards are uint16 and those are uint32" has no valid
+    resolution — a caller receiving it must either raise itself or pick one, and picking one is
+    precisely the silent-halving bug this module exists to prevent (§5, and the module
+    docstring: OLMo-core's ``uint16`` default). ``dtype=None`` was the worst of both: it looks
+    like the legitimate "this container carries its own typing" answer, so it flows into a
+    loader and gets defaulted.
+
+    The recourse is structural and already in the standard: put the differently-typed shards in
+    separate GROUPS and pass ``group=``. That is what groups are for, and it makes the choice
+    visible in a training config instead of resolved by a coin flip.
+
+    Note that a group whose entries ALL carry no dtype (parquet, jsonl, a tokenizer tree, a
+    vendored directory) is not mixed and does not raise — ``dtype`` is legitimately ``None``
+    there, because the container does its own typing.
+    """
 
 
 @dataclass
@@ -46,6 +91,68 @@ class ResolvedSplit:
     dtype: str | None
     rows: int | None
     kwargs: dict[str, Any]
+    #: ``"little"`` / ``"big"``, or ``None`` for a container that carries its own typing.
+    #:
+    #: Carried because the manifest declares it and DISCARDING it made the reader lossy in the
+    #: one way that silently corrupts data: ``np.memmap(path, dtype="uint32")`` uses the HOST's
+    #: byte order, so a big-endian shard read on a little-endian host (or the reverse) decodes
+    #: every token to a different, in-range-looking id. Nothing downstream notices — the token
+    #: count is right, the ids are plausible, the loss curve is merely bad. ``dtype`` alone is
+    #: not enough to read the bytes correctly; see :attr:`numpy_dtype`.
+    byte_order: str | None = None
+    #: Leading bytes to skip before the first element (0 for the headerless ``.u32le.bin``
+    #: form). A ``.npy``-style header is nonzero, and a reader that memmaps from offset 0
+    #: decodes the header AS DATA — the exact ".npy lie" the standard was written against. A
+    #: loader must honour this; it is not decoration.
+    header_bytes: int = 0
+    #: Every declared split, keyed by name — ``{"train": [...uris], "val": [...uris]}``.
+    #:
+    #: A dataset returns BOTH by default, which is what a run actually needs (train for the
+    #: dataset config, val for the eval callback). They are kept SEPARATE rather than
+    #: concatenated into ``paths`` because a flat list is precisely the bug: a caller cannot
+    #: tell the two apart, so held-out shards end up in training with nothing to notice.
+    splits: dict[str, list[str]] = field(default_factory=dict)
+    #: Per-split declared row counts, same keys as ``splits``.
+    split_rows: dict[str, int | None] = field(default_factory=dict)
+
+    @property
+    def train(self) -> list[str]:
+        """The trainable URIs. Empty if this dataset declares no trainable split."""
+        return [p for name, ps in self.splits.items() if is_trainable(name) for p in ps]
+
+    @property
+    def val(self) -> list[str] | None:
+        """Held-out URIs, or ``None`` when the dataset has none.
+
+        ``None`` rather than ``[]`` on purpose: "this dataset has no validation data" and "the
+        validation split is empty" are different facts, and a caller that wants to branch on
+        the first should not have to guess. Never raises — asking is not an error.
+        """
+        held = [p for name, ps in self.splits.items() if not is_trainable(name) for p in ps]
+        return held or None
+
+    def has_split(self, name: str) -> bool:
+        return name in self.splits
+
+    @property
+    def numpy_dtype(self) -> str | None:
+        """``dtype`` and ``byte_order`` combined into a numpy dtype string — ``"<u4"``, ``">u4"``.
+
+        The whole point of carrying ``byte_order`` is that it must reach the loader, and a
+        caller doing ``np.dtype(r.dtype)`` gets NATIVE order, which is only accidentally
+        correct. This is the string that is correct on any host: pass it straight to
+        ``np.dtype`` / ``np.memmap(..., dtype=...)``.
+
+        ``None`` when there is no fixed-width dtype (a container that types itself). Falls back
+        to the bare dtype name when the manifest declared no byte order, which is honest —
+        that dataset genuinely does not say, so native is the only available reading.
+        """
+        if self.dtype is None:
+            return None
+        prefix = {"little": "<", "big": ">"}.get(self.byte_order or "")
+        if not prefix:
+            return self.dtype
+        return prefix + _NUMPY_CHAR.get(self.dtype, self.dtype)
 
 
 def _load_json(s3: S3, bucket: str, key: str) -> Any:
@@ -76,15 +183,52 @@ def dataset_paths(
     data_bucket: str = DATA_BUCKET,
     require_validated: bool = True,
     group: str | None = None,
+    include_held_out: bool = False,
 ) -> ResolvedSplit:
-    """Resolve a dataset (optionally one split) to concrete object URIs + dtype.
+    """Resolve a dataset to concrete object URIs + dtype.
 
     ``group`` selects which payload group when a dataset has several; defaults to the single
     group if there is exactly one, else raises so the caller is explicit about what they read.
+
+    **``split=None`` returns TRAINABLE data only**, and every declared split separately in
+    ``.splits`` / ``.train`` / ``.val``. Returning everything — which is what this used to do —
+    hands a trainer its own held-out shards with no way to tell them apart. Silence means the
+    safe subset.
+
+    A dataset that declares no trainable split at all (a tokenizer, a vendored tree, an eval
+    set) returns everything: there is nothing to protect, and the whole artifact is the payload.
+
+    ``include_held_out=True`` opts back into the old behaviour for the rare deliberate case.
+    It is spelled out so it shows up in a code review of a training config.
+
+    Asking for a split the dataset does not have returns an EMPTY result rather than raising,
+    so "does this have validation data?" is a question, not an exception. A split outside the
+    vocabulary is still an error.
     """
     prefix = f"{dataset_id}/{version}"
     if require_validated:
         _require_validated(s3, data_bucket, prefix)
+        # RECOMPUTE the seal, do not merely observe that it exists. A marker whose presence is
+        # the only thing checked is the decoration this standard exists to remove: rooting the
+        # hash chain buys nothing if no read path verifies it.
+        #
+        # This catches the tampering that matters most here — a rewritten dataset.json whose
+        # train and val globs have been SWAPPED. The marker is present, every group manifest is
+        # intact, and `split="train"` hands back the val shards. Two small GETs per group, no
+        # payload bytes.
+        #
+        # A pre-root seal (written before dataset_sha256 existed) is unverifiable rather than
+        # invalid, so it is reported and allowed through: refusing would make every
+        # already-published dataset unreadable, which is the retroactive invalidation the
+        # standard forbids.
+        problems = [p for p in verify_seal(dataset_id, version, s3=s3, data_bucket=data_bucket)
+                    if "no dataset_sha256" not in p]
+        if problems:
+            raise SealMismatch(
+                f"{data_bucket}/{prefix} does not match its own seal — refusing to read:\n  "
+                + "\n  ".join(problems)
+                + "\nThe dataset was altered after it was validated. Do not train on it."
+            )
 
     try:
         ds = _load_json(s3, data_bucket, f"{prefix}/dataset.json")
@@ -111,34 +255,95 @@ def dataset_paths(
     manifest = _load_json(s3, data_bucket, f"{prefix}/{chosen.get('manifest', f'{gname}/manifest.json')}")
     entries = [ManifestEntry.from_dict(e) for e in manifest.get("entries", [])]
 
-    # dtype: uniform across the group's raw shards, read from the manifest, never inferred
-    dtypes = {e.format.dtype for e in entries if e.format.dtype}
-    dtype = dtypes.pop() if len(dtypes) == 1 else None
+    # The FULL format triple, read from the manifest and never inferred (§5). dtype alone does
+    # not let a caller read the bytes: byte_order decides how each element is assembled and
+    # header_bytes decides where the elements start. Both were being dropped on the floor here
+    # while the manifest declared them.
+    dtype, byte_order, header_bytes = _resolve_format(entries, prefix, gname)
 
-    # split selection via the group's partitions (path form resolvable here; field/range/
-    # indices need the row-level machinery a loader applies, so we return all paths + note it)
-    selected = entries
+    def _uri(entry: Any) -> str:
+        return f"s3://{data_bucket}/{prefix}/{entry.path}"
+
+    def _select(part: Mapping[str, Any]) -> tuple[list[Any], dict[str, Any]]:
+        """Entries belonging to one partition, plus any loader kwargs it implies."""
+        if part.get("by") == "path":
+            glob = part.get("glob", "")
+            return [
+                e for e in entries
+                if fnmatch.fnmatch(e.path.rsplit("/", 1)[-1], glob) or fnmatch.fnmatch(e.path, glob)
+            ], {}
+        # field/range/indices: the split is a row predicate, not a file subset. Return all
+        # shards plus the predicate so the loader applies it — never silently return the whole
+        # set as if it were the split.
+        return list(entries), {"row_predicate": {k: part[k] for k in part if k not in {"name"}}}
+
+    # Resolve EVERY declared split, always. This is what makes "a dataset returns train and
+    # val" true without flattening them together.
+    declared = [p for p in (chosen.get("partitions") or []) if isinstance(p, Mapping) and p.get("name")]
+    splits: dict[str, list[str]] = {}
+    split_rows: dict[str, int | None] = {}
+    for part in declared:
+        name = str(part["name"])
+        sel, _ = _select(part)
+        splits[name] = [_uri(e) for e in sel]
+        split_rows[name] = part.get("rows")
+
     rows: int | None = None
     kwargs: dict[str, Any] = {}
     if split is not None:
         part = _find_partition(chosen, split)
         if part is None:
-            raise ReadError(f"split {split!r} not declared in group {gname!r} partitions")
+            # Deliberately NOT an error when the dataset simply has no such split: asking "does
+            # this have validation data?" must not require catching an exception. An unknown
+            # word — one outside the vocabulary — is still a mistake worth reporting.
+            if split in SPLITS:
+                return ResolvedSplit(
+                    dataset_id=dataset_id, version=version, split=split, paths=[], dtype=dtype,
+                    rows=None, kwargs={}, splits=splits, split_rows=split_rows,
+                    byte_order=byte_order, header_bytes=header_bytes,
+                )
+            raise ReadError(
+                f"split {split!r} is not in the vocabulary {sorted(SPLITS)}; group {gname!r} "
+                f"declares {sorted(splits)}"
+            )
         rows = part.get("rows")
-        by = part.get("by")
-        if by == "path":
-            glob = part.get("glob", "")
-            selected = [
-                e for e in entries
-                if fnmatch.fnmatch(e.path.rsplit("/", 1)[-1], glob) or fnmatch.fnmatch(e.path, glob)
-            ]
+        selected, kwargs = _select(part)
+    else:
+        # THE V9 FIX. This used to return every entry, so a caller who asked for no split in
+        # particular was handed the held-out shards along with the training ones and had no way
+        # to tell which was which — i.e. train on your own validation set, silently.
+        #
+        # Now: trainable data only. Silence means the SAFE subset, never "everything".
+        trainable = [name for name in splits if is_trainable(name)]
+        if trainable:
+            if not include_held_out:
+                selected = [e for name in trainable for e in _select(_find_partition(chosen, name))[0]]
+            else:
+                selected = list(entries)
         else:
-            # field/range/indices: the split is a row predicate, not a file subset. Return
-            # all shards plus the predicate so the loader applies it — never silently return
-            # the whole set as if it were the split.
-            kwargs["row_predicate"] = {k: part[k] for k in part if k not in {"name"}}
+            # No trainable split DECLARED — a tokenizer, a vendored tree, an eval set. There is
+            # normally nothing to protect here, so the whole artifact is the payload.
+            selected = list(entries)
 
-    paths = [f"s3://{data_bucket}/{prefix}/{e.path}" for e in selected]
+        if not include_held_out:
+            # RECOMPUTE from the bytes' own names, do not trust the declaration. Everything
+            # above reasons from declared partition NAMES, which is a claim in dataset.json —
+            # and every way that claim can be wrong (a val-only partition, an empty or malformed
+            # partitions list, a partition with no name, a `by: field` partition that selects
+            # every shard, a group whose val shards nobody declared) ends with held-out data
+            # inside the trainable set.
+            #
+            # A filename that parses to a non-trainable split is dropped regardless of what was
+            # declared. Names that do not parse as shards are kept, so tokenizer files and
+            # vendored trees are unaffected.
+            selected = [
+                e for e in selected
+                if (parsed := parse_shard_name(e.path)) is None
+                or parsed[0] not in SPLITS
+                or is_trainable(parsed[0])
+            ]
+
+    paths = [_uri(e) for e in selected]
     return ResolvedSplit(
         dataset_id=dataset_id,
         version=version,
@@ -147,6 +352,45 @@ def dataset_paths(
         dtype=dtype,
         rows=rows,
         kwargs=kwargs,
+        splits=splits,
+        split_rows=split_rows,
+        byte_order=byte_order,
+        header_bytes=header_bytes,
+    )
+
+
+def _resolve_format(
+    entries: list[Any], prefix: str, gname: str
+) -> tuple[str | None, str | None, int]:
+    """The one ``(dtype, byte_order, header_bytes)`` that describes every fixed-width shard in a
+    group — or :class:`MixedFormat` if there is no such single answer.
+
+    DISAGREEMENT IS AN ERROR, not a ``None``. See :class:`MixedFormat`: the caller gets one
+    triple because the loader memmaps the group as one array, so an ambiguous group has no
+    correct single answer and the softer signals (``None``, ``"mixed"``) are indistinguishable
+    from the legitimate "container types itself" answer and get defaulted by the loader.
+
+    Only fixed-width entries participate: an entry with ``dtype=None`` is a self-typing
+    container (parquet/jsonl/csv/text) or a tokenizer/vendored file and makes no claim, so it
+    can neither set nor contradict the group's dtype. A group of ONLY such entries resolves to
+    ``(None, None, 0)`` — legitimately untyped, not mixed.
+
+    ``header_bytes`` is checked alongside dtype for the same reason: two shards with the same
+    dtype but different header sizes cannot be read by one memmap stride either, and a
+    disagreement there is the ".npy lie" shape (some shards headerless, some not).
+    """
+    typed = [e for e in entries if e.format.dtype]
+    if not typed:
+        return None, None, 0
+    triples = {(e.format.dtype, e.format.byte_order, e.format.header_bytes) for e in typed}
+    if len(triples) == 1:
+        return triples.pop()
+    raise MixedFormat(
+        f"{prefix} group {gname!r} declares {len(triples)} different fixed-width formats "
+        f"{sorted(str(t) for t in triples)}; there is no single dtype/byte_order/header_bytes "
+        f"that reads all of its shards. A loader memmaps a group as one array, so this cannot "
+        f"be resolved here — split the differently-typed shards into separate groups and select "
+        f"one with group=."
     )
 
 
@@ -171,4 +415,92 @@ def resolve_latest(dataset_id: str, *, s3: S3, data_bucket: str = DATA_BUCKET) -
     return f"v{highest}" if found else None
 
 
-__all__ = ["dataset_paths", "resolve_latest", "ResolvedSplit", "ReadError", "NotValidated"]
+def verify_seal(
+    dataset_id: str,
+    version: str,
+    *,
+    s3: S3,
+    data_bucket: str = DATA_BUCKET,
+) -> list[str]:
+    """Recompute the sealed hashes and report every mismatch. Empty list = intact.
+
+    The seal written by ``promote()`` carries ``dataset_sha256`` (the root) and each group's
+    ``manifest_sha256``. This walks the chain the way a verifier should: recompute
+    ``sha256(dataset.json)`` from the bytes and compare to the root; then, for each group in
+    that file, recompute ``sha256(manifest.json)`` and compare to both the seal's copy and
+    ``dataset.json``'s own copy. Payload digests hang off the manifests from there.
+
+    Recompute, never trust — a seal that merely asserts "someone validated this" is
+    decoration. This is the check that makes "frozen means frozen" falsifiable, and it is
+    cheap: two small GETs per group, no payload bytes.
+
+    Returns human-readable mismatch descriptions rather than raising, so a caller can report
+    all of them at once (an fsck sweep wants the full picture, not the first failure).
+    """
+    import json
+
+    from .contracts import sha256_bytes
+
+    prefix = f"{dataset_id}/{version}"
+    problems: list[str] = []
+
+    try:
+        seal = _load_json(s3, data_bucket, f"{prefix}/_VALIDATED.json")
+    except NotFound:
+        raise NotValidated(f"{data_bucket}/{prefix} has no _VALIDATED.json") from None
+
+    try:
+        ds_bytes = s3.get(data_bucket, f"{prefix}/dataset.json")
+    except NotFound:
+        return [f"{prefix}: sealed but dataset.json is absent"]
+
+    sealed_root = seal.get("dataset_sha256")
+    actual_root = sha256_bytes(ds_bytes)
+    if sealed_root is None:
+        # Pre-root seal (written before the chain had a root). Say so rather than passing
+        # silently: an unverifiable seal is a different state from a verified one.
+        problems.append(
+            f"{prefix}: seal carries no dataset_sha256 — written before the chain was rooted, "
+            f"so it cannot be verified (recomputed root is {actual_root})"
+        )
+    elif sealed_root != actual_root:
+        problems.append(
+            f"{prefix}/dataset.json: sealed dataset_sha256={sealed_root} but recomputed "
+            f"{actual_root} — the sealed dataset.json is NOT the one published"
+        )
+
+    ds = json.loads(ds_bytes.decode("utf-8"))
+    sealed_manifests = seal.get("manifest_sha256") or {}
+    for group in ds.get("groups", []):
+        gname = str(group.get("name"))
+        man_rel = group.get("manifest") or "manifest.json"
+        declared = group.get("manifest_sha256")
+        try:
+            man_bytes = s3.get(data_bucket, f"{prefix}/{man_rel}")
+        except NotFound:
+            problems.append(f"{prefix}/{man_rel}: group {gname!r} manifest is absent")
+            continue
+        actual = sha256_bytes(man_bytes)
+        if declared and declared != actual:
+            problems.append(
+                f"{prefix}/{man_rel}: dataset.json declares manifest_sha256={declared} but "
+                f"recomputed {actual}"
+            )
+        sealed = sealed_manifests.get(gname)
+        if sealed and sealed != actual:
+            problems.append(
+                f"{prefix}/{man_rel}: seal records manifest_sha256={sealed} but recomputed {actual}"
+            )
+    return problems
+
+
+__all__ = [
+    "dataset_paths",
+    "MixedFormat",
+    "SealMismatch",
+    "resolve_latest",
+    "verify_seal",
+    "ResolvedSplit",
+    "ReadError",
+    "NotValidated",
+]

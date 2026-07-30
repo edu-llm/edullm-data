@@ -24,6 +24,10 @@ def _publish_promote(s3: FakeS3, dataset_id: str = DID) -> str:
     d = Path(tempfile.mkdtemp())
     (d / "tokens").mkdir()
     (d / "tokens" / "train-00000.u32le.bin").write_bytes((np.arange(1, 60001, dtype=np.uint32) % 90000).tobytes())
+    # A val shard: the pretrain family now requires held-out data
+    # (families/pretrain.json validation_required=true), so a train-only
+    # corpus is a missing-required-split violation.
+    (d / "tokens" / "val-00000.u32le.bin").write_bytes((np.arange(1, 20001, dtype=np.uint32) % 90000).tobytes())
     plan = P.publish(
         d,
         dataset_id=dataset_id,
@@ -70,16 +74,72 @@ def test_object_resized_after_publish():
     assert "object-resized" in _codes(report)
 
 
-def test_catalog_drift():
+def test_promote_records_a_post_copy_crc_reference():
+    """The seal carries a CRC per payload path, HEADed from the DATA bucket after the copy.
+
+    Captured post-copy on purpose: real S3 recomputes the checksum on CopyObject, so a value
+    inherited from landing would describe bytes that never reached edullm-data — and landing
+    expires in 14 days, so it could never be re-derived.
+    """
     s3 = FakeS3()
     ver = _publish_promote(s3)
-    # mutate the published dataset.json inventory to disagree with reality
-    key = ("edullm-data", f"{DID}/{ver}/dataset.json")
-    ds = json.loads(s3._store[key])
-    ds["inventory"]["objects"] = 999
-    s3._store[key] = json.dumps(ds).encode()
+    seal = json.loads(s3.get("edullm-data", f"{DID}/{ver}/_VALIDATED.json").decode())
+    crc = seal["crc64nvme"]
+    assert set(crc) == {"tokens/train-00000.u32le.bin", "tokens/val-00000.u32le.bin"}
+    for path, ref in crc.items():
+        assert ref == s3.head("edullm-data", f"{DID}/{ver}/{path}")["crc64nvme"]
+
+
+def test_same_length_overwrite_caught_by_crc():
+    """The check nothing else can make: the bytes are REPLACED at the same length.
+
+    Size still matches, every manifest and the whole hash chain are untouched, and no payload
+    byte is read by the sweep — only the CRC S3 recomputed on the overwrite disagrees.
+    """
+    s3 = FakeS3()
+    ver = _publish_promote(s3)
+    key = ("edullm-data", f"{DID}/{ver}/tokens/train-00000.u32le.bin")
+    original = s3._store[key]
+    # same length, different content — flip one byte
+    s3._store[key] = bytes([original[0] ^ 0xFF]) + original[1:]
+    assert len(s3._store[key]) == len(original)
+
     report = F.fsck(s3, data_bucket="edullm-data")
-    assert "catalog-object-drift" in _codes(report)
+    assert "object-content-changed" in _codes(report)
+    assert not report.ok
+    # and specifically NOT via the size check, which is blind to this
+    assert "object-resized" not in _codes(report)
+
+
+def test_missing_crc_reference_is_silent_not_a_finding():
+    """A dataset promoted before the seal carried crc64nvme has no reference for any object.
+
+    Warning per-object per-run on data that is fine is exactly the noise that gets a weekly job
+    muted, so an absent reference means "not checkable", never "changed".
+    """
+    s3 = FakeS3()
+    ver = _publish_promote(s3)
+    key = ("edullm-data", f"{DID}/{ver}/_VALIDATED.json")
+    seal = json.loads(s3._store[key])
+    del seal["crc64nvme"]  # simulate a pre-CRC seal
+    s3._store[key] = json.dumps(seal).encode()
+    # mutate the bytes too: undetectable without a reference, and that must be SILENT
+    pkey = ("edullm-data", f"{DID}/{ver}/tokens/train-00000.u32le.bin")
+    body = s3._store[pkey]
+    s3._store[pkey] = bytes([body[0] ^ 0xFF]) + body[1:]
+
+    report = F.fsck(s3, data_bucket="edullm-data")
+    assert report.ok, [str(f) for f in report.findings]
+    assert not report.findings
+
+
+def test_no_crc_from_s3_is_skipped_not_flagged():
+    """A bucket whose objects predate additional checksums returns no ChecksumCRC64NVME."""
+    s3 = FakeS3()
+    ver = _publish_promote(s3)
+    s3.override_head("edullm-data", f"{DID}/{ver}/tokens/train-00000.u32le.bin", crc64nvme=None)
+    report = F.fsck(s3, data_bucket="edullm-data")
+    assert report.ok, [str(f) for f in report.findings]
 
 
 def test_dangling_parent():
@@ -98,7 +158,7 @@ def test_dangling_parent():
     }
     s3.seed("edullm-data", f"{child_prefix}/dataset.json", json.dumps(child_ds).encode())
     s3.seed("edullm-data", f"{child_prefix}/order/manifest.json", json.dumps({"entries": []}).encode())
-    s3.seed("edullm-data", f"_catalog/curriculum/flesch-linear-370m/v1.json", b"{}")
+    s3.seed("edullm-data", "_catalog/curriculum/flesch-linear-370m/v1.json", b"{}")
     # delete the parent dataset.json
     del s3._store[("edullm-data", f"pretrain/datamix-370m/{pver}/dataset.json")]
     report = F.fsck(s3, data_bucket="edullm-data")

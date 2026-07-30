@@ -12,7 +12,6 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 from edullm_data import publish as P
 from edullm_data import validate as V
@@ -39,6 +38,10 @@ def _tokens_dir(n: int = 80000) -> Path:
     (d / "tokens").mkdir()
     (d / "tokens" / "train-00000.u32le.bin").write_bytes((np.arange(1, n + 1, dtype=np.uint32) % 90000).tobytes())
     (d / "tokens" / "train-00001.u32le.bin").write_bytes((np.arange(1, n // 2, dtype=np.uint32) % 90000).tobytes())
+    # A val shard: the pretrain family now requires held-out data
+    # (families/pretrain.json validation_required=true), so a train-only
+    # corpus is a missing-required-split violation.
+    (d / "tokens" / "val-00000.u32le.bin").write_bytes((np.arange(1, n // 4, dtype=np.uint32) % 90000).tobytes())
     return d
 
 
@@ -65,6 +68,9 @@ def test_publish_never_gets_payload_whole_s3_source():
     for i, n in [(0, 80000), (1, 40000)]:
         body = (np.arange(1, n + 1, dtype=np.uint32) % 90000).tobytes()
         s3.seed("edullm-landing", f"_pending/mig/tokens/train-{i:05d}.u32le.bin", body)
+    # val shard: pretrain requires held-out data (validation_required=true)
+    val = (np.arange(1, 20001, dtype=np.uint32) % 90000).tobytes()
+    s3.seed("edullm-landing", "_pending/mig/tokens/val-00000.u32le.bin", val)
     plan = P.publish(
         "s3://edullm-landing/_pending/mig/",
         dataset_id="pretrain/fineweb-edu-10b",

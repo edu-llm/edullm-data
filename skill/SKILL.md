@@ -224,14 +224,24 @@ team genuinely standardizes on one tokenizer for everything.
 
 ## What the validator will reject (so you don't ship it)
 
-Gate A recomputes, it doesn't trust. It rejects: a manifest hash that doesn't match the bytes;
-a shard listed but missing, or present but unlisted; a HEAD size disagreeing with the manifest;
-`count × dtype_size != bytes` (truncation / wrong dtype); a `.npy` that's really headerless raw;
-duplicate shard digests; an inventory count that doesn't match reality; a shard sha256 shared
-with a `depends_on` parent (copy instead of reference); an unknown profile. Per profile it also
-reads bytes: all-zeros / all-EOS / wrong-endianness token shards; an eval-results file where
+Gate A recomputes, it doesn't trust. It rejects: a `manifest_sha256` that doesn't match the
+canonical manifest JSON; a shard listed but missing, or present but unlisted; a HEAD size
+disagreeing with the manifest's `bytes`; `count × dtype_size != bytes` (truncation, or a size
+that isn't a whole multiple of the item width); a dtype too narrow for the tokenizer's derived
+vocab; a `.npy` that's really headerless raw; a partition whose `rows` don't sum from its entries;
+a `coverage: "partition"` whose splits overlap; duplicate shard digests; an inventory count that
+doesn't match reality; a shard sha256 shared with a `depends_on` parent (copy instead of
+reference); an unknown profile. Per profile it also reads bytes — ~64 KB per shard at seeded
+offsets: all-zeros / all-EOS / wrong-endianness token shards; an eval-results file where
 every row errored (`n_ok == 0`); a degenerate curriculum ordering that isn't a permutation;
 train/heldout leakage in SFT.
+
+**Gate A does not re-hash your payload.** Only the producer hashes (`publish()` streams every
+file once); the validator checks SIZE per entry, not a digest. Your declared `sha256` is used for
+content addressing — catching a shard duplicated inside the group, or one copied from a
+`depends_on` parent instead of referenced — and for the hash chain. So a correct `sha256` is not
+a substitute for correct bytes: what keeps `edullm-data` trustworthy is that only the validator
+role can write it (an IAM Deny, not a convention), plus S3 durability and CRC64NVME.
 
 ## Reading a published dataset
 
