@@ -188,12 +188,26 @@ r = dataset_paths("pretrain/dolma2-150b", version, split="train", s3=s3)
 
 ## What gets rejected
 
-The validator recomputes every claim. It will reject, among others: a manifest hash that
-doesn't match the bytes; a missing or unlisted shard; a size mismatch; `count × dtype != bytes`;
-a `.npy` that's actually headerless raw; duplicate shard digests; an inventory that doesn't
+The validator recomputes its claims rather than reading them back. It will reject, among others:
+a `manifest_sha256` or `dataset_sha256` that doesn't match the canonical JSON it seals; a missing
+or unlisted shard (LIST compared both directions); a HEAD size that disagrees with the manifest's
+`bytes`; `count × dtype_size != bytes`; a `.npy` that's actually headerless raw; a dtype too narrow
+for the tokenizer's derived vocab; a partition whose declared `rows` don't sum from its entries;
+a `coverage: "partition"` whose splits overlap; duplicate shard digests; an inventory that doesn't
 match reality; a shard shared with a `depends_on` parent (copy vs reference); all-zeros /
-all-EOS / wrong-dtype token shards; an eval file where every row errored; a non-permutation
+all-EOS / wrong-endianness token shards; an eval file where every row errored; a non-permutation
 curriculum ordering; train/heldout leakage. Full list in §7 of the spec.
+
+**What it does not do: re-hash payload bytes.** Per-entry integrity is HEAD size, not a digest —
+`s3.hash_object` is called only by the producer (`publish.py:280`), and `fsck` reads "never a
+payload byte" by design. A manifest `sha256` is written once at publish time and is used for
+*content addressing*, not verification: pairwise-distinct digests within a group
+(`duplicate-shard-digest`) and no digest shared with a `depends_on` parent
+(`shared-sha-with-parent` — the 37 GB re-materialization the audit found), plus the hash chain,
+which the validator does recompute. What defends the bytes themselves is the airlock (an IAM Deny —
+only the validator role can `PutObject` to `edullm-data`), S3's own durability, and CRC64NVME.
+`s3.head()` returns `crc64nvme` and deliberately omits `sha256`: S3 stores no whole-object SHA-256
+for a multipart object.
 
 If you hit a rejection, read the `_REJECTED.json` the validator wrote next to your upload — each
 violation names the concrete failure.

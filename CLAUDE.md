@@ -18,10 +18,20 @@ orients you, it is not the spec.
 
 ## The one rule that governs every check
 
-**Recompute, never trust.** Every validator check must recompute something from the bytes (a hash,
-`ContentLength`, a magic-byte sniff) and compare it to what the manifest claims. A check that only
-asserts a field is *present* is decoration — coding agents satisfy schemas effortlessly and that is
-exactly how plausible garbage shipped before. See `CONTRIBUTING.md` "the golden rule."
+**Recompute, never trust.** Every validator check must recompute something from the bytes (a
+`ContentLength`, a magic-byte sniff, a sampled decode) and compare it to what the manifest claims. A
+check that only asserts a field is *present* is decoration — coding agents satisfy schemas
+effortlessly and that is exactly how plausible garbage shipped before. See `CONTRIBUTING.md` "the
+golden rule."
+
+**Known gap — do not restate this rule as a payload re-hash.** `s3.hash_object` has exactly one
+non-definition caller, `publish.py:280`, the PRODUCER. Gate A's per-entry loop
+(`validate.py:399-431`) does `s3.head` for SIZE and then set-membership on the *declared* digest; it
+never re-reads payload bytes. `fsck.py`'s docstring says so outright ("never a payload byte"). So a
+manifest `sha256` is a producer assertion no gate falsifies. What the validator *does* recompute is
+listed in `USAGE.md` "What gets rejected"; what `sha256` is actually for (content addressing +
+the hash chain) and what defends integrity instead (the airlock's IAM Deny, S3 durability,
+CRC64NVME) is in `docs/ONBOARDING.md`. Adding a real re-hash is an open decision, not a fact.
 
 ## Invariants you must not break
 

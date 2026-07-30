@@ -593,8 +593,13 @@ def verify_arithmetic(entry: ManifestEntry) -> list[str]:
             f"{dtype_size} bytes/{entry.format.dtype}"
             + (f" + {entry.format.header_bytes} header bytes" if entry.format.header_bytes else "")
             + f" = {expected_bytes}, but bytes={entry.bytes} "
-            f"({delta:+d}). Either the count is wrong, the dtype is wrong "
-            f"(uint16-vs-uint32 halves the count), or the object is truncated"
+            f"({delta:+d}). The object is truncated (or grew) relative to the declared "
+            f"count, or its size is not a whole multiple of the item width — a raw "
+            f"fixed-width array must end on an element boundary. This is NOT a dtype "
+            f"check: publish() derives count = bytes // dtype_size (publish.py:134), so "
+            f"the identity collapses to bytes % dtype_size == 0, which uint16 and uint32 "
+            f"satisfy equally for the same bytes. A too-narrow dtype is caught separately, "
+            f"by 'dtype-too-narrow-for-vocab' against the tokenizer's derived vocab_size"
         )
     return violations
 

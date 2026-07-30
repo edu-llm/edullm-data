@@ -42,9 +42,13 @@ EVERY DATASET HAS THE SAME ADDRESS SHAPE
 WHAT THE PIPELINE FORCES (can't publish otherwise)
   • Naming: family from the fixed 7; name kebab-case 2–5 words; no dates,
     version tokens, names, or vague words. Version is auto-assigned.
-  • Integrity ("recompute, never trust"): validator re-hashes every file and
-    compares to the manifest. Manifest and bucket must match both directions —
-    no missing files, no stray unlisted ones.
+  • Integrity ("recompute, never trust"): validator HEADs every file and compares
+    the real object size to the manifest's `bytes`; profiles then read ~64 KB per
+    shard and decode it. It does NOT re-hash payload bytes — `sha256` is written
+    once by the producer, and its job is content addressing (duplicate-shard and
+    shared-with-parent detection) plus the manifest hash chain, which IS recomputed.
+    Manifest and bucket must match both directions — no missing files, no stray
+    unlisted ones.
   • Token files: (tokens × 4 bytes) must equal file size exactly. Extension must
     match real bytes → token shards are `.u32le.bin`, never `.npy`.
   • Tokenizer: a corpus must point at a PUBLISHED tokenizer, pinned by checksum;
