@@ -50,22 +50,35 @@ had for free.
 > Not hypothetical — this is exactly where the 150B corpus ended up. Its mapping was recoverable
 > only by luck (sorted order happened to be bijective), which is not a plan.
 
-**Two levels are the safe budget: `<source>/<domain>`.** A pending change
-(`feat/entry-labels-from-path`) derives `entry.labels` automatically from precisely these
-segments, and names exactly two of them (`PATH_LABEL_KEYS = ("source", "domain")`). Nest deeper
-than that and it raises rather than silently inventing a `level_3` label. So nesting two levels
-is both free now and forward-compatible; nesting three is a bet.
+**Two levels, `<source>/<domain>` — that is the whole budget.** `publish()` derives
+`entry.labels` from exactly those segments, and exactly two of them are named
+(`PATH_LABEL_KEYS = ("source", "domain")`):
 
-**What is true on `main` today:** `publish()` has **no `labels` parameter** — you cannot hand it
-labels, and it does not populate `entry.labels`. The field exists in the manifest schema and is
-validated if present, but nothing produces it. Your slice information lives in `entry.path` and
-nowhere else. That is fine — the path is the durable artifact, and it is what the pending change
-reads. Do not wait for the feature; just don't flatten.
+```
+tokens/train-00000.u32le.bin                 →  {}                                  (flat, fine)
+tokens/arxiv/train-00000.u32le.bin           →  {"source": "arxiv"}
+tokens/arxiv/science/train-00000.u32le.bin   →  {"source": "arxiv", "domain": "science"}
+tokens/a/b/c/train-00000.u32le.bin           →  raises — 3 levels, only 2 are named
+```
 
-**The other honest caveat:** `partitions[]` cannot express "select by label" — the empty-split
-check fires regardless of the `by` field. So even once labels land, they are *descriptive*
-(queryable metadata) rather than a reader-level selector. Structure the tree anyway; the
-expensive direction is wanting the slice later and not having it.
+Three levels is a hard error, not a silent `level_3` — deliberately, because labels land in
+`manifest_sha256` and a wrong one is unfixable without republishing.
+
+**You do not pass labels to `publish()`.** There is no `labels` parameter and there is not meant
+to be one: a hand-typed label would be a producer assertion nothing falsifies, which the golden
+rule forbids. `publish()` reads them off the key, and Gate A **recomputes** them from that same
+key (`_check_labels_match_path`), rejecting a label that contradicts the path or a nested entry
+whose labels were omitted. So the path is the single source of truth, and the only thing you
+control is how you name your files.
+
+Absence is treated one-directionally: a flat layout produces no labels and that is silent and
+legal. What is rejected is a *nested* key whose labels don't match — because a reader slicing on
+labels would drop that object from every slice.
+
+**One caveat:** `partitions[]` still cannot express "select by label", and `read.py` doesn't
+consume labels at all. So labels today are *descriptive* (queryable metadata, and now verified
+against the key) rather than a reader-level selector. Structure the tree anyway — the expensive
+direction is wanting the slice later and not having it.
 
 ### 0.2 Held-out data must come from a different place than train
 
@@ -190,8 +203,9 @@ artifacts/public/
 - **One subdirectory per group.** A file not under a group prefix is a hard publish error —
   the group is what makes the profile unambiguous. A dataset may have several groups with
   different profiles (e.g. `tokens/` + a sidecar table).
-- **Between the group and the filename you may nest up to two levels** (`<source>/<domain>`).
-  Flat is fine if the corpus genuinely has no slices. See §0.1 — this is the irreversible one.
+- **Between the group and the filename you may nest at most two levels** (`<source>/<domain>`);
+  they become `entry.labels`, and a third level is a hard error. Flat is fine if the corpus
+  genuinely has no slices. See §0.1 — this is the irreversible one.
 - **Splits are matched by glob on the filename** (`train-*.u32le.bin`). The split lives in the
   *name*. Get the prefix right at write time or the partition comes up empty.
 - **No `-of-NNNNN` in shard names.** The surviving shard count is unknowable at write time
@@ -253,7 +267,7 @@ scores for 23 baseline models, for the baseline table."
     -> states WHAT IT IS + THE AXIS vs its siblings
 [ ] I know every field my profile requires, and my generation job emits all of them
 [ ] Slice structure is IN THE PATH: <group>/<source>/<domain>/<shard>   <- UNBACKFILLABLE
-    (flat only if the corpus truly has no slices; max 2 levels)
+    (becomes entry.labels; flat is fine; 3 levels is a hard error)
 [ ] Heldout is carved from a different pool than train, before tokenizing
 [ ] Eval only: every row carries a status; counts accumulate during the run
 [ ] Tokenizer is already published (or is the first of my two publishes)
