@@ -237,6 +237,7 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
     total_objects = 0
     total_bytes = 0
     all_shas: dict[str, str] = {}  # sha256 -> first path that declared it (dup detection)
+    group_manifest_paths: dict[str, set[str]] = {}  # group -> its manifest's paths
     my_shas: set[str] = set()
     incomplete = False
 
@@ -245,7 +246,7 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
         gprefix = group.get("prefix", "")
         gres = _validate_group(
             s3, landing_bucket, prefix, dataset_id, version_id, group, v, all_shas, my_shas,
-            data_bucket=data_bucket,
+            data_bucket=data_bucket, collect_paths=group_manifest_paths,
         )
         if gres is None:
             # missing manifest: incomplete for frozen, fine otherwise
@@ -262,6 +263,14 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
         gobjs, gbytes = gres
         total_objects += gobjs
         total_bytes += gbytes
+
+    # -- dataset-level sweep: orphan prefixes + observed-vs-declared splits --
+    # After the group loop, so every group's manifest paths have been collected. A group-scoped
+    # LIST cannot see an object under a top-level prefix that belongs to no declared group.
+    if not incomplete:
+        _check_dataset_exhaustive_and_splits(
+            s3, landing_bucket, prefix, groups, group_manifest_paths, v
+        )
 
     # -- inventory: declared totals equal recomputed sums (§7 — the inventory.json bug) --
     inv = ds.get("inventory") or {}
@@ -296,6 +305,7 @@ def _validate_group(
     my_shas: set[str],
     *,
     data_bucket: str | None,
+    collect_paths: dict[str, set[str]] | None = None,
 ) -> tuple[int, int] | None:
     """Validate one group. Returns (objects, bytes) or None if the group's manifest is
     absent (incomplete). Appends Violations to ``v`` in place."""
@@ -395,6 +405,8 @@ def _validate_group(
             continue
         actual_rel.add(rel_to_dataset)
     manifest_paths = {e.path for e in entries}
+    if collect_paths is not None:
+        collect_paths[gname] = manifest_paths
     missing, extra = diff_paths(manifest_paths, actual_rel)
     for m in sorted(missing):
         v.append(Violation("missing-object", f"manifest lists {m!r} but it is not in S3", path=m))
@@ -402,7 +414,7 @@ def _validate_group(
         v.append(Violation("unlisted-object", f"{x!r} is in S3 but not in the manifest (a globbing reader would train on it)", path=x))
 
     # -- partitions (§7): every partition declares rows; structural check of the four forms --
-    _validate_partitions(group, v, gname, manifest_paths)
+    _validate_partitions(group, v, gname, manifest_paths, entries)
 
     # -- profile CHECKS (recompute against bytes) --
     if profile_name is None:
@@ -503,6 +515,91 @@ def _family_defaults_for(dataset_id: str) -> dict[str, Any]:
             if fam_key in smoke:
                 flat[profile_key] = smoke[fam_key]
     return flat
+
+
+def _check_dataset_exhaustive_and_splits(
+    s3: S3,
+    landing_bucket: str,
+    prefix: str,
+    groups: list[Any],
+    group_manifest_paths: dict[str, set[str]],
+    v: list[Violation],
+) -> None:
+    """LIST the whole DATASET prefix and reconcile it, then recompute observed splits.
+
+    Two holes closed at once, both of which needed a dataset-wide view:
+
+    **V8 — orphan prefixes.** The per-group exhaustiveness check LISTs each group's own prefix,
+    so an object under a top-level prefix belonging to NO declared group is listed by nobody and
+    reconciled against nothing. An injected ``sneaky/val-00000.u32le.bin`` passed Gate A clean.
+    ``promote()`` only copies manifest-listed keys, so such an object never reaches the data
+    bucket — but "the manifest is exhaustive in both directions" held only *within* groups, not
+    across the dataset, and that is a weaker claim than the standard makes.
+
+    **The silent split hole.** A shard named ``val-00000.u32le.bin`` in a group with no declared
+    ``val`` partition validated clean, was invisible to ``split="val"``, and — before the reader
+    fix — was still returned by an unsplit read. So you could train on your validation data with
+    nothing anywhere objecting. The split word is recomputed from each object's own filename via
+    ``parse_shard_name`` and compared, in BOTH directions, against the declared partitions.
+
+    ERROR rather than warning, for the same reason ``unlisted-object`` is an error: a warning
+    does not stop ``promote()``, so it would publish a dataset nobody can trust. And in landing
+    the fix is free — rename the shard or declare the partition, while the bytes are still
+    mutable.
+    """
+    claimed: set[str] = set()
+    for paths in group_manifest_paths.values():
+        claimed |= paths
+
+    listed = s3.list(landing_bucket, prefix + "/")
+    observed: dict[str, list[str]] = {}
+    orphans: list[str] = []
+    for obj in listed:
+        key = obj["key"]
+        rel = key[len(prefix) + 1:] if key.startswith(prefix + "/") else key
+        if _is_control_key(rel):
+            continue
+        if rel not in claimed:
+            orphans.append(rel)
+        parsed = parse_shard_name(rel)
+        if parsed is not None and not is_cas_name(rel):
+            observed.setdefault(parsed[0], []).append(rel)
+
+    for rel in sorted(orphans):
+        v.append(Violation(
+            "unlisted-object-dataset-level",
+            f"{rel!r} is under the dataset prefix but is in no group's manifest. It belongs to "
+            f"no declared group, so no group's exhaustiveness check ever looked at it — a "
+            f"globbing reader would still find it.",
+            path=rel,
+        ))
+
+    declared: set[str] = set()
+    for group in groups:
+        for part in (group.get("partitions") or []):
+            if isinstance(part, Mapping) and part.get("name"):
+                declared.add(str(part["name"]))
+    if not declared:
+        return  # a group may legitimately declare no partitions; a different rule owns that
+
+    for split_word, paths in sorted(observed.items()):
+        if split_word not in declared:
+            v.append(Violation(
+                "undeclared-split",
+                f"{len(paths)} object(s) are named {split_word!r}-NNNNN.* but no partition "
+                f"declares a split called {split_word!r}. They are unreachable via "
+                f"split={split_word!r} AND (before the reader's trainable-only default) were "
+                f"returned by an unsplit read — trainable by accident. Declare the split or "
+                f"rename the shards. First: {sorted(paths)[0]}",
+                path=sorted(paths)[0],
+            ))
+    for split_word in sorted(declared - set(observed)):
+        v.append(Violation(
+            "empty-split",
+            f"partition {split_word!r} is declared but no object is named "
+            f"{split_word!r}-NNNNN.*; a reader asking for it gets silence",
+            path=split_word,
+        ))
 
 
 def _check_validation_present(
@@ -633,7 +730,19 @@ def _check_dtype_width_vs_vocab(
             ))
 
 
-def _validate_partitions(group: Mapping[str, Any], v: list[Violation], gname: str, manifest_paths: set[str]) -> None:
+def _matches_glob(path: str, glob: str) -> bool:
+    """Basename first, then the full manifest-relative path — the same order the reader uses,
+    so a partition that resolves at validation resolves identically at read time."""
+    return fnmatch.fnmatch(path.rsplit("/", 1)[-1], glob) or fnmatch.fnmatch(path, glob)
+
+
+def _validate_partitions(
+    group: Mapping[str, Any],
+    v: list[Violation],
+    gname: str,
+    manifest_paths: set[str],
+    entries: list[Any] | None = None,
+) -> None:
     parts = group.get("partitions")
     if parts is None:
         return
@@ -643,8 +752,13 @@ def _validate_partitions(group: Mapping[str, Any], v: list[Violation], gname: st
     coverage = group.get("coverage")
     if coverage not in {"partition", "overlapping", "incomplete"}:
         v.append(Violation("bad-coverage", f"group {gname!r}: coverage {coverage!r} not in partition|overlapping|incomplete", path=gname))
+
+    by_name: dict[str, set[str]] = {}  # partition name -> the paths it selects
     for p in parts:
-        pname = p.get("name", "?")
+        if not isinstance(p, Mapping):
+            v.append(Violation("bad-partitions", f"group {gname!r}: a partition must be an object, got {type(p).__name__}", path=gname))
+            continue
+        pname = str(p.get("name", "?"))
         if "rows" not in p:
             v.append(Violation("partition-no-rows", f"group {gname!r} partition {pname!r} declares no rows", path=gname))
         by = p.get("by")
@@ -652,9 +766,97 @@ def _validate_partitions(group: Mapping[str, Any], v: list[Violation], gname: st
             v.append(Violation("bad-partition-form", f"partition {pname!r} has by={by!r}", path=gname))
         elif by == "path":
             glob = p.get("glob", "")
-            if not any(fnmatch.fnmatch(mp.rsplit("/", 1)[-1], glob) or fnmatch.fnmatch(mp, glob) for mp in manifest_paths):
+            matched = {mp for mp in manifest_paths if _matches_glob(mp, glob)}
+            by_name[pname] = matched
+            if not matched:
                 v.append(Violation("partition-glob-empty", f"partition {pname!r} glob {glob!r} matches no manifest path", path=gname))
+            elif entries is not None:
+                _check_partition_rows(p, pname, matched, entries, v, gname)
         # field/range/indices scans are a v1 TODO — a profile check reads the bytes.
+
+    if coverage == "partition" and by_name:
+        _check_coverage_is_a_partition(by_name, manifest_paths, v, gname)
+
+
+def _check_partition_rows(
+    part: Mapping[str, Any],
+    pname: str,
+    matched: set[str],
+    entries: list[Any],
+    v: list[Violation],
+    gname: str,
+) -> None:
+    """RECOMPUTE ``rows`` from the selected entries' own counts and compare to the claim.
+
+    Previously ``rows`` was required to be present and never checked, so ``rows: 999999999`` on
+    a 60,000-token group passed clean — and ``read.dataset_paths`` hands that number straight to
+    a trainer as ``ResolvedSplit.rows``. Under "recompute, never trust", a required-but-unchecked
+    field is exactly the decoration the standard warns about.
+
+    Pure metadata arithmetic: the per-entry counts were themselves derived from object sizes, so
+    this reads no payload bytes.
+    """
+    declared = part.get("rows")
+    if not isinstance(declared, int) or isinstance(declared, bool):
+        return  # absent or malformed — partition-no-rows / schema validation owns that
+    actual = 0
+    countable = False
+    for e in entries:
+        if e.path not in matched:
+            continue
+        if e.count and e.count.get("unit") in {"tokens", "rows", "items"}:
+            actual += int(e.count["value"])
+            countable = True
+    if not countable:
+        return  # nothing in this partition declares an honest count; §5 allows that
+    if actual != declared:
+        v.append(Violation(
+            "partition-rows-mismatch",
+            f"group {gname!r} partition {pname!r} declares rows={declared:,} but the "
+            f"{len(matched)} object(s) it selects sum to {actual:,} "
+            f"({declared - actual:+,}). A trainer reads this number as the split's size.",
+            path=gname,
+        ))
+
+
+def _check_coverage_is_a_partition(
+    by_name: dict[str, set[str]], manifest_paths: set[str], v: list[Violation], gname: str
+) -> None:
+    """``coverage: "partition"`` claims the splits are disjoint AND cover everything. Check it.
+
+    Only the word was validated before — that it was one of partition|overlapping|incomplete —
+    so a group could declare ``"partition"`` with two identical globs and pass, which makes
+    summing partition rows double-count. ``coverage`` exists precisely to tell a tool whether
+    that sum is legitimate, so an unenforced value is worse than none.
+
+    ``overlapping`` skips the disjointness half by design (curriculum replay legitimately
+    revisits the same shards); ``incomplete`` skips both.
+    """
+    names = sorted(by_name)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            shared = by_name[a] & by_name[b]
+            if shared:
+                v.append(Violation(
+                    "coverage-not-disjoint",
+                    f"group {gname!r} declares coverage='partition' but partitions {a!r} and "
+                    f"{b!r} both select {len(shared)} object(s), e.g. {sorted(shared)[0]}. "
+                    f"Summing partition rows would double-count. Use coverage='overlapping' if "
+                    f"the overlap is intended — but if {a!r} is trainable and {b!r} is held out, "
+                    f"this is train/test leakage.",
+                    path=gname,
+                ))
+    selected = set().union(*by_name.values()) if by_name else set()
+    unclaimed = manifest_paths - selected
+    if unclaimed:
+        v.append(Violation(
+            "coverage-incomplete",
+            f"group {gname!r} declares coverage='partition' but {len(unclaimed)} object(s) "
+            f"belong to no partition, e.g. {sorted(unclaimed)[0]}. They are invisible to every "
+            f"split= read yet still counted in the group's totals. Declare a partition that "
+            f"covers them, or use coverage='incomplete' to say so on purpose.",
+            path=gname,
+        ))
 
 
 def _register_parent_shas(s3, data_bucket, group, ds_depends, all_shas, v, gname) -> None:
