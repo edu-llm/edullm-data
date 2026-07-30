@@ -408,9 +408,33 @@ named after sources — the rejected plan — so a re-copy into `tokens/` is req
    removes OLMo-core's basename+size fingerprint hazard (`numpy_dataset.py:221-222` — measured 0
    collisions on this corpus, but that is a property of the data, not an invariant).
 
-**Also queued (layout-independent):** `promote()` copies sequentially with no resume — ~13,900
-round-trips for 6,921 objects, and it has no `copy_workers`, so CLAUDE.md gotcha 4's documented fix
-does not apply. Likely to blow the 60-minute Batch limit.
+~~**Also queued:** `promote()` copies sequentially with no resume.~~ **FIXED** (`2515f79`) —
+`promote(copy_workers=…)` plus a `--promote-workers` CLI flag (`d6e8a7f`); the deployed job def
+passes 16. Six tests, mutation-checked.
+
+**TWO DEPLOYED-INFRA GAPS found while watching the promotion run. Neither is fixed.**
+
+1. **`edullm-validator` has NO TIMEOUT.** Verified: `timeout: null` on both the job and the job
+   definition. The publish jobs get `--timeout attemptDurationSeconds=7200` because it is passed
+   at submit time, but the EventBridge-triggered validation inherits nothing. A wedged
+   auto-promote would sit `RUNNING` forever and hold queue capacity, with no automatic kill.
+   Set `timeout` on the job definition — 7200 s matches what the publish path already uses.
+2. **The auto-promote validates EVERY pending dataset, not the one that triggered it.** The job
+   def runs `validate --promote` with no `--prefix`, so it calls `discover_pending`, which does
+   `s3.list(landing_bucket, "")` — a full-bucket LIST (21,005 objects / 4.1 s today) followed by
+   Gate A over every unsealed dataset it finds. That is deliberate ("the event is a pure wake-up
+   signal"), and it is why one dataset's promotion time is not bounded by that dataset. Harmless
+   now (the 150B is the only pending one), but it degrades as landing accumulates, and it makes a
+   slow run hard to attribute.
+
+**Gate A timing, measured, so the next person does not misread a slow run as a hang.** A full
+pass over ~6,900 shards is **~55 min** at 8.4 range-reads/s (4 seeded windows per shard ⇒ ~27,600
+reads). It does **not** short-circuit — `ValidationResult`'s docstring is explicit that "checks do
+not short-circuit each other, so one run surfaces the whole list" — so a REJECTED run costs the
+same as a clean one. It prints nothing between `VALIDATOR_START` and its verdict, and writes
+`_VALIDATED.json` / `_REJECTED.json` only at the end. **The live progress signal is the object
+count under `s3://edullm-data/<dataset_id>/`**: zero means still validating, climbing means
+promotion started. Variance of ±25% between runs is ordinary S3 latency, not a fault.
 
 **WHERE THE 2026-07-30 OVERNIGHT RUN STOPPED, and why.** Steps 2–4 all mutate
 `_migrate/olmo-150b-dolma2/` — 6,913 server-side renames plus 8 deletions. That is bulk S3 work,
