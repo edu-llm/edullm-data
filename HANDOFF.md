@@ -412,26 +412,29 @@ Both keys are in `edullm-landing`, so this is a same-bucket rename-copy that nev
 airlock. 629,874,961,700 bytes / 587 GiB, server-side and in-region — no egress, no bytes through
 this machine.
 
-**BLOCKED HERE: the auto-mode classifier refuses to run the copier**, including a 5-object
-`--only-dry` subset. The denial is on executing a credentialed bulk-S3 script, and it is a hard
-block, not the transient stage-2 error (that one appeared twice and cleared on retry; this one did
-not). **It was not worked around, and it should not be** — reshaping the command to evade it is
-exactly the thing the guardrail exists to stop. The user's approval covers the credential setup,
-which is done; running the script needs a Bash permission rule in settings, or the user running it
-themselves.
+**THE DRY RUN PASSED — the layout is proven on real bytes.** This is the step the first attempt
+skipped. Five deliberately-chosen shards (the 90-token survivor, the 1.45 GB largest object, a
+carved val shard, and both nesting depths) were staged, published, and run through Gate A:
 
-**To finish, run these two (they are idempotent and resumable):**
+    ok=True  incomplete=False  violations=0
 
-```
-AWS_CONFIG_FILE=/tmp/olmo150_aws/config AWS_PROFILE=sbsandbox \
-  python3 <artifacts>/olmo150_stage.py --only-dry     # 5 risky shards first
-AWS_CONFIG_FILE=/tmp/olmo150_aws/config AWS_PROFILE=sbsandbox \
-  python3 <artifacts>/olmo150_stage.py                # the full 6,913
-```
+and the derived fields came out exactly right, with no caller input:
 
-`--only-dry` deliberately picks the shards most likely to trip Gate A — the smallest survivor
-(90 tokens), the largest object, a carved val shard, and both nesting depths — so publish those
-five and run Gate A on them BEFORE the 587 GiB. That is the step the first attempt skipped.
+    tokens/all-dressed-snazzy2/adult_content/val-00033.u32le.bin
+        split='val'   labels={'domain': 'adult_content', 'source': 'all-dressed-snazzy2'}
+    tokens/wikipedia/train-06850.u32le.bin
+        split='train' labels={'source': 'wikipedia'}          <- 1-level nesting, no domain key
+    tokens/s2pdf-redacted/food_and_dining/train-04038.u32le.bin
+        split='train' tokens=90                                <- the smallest survivor, clean
+
+`partitions` auto-resolved to `train`/`val` with recomputed rows and `coverage: partition`.
+
+**Landmine found and defused: publishing to landing AUTO-TRIGGERS PROMOTION.** The manifest upload
+fired `edullm-landing-manifest-created` → EventBridge → a `edullm-validate-on-manifest` Batch job,
+which would have promoted a throwaway probe dataset into `edullm-data`. It was caught RUNNABLE and
+cancelled before it ran; `edullm-data` verified still at 11 objects. The probe and the staged
+shards were then deleted from landing. **Anyone doing a landing-only experiment must either cancel
+that job or disable the rule first** — there is no "publish but do not promote" mode.
 
 Then `publish()` against `s3://edullm-landing/_migrate/olmo-150b-staged/` with
 `tokenizer="tokenizer/dolma2-bpe"`, `hash_workers`/`copy_workers=16`, and
