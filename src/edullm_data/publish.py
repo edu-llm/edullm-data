@@ -333,6 +333,19 @@ def build_plan(
             gm["partitions"] = _resolve_path_partitions(defaults["partitions"], entries)
             gm["coverage"] = defaults.get("coverage", "partition")
         gm.update(group_meta.get(g, {}))
+        # A CALLER-SUPPLIED partitions list used to bypass row-filling entirely: the branch
+        # above is guarded on the caller NOT having supplied one, and this gm.update() copies
+        # theirs verbatim. So any caller declaring its own splits — which is the only way to
+        # get a val split, since the pretrain family defaults to train only — shipped
+        # partitions with no `rows`, and Gate A rejects those (validate.py: partition-no-rows).
+        #
+        # That rejection lands at promote() time, i.e. AFTER the copy and the whole publish
+        # run. For a 630 GB corpus that is hours of work discarded over a field the publisher
+        # could have computed. Fill rows for every by:path partition regardless of who wrote
+        # it; an explicitly declared rows is left alone so a caller can still override.
+        if gm.get("partitions"):
+            gm["partitions"] = _fill_missing_partition_rows(gm["partitions"], entries)
+            gm.setdefault("coverage", defaults.get("coverage", "partition"))
         groups_meta.append(gm)
 
     dataset_json = {
@@ -381,6 +394,52 @@ def _prev_version(version: str) -> str | None:
     return f"v{n - 1}" if n > 1 else None
 
 
+def _count_rows_for_glob(glob: str, entries: Sequence[ManifestEntry]) -> int | None:
+    """Sum the declared counts of every manifest entry whose name matches ``glob``.
+
+    Returns ``None`` when nothing matches, so a caller can distinguish "no shards for this
+    split" from "shards totalling zero rows". Matches the basename first, then the full
+    manifest-relative path — the same order ``read.dataset_paths`` uses, so a partition that
+    resolves here resolves identically at read time.
+    """
+    import fnmatch
+
+    matched = [
+        e for e in entries
+        if fnmatch.fnmatch(e.path.rsplit("/", 1)[-1], glob) or fnmatch.fnmatch(e.path, glob)
+    ]
+    if not matched:
+        return None
+    rows = 0
+    for e in matched:
+        if e.count and e.count.get("unit") in {"tokens", "rows", "items"}:
+            rows += int(e.count["value"])
+    return rows
+
+
+def _fill_missing_partition_rows(
+    partitions: Sequence[Mapping[str, Any]], entries: Sequence[ManifestEntry]
+) -> list[dict[str, Any]]:
+    """Add ``rows`` to any ``by: path`` partition that lacks it, counted from the manifest.
+
+    Idempotent and non-destructive: a partition that already declares ``rows`` is returned
+    unchanged (a caller may have a reason to state it), and a non-path partition is passed
+    through because its count cannot be derived from filenames alone. Unlike
+    ``_resolve_path_partitions`` this does NOT drop a partition whose glob matches nothing —
+    a caller who explicitly named a split is making a claim, and silently deleting it would
+    hide the mistake. Gate A's ``partition-glob-empty`` is the right place for that to surface.
+    """
+    out: list[dict[str, Any]] = []
+    for part in partitions:
+        p = dict(part)
+        if "rows" not in p and p.get("by") == "path":
+            rows = _count_rows_for_glob(p.get("glob", ""), entries)
+            if rows is not None:
+                p["rows"] = rows
+        out.append(p)
+    return out
+
+
 def _resolve_path_partitions(
     templates: Sequence[Mapping[str, Any]], entries: Sequence[ManifestEntry]
 ) -> list[dict[str, Any]]:
@@ -390,24 +449,14 @@ def _resolve_path_partitions(
     with rows=0, because a dataset legitimately may not contain every split the family
     anticipates. Non-path templates are passed through untouched — their rows must come
     from group_meta, and Gate A will flag any that still lack a count."""
-    import fnmatch
-
     resolved: list[dict[str, Any]] = []
     for tmpl in templates:
         if tmpl.get("by") != "path":
             resolved.append(dict(tmpl))
             continue
-        glob = tmpl.get("glob", "")
-        matched = [
-            e for e in entries
-            if fnmatch.fnmatch(e.path.rsplit("/", 1)[-1], glob) or fnmatch.fnmatch(e.path, glob)
-        ]
-        if not matched:
+        rows = _count_rows_for_glob(tmpl.get("glob", ""), entries)
+        if rows is None:
             continue  # this split isn't present in this dataset
-        rows = 0
-        for e in matched:
-            if e.count and e.count.get("unit") in {"tokens", "rows", "items"}:
-                rows += int(e.count["value"])
         out = dict(tmpl)
         out["rows"] = rows
         resolved.append(out)
