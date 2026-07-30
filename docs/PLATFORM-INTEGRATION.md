@@ -10,6 +10,49 @@ with what the repository or the API actually says, the disagreement is named in 
 
 ---
 
+> ## ⚠️ READ THIS FIRST — corrections dated 2026-07-30
+>
+> This document was written before the current corpus was published and before the reader could
+> build mixtures. Re-audited against live AWS and the platform repo; the four requested changes
+> still stand, but these specifics have moved:
+>
+> 1. **The corpus is different.** `pretrain/olmo-mix-1124-31b/v1` was **deleted**. The live one is
+>    **`pretrain/olmo-150b-dolma2/v1`** — 6,911 shards, **157,467,202,883 tokens**, 6,851 train +
+>    60 val, laid out `tokens/<source>/<domain>/`. Every occurrence of the old id below, including
+>    the proposed registry entry, points at objects that no longer exist.
+> 2. **Change 3 (mixture) is much smaller than described.** `build_mixture()` now resolves a
+>    weighted mixture from `(dataset, version, sources, ratios, total, seed)` — measured at
+>    **306 bytes**, comfortably inside the 8192-byte ContainerOverrides cap. Only a *resolved* URI
+>    list blows it (53 KB for a 528-shard mix; 753 KB for all 6,911). So the submission form needs
+>    a small spec, not a path list. **Include `seed` and `group`** — the field list at "Change 3"
+>    omits both, and without `seed` a mixture is not reproducible.
+> 3. **Change 4 is two independent things, not one.** The 3600 s timeout is **not** a blocker:
+>    `execution.py` sends `AttemptDurationSeconds` on every submit, derived from the form's
+>    `maximum_runtime_hours`, which overrides the job-definition default. A submitter can raise it
+>    with no repo change (>12 h reclassifies as EXCEPTION, which is approvable — it is not in
+>    `denied_outright`). **GPU capacity is the real constraint**: the only provisioned GPU is a
+>    single A10G, and `gpu-8xa100` raises `UnprovisionedComputeProfileError` before any queue is
+>    chosen — a hard raise, not a policy vote. Good news: the permission boundary no longer blocks
+>    `p4d`/`p5`/`g5` (that Deny is gone as of boundary v5), so provisioning is now a budget call.
+> 4. **Do not use `SourceMixtureDatasetConfig`.** It routes into `NumpyFSLDatasetMixture`, which
+>    derives a `.csv.gz` sidecar name from each shard name — and `.replace(".npy", ".csv.gz")` is a
+>    **no-op** on `.u32le.bin`, so it hands raw uint32 to gzip and dies. Verified by execution
+>    (`BadGzipFile`). Those sidecars were deliberately not migrated. Use plain
+>    `NumpyFSLDatasetConfig` with an explicit dtype; see `docs/CONSUMER-CONTRACT.md` §6.
+> 5. **Two blockers this document never listed.** (a) `config/datasets.yaml` has one entry,
+>    `dolma-2026-07`, naming nothing in `edullm-data`; an unregistered dataset is
+>    **denied outright**, not merely awkward. (b) `config/repositories.yaml` pins
+>    `dockerfile_path: .edullm/Dockerfile` for OLMo-core and **that file does not exist**, nor does
+>    any image install `edullm_data`/`boto3`. No image, no run.
+>
+> Change 1 (the IAM grant) is unaffected and remains the cleanest single fix: one statement on
+> `batch-gpu-roles.yaml`, no bucket-policy edit — the `edullm-data` Deny covers writes only.
+> While you are in that file, note the deployed policy scopes to `teams/*/runs/*` while the
+> template says `teams/platform/runs/*`; the committed isolation argument does not match what is
+> deployed.
+
+---
+
 ## The goal, stated up front
 
 Training runs are launched through `.github/workflows/submit-run.yml` — a `workflow_dispatch`
@@ -20,7 +63,7 @@ The eduLLM datasets live at `s3://edullm-data/<family>/<name>/<version>/`. Two a
 today, both frozen and validator-sealed:
 
 ```
-s3://edullm-data/pretrain/olmo-mix-1124-31b/v1/    31.334B tokens, 218 shards, 125,336,003,336 B
+s3://edullm-data/pretrain/olmo-150b-dolma2/v1/     157.467B tokens, 6,911 shards, 629,868,811,532 B
 s3://edullm-data/tokenizer/dolma2-bpe/v1/          the tokenizer those tokens were made with
 ```
 
@@ -696,10 +739,18 @@ re-verifying:
 
   ```python
   from edullm_data.read import dataset_paths, resolve_latest
-  ver = resolve_latest("pretrain/olmo-mix-1124-31b", s3=s3)
-  r   = dataset_paths("pretrain/olmo-mix-1124-31b", ver, split="train", s3=s3)
-  # r.paths -> the 218 URIs      r.dtype -> "uint32"  (feed this to the loader)
+  ver = resolve_latest("pretrain/olmo-150b-dolma2", s3=s3)
+  r   = dataset_paths("pretrain/olmo-150b-dolma2", ver, split="train", s3=s3)
+  # r.paths        -> 6,851 URIs
+  # r.numpy_dtype  -> "<u4"   <-- FEED THIS ONE
   ```
+
+  **Pass `r.numpy_dtype`, not `r.dtype`.** `r.dtype` is the bare name `"uint32"`, and
+  `np.dtype("uint32")` resolves to *native* byte order — correct only by accident on a
+  little-endian host. `r.numpy_dtype` is byte-order-qualified (`"<u4"`) and correct anywhere.
+  An earlier draft of this document said to feed `r.dtype`; that contradicted
+  `docs/CONSUMER-CONTRACT.md` on the one field whose silent failure mode is corrupted training
+  data.
 
   The reader also refuses a prefix carrying no `_VALIDATED.json` seal, and can verify the seal
   against a pinned `manifest_sha256` — which is what makes Change 2's digest worth carrying.

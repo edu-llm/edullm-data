@@ -461,7 +461,15 @@ once (`read.py:437-438`). Empty list = intact. It walks the chain the way a veri
 then per group recompute `sha256(manifest.json)` and compare to **both** the seal's copy and
 `dataset.json`'s own copy. It raises `NotValidated` if there is no seal at all (`read.py:450`).
 
-### Both live datasets are currently UNVERIFIABLE
+### One live dataset is verifiable; the other is not
+
+**`pretrain/olmo-150b-dolma2/v1` verifies CLEAN** — it was promoted by the rooting code, so its seal
+carries `dataset_sha256`, a per-group `manifest_sha256` map, and a CRC64NVME reference for each of
+its 6,911 objects. `verify_seal` returns no problems (checked against the live bucket).
+
+**`tokenizer/dolma2-bpe/v1` is still pre-root**, and the rest of this section is about that case.
+It stays that way until it is republished — `promote()` refuses a sealed prefix, so that means a new
+version rather than a rewrite of `v1`.
 
 A seal written before the chain had a root carries no `dataset_sha256`. `verify_seal` reports that as a
 problem string — *"seal carries no dataset_sha256 — written before the chain was rooted, so it cannot
