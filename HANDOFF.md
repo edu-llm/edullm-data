@@ -9,12 +9,13 @@ live work. Everything before it is history that still holds.
 > the new wheel · `2515f79` `promote(copy_workers=…)` · `d6e8a7f` `--promote-workers` CLI flag +
 > version bump to **0.3.0**. Plus three HANDOFF commits.
 >
-> **DEPLOYED NOW:** `_dist/edullm_data-0.4.0-py3-none-any.whl` is the current wheel; job defs
-> `edullm-validator:3` (4 vCPU / 8 GB, `--promote-workers 16`) and `edullm-fsck:2` — note those
-> job DEFS still name 0.3.0 and 0.2.0 in their baked commands, so the 150B publish passes 0.4.0
-> via `--container-overrides`. **Re-register both at 0.4.0 before relying on the automatic
-> event-driven path**, or an auto-triggered validation runs 0.3.0, which cannot load `families/`
-> from the producer side. 0.1.0–0.3.0 are all still in `_dist/`.
+> **DEPLOYED NOW:** `_dist/edullm_data-0.4.0-py3-none-any.whl`, and both job defs are cut over to
+> it — **`edullm-validator:4`** (4 vCPU / 8 GB, `--promote-workers 16`) and **`edullm-fsck:3`**.
+> Each asserts `__version__ == "0.4.0"` at startup, and the validator additionally asserts that
+> `publish.FAMILIES_DIR == validate.FAMILIES_DIR`, is a real directory, and that
+> `_load_family("pretrain")` actually loads — the three things whose absence caused the two
+> failures below. EventBridge targets both by unversioned name, so the new revisions are live.
+> 0.1.0–0.3.0 remain in `_dist/` but nothing references them.
 >
 > **THE 150B PUBLISH IS IN FLIGHT as of this writing** (job `olmo150-publish-2`, RUNNING, 2 h
 > timeout). All 6,913 objects (586.6 GiB) are staged and verified at
