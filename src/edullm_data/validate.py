@@ -1403,6 +1403,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--data-bucket", default="edullm-data")
     ap.add_argument("--prefix", help="dataset prefix (<dataset_id>/<version>); omit to self-discover")
     ap.add_argument("--promote", action="store_true")
+    ap.add_argument(
+        "--promote-workers",
+        type=int,
+        default=1,
+        help="threads for promote()'s copy + CRC loops (default 1, sequential). Promotion is "
+             "~2 S3 round-trips per object, so a several-thousand-object corpus needs this to "
+             "finish inside the Batch job-def time limit.",
+    )
     ap.add_argument("--now", default=None, help="ISO-8601 timestamp to stamp markers with")
     args = ap.parse_args(argv)
 
@@ -1422,7 +1430,14 @@ def main(argv: list[str] | None = None) -> int:
             continue
         if result.ok:
             if args.promote:
-                promote(result, s3, data_bucket=args.data_bucket, landing_bucket=args.landing_bucket, now=args.now)
+                promote(
+                    result,
+                    s3,
+                    data_bucket=args.data_bucket,
+                    landing_bucket=args.landing_bucket,
+                    now=args.now,
+                    copy_workers=args.promote_workers,
+                )
             s3.put(args.landing_bucket, f"{prefix}/_VALIDATED.json",
                    canonical_json(result.report()), content_type="application/json")
             print(f"{prefix}: PASS" + (" + promoted" if args.promote else ""))

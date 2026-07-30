@@ -173,3 +173,24 @@ def test_default_is_still_sequential():
     import inspect
 
     assert inspect.signature(V.promote).parameters["copy_workers"].default == 1
+
+
+def test_the_cli_exposes_promote_workers_and_wires_it_through():
+    """The deployed Batch job def passes ``--promote-workers 16``.
+
+    An argparse flag that does not exist is a hard crash on an unrecognized argument, and the
+    job def is the ONLY caller that needs concurrency — so a missing flag would break exactly
+    the case it was added for, and only in production. (Caught that way once: the job def was
+    registered against this flag before it existed.)
+    """
+    import argparse
+    import inspect
+
+    src = inspect.getsource(V.main)
+    assert "--promote-workers" in src, "the CLI flag the deployed job def passes is missing"
+    assert "copy_workers=args.promote_workers" in src, "the flag is parsed but never used"
+
+    # and it really parses, rather than merely appearing in the source
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--promote-workers", type=int, default=1)
+    assert ap.parse_args(["--promote-workers", "16"]).promote_workers == 16
