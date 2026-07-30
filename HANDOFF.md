@@ -1,28 +1,39 @@
 # HANDOFF — eduLLM Dataset Standard
 
-Last updated: **2026-07-30** — the 150B migration. Read "THE 150B PUBLISH PLAN" first; it is the
-live work. Everything before it is history that still holds.
+Last updated: **2026-07-30** — the 150B corpus is PUBLISHED and READABLE, and the reader can now
+slice and mix it. Read this header, then "WHAT IS ACTUALLY LEFT".
 
-> **You are on branch `feat/entry-labels-from-path`** (NOT merged, NOT pushed), **564 tests
-> passing, 0 ruff errors**. Commits this session, oldest first:
-> `aa4d509` key-derived `entry.labels` + Gate A recompute · `62c81a4` cut the Batch job defs to
-> the new wheel · `2515f79` `promote(copy_workers=…)` · `d6e8a7f` `--promote-workers` CLI flag +
-> version bump to **0.3.0**. Plus three HANDOFF commits.
+> **You are on `main` at `0f463ea`, pushed, `main == origin/main`. 626 tests passing, 0 ruff
+> errors.** Everything from this session is merged; no work is stranded on a branch.
 >
-> **DEPLOYED NOW:** `_dist/edullm_data-0.5.0-py3-none-any.whl`, and both job defs are cut over to
-> it — **`edullm-validator:5`** (4 vCPU / 8 GB, `--promote-workers 16`) and **`edullm-fsck:4`**.
-> Each asserts `__version__ == "0.5.0"` at startup; the validator also asserts that
-> `publish.FAMILIES_DIR == validate.FAMILIES_DIR` and that the family's `max_zero_run` bound
-> resolves to 256 — i.e. it fails loudly on exactly the two defects that burned runs below,
-> rather than running with a stale wheel. EventBridge targets both by unversioned name, so a new
-> revision is live the moment it is registered (convenient, and dangerous — always smoke-test
-> with a manual `submit-job`). 0.1.0–0.4.0 remain in `_dist/`; nothing references them.
+> **`edullm-data` HOLDS A TRAINABLE PRETRAIN CORPUS.** 6,927 objects / 586.6 GiB:
+> - **`pretrain/olmo-150b-dolma2/v1`** — 6,911 shards, **157,467,202,883 dolma2 tokens**
+>   (6,851 `train` + 60 `val`), one `tokens/` group nested `<source>/<domain>/`, every entry
+>   carrying `split` + `labels` derived from its own key and recomputed by Gate A.
+>   **Seal verified CLEAN**: `dataset_sha256` present, per-group `manifest_sha256`, and 6,911
+>   CRC64NVME references. `verify_seal` returns no problems.
+> - **`tokenizer/dolma2-bpe/v1`** — pinned by the corpus via `manifest_sha256`. Its seal is
+>   still PRE-ROOT (no `dataset_sha256`), so `verify_seal` reports it *unverifiable* rather than
+>   invalid. That only changes if it is republished.
 >
-> **THE 150B PUBLISH IS IN FLIGHT as of this writing** (job `olmo150-publish-3`, 2 h timeout,
-> wheel **0.5.0**). **6,911** objects (586.6 GiB) staged and verified at
-> `s3://edullm-landing/_migrate/olmo-150b-staged/`; the publish runs ON BATCH, in-region.
-> **If it did not finish, do NOT re-copy anything** — the staged tree is intact and the publish
-> is re-runnable as-is. Verify first with `artifacts/olmo150_verify_staged.py`.
+> **The reader can slice and mix it** (`0f463ea`):
+> `dataset_paths(..., labels={"source": "stack-edu", "domain": "Python"})` and
+> `build_mixture(..., sources=[MixtureSource({...}, ratio)], total=…, seed=…)`. Whole shards in a
+> seed-determined order, so `(dataset, version, sources, ratios, total, seed)` fully describes a
+> training set. Verified live: stack-edu → 961 shards, stack-edu/Python → 100; seed 42 reproduces
+> identically and seed 43 differs; a selected shard decodes as `<u4` with every id inside vocab.
+>
+> **DEPLOYED NOW:** `_dist/edullm_data-0.5.0-py3-none-any.whl`; job defs **`edullm-validator:5`**
+> (4 vCPU / 8 GB, `--promote-workers 16`) and **`edullm-fsck:4`**. Each asserts its wheel version
+> at startup, and the validator also asserts `publish.FAMILIES_DIR == validate.FAMILIES_DIR` and
+> that `max_zero_run` resolves to 256 — it fails loudly on exactly the defects that burned runs
+> below rather than running a stale wheel. EventBridge targets both by **unversioned name**, so a
+> new revision goes live the moment it is registered; always smoke-test with a manual
+> `submit-job`. 0.1.0–0.4.0 remain in `_dist/`; nothing references them.
+>
+> **The staged tree at `s3://edullm-landing/_migrate/olmo-150b-staged/` (6,911 objects) is still
+> there and is now redundant** — the corpus is promoted. Landing has a 14-day expiry on family
+> prefixes; `_migrate/` may or may not be covered, so delete it deliberately rather than assuming.
 >
 > **Four failures already burned, do not repeat them.**
 > 1. **Ran the publish on the LAPTOP.** `publish()` GETs every byte to wherever it runs;
@@ -543,8 +554,8 @@ Do not relitigate these; they were decided. Do not act on them without re-asking
    a replacement will pin it by `manifest_sha256` `b37b8954…`), and
    `_catalog/pretrain/olmo-mix-1124-31b/v1.json` was **CLEARED** so `resolve_latest()` returns `None`
    instead of pointing at absent bytes.
-   **Consequence for the next session: there is NO pretrain corpus in `edullm-data`.** Publishing the
-   150B is now the critical path, not an optional migration.
+   ~~**Consequence for the next session: there is NO pretrain corpus in `edullm-data`.**~~
+   **RESOLVED 2026-07-30** — `pretrain/olmo-150b-dolma2/v1` is published, promoted, and readable.
 4. **`infra/02-bucket-policy.json` is v2 in the repo but the LIVE bucket still has the v1 2-statement
    policy.** Deploying it is a documented step — `infra/DEPLOY.md:256+` ("Deploying the split Delete
    Deny"). What v1 got wrong: one Deny covered Put *and* Delete and exempted the validator + deployer
@@ -554,41 +565,80 @@ Do not relitigate these; they were decided. Do not act on them without re-asking
    `NobodyDeletesPublishedData` (Delete, **nobody** exempt). **Consequence once deployed: deleting a
    published dataset becomes two deliberate steps** — remove the Deny, then delete — which is the
    point.
-5. **Both live seals are UNROOTED.** Verified against the live bucket this session: both
-   `_VALIDATED.json` files carry only `{bytes, dataset_id, objects, validated_at, version}` — **no
-   `dataset_sha256`, no `manifest_sha256` map.** `verify_seal` reports them *unverifiable* (not
-   invalid) and `dataset_paths` lets them through (`read.py:154-155`). They stay that way until
-   re-promoted — and since `promote()` now refuses a sealed prefix, that means a **new version**, not
-   a rewrite of `v1`.
+5. ~~**Both live seals are UNROOTED.**~~ **HALF RESOLVED 2026-07-30, re-verified live.** The 150B
+   was promoted by the rooting code, so its seal carries `dataset_sha256`, a per-group
+   `manifest_sha256` map, and 6,911 CRC64NVME references — `verify_seal` returns **no problems**.
+   Only `tokenizer/dolma2-bpe/v1` is still pre-root: it reports *unverifiable* (not invalid) and
+   `dataset_paths` lets it through. It stays that way until republished, and since `promote()`
+   refuses a sealed prefix that means a **new version**, not a rewrite of `v1`.
 6. **The platform needs 4 changes owned by a TEAMMATE, not by this repo.** See
    `docs/PLATFORM-INTEGRATION.md` (being written by another agent concurrently with this handoff).
 
 ---
 
+## WHAT IS ACTUALLY LEFT — verified against live state 2026-07-30, in priority order
+
+Several older "not done" items below were fixed today. These are the ones that survive checking.
+
+### 1. Hand `docs/PLATFORM-INTEGRATION.md` to whoever owns `edu-llm/platform`
+
+**The long pole, and not this repo's to fix.** A training run needs two things from that repo: the
+GPU workload role must be able to `s3:GetObject` on `edullm-data` (it is scoped to
+`outputs/teams/platform/runs/*` today), and the Batch attempt timeout must exceed 3600 s. Neither
+has a workaround from our side — the IAM grant is enforced outside the container. Everything else
+here is smaller than this.
+
+### 2. Deploy bucket-policy v2 — **now protecting 587 GiB, not an empty bucket**
+
+Confirmed live this session: the policy is still `edullm-data-airlock-v1`, a single Deny covering
+`PutObject` AND `Delete*`, exempting `<BATCH_JOB_ROLE>` and `<INFRA_DEPLOYER_ROLE>` from all five
+actions. So the only thing stopping the validator role from deleting the published corpus is an
+identity policy that `iam:PutRolePolicy` can widen — and the intern session holds that permission.
+`infra/02-bucket-policy.json` is already v2 in the repo (Put and Delete split, **nobody** exempt
+from Delete). Runbook: `infra/DEPLOY.md:256+`. This mattered less when the bucket held 11 objects.
+
+### 3. Set a timeout on the `edullm-validator` job definition
+
+It has **none** (`timeout: null` on both the job and the job def, verified). The publish jobs only
+get one because it is passed at submit time; the EventBridge-triggered validation inherits nothing,
+so a wedged auto-promote sits `RUNNING` forever holding queue capacity. 7200 s matches the publish
+path. Related: that job runs `discover_pending`, which LISTs the whole landing bucket and validates
+every unsealed dataset — so its runtime is not bounded by the dataset that triggered it.
+
+### 4. `sft_conversations_v1` still substring-matches split names
+
+`profiles/sft_conversations_v1.py:92-117` tests against `heldout|held-out|holdout|test|val|eval`
+instead of consulting `contracts.is_trainable`. The `SPLITS` docstring (`contracts.py:132-135`)
+cites this exact substring-matching as the problem the closed vocabulary fixed, so it **overstates
+the fix**: `trainval` is still classed held-out and `dev` still rejected, in that one function.
+
+### 5. Write the adapter, once #1 unblocks
+
+`docs/CONSUMER-CONTRACT.md` is the spec. It should be small — plain `NumpyFSLDatasetConfig`, an
+explicit `dtype` from `r.dtype`, an explicit path list from `dataset_paths` or `build_mixture`.
+Do NOT reach for the Mixture/Padded/Packed/VSL/Interleaved classes or the composable stack: all of
+them call `iter_document_indices`, which on an `s3://` path derives a `.csv.gz` sidecar name and
+dies (verified by execution, 403 on the derived key). Those sidecars were deliberately not
+migrated; it is recorded in the dataset's own `limitations`.
+
 ## What is NOT done
 
-- **No training-side adapter has been written.** `docs/CONSUMER-CONTRACT.md` is the specification it
-  should be written against; the adapter itself does not exist.
-- **No training run has happened** against any `edullm-data` dataset.
-- ~~**`entry.split` is DORMANT.**~~ **FIXED 2026-07-30 (`aa4d509`, branch
-  `feat/entry-labels-from-path`).** `publish()` now derives BOTH `split` and `labels` from the
-  object's own key, and Gate A recomputes `labels` against that key
-  (`_check_labels_match_path`), rejecting a lie, an omission on a nested entry, and an extra
-  key the path cannot justify. `split-contradicts-filename` is now reachable in production.
-  A tree deeper than the key vocabulary can name is REFUSED at publish time rather than
-  labelled by guesswork. 557 tests, ruff clean. **Not yet merged, not yet in the `_dist` wheel.**
-- **`sft_conversations_v1._partition_globs` still substring-matches partition names** against
-  `heldout|held-out|holdout|test|val|eval` (`profiles/sft_conversations_v1.py:92-117`) instead of
-  using `contracts.is_trainable`. So the `SPLITS` docstring (`contracts.py:132-135`), which cites this
-  exact substring-matching as the problem the closed vocabulary fixed, **overstates the fix** — the
-  vocabulary is closed but this profile does not consult it. The `trainval`-classified-as-held-out and
-  `dev`-rejected bugs it describes are still live in that one function.
-- **The `v0.2.0` wheel reship is still outstanding** (Next Step #6) — and now `families/`-in-the-wheel
-  depends on it too.
+- **No training-side adapter has been written**, and **no training run has happened** against any
+  `edullm-data` dataset. See #1 and #5 above.
+- **The tokenizer's seal is pre-root.** `tokenizer/dolma2-bpe/v1`'s `_VALIDATED.json` carries no
+  `dataset_sha256`, so `verify_seal` reports it *unverifiable* rather than invalid and
+  `dataset_paths` lets it through. It stays that way until republished — and `promote()` refuses a
+  sealed prefix, so that means a new version, not a rewrite of `v1`. **The 150B's seal IS rooted**
+  (`dataset_sha256` + per-group `manifest_sha256` + 6,911 CRC refs, `verify_seal` clean), which
+  supersedes the older claim that "both live seals are unrooted".
+- **A mixture cannot be published as a child dataset.** `build_mixture` resolves live; freezing one
+  as `depends_on[]` + `token-order/v1` (`DATASET-STANDARD.md:836-846`) is the spec's own answer for
+  a subset and is not built. Deferred deliberately — live resolution was the user's call.
+- **No `by: "label"` partition form.** Label selection is a read-side concern only; adding the
+  partition form would be a spec amendment (the four-form set at `:822-826` is closed, and
+  `validate.py:653-658` rejects a label-named partition as `empty-split`).
 
 ---
-
-Working tree was CLEAN as of the `a5818ac` handoff; it is not clean now (see THIS BRANCH).
 
 **Deployed live in AWS account `sbsandbox` (<ACCOUNT_ID>), us-east-1** (NOT in git — broker-applied):
 - Buckets: `edullm-landing` (write-anything, expiry) + `edullm-data` (read-only; validator writes only)
@@ -932,8 +982,21 @@ outstanding to commit for this feature.
   **trainable data only**; both splits come back separately keyed in `.splits`/`.train`/`.val`; the
   seal is recomputed on every read. **Always pass `r.dtype` to the loader.** Full read-side contract
   (every field, the dtype asymmetry, the OLMo-core constraints): `docs/CONSUMER-CONTRACT.md`.
-- **Discover what's published**: list `s3://edullm-data/_catalog/` (now has `tokenizer/dolma2-bpe/v1`
-  + `pretrain/olmo-mix-1124-31b/v1`).
+- **Slice by label** (`0f463ea`): `dataset_paths(..., labels={"source": "stack-edu"})`, or add
+  `"domain"` to narrow further. Keys are whatever the producer used — nothing hardcodes
+  `source`/`domain`, so this works for any family. `rows`/`split_rows` are RECOMPUTED for what was
+  selected; asking for labels on an unlabelled dataset raises rather than returning `[]`.
+- **Build a data mixture** (`0f463ea`):
+  `build_mixture(ds, ver, sources=[MixtureSource({"source": "stack-edu"}, 0.5), …], total=2_000_000_000, seed=42)`.
+  Whole shards in a seed-determined order, so `(dataset, version, sources, ratios, total, seed)`
+  fully describes a training set — six values in a run config, not 6,911 URIs. Returns
+  `actual_ratios`, `counts_by_source`, `unit`, and `shortfall` (a component that could not reach
+  its ratio). `max_repetition_ratio` upsamples a small source; `max_source_fraction` is a HARD cap
+  that will not overshoot by part of a shard, unlike the budget. **Single dataset only** — mixing
+  two corpora risks combining different tokenizers whose vocab sizes are close enough that every
+  id still looks valid, which is silent and wrong.
+- **Discover what's published**: list `s3://edullm-data/_catalog/` — `tokenizer/dolma2-bpe/v1` and
+  `pretrain/olmo-150b-dolma2/v1`.
 - **Migrate a legacy corpus (proven playbook)**: broker-copy headerless `.npy`→`.u32le.bin` into
   `s3://edullm-landing/_migrate/<name>/tokens/`, ship wheel+driver+families to `_dist/`, then Batch
   submit `_dist/publish_driver.py` via the boto3 bootstrap with `PUB_*` env (incl. `PUB_HASH_WORKERS`/
