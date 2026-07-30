@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import fnmatch
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from .contracts import SPLITS, is_trainable
 from .manifest import ManifestEntry, parse_shard_name
@@ -147,12 +147,39 @@ class ResolvedSplit:
         to the bare dtype name when the manifest declared no byte order, which is honest —
         that dataset genuinely does not say, so native is the only available reading.
         """
-        if self.dtype is None:
-            return None
-        prefix = {"little": "<", "big": ">"}.get(self.byte_order or "")
-        if not prefix:
-            return self.dtype
-        return prefix + _NUMPY_CHAR.get(self.dtype, self.dtype)
+        return _numpy_dtype_of(self.dtype, self.byte_order)
+
+
+def _numpy_dtype_of(dtype: str | None, byte_order: str | None) -> str | None:
+    """``("uint32", "little")`` -> ``"<u4"``. Shared by ResolvedSplit and ResolvedMixture so the
+    two cannot drift on the one field a loader must not get wrong."""
+    if dtype is None:
+        return None
+    prefix = {"little": "<", "big": ">"}.get(byte_order or "")
+    if not prefix:
+        return dtype
+    return prefix + _NUMPY_CHAR.get(dtype, dtype)
+
+
+def _choose_group(
+    groups: list[Any], group: str | None, dataset_id: str, version: str
+) -> Mapping[str, Any]:
+    """The one payload group to read, or a ReadError explaining the choice the caller must make."""
+    if not groups:
+        raise ReadError(f"{dataset_id}/{version} declares no groups")
+    if group is not None:
+        chosen = next((g for g in groups if g.get("name") == group), None)
+        if chosen is None:
+            raise ReadError(
+                f"group {group!r} not found; groups are {[g.get('name') for g in groups]}"
+            )
+        return chosen
+    if len(groups) == 1:
+        return groups[0]
+    raise ReadError(
+        f"{dataset_id}/{version} has {len(groups)} groups "
+        f"{[g.get('name') for g in groups]}; pass group= to choose one"
+    )
 
 
 def _load_json(s3: S3, bucket: str, key: str) -> Any:
@@ -184,11 +211,22 @@ def dataset_paths(
     require_validated: bool = True,
     group: str | None = None,
     include_held_out: bool = False,
+    labels: Mapping[str, str] | None = None,
 ) -> ResolvedSplit:
     """Resolve a dataset to concrete object URIs + dtype.
 
     ``group`` selects which payload group when a dataset has several; defaults to the single
     group if there is exactly one, else raises so the caller is explicit about what they read.
+
+    ``labels`` narrows to the shards carrying EVERY given label key/value — the read-side use of
+    ``entry.labels``, which Gate A recomputes from each object's own key so the label cannot
+    drift from the file it describes. Keys are whatever the producer used
+    (``{"source": …, "domain": …}`` for a pretrain corpus; another family will differ), so
+    nothing here is hardcoded. ``rows`` and ``split_rows`` are then RECOMPUTED from the selected
+    entries' counts: the partition's declared total describes a superset, and handing a trainer
+    an inflated row count is the failure ``validate``'s ``partition-rows-mismatch`` exists to
+    catch on the write side. Asking for labels on an unlabelled dataset raises rather than
+    returning nothing, so "this dataset has no labels" is distinguishable from "nothing matched".
 
     **``split=None`` returns TRAINABLE data only**, and every declared split separately in
     ``.splits`` / ``.train`` / ``.val``. Returning everything — which is what this used to do —
@@ -235,22 +273,7 @@ def dataset_paths(
     except NotFound:
         raise ReadError(f"no dataset.json at {data_bucket}/{prefix}") from None
 
-    groups = ds.get("groups", [])
-    if not groups:
-        raise ReadError(f"{prefix} declares no groups")
-
-    if group is not None:
-        chosen = next((g for g in groups if g.get("name") == group), None)
-        if chosen is None:
-            raise ReadError(f"group {group!r} not found; groups are {[g.get('name') for g in groups]}")
-    elif len(groups) == 1:
-        chosen = groups[0]
-    else:
-        raise ReadError(
-            f"{prefix} has {len(groups)} groups {[g.get('name') for g in groups]}; "
-            f"pass group= to choose one"
-        )
-
+    chosen = _choose_group(ds.get("groups", []), group, dataset_id, version)
     gname = chosen["name"]
     manifest = _load_json(s3, data_bucket, f"{prefix}/{chosen.get('manifest', f'{gname}/manifest.json')}")
     entries = [ManifestEntry.from_dict(e) for e in manifest.get("entries", [])]
@@ -264,18 +287,38 @@ def dataset_paths(
     def _uri(entry: Any) -> str:
         return f"s3://{data_bucket}/{prefix}/{entry.path}"
 
+    # A labels= filter must not change how a PARTITION resolves. The glob matcher below is a
+    # deliberate three-way mirror with validate._matches_glob and publish._count_rows_for_glob
+    # ("the same order the reader uses, so a partition that resolves at validation resolves
+    # identically at read time"). So the label filter is applied to _select's OUTPUT, never
+    # inside it: partition resolution stays byte-identical to what Gate A verified, and the
+    # filter is a narrowing on top.
+    if labels:
+        if not any(getattr(e, "labels", None) for e in entries):
+            raise ReadError(
+                f"labels={dict(labels)!r} was requested but no entry in group {gname!r} of "
+                f"{dataset_id}/{version} carries any labels — this dataset is unlabelled (a flat "
+                f"layout, or a manifest written before schema v2). Returning an empty result "
+                f"would be indistinguishable from 'your filter matched nothing'."
+            )
+
+    def _label_filter(sel: list[Any]) -> list[Any]:
+        return [e for e in sel if _matches_labels(e, labels)] if labels else sel
+
     def _select(part: Mapping[str, Any]) -> tuple[list[Any], dict[str, Any]]:
         """Entries belonging to one partition, plus any loader kwargs it implies."""
         if part.get("by") == "path":
             glob = part.get("glob", "")
-            return [
+            return _label_filter([
                 e for e in entries
                 if fnmatch.fnmatch(e.path.rsplit("/", 1)[-1], glob) or fnmatch.fnmatch(e.path, glob)
-            ], {}
+            ]), {}
         # field/range/indices: the split is a row predicate, not a file subset. Return all
         # shards plus the predicate so the loader applies it — never silently return the whole
         # set as if it were the split.
-        return list(entries), {"row_predicate": {k: part[k] for k in part if k not in {"name"}}}
+        return _label_filter(list(entries)), {
+            "row_predicate": {k: part[k] for k in part if k not in {"name"}}
+        }
 
     # Resolve EVERY declared split, always. This is what makes "a dataset returns train and
     # val" true without flattening them together.
@@ -286,7 +329,10 @@ def dataset_paths(
         name = str(part["name"])
         sel, _ = _select(part)
         splits[name] = [_uri(e) for e in sel]
-        split_rows[name] = part.get("rows")
+        # Under a label filter the partition's DECLARED rows describes a superset of what was
+        # selected, so recompute from the selected entries' own counts. Unfiltered, keep the
+        # declared value: it is what Gate A recomputed and sealed.
+        split_rows[name] = _sum_counts(sel)[0] if labels else part.get("rows")
 
     rows: int | None = None
     kwargs: dict[str, Any] = {}
@@ -306,8 +352,8 @@ def dataset_paths(
                 f"split {split!r} is not in the vocabulary {sorted(SPLITS)}; group {gname!r} "
                 f"declares {sorted(splits)}"
             )
-        rows = part.get("rows")
         selected, kwargs = _select(part)
+        rows = _sum_counts(selected)[0] if labels else part.get("rows")
     else:
         # THE V9 FIX. This used to return every entry, so a caller who asked for no split in
         # particular was handed the held-out shards along with the training ones and had no way
@@ -319,11 +365,11 @@ def dataset_paths(
             if not include_held_out:
                 selected = [e for name in trainable for e in _select(_find_partition(chosen, name))[0]]
             else:
-                selected = list(entries)
+                selected = _label_filter(list(entries))
         else:
             # No trainable split DECLARED — a tokenizer, a vendored tree, an eval set. There is
             # normally nothing to protect here, so the whole artifact is the payload.
-            selected = list(entries)
+            selected = _label_filter(list(entries))
 
         if not include_held_out:
             # RECOMPUTE from the bytes' own names, do not trust the declaration. Everything
@@ -343,6 +389,11 @@ def dataset_paths(
                 or is_trainable(parsed[0])
             ]
 
+    # An unsplit read has no partition to inherit `rows` from, so it has always reported None.
+    # Under a label filter we can do better for free: the counts of exactly what was selected.
+    if labels and rows is None:
+        rows = _sum_counts(selected)[0]
+
     paths = [_uri(e) for e in selected]
     return ResolvedSplit(
         dataset_id=dataset_id,
@@ -357,6 +408,55 @@ def dataset_paths(
         byte_order=byte_order,
         header_bytes=header_bytes,
     )
+
+
+#: Count units whose values can be summed into a meaningful total. Mirrors
+#: ``validate._COUNTABLE_UNITS``; ``bytes`` is excluded there and here because summing bytes
+#: across shards answers a different question than summing rows or tokens.
+_COUNTABLE_UNITS = frozenset({"tokens", "indices", "rows", "items"})
+
+
+def _matches_labels(entry: Any, want: Mapping[str, str]) -> bool:
+    """Whether one entry carries EVERY requested label key with the requested value.
+
+    Exact match, AND across keys, no wildcards. A predicate language here would need a
+    validator nobody has written — the same reasoning that keeps ``entry.labels`` flat and
+    string-valued (``manifest.py``'s ``labels`` docstring).
+
+    Deliberately generic: it never names ``source`` or ``domain``. Those are the *pretrain*
+    convention (``manifest.PATH_LABEL_KEYS``); a curriculum or sft dataset will label by
+    something else entirely, and this must work for whatever the next family invents.
+    """
+    have = getattr(entry, "labels", None) or {}
+    return all(have.get(k) == v for k, v in want.items())
+
+
+def _sum_counts(entries: list[Any]) -> tuple[int | None, str | None]:
+    """``(total, unit)`` summed over entries, or ``(None, None)`` if that is not meaningful.
+
+    Returns ``None`` rather than a wrong number in three cases: no entry declares a count, the
+    entries disagree about the unit, or the unit is not summable. A caller that filtered a
+    partition needs the count of what it *selected* — inheriting the partition's declared total
+    would overstate it, which is the exact failure ``validate``'s ``partition-rows-mismatch``
+    exists to catch on the write side ("read.dataset_paths hands that number straight to a
+    trainer").
+    """
+    total = 0
+    unit: str | None = None
+    seen = False
+    for e in entries:
+        count = getattr(e, "count", None)
+        if not count:
+            continue
+        u = count.get("unit")
+        if u not in _COUNTABLE_UNITS:
+            continue
+        if unit is not None and u != unit:
+            return None, None  # mixed units: no single honest total
+        unit = u
+        total += int(count.get("value", 0))
+        seen = True
+    return (total, unit) if seen else (None, None)
 
 
 def _resolve_format(
@@ -494,8 +594,285 @@ def verify_seal(
     return problems
 
 
+# --------------------------------------------------------------------------------------
+# data mixtures — choose a weighted subset, reproducibly
+# --------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class MixtureSource:
+    """One weighted component of a mixture.
+
+    ``labels`` is the predicate that picks this component's shards — generic key/value match,
+    so it works for a pretrain corpus's ``{"source": …}``, a finer ``{"source": …, "domain": …}``,
+    or whatever keys another family uses.
+    """
+
+    labels: Mapping[str, str]
+    #: Share of the total budget this component should contribute, in (0, 1].
+    ratio: float
+    #: Upsampling ceiling. ``1.0`` means never reuse a shard. ``1.05`` means this component may
+    #: contribute up to 1.05x its own size by repeating shards — the only way a small source can
+    #: reach a large ratio. The legacy config used exactly this on arxiv and wikipedia.
+    max_repetition_ratio: float = 1.0
+    #: Never consume more than this fraction of the component's available count, even if the
+    #: ratio asks for more. Holds data in reserve.
+    max_source_fraction: float = 1.0
+
+    @property
+    def name(self) -> str:
+        """A stable display key, e.g. ``source=stack-edu,domain=Python``."""
+        return ",".join(f"{k}={self.labels[k]}" for k in sorted(self.labels))
+
+
+@dataclass(frozen=True)
+class ResolvedMixture:
+    """A resolved mixture: the URIs to train on, plus what you actually got.
+
+    ``actual_ratios`` and ``shortfall`` are the point. Whole-shard selection cannot hit a ratio
+    exactly, and a component whose pool is too small silently under-delivers — so the result
+    states what was achieved rather than echoing what was asked for.
+    """
+
+    dataset_id: str
+    version: str
+    paths: list[str]
+    dtype: str | None
+    byte_order: str | None
+    header_bytes: int
+    seed: int
+    #: The count unit these totals are in — ``tokens`` for a pretrain corpus, but the manifest
+    #: decides, not this module.
+    unit: str | None
+    total: int
+    counts_by_source: dict[str, int]
+    actual_ratios: dict[str, float]
+    requested_ratios: dict[str, float]
+    #: Per component, how far short of its requested budget it fell. Absent when it was met.
+    shortfall: dict[str, int]
+
+    @property
+    def numpy_dtype(self) -> str | None:
+        """Byte-order-qualified dtype string, as :class:`ResolvedSplit` gives."""
+        return _numpy_dtype_of(self.dtype, self.byte_order)
+
+
+def _shuffle_key(seed: int, dataset_id: str, version: str, path: str) -> bytes:
+    """Deterministic sort key for one shard.
+
+    Counter-mode SHA-256, the house pattern (``profiles.base.sample_offsets``): no PRNG object,
+    no ``random``/``numpy``, so the permutation is a pure function of its inputs and
+    reproducible across processes, machines and Python versions.
+
+    ``dataset_id`` and ``version`` are bound in — mirroring
+    ``validate``'s ``sha256(f"{dataset_id}|{version_id}|{gname}")`` — so seed 42 picks an
+    unrelated subset of each dataset. Reusing one seed across datasets is then not a hidden
+    correlation between their samples.
+
+    Note this does NOT reuse ``sample_offsets`` itself: that function dedups with
+    ``sorted(set(...))`` and so can return fewer values than asked for. Fine for sampling bytes
+    within a file, wrong for choosing a set of distinct shards.
+    """
+    import hashlib
+
+    return hashlib.sha256(f"{seed}|{dataset_id}|{version}|{path}".encode()).digest()
+
+
+def build_mixture(
+    dataset_id: str,
+    version: str,
+    *,
+    sources: Sequence[MixtureSource],
+    total: int,
+    seed: int,
+    s3: S3,
+    data_bucket: str = DATA_BUCKET,
+    require_validated: bool = True,
+    group: str | None = None,
+    split: str | None = "train",
+) -> ResolvedMixture:
+    """Choose a weighted, seeded subset of one dataset.
+
+    ``total`` is a budget in the group's own count unit (tokens for a pretrain corpus). Each
+    component gets ``ratio * total``, filled with WHOLE shards drawn in a seed-determined order.
+
+    **Whole shards, chosen randomly — not the head of every shard.** The legacy
+    ``SourceMixtureDatasetConfig`` took ``ceil(available * ratio)`` from the front of every path,
+    so a 10% mixture read the first 10% of every shard and never touched a tail; any ordering
+    inside a shard (crawl batch, date, repo) became a systematic skew. Drawing whole shards in a
+    seeded order has no positional bias, and needs no way to express "the first N tokens of this
+    file" — which neither :class:`ResolvedSplit` nor OLMo-core can represent. The cost is that a
+    budget lands within one shard of target rather than exactly on it.
+
+    Same ``seed`` and same inputs always give the same shard list; a different seed gives a
+    different one. That pair of properties is what makes a run reproducible from its config.
+
+    Single-dataset by construction. Mixing two datasets would risk combining corpora tokenized
+    with different tokenizers whose vocab sizes are similar enough that every id still looks
+    valid — semantically wrong and silent. Doing that safely needs a tokenizer-identity check
+    across the datasets' ``depends_on`` pins, which is deliberately not built here.
+    """
+    if not sources:
+        raise ReadError("build_mixture needs at least one source")
+    if total <= 0:
+        raise ReadError(f"total must be > 0; got {total}")
+    for src in sources:
+        if not src.labels:
+            raise ReadError(f"source {src.name!r} has an empty label predicate")
+        if not 0 < src.ratio <= 1:
+            raise ReadError(f"source {src.name!r}: ratio must be in (0, 1]; got {src.ratio}")
+        if src.max_repetition_ratio < 1:
+            raise ReadError(
+                f"source {src.name!r}: max_repetition_ratio must be >= 1 "
+                f"({src.max_repetition_ratio} would DISCARD data rather than repeat it; use "
+                f"max_source_fraction to consume less)"
+            )
+        if not 0 < src.max_source_fraction <= 1:
+            raise ReadError(
+                f"source {src.name!r}: max_source_fraction must be in (0, 1]; "
+                f"got {src.max_source_fraction}"
+            )
+    names = [s.name for s in sources]
+    if len(set(names)) != len(names):
+        raise ReadError(f"duplicate source predicates in the mixture: {sorted(names)}")
+    ratio_sum = sum(s.ratio for s in sources)
+    if abs(ratio_sum - 1.0) > 1e-6:
+        raise ReadError(
+            f"source ratios must sum to 1.0; got {ratio_sum:.6f} for {names}. An implicit "
+            f"remainder would silently decide part of your data mix."
+        )
+
+    # One resolve for the whole mixture: seal verified once, manifest read once. Each component
+    # then filters this in memory — no extra S3 calls per source.
+    base = dataset_paths(
+        dataset_id, version, split=split, s3=s3, data_bucket=data_bucket,
+        require_validated=require_validated, group=group,
+    )
+    pool = _mixture_entries(
+        dataset_id, version, s3=s3, data_bucket=data_bucket, group=group, split=split,
+    )
+
+    chosen: list[str] = []
+    counts: dict[str, int] = {}
+    shortfall: dict[str, int] = {}
+    unit: str | None = None
+
+    for src in sources:
+        matching = [e for e in pool if _matches_labels(e, src.labels)]
+        if not matching:
+            raise ReadError(
+                f"source {src.name!r} matches no shards in {dataset_id}/{version}. Check the "
+                f"label keys — a predicate that matches nothing would otherwise contribute "
+                f"silently zero to the mixture."
+            )
+        available, src_unit = _sum_counts(matching)
+        if available is None:
+            raise ReadError(
+                f"source {src.name!r}: shards declare no summable count, or disagree about the "
+                f"unit, so a budget over them is meaningless"
+            )
+        if unit is not None and src_unit != unit:
+            raise ReadError(
+                f"mixture components disagree about the count unit ({unit!r} vs {src_unit!r}); "
+                f"a single budget cannot span both"
+            )
+        unit = src_unit
+
+        want = int(total * src.ratio)
+        # A CEILING and a TARGET behave differently at the last shard, and conflating them makes
+        # max_source_fraction a lie. The budget is a goal: overshooting it by part of one shard
+        # is the accepted cost of whole-shard selection. The fraction is a LIMIT the caller
+        # asked not to exceed — "use at most 10% of arxiv" must not consume 13.5% because one
+        # 40M-token shard straddled the line. So: fill toward `want`, but never cross `hard_cap`.
+        hard_cap = int(available * src.max_source_fraction * src.max_repetition_ratio)
+        target = min(want, hard_cap)
+        capped = hard_cap < want
+
+        ordered = sorted(matching, key=lambda e: _shuffle_key(seed, dataset_id, version, e.path))
+        got = 0
+        picked: list[Any] = []
+        # Passes > 1 only happen when max_repetition_ratio > 1: the pool is walked again in the
+        # same seeded order, so a repeat is deterministic too.
+        while got < target:
+            before = got
+            for e in ordered:
+                if got >= target:
+                    break
+                n = int((getattr(e, "count", None) or {}).get("value", 0))
+                if capped and got + n > hard_cap:
+                    continue  # would breach the limit; try a smaller shard
+                picked.append(e)
+                got += n
+            if got == before:
+                break  # nothing left that fits, or every shard counts zero; refuse to spin
+
+        counts[src.name] = got
+        chosen.extend(f"s3://{data_bucket}/{dataset_id}/{version}/{e.path}" for e in picked)
+        if got < want:
+            shortfall[src.name] = want - got
+
+    grand = sum(counts.values())
+    return ResolvedMixture(
+        dataset_id=dataset_id,
+        version=version,
+        paths=chosen,
+        dtype=base.dtype,
+        byte_order=base.byte_order,
+        header_bytes=base.header_bytes,
+        seed=seed,
+        unit=unit,
+        total=grand,
+        counts_by_source=counts,
+        actual_ratios={k: (v / grand if grand else 0.0) for k, v in counts.items()},
+        requested_ratios={s.name: s.ratio for s in sources},
+        shortfall=shortfall,
+    )
+
+
+def _mixture_entries(
+    dataset_id: str,
+    version: str,
+    *,
+    s3: S3,
+    data_bucket: str,
+    group: str | None,
+    split: str | None,
+) -> list[Any]:
+    """The manifest entries a mixture may draw from, split-filtered the way the reader is.
+
+    Kept separate from :func:`dataset_paths` because a mixture needs the ENTRIES (for their
+    labels and counts), while ``dataset_paths`` returns URI strings. Both read the same manifest
+    and apply the same trainable-split rule, so a mixture can never draw a held-out shard that
+    an unsplit read would have withheld.
+    """
+    prefix = f"{dataset_id}/{version}"
+    ds = _load_json(s3, data_bucket, f"{prefix}/dataset.json")
+    groups = ds.get("groups") or []
+    chosen_group = _choose_group(groups, group, dataset_id, version)
+    gname = str(chosen_group.get("name"))
+    manifest = _load_json(
+        s3, data_bucket, f"{prefix}/{chosen_group.get('manifest', f'{gname}/manifest.json')}"
+    )
+    entries = [ManifestEntry.from_dict(e) for e in manifest.get("entries", [])]
+    if split is None:
+        return entries
+    # Recompute the split from each filename rather than trusting a declaration — the same
+    # hardening dataset_paths applies, for the same reason.
+    keep = []
+    for e in entries:
+        parsed = parse_shard_name(e.path)
+        if parsed is None or parsed[0] not in SPLITS:
+            continue  # not a split-bearing shard; a mixture is over shards
+        if parsed[0] == split:
+            keep.append(e)
+    return keep
+
+
 __all__ = [
     "dataset_paths",
+    "build_mixture",
+    "MixtureSource",
+    "ResolvedMixture",
     "MixedFormat",
     "SealMismatch",
     "resolve_latest",

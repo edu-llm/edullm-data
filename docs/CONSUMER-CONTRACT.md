@@ -144,6 +144,78 @@ With one group, `group=` is optional. With several and no `group=`, it **raises*
 (`read.py:242-252`) rather than guessing — the same reasoning as everywhere else here: an ambiguous
 read that succeeds is worse than one that stops.
 
+### Selecting a subset by label
+
+Shards carry `entry.labels` — flat, string-valued, and **recomputed by Gate A from the object's
+own key** (`validate._check_labels_match_path`), so a label cannot drift from the file it
+describes. `labels=` narrows a read to the shards carrying every given key/value:
+
+```python
+r = dataset_paths(ds_id, version, labels={"source": "stack-edu"}, s3=s3)
+r = dataset_paths(ds_id, version, labels={"source": "stack-edu", "domain": "Python"}, s3=s3)
+```
+
+The keys are **whatever the producer used** — `{source, domain}` for a pretrain corpus laid out
+`tokens/<source>/<domain>/`, something else for another family. Nothing in the reader hardcodes a
+key name.
+
+Two behaviours worth knowing:
+
+- **`rows` and `split_rows` are recomputed** from the selected entries' own counts. The
+  partition's declared total describes a superset, and handing a trainer an inflated row count for
+  data it did not select is the failure `partition-rows-mismatch` exists to catch on the write side.
+- **Asking for labels on an unlabelled dataset raises.** A flat corpus, or any v1 manifest, carries
+  no labels; returning `[]` would be indistinguishable from "your predicate missed", and you would
+  train on nothing without noticing.
+
+### Building a weighted mixture
+
+`build_mixture` chooses a weighted, budgeted, **reproducible** subset:
+
+```python
+from edullm_data.read import build_mixture, MixtureSource
+
+m = build_mixture(
+    ds_id, version, s3=s3, seed=42, total=2_000_000_000,
+    sources=[
+        MixtureSource({"source": "stack-edu", "domain": "Python"}, 0.4),
+        MixtureSource({"source": "finemath-3plus"},                0.4),
+        MixtureSource({"source": "arxiv"}, 0.2, max_repetition_ratio=1.05),
+    ],
+)
+m.paths            # feed these to the loader
+m.numpy_dtype      # "<u4" — same rule as §3, pass it explicitly
+m.actual_ratios    # what you GOT: {"source=arxiv": 0.214, …}
+m.shortfall        # a component that could not reach its ratio, and by how much
+```
+
+**Whole shards, drawn in a seed-determined order.** The same `seed` always selects the same
+shards, so `(dataset, version, sources, ratios, total, seed)` fully describes your training data —
+six values in a run config instead of a list of 6,911 URIs. A different seed gives a different
+sample of the same mixture.
+
+This deliberately differs from OLMo-core's `SourceMixtureDatasetConfig`, which takes
+`ceil(available * ratio)` from the **head of every path**: a 10% mixture there reads the first 10%
+of every shard and never touches a tail, so any ordering inside a shard becomes a systematic skew.
+(Its own `seed` field is declared, documented as controlling sampling, and never read.) The cost of
+whole shards is that a budget lands *near* the target rather than on it — measured at ~2% over on
+the 150B corpus.
+
+Two knobs carried over from that config, both of which its real usage needed:
+
+| knob | meaning |
+| --- | --- |
+| `max_repetition_ratio` | upsample by repeating shards, up to this multiple of the component's own size. A source smaller than its ratio demands cannot reach it otherwise. Default `1.0` = never reuse. |
+| `max_source_fraction` | never consume more than this fraction of the component. A **hard cap**, not a target: unlike the budget, it will not overshoot by part of a shard. |
+
+`shortfall` is the honest half. A component whose pool is too small under-delivers; without it
+being reported you would ask for 5% wikipedia, get 3%, and never know.
+
+**One dataset at a time, by construction.** Mixing two datasets could combine corpora tokenized
+with *different* tokenizers whose vocab sizes are similar enough that every id still looks valid —
+semantically wrong, and silent. Doing it safely needs a tokenizer-identity check across the
+datasets' `depends_on` pins; that is not built, so the API does not offer the option.
+
 ---
 
 ## 3. THE dtype rule

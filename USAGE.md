@@ -182,6 +182,41 @@ r = dataset_paths("pretrain/dolma2-150b", version, split="train", s3=s3)
 
 `dataset_paths` refuses a dataset with no `_VALIDATED.json` — unvalidated data is not readable.
 
+### Just part of it
+
+Shards carry labels (`{"source": …, "domain": …}` for a pretrain corpus; whatever the producer
+used otherwise), recomputed by the validator from each object's key so they cannot drift:
+
+```python
+r = dataset_paths(ds_id, version, labels={"source": "stack-edu"}, s3=s3)
+r = dataset_paths(ds_id, version, labels={"source": "stack-edu", "domain": "Python"}, s3=s3)
+r.rows   # recomputed for what you SELECTED, not the whole partition
+```
+
+### A weighted mixture
+
+```python
+from edullm_data.read import build_mixture, MixtureSource
+
+m = build_mixture(
+    "pretrain/olmo-150b-dolma2", "v1", s3=s3, seed=42, total=2_000_000_000,
+    sources=[
+        MixtureSource({"source": "stack-edu"},      0.5),
+        MixtureSource({"source": "finemath-3plus"}, 0.3),
+        MixtureSource({"source": "arxiv"},          0.2, max_repetition_ratio=1.05),
+    ],
+)
+m.paths          # the URIs to train on
+m.numpy_dtype    # "<u4"
+m.actual_ratios  # what you got, e.g. {"source=arxiv": 0.214, …}
+m.shortfall      # any component that could not reach its ratio
+```
+
+Whole shards in a seed-determined order, so `(dataset, version, sources, ratios, total, seed)`
+fully describes the training data — the same seed always yields the same shards. Ratios land
+*near* target rather than exactly on it, which is the cost of not needing partial-file reads.
+Full semantics, including both upsampling knobs: [`docs/CONSUMER-CONTRACT.md`](docs/CONSUMER-CONTRACT.md).
+
 ---
 
 ## Find what exists
