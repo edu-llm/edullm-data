@@ -403,7 +403,54 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 - **Testing live, not just asserting** — every deploy step was proven by exercising it; this is how
   the invocation-role gap (below) was caught.
 
+
+### From the schema-v2 / recompute-gaps session (PR #4)
+
+- **Adversarial subagent review, with a mandate to BREAK claims.** Four reviewers ran against the
+  diff and between them found 3 CRITICALs, including one leak reachable with **no adversarial input at
+  all** (`families/curriculum.json` required validation while shipping no partition template, so an
+  ordinary publish leaked its val shards as trainable while `.val` reported `None`). Asking "prove this
+  fix holds" found nothing; asking "break this" found real holes. Worth repeating for any safety claim.
+- **Reproducing a defect by EXECUTION before fixing it.** Every one of the 15 defects was demonstrated
+  live first. This caught two cases where the intuitive story was backwards (see What Didn't Work).
+- **Verifying against the real live corpus, not just fixtures.** Running each new check over the actual
+  218-entry manifest is what proved the changes were a no-op on published data — `manifest_sha256`
+  still `f05702fa…`, 0 dtype violations, `sum(tokens) * 4 == sum(bytes)` exactly.
+- **Testing the WIRING, not just the unit.** Reverting `family_defaults` out of `GroupContext` broke
+  **zero of 410 tests**, because every test called the helper directly. The unit was covered; the
+  plumbing was not, and the plumbing was the bug. Any fix that threads a value somewhere new needs a
+  test that fails when the threading is removed — verified by actually removing it.
+- **Building a real wheel and installing it into a clean venv.** Grepping for 3.11-only syntax and
+  reading `pyproject.toml` both said `families/` shipped. Installing proved it did not.
+
 ## What Didn't Work (and the fix)
+
+### From the schema-v2 / recompute-gaps session (PR #4)
+
+- **Trusting a fix because the tests passed.** `family_defaults` was wired into `GroupContext` and 410
+  tests went green — but `FAMILIES_DIR` was repo-root-relative and the wheel ships only
+  `src/edullm_data`, so on the deployed validator it resolved to a nonexistent path and silently fell
+  back to `{}`. **It failed only in production**, because every checkout and every test found the
+  directory. Fix: `force-include` families into the wheel + a three-way lookup, proven from a real
+  installed wheel. Lesson: a path-relative resource lookup is a deployment bug waiting for a deploy.
+- **Reasoning about the dtype failure instead of executing it.** I stated twice, confidently, that
+  uint32-read-as-uint16 would crash and uint16-read-as-uint32 would be silent. **It is the reverse.**
+  Executed over all 100,278 dolma2 ids: reading uint32 as uint16 yields **0 of 200,554 out-of-range**
+  values (every half is <= 65,535) and doubles the element count — silent, trains to completion.
+  Reading uint16 as uint32 puts 100% out of range and crashes. This matters because OLMo-core's
+  low-level default IS uint16 and these corpora ARE uint32, so **the silent direction is the default
+  one**. Never reason about a byte-level failure that takes four lines to demonstrate.
+- **Quoting a price from memory.** I put p4d.24xlarge at $32.77/hr in a doc headed for a teammate's
+  budget. It is **$21.9576** (`config/workload-catalog.yaml:104`, confirmed against the live Price List
+  API) — ~50% high. A subagent caught it.
+- **Deferring to a check that did not exist.** Two of my own new validators early-returned with the
+  comment "a different check owns that". `grep` for that check found only the comments. Writing a
+  deferral is not the same as writing the check.
+- **A guard that cannot fail.** My first family-key drift test used a substring heuristic that reported
+  "mapped" for invented names like `tags_extra`. Replaced with set membership in both directions.
+- **`--human-readable` output for numeric comparison.** GiB-rounded sizes made me flag 2 of 218 legacy
+  shards as mismatched; the exact API sizes matched perfectly. Use `list-objects-v2 --query sum(Size)`
+  when bytes decide something.
 
 - **Subagents for the orchestrator** — stalled twice on rate limits (transcript frozen >10 min,
   ending on a tool_result with no assistant turn). Signature to watch for. Fix: build in main thread.
@@ -533,9 +580,18 @@ is clean; local `main` == `origin/main`. The two live datasets were verified by 
 re-run in place (job `e72522a4…`, SUCCEEDED): both `ok=True, violations=0`, READMEs present. Nothing
 outstanding to commit for this feature.
 
-0. **FIRST: get this branch off the laptop.** `fix/validator-recompute-gaps-schema-v2` is 10 commits
-   of unmerged, unpushed work (527 tests). Branch + PR per the repo's own rule, not a direct push to
-   `main`. Everything below assumes it lands.
+0. ~~**FIRST: get this branch off the laptop.**~~ **DONE** — pushed, PR #4, merged to `main` as
+   `2e561cc` with `--merge` (13 commits preserved individually), branch deleted local + remote.
+   Then `38c4a0b` refreshed this file. `main == origin/main`, 541 tests, 0 ruff errors.
+
+   **THE ACTUAL #1 NOW: publish a pretrain corpus.** `edullm-data` holds only the tokenizer, so
+   there is nothing to train on. The 150B is the intended replacement and its structural decision is
+   already made (ONE `tokens/` group + labels — see DEFERRED DECISIONS #1). Two blockers that used to
+   stop it are fixed on `main`: caller-supplied partitions now get `rows` filled (`c9d2816`, which
+   otherwise rejected the whole publish AFTER the 630 GB copy), and the distinct-ids floor scales with
+   sample size (`72df9f7`, which otherwise blocked 630 GB over two 20-byte shards). Re-run the Gate A
+   dry-run that produced 12 `partition-no-rows` violations and confirm it is clean before spending the
+   copy.
 1. ~~Package `families/` INTO the wheel.~~ **DONE on this branch** (`ad75062`) via
    `[tool.hatch.build.targets.wheel.force-include]` in `pyproject.toml:42-43`. **Still outstanding:**
    rebuild the wheel + `aws s3 cp` it to `_dist/`, then simplify `_dist/publish_driver.py` to drop the
