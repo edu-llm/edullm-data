@@ -6,6 +6,22 @@ manifest shape, the airlock, profiles, validation gates — lives at
 package is code that implements that document; it is not a second source of truth. If the two disagree,
 the standard wins and this package has a bug.
 
+## What is in `s3://edullm-data` right now
+
+One dataset. **11 objects, 6.5 MiB** (as of 2026-07-29):
+
+| Dataset | Contents |
+| --- | --- |
+| `tokenizer/dolma2-bpe/v1` | `allenai/dolma2-tokenizer` — tokenizer.json, merges.txt, vocab.json, configs. `vocab_size 100278` / `eos 100257` **derived** from tokenizer.json, never typed. |
+
+**There is currently no pretrain corpus.** `pretrain/olmo-mix-1124-31b/v1` (31.3B tokens, 218 shards)
+was deleted on 2026-07-29: it had no `val` split and, being frozen, could not gain one, so under
+validation-required-by-default it failed permanently. Its bytes remain recoverable two ways — a
+byte-identical legacy copy at `s3://edullm-datasets/olmo30b/` (218 `.npy` shards,
+125,336,003,336 bytes) and 342 noncurrent versions in the bucket itself.
+
+Publishing a replacement corpus is the open work. See `HANDOFF.md`.
+
 ## Install
 
 Public repo — the `git+https` install needs no auth. Pin a tag so the publisher and validator agree:
@@ -85,7 +101,7 @@ edullm-data/                    ← git root
 │       └── sft_conversations_v1.py messages[] schema, dedup + leakage report     done
 ├── infra/                      CloudFormation + policies + Dockerfile + runbooks done (deployed)
 ├── families/                   the six family.json files                         done
-└── tests/                      380 passing                                       done
+└── tests/                      541 passing                                       done
 ```
 
 ## Build status (standard §13)

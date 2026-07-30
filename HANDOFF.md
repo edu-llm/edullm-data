@@ -1,14 +1,19 @@
 # HANDOFF — eduLLM Dataset Standard
 
 Last updated: 2026-07-29 (post olmo30b migration + public release + per-dataset generated READMEs,
-MERGED to main as `afac933` via PR #1; then the `v0.2.0` release bump — see Next Step #6; then the
-**schema-v2 / validator-recompute-gaps** branch, see "THIS BRANCH" below). Author: prior agent. Read
-this file alone and you can continue with no other context.
+MERGED as `afac933` via PR #1; then the `v0.2.0` release bump — see Next Step #6; then the
+**schema-v2 / validator-recompute-gaps** work, MERGED as `2e561cc` via **PR #4** — see "THIS BRANCH"
+below; then the **31B corpus was DELETED** from `edullm-data`). Author: prior agent. Read this file
+alone and you can continue with no other context.
 
-> **YOU ARE NOT ON `main`.** Branch `fix/validator-recompute-gaps-schema-v2`, **12 commits ahead of
-> `main`** (`a5818ac`), **NOT merged and NOT pushed** — `origin/main == main == a5818ac`, so these
-> commits exist only on this laptop. **541 tests passing.** Read "THIS BRANCH" and "DEFERRED
-> DECISIONS" before doing anything else.
+> **You are on `main` at `2e561cc`**, pushed, `main == origin/main`. **541 tests passing, 0 ruff
+> errors.** PR #4 merged with `--merge` (not squash), so all 13 commits are preserved in history —
+> the per-fix reasoning and executed proofs live in those messages.
+>
+> **`edullm-data` NOW HOLDS ONE DATASET: `tokenizer/dolma2-bpe/v1`.** 11 objects, 6.5 MiB. The
+> 31B corpus was deleted on 2026-07-29 (see "THE 31B DELETION"). **There is currently NO pretrain
+> corpus to train on** — that is expected and was a deliberate choice; the 150B migration is the
+> replacement. Read "THE 31B DELETION" and "DEFERRED DECISIONS" before doing anything else.
 
 ---
 
@@ -28,28 +33,52 @@ Motivating audit: `../docs/dataset-creation/s3-dataset-audit-2026-07-28.md` (23 
 ## Current Progress — BUILT, DEPLOYED, PROVEN AUTOMATIC, PUBLIC, and carrying REAL DATA
 
 The full pipeline is proven end-to-end on live AWS with real data, including fully-automatic
-event-triggered validation. The repo is now **public at
-`https://github.com/edu-llm/edullm-data`** (tag `v0.1.0`). The first real migration is DONE:
-two datasets are live, validated, promoted, and READABLE in `edullm-data`.
+event-triggered validation. The repo is **public at `https://github.com/edu-llm/edullm-data`**.
+The first real migration was completed and then **deliberately rolled back** — see below.
 
-**Two datasets now in `edullm-data` (migrated 2026-07-29 from `s3://edullm-datasets/olmo30b/`):**
+**WHAT IS IN `edullm-data` RIGHT NOW — one dataset, 11 objects, 6.5 MiB (verified 2026-07-29):**
 - `tokenizer/dolma2-bpe/v1` — the real `allenai/dolma2-tokenizer` (tokenizer.json + merges.txt +
-  vocab.json + configs). `vocab_size 100278` & `eos 100257` DERIVED from tokenizer.json.
-- `pretrain/olmo-mix-1124-31b/v1` — 31,334,000,834 dolma2 tokens, 218 shards, 125.336 GB,
-  uint32 headerless `.u32le.bin`, `depends_on tokenizer/dolma2-bpe`. Both have `_VALIDATED.json`
-  + `_catalog/` entries; `read.dataset_paths()` returns them with dtype uint32.
-- **Both now carry a generated `README.md`** at their prefix, plus enriched descriptive metadata
-  in `dataset.json`. The olmo corpus has the real OLMo-mix-1124 data-mix table (DCLM-Baseline,
-  starcoder, pes2o, arxiv, open-web-math, algebraic-stack, wiki — upstream token/doc counts,
-  per-source licenses) with an explicit "these are upstream-collection figures, not this subset's
-  measured mix" caveat, an `about` block, and `license {id: ODC-By-1.0, basis: declared}`. The
-  tokenizer README keeps license `unknown` (upstream terms unverified — not fabricated). These were
-  added by an **in-place backfill** that changed ONLY descriptive keys — every group's
-  `manifest_sha256`, the `depends_on` pin, and `inventory` are byte-identical to pre-backfill
-  (verified), so the frozen contract on the 218 shards holds and no payload byte was re-copied.
-- Legacy `s3://edullm-datasets/olmo30b/` left fully intact (greenfield + provenance). The legacy
-  `.npy` shards were headerless-raw-uint32 (the ".npy lie"), so migration was a pure server-side
-  rename `.npy → .u32le.bin` + publish — zero re-encode, zero bytes through the laptop.
+  vocab.json + configs). `vocab_size 100278` & `eos 100257` DERIVED from tokenizer.json. Has
+  `_VALIDATED.json` + `_catalog/tokenizer/dolma2-bpe/v1.json`. **KEEP THIS** — it has NO legacy
+  backup (the legacy `olmo30b/` tree contains zero tokenizer files, verified), and a replacement
+  corpus will pin it by `manifest_sha256`, so re-downloading from HuggingFace could break that chain.
+- **`pretrain/olmo-mix-1124-31b/v1` — DELETED.** Was 31,334,000,834 dolma2 tokens / 218 shards /
+  125.336 GB. See "THE 31B DELETION" for why, and for the two recovery paths.
+
+### THE 31B DELETION (2026-07-29)
+
+**Why:** it had no `val` split and, being frozen, could not gain one — so under the new
+validation-required-by-default rule it fails `missing-required-split` permanently. Its per-source
+structure was also already flattened, which is not the shape the 150B work needs. Keeping it bought
+nothing except a corpus no defensible claim could be made from.
+
+**Recovery — TWO independent paths, both verified before deleting:**
+1. `s3://edullm-datasets/olmo30b/olmo-mix-1124-30b/tokenized/shards/` — 218 `.npy` shards totalling
+   **125,336,003,336 bytes, byte-identical** to the published manifest total. Never touched. (These
+   are the headerless-raw-uint32 ".npy lie" files; a re-publish is a server-side rename, no re-encode.)
+   The legacy tree also holds 218 sidecar files the migration excluded.
+2. Versioning was ON and nothing was purged: **342 noncurrent versions + 222 delete markers** remain
+   under the deleted prefix.
+
+**How:** the intern role is denied `s3:DeleteObject` by the airlock, so this needed a temporary
+bucket-policy amend (add the intern ARN to `OnlyValidatorWrites`'s exemption list) → delete → restore
+the original policy verbatim. **The airlock is RESTORED and verified**: the live policy diffs
+identical to the original (`Id: edullm-data-airlock-v1`, exemption list back to the two roles, intern
+ARN absent), and both probes deny — intern `PutObject` to the bucket AND intern `DeleteObject` on the
+surviving tokenizer README, each with "explicit deny in a resource-based policy". The same probes
+were run BEFORE the amend and also denied, which proves the probe detects the policy rather than
+passing vacuously. 223 objects / 125,336,070,789 bytes removed; bucket went 234 → 11 objects.
+
+**Consequence:** `resolve_latest("pretrain/olmo-mix-1124-31b")` now returns `None` (the catalog entry
+went with the data), which is the correct state — better than a catalog pointing at absent bytes.
+
+**Still true from the migration, and worth keeping:** every promoted dataset carries a **generated
+`README.md`** rendered from `dataset.json` (a DERIVED artifact — it cannot drift). The tokenizer's
+keeps `license: unknown` because upstream terms were never verified, and that is deliberate: the
+generator omits what it does not know rather than fabricating it. The migration also proved the
+in-place **descriptive-keys-only backfill** works — it changed only prose fields and left every
+`manifest_sha256`, `depends_on` pin, and `inventory` byte-identical (verified), so a frozen contract
+survives a metadata edit. Legacy `s3://edullm-datasets/olmo30b/` was left fully intact throughout.
 
 **Code** (this repo, `edullm-data/`, its own git root; **541 tests passing** on this branch — was 380
 on `main`):
@@ -109,10 +138,13 @@ on `main`):
 
 ---
 
-## THIS BRANCH — `fix/validator-recompute-gaps-schema-v2` (12 commits, UNMERGED, UNPUSHED)
+## THIS WORK — `fix/validator-recompute-gaps-schema-v2`, MERGED to `main` as `2e561cc` (PR #4)
 
-Branched from `a5818ac`. **380 → 541 tests.** Nothing here is on `origin`; if this laptop dies the work
-is gone. Commits, newest last:
+13 commits, preserved individually (merged with `--merge`, not squash). Branch deleted local + remote.
+
+Branched from `a5818ac`. **380 → 541 tests.** Pushed and merged to `main` as `2e561cc` via PR #4,
+using `--merge` so all 13 commits survive individually — the executed proofs and per-fix reasoning are
+in these messages, not just in the PR body. Commits, newest last:
 
 ```
 9bd5213  fix(validator): derive dtype from vocab; wire family defaults into the gate
@@ -259,14 +291,16 @@ Do not relitigate these; they were decided. Do not act on them without re-asking
    section still describes the six-group plan; **that is superseded by this decision.**
 2. **Slurm/ORCD is OUT OF SCOPE entirely.** Training goes through `edu-llm/platform` → AWS Batch.
    Do not write Slurm submission scripts, sbatch wrappers, or ORCD docs.
-3. **The 31B corpus is EXPECTED to fail `missing-required-split`** — it has no val split, predates
-   the rule, and is frozen so it cannot gain one in place. The violation message itself says so
-   (`validate.py:747-753`). It is **slated for deletion once a compliant replacement exists.** When
-   that happens:
-   - **KEEP `tokenizer/dolma2-bpe/v1`** — the replacement will pin it by `manifest_sha256`
-     (currently `b37b8954…`, per the 31B corpus's `depends_on`).
-   - **CLEAR `_catalog/pretrain/olmo-mix-1124-31b/v1.json`**, or `resolve_latest()` will keep
-     reporting `v1` for a dataset whose data is gone (it reads the catalog only, `read.py:294-305`).
+3. ~~**The 31B corpus is EXPECTED to fail `missing-required-split`**, slated for deletion.~~
+   **DONE 2026-07-29 — DELETED**, ahead of a replacement rather than after one. The user's call, and
+   correct: it failed the rule whether it existed or not, and its flattened per-source structure was
+   not the shape the 150B needs. See "THE 31B DELETION" above for the two verified recovery paths.
+   Both follow-ups were handled: `tokenizer/dolma2-bpe/v1` was **KEPT** (it has no legacy backup, and
+   a replacement will pin it by `manifest_sha256` `b37b8954…`), and
+   `_catalog/pretrain/olmo-mix-1124-31b/v1.json` was **CLEARED** so `resolve_latest()` returns `None`
+   instead of pointing at absent bytes.
+   **Consequence for the next session: there is NO pretrain corpus in `edullm-data`.** Publishing the
+   150B is now the critical path, not an optional migration.
 4. **`infra/02-bucket-policy.json` is v2 in the repo but the LIVE bucket still has the v1 2-statement
    policy.** Deploying it is a documented step — `infra/DEPLOY.md:256+` ("Deploying the split Delete
    Deny"). What v1 got wrong: one Deny covered Put *and* Delete and exempted the validator + deployer
@@ -326,13 +360,14 @@ Working tree was CLEAN as of the `a5818ac` handoff; it is not clean now (see THI
 - Batch job defs: `edullm-validator:1` (self-discovering validate+promote), `edullm-fsck:1`
 - **Event rule `edullm-landing-manifest-created` — ENABLED**: manifest.json upload → validate+promote,
   RoleArn `<EVENTBRIDGE_INVOKE_ROLE>` + its inline `edullm-validator-submit` (SubmitJob+PassRole)
-- **Schedule rule `edullm-wu-fsck-nightly` — ENABLED**: `cron(6 9 * * ? *)` UTC (04:06 local) → fsck.
-  **DRIFT, not yet reconciled:** `fsck.py` now documents itself as **WEEKLY** (`4dfad55`) — the facts
-  it re-checks change only when something mutates a frozen prefix, so nightly bought 7× the
-  false-alarm exposure and an owned job that cries wolf gets muted. **A code deploy does NOT change
-  the live rule.** Exact `put-rule` (`cron(6 9 ? * MON *)`) is in `infra/DEPLOY.md:738+`, with the
-  note that *renaming* the rule means delete+recreate with the target re-attached — so changing only
-  the expression is the smaller move.
+- **Schedule rule `edullm-wu-fsck-nightly` — ENABLED, NOW WEEKLY**: `cron(6 9 ? * MON *)` UTC
+  (Mondays 09:06) → fsck. **DRIFT RESOLVED 2026-07-29** — applied live via `events put-rule`, and the
+  target was verified intact afterwards (`fsck-batch-queue` → CPU queue, job def `edullm-fsck`, role
+  `CloudWatchSendEventsToVdi`). That verification matters: `put-rule` replaces a rule's attributes and
+  can drop the target silently.
+  **The rule NAME still says `-nightly` and that is deliberate** — renaming means delete+recreate,
+  which drops the target and its `RoleArn`. Changing only the expression was the smaller, safer move;
+  the reason is recorded in the rule's own live Description so nobody re-litigates it.
 - S3 Inventory (weekly) on `edullm-data`; landing lifecycle scoped to family prefixes (keeps `_dist/`)
 - `s3://edullm-landing/_dist/edullm_data-0.1.0-py3-none-any.whl` — the durable bootstrap wheel
 
@@ -554,7 +589,9 @@ outstanding to commit for this feature.
 9. **Make `sft_conversations_v1._partition_globs` use `contracts.is_trainable`** instead of substring
    matching. Until then the `SPLITS` docstring overstates the fix. See "What is NOT done".
 10. **Deploy bucket-policy v2** — DEFERRED DECISIONS #4, runbook at `infra/DEPLOY.md:256+`.
-11. **Reconcile the fsck schedule** — the live rule is nightly, `fsck.py` argues weekly.
+11. ~~**Reconcile the fsck schedule.**~~ **DONE 2026-07-29** — live rule is now `cron(6 9 ? * MON *)`
+    (Mondays 09:06 UTC), target verified intact after the `put-rule`. Rule name still says `-nightly`
+    deliberately; see the deployed-infra section.
 
 ## How to operate it (quick reference)
 
