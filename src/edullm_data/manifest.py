@@ -22,7 +22,7 @@ exceptions because §7 wants *all* failing assertions written into
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from .contracts import SCHEMA_VERSION, SPLITS, canonical_json, sha256_bytes
 
@@ -32,6 +32,8 @@ __all__ = [
     "FIXED_WIDTH_UNITS",
     "FIXED_WIDTH_CONTAINERS",
     "EXTENSION_FORMAT",
+    "PATH_LABEL_KEYS",
+    "labels_from_path",
     "SHARD_RE",
     "CAS_RE",
     "Format",
@@ -670,6 +672,47 @@ def parse_shard_name(path: str) -> tuple[str, int] | None:
     if match is None:
         return None
     return match.group("split"), int(match.group("ordinal"))
+
+
+#: Names for the path segments BETWEEN the group and the basename, outermost first.
+#: ``tokens/<source>/<domain>/train-00000.u32le.bin`` -> ``{"source": …, "domain": …}``.
+#: Two levels is the depth this standard describes; a third is a producer mistake, not a
+#: dimension nobody named, so :func:`labels_from_path` refuses rather than inventing a key.
+PATH_LABEL_KEYS: tuple[str, ...] = ("source", "domain")
+
+
+def labels_from_path(rel_path: str, *, keys: Sequence[str] = PATH_LABEL_KEYS) -> dict[str, str]:
+    """Derive ``entry.labels`` from the directory segments between the group and the basename.
+
+    A corpus that keeps its sources in the key already states the slice a shard belongs to;
+    this reads that statement into the manifest so the claim is machine-readable rather than
+    a string convention a consumer has to re-parse. Gate A then recomputes it
+    (``_check_labels_match_path``), which is what makes the label trustworthy — an entry whose
+    ``labels`` disagree with its own key is rejected. A hand-typed label would be a producer
+    assertion no gate falsifies, i.e. decoration under CONTRIBUTING's golden rule.
+
+    Flat layouts return ``{}``: there are no segments, so there is nothing to say, and an
+    empty dict is omitted from the manifest entirely (``ManifestEntry.to_dict``) so a flat
+    dataset's bytes are unchanged.
+
+    Raises ``PublishError`` when the tree is deeper than ``keys`` can name. Silently dropping
+    the extra segment would publish a label that is true but incomplete, and silently
+    inventing ``level_3`` would put an unnamed dimension in the hash chain forever — labels
+    live inside ``manifest_sha256`` and cannot be corrected without republishing.
+    """
+    parts = rel_path.split("/")
+    middle = parts[1:-1]  # drop the group segment and the basename
+    if not middle:
+        return {}
+    if len(middle) > len(keys):
+        raise ValueError(
+            f"payload key {rel_path!r} nests {len(middle)} levels under its group "
+            f"({'/'.join(middle)}), but only {len(keys)} are named {tuple(keys)!r}. Name the "
+            f"extra level explicitly via labels_from_path(keys=…) rather than shipping an "
+            f"unlabelled dimension — entry.labels is inside manifest_sha256, so a label that "
+            f"is wrong today cannot be fixed without republishing the payload."
+        )
+    return {key: seg for key, seg in zip(keys, middle)}
 
 
 def is_cas_name(path: str) -> bool:

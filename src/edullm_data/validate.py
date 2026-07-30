@@ -49,6 +49,7 @@ from .manifest import (
     check_shard_naming,
     diff_paths,
     is_cas_name,
+    labels_from_path,
     manifest_sha256,
     parse_shard_name,
     verify_arithmetic,
@@ -491,6 +492,9 @@ def _validate_group(
             _check_split_matches_filename(
                 entries, v, gname, profile_is_vendored=profile_is_vendored
             )
+            _check_labels_match_path(
+                entries, v, gname, profile_is_vendored=profile_is_vendored
+            )
             # prefix is the DATASET prefix, not the group prefix: entry.path already carries
             # the group segment (tokens/train-00000...), so a profile joins prefix+entry.path.
             ctx = GroupContext(
@@ -775,6 +779,45 @@ def _check_split_matches_filename(
                 f"{observed!r}. One of the two is wrong, and a reader that trusts the manifest "
                 f"would put this object in the wrong split — training on held-out data, or "
                 f"evaluating on data it was trained on.",
+                path=entry.path,
+            ))
+
+
+def _check_labels_match_path(
+    entries: list[Any], v: list[Violation], gname: str, *, profile_is_vendored: bool = False
+) -> None:
+    """Declared ``labels`` must equal the labels RECOMPUTED from the object's own key.
+
+    The same construction as :func:`_check_split_matches_filename`, for the same reason: a
+    label nothing recomputes is a producer assertion, and a consumer slicing a corpus by
+    ``source`` would silently train on the wrong mixture. Here the recompute is free — the
+    directory segments between the group and the basename ARE the claim, so the check is a
+    string comparison against a value the key already carries.
+
+    Deliberately one-directional about absence. An entry with no labels is silent: a flat
+    layout has no segments to describe, and v1 manifests predate the field. What is rejected
+    is a label that CONTRADICTS the key, or a nested key whose labels were omitted — because
+    then a reader partitioning on labels would drop the object from every slice.
+    """
+    if profile_is_vendored:
+        return  # vendored trees keep upstream layout; segments imply nothing about slices
+    for entry in entries:
+        if is_cas_name(entry.path):
+            continue  # a hash-named object sits in no meaningful subtree
+        try:
+            expected = labels_from_path(entry.path)
+        except Exception as e:  # noqa: BLE001 - a deeper tree than we can name
+            v.append(Violation("labels-unnameable-path", f"{entry.path}: {e}", path=entry.path))
+            continue
+        declared = getattr(entry, "labels", None) or {}
+        if not expected and not declared:
+            continue
+        if declared != expected:
+            v.append(Violation(
+                "labels-contradict-path",
+                f"{entry.path}: manifest declares labels={declared or {}} but the key's own "
+                f"segments say {expected}. The path and the label disagree about which slice "
+                f"this object belongs to, so any mixture computed from labels is wrong.",
                 path=entry.path,
             ))
 

@@ -36,6 +36,7 @@ from typing import Any, Mapping, Sequence
 from .contracts import (
     NamingError,
     SCHEMA_VERSION,
+    SPLITS,
     canonical_json,
     validate_dataset_id,
     validate_purpose,
@@ -45,7 +46,9 @@ from .manifest import (
     Format,
     ManifestEntry,
     build_manifest,
+    labels_from_path,
     manifest_sha256,
+    parse_shard_name,
 )
 from .s3 import S3, NotFound
 
@@ -197,6 +200,8 @@ def _group_of(rel_path: str) -> str:
     return rel_path.split("/", 1)[0] if "/" in rel_path else ""
 
 
+
+
 # --------------------------------------------------------------------------------------
 # build the plan
 # --------------------------------------------------------------------------------------
@@ -278,12 +283,26 @@ def build_plan(
             fmt = _format_for(rel, defaults)
             src_key = f"{source_prefix}/{rel}" if source_prefix else rel
             sha, hashed_size = s3.hash_object(source_bucket, src_key)  # streamed, no whole-object RAM
+            parsed = parse_shard_name(rel)
+            try:
+                derived_labels = labels_from_path(rel)
+            except ValueError as e:
+                # Re-raise in the producer's own vocabulary: a caller who staged a tree too
+                # deep to label needs a PublishError like every other staging mistake, not a
+                # bare ValueError from a metadata helper.
+                raise PublishError(str(e)) from e
             return ManifestEntry(
                 path=rel,
                 sha256=sha,
                 bytes=hashed_size,
                 count=_count_for(rel, hashed_size, fmt, s3, source_bucket, src_key),
                 format=fmt,
+                # Both derived from the key itself, never asked of the caller, and both
+                # recomputed by Gate A from that same key — so neither can drift from the
+                # object it describes. `split` stays None for a name that is not a shard
+                # (a tokenizer file, a vendored blob): absent, not guessed.
+                split=parsed[0] if parsed and parsed[0] in SPLITS else None,
+                labels=derived_labels or None,
             )
 
         if hash_workers > 1 and len(group_files) > 1:
