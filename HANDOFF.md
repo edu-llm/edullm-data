@@ -9,16 +9,26 @@ live work. Everything before it is history that still holds.
 > the new wheel · `2515f79` `promote(copy_workers=…)` · `d6e8a7f` `--promote-workers` CLI flag +
 > version bump to **0.3.0**. Plus three HANDOFF commits.
 >
-> **DEPLOYED NOW:** `_dist/edullm_data-0.3.0-py3-none-any.whl`; job defs `edullm-validator:3`
-> (4 vCPU / 8 GB, `--promote-workers 16`) and `edullm-fsck:2`. Both assert their wheel version at
-> startup and fail loudly on a mismatch. Proven by real jobs logging `WHEEL_VERSION=0.3.0` /
-> `FAMILIES_OK=7` and `WHEEL_VERSION=0.2.0` respectively. **0.1.0 and 0.2.0 are still in `_dist/`
-> but nothing references them.**
+> **DEPLOYED NOW:** `_dist/edullm_data-0.4.0-py3-none-any.whl` is the current wheel; job defs
+> `edullm-validator:3` (4 vCPU / 8 GB, `--promote-workers 16`) and `edullm-fsck:2` — note those
+> job DEFS still name 0.3.0 and 0.2.0 in their baked commands, so the 150B publish passes 0.4.0
+> via `--container-overrides`. **Re-register both at 0.4.0 before relying on the automatic
+> event-driven path**, or an auto-triggered validation runs 0.3.0, which cannot load `families/`
+> from the producer side. 0.1.0–0.3.0 are all still in `_dist/`.
 >
-> **THE 150B PUBLISH IS IN FLIGHT as of this writing.** All 6,913 objects (586.6 GiB) are staged
-> and verified at `s3://edullm-landing/_migrate/olmo-150b-staged/`; `publish()` is running against
-> them as `pretrain/olmo-150b-dolma2`. **If it did not finish, do NOT re-copy anything** — the
-> staged tree is intact and re-runnable; see "THE 150B PUBLISH PLAN" for exactly where to resume.
+> **THE 150B PUBLISH IS IN FLIGHT as of this writing** (job `olmo150-publish-2`, RUNNING, 2 h
+> timeout). All 6,913 objects (586.6 GiB) are staged and verified at
+> `s3://edullm-landing/_migrate/olmo-150b-staged/`; the publish runs ON BATCH, in-region.
+> **If it did not finish, do NOT re-copy anything** — the staged tree is intact and the publish
+> is re-runnable as-is; see "THE 150B PUBLISH PLAN".
+>
+> **Two failures already burned, do not repeat them.** (1) The first publish attempt ran on the
+> LAPTOP: `publish()` GETs every byte to wherever it runs, measured 0.8 MiB/s ⇒ a 9-day ETA.
+> Killed; no partial state. It must run on Batch. (2) The first Batch attempt died in 2 minutes
+> with `no family.json for 'pretrain' (looked in /usr/local/lib/python3.12/families)` —
+> `publish.FAMILIES_DIR` was still repo-root-relative while `validate` had been fixed. Both now
+> share one resolver in `contracts`, with a test that imports the package from a rootless
+> directory (`tests/test_families_dir_resolution.py`); reverting the fix fails it.
 >
 > `edullm-data` held only `tokenizer/dolma2-bpe/v1` (11 objects) before this publish. The 31B
 > corpus was deleted 2026-07-29 — see "THE 31B DELETION".
