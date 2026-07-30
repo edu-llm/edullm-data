@@ -244,12 +244,30 @@ def check_decode_smoke(ctx: GroupContext) -> list[Violation]:
                 )
 
         distinct = int(np.unique(ids).size)
-        if distinct < min_distinct:
+        # The floor SCALES with how much was actually sampled. A bound expressed as an absolute
+        # count is unsatisfiable for a shard smaller than the bound: a 5-token shard can never
+        # reach 256 distinct ids, or even 16, no matter how healthy it is.
+        #
+        # That is not hypothetical. In the 150B corpus, 2 of 6,921 shards are 20 bytes / 5
+        # tokens. Under an absolute floor they are guaranteed violations, and because promote()
+        # is all-or-nothing they would block 630 GB / 157.5B tokens over 10 tokens —
+        # 6.3e-9 % of the corpus. The root cause is the bound's units, not the shards.
+        #
+        # The floor of 2 is load-bearing. A naive ``max(n // 4, 1)`` collapses to 1 for n <= 4,
+        # and a floor of 1 is vacuous — every non-empty shard has at least one distinct id, so
+        # an all-one-token 5-token shard would pass. Degeneracy is precisely what this check
+        # exists to catch, so it must stay catchable at every size where "degenerate" is even
+        # meaningful. At n == 1 there is nothing to compare, so 1 is the honest bound there.
+        #
+        # Above ~1 KB of sampled tokens the declared bound applies unchanged.
+        effective_min = min(min_distinct, max(n // 4, 2 if n > 1 else 1))
+        if distinct < effective_min:
+            scaled = " (scaled to this shard's sample size)" if effective_min != min_distinct else ""
             out.append(
                 Violation(
                     "distinct-too-few",
                     f"only {distinct} distinct ids across {n} sampled tokens (need >= "
-                    f"{min_distinct}); signature of an all-zeros or all-one-token shard",
+                    f"{effective_min}{scaled}); signature of an all-zeros or all-one-token shard",
                     entry.path,
                 )
             )
