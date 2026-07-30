@@ -103,8 +103,11 @@ def test_the_narrowing_lie_passes_every_other_check():
     — but it should be a deliberate change, not a silent one.
     """
     r = _publish(FakeS3(), ext="u16le", dtype=np.uint16)
-    other = sorted({v.code for v in r.violations} - {"dtype-too-narrow-for-vocab"})
-    assert other == [], f"expected the width check to be the ONLY objection, also got: {other}"
+    # This fixture is deliberately train-only and partitionless, so the split rules also object.
+    # Those are unrelated to the dtype claim; exclude them and assert nothing ELSE fires.
+    unrelated = {"missing-required-split", "undeclared-split", "empty-split"}
+    other = sorted({v.code for v in r.violations} - {"dtype-too-narrow-for-vocab"} - unrelated)
+    assert other == [], f"expected the width check to be the ONLY dtype objection, also got: {other}"
 
 
 def test_the_violation_explains_the_inflated_count():

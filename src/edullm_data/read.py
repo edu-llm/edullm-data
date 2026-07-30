@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from .contracts import SPLITS, is_trainable
-from .manifest import ManifestEntry
+from .manifest import ManifestEntry, parse_shard_name
 from .s3 import S3, NotFound
 
 DATA_BUCKET = "edullm-data"
@@ -31,6 +31,14 @@ class ReadError(RuntimeError):
 
 class NotValidated(ReadError):
     """The prefix carries no validation marker — refuse to read (§9)."""
+
+
+class SealMismatch(ReadError):
+    """The dataset's bytes do not match the seal written when it was validated.
+
+    Distinct from :class:`NotValidated`: the marker IS there, and it disagrees with what is on
+    the shelf. That is a stronger signal than absence — something changed a frozen dataset.
+    """
 
 
 @dataclass
@@ -130,6 +138,27 @@ def dataset_paths(
     prefix = f"{dataset_id}/{version}"
     if require_validated:
         _require_validated(s3, data_bucket, prefix)
+        # RECOMPUTE the seal, do not merely observe that it exists. A marker whose presence is
+        # the only thing checked is the decoration this standard exists to remove: rooting the
+        # hash chain buys nothing if no read path verifies it.
+        #
+        # This catches the tampering that matters most here — a rewritten dataset.json whose
+        # train and val globs have been SWAPPED. The marker is present, every group manifest is
+        # intact, and `split="train"` hands back the val shards. Two small GETs per group, no
+        # payload bytes.
+        #
+        # A pre-root seal (written before dataset_sha256 existed) is unverifiable rather than
+        # invalid, so it is reported and allowed through: refusing would make every
+        # already-published dataset unreadable, which is the retroactive invalidation the
+        # standard forbids.
+        problems = [p for p in verify_seal(dataset_id, version, s3=s3, data_bucket=data_bucket)
+                    if "no dataset_sha256" not in p]
+        if problems:
+            raise SealMismatch(
+                f"{data_bucket}/{prefix} does not match its own seal — refusing to read:\n  "
+                + "\n  ".join(problems)
+                + "\nThe dataset was altered after it was validated. Do not train on it."
+            )
 
     try:
         ds = _load_json(s3, data_bucket, f"{prefix}/dataset.json")
@@ -219,11 +248,27 @@ def dataset_paths(
             else:
                 selected = list(entries)
         else:
-            # No trainable split declared at all — a tokenizer, a vendored tree, an eval set.
-            # There is no held-out data to protect here; the whole artifact IS the payload, so
-            # returning everything is correct. This is what keeps the change a no-op for the
-            # four families that legitimately have no train side.
+            # No trainable split DECLARED — a tokenizer, a vendored tree, an eval set. There is
+            # normally nothing to protect here, so the whole artifact is the payload.
             selected = list(entries)
+
+        if not include_held_out:
+            # RECOMPUTE from the bytes' own names, do not trust the declaration. Everything
+            # above reasons from declared partition NAMES, which is a claim in dataset.json —
+            # and every way that claim can be wrong (a val-only partition, an empty or malformed
+            # partitions list, a partition with no name, a `by: field` partition that selects
+            # every shard, a group whose val shards nobody declared) ends with held-out data
+            # inside the trainable set.
+            #
+            # A filename that parses to a non-trainable split is dropped regardless of what was
+            # declared. Names that do not parse as shards are kept, so tokenizer files and
+            # vendored trees are unaffected.
+            selected = [
+                e for e in selected
+                if (parsed := parse_shard_name(e.path)) is None
+                or parsed[0] not in SPLITS
+                or is_trainable(parsed[0])
+            ]
 
     paths = [_uri(e) for e in selected]
     return ResolvedSplit(
@@ -341,6 +386,7 @@ def verify_seal(
 
 __all__ = [
     "dataset_paths",
+    "SealMismatch",
     "resolve_latest",
     "verify_seal",
     "ResolvedSplit",

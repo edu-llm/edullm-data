@@ -96,11 +96,42 @@ def _np_dtype(entry: ManifestEntry) -> "np.dtype | None":
     return base
 
 
+#: Which direction makes a bound LAXER, so a group override can be clamped against the family.
+#: ``max`` means a bigger number is more permissive (``max_eos_fraction``); ``min`` means a
+#: smaller one is (``min_distinct_ids``).
+_BOUND_LAXER_DIRECTION = {
+    "min_distinct_ids": "smaller",
+    "max_eos_fraction": "larger",
+    "max_zero_fraction": "larger",
+}
+
+
 def _bound(ctx: GroupContext, key: str, default: Any) -> Any:
+    """Resolve a tunable bound: group override, else family default, else the profile constant.
+
+    A group override may TIGHTEN a family bound freely but cannot LOOSEN it silently. Without
+    that clamp the family bounds are decoration: a group declaring
+    ``{"min_distinct_ids": 1, "max_zero_fraction": 1.0}`` publishes an all-zeros corpus clean —
+    re-enabling by hand the exact failure the family bounds exist to forbid, and which this
+    profile's own docstring claims is "visible in review" (it is one line in a group_meta block).
+
+    Loosening is still possible, but it must be a deliberate edit to the FAMILY file, where it
+    applies to everyone and shows up as a change to the standard rather than to one dataset.
+    """
+    fam = ctx.family_defaults.get(key)
     if key in ctx.group:
-        return ctx.group[key]
-    if key in ctx.family_defaults:
-        return ctx.family_defaults[key]
+        val = ctx.group[key]
+        direction = _BOUND_LAXER_DIRECTION.get(key)
+        if fam is not None and direction is not None:
+            try:
+                if direction == "smaller":
+                    return max(val, fam)  # a floor may be raised, never lowered
+                return min(val, fam)  # a ceiling may be lowered, never raised
+            except TypeError:
+                return val  # non-comparable; schema validation owns the type error
+        return val
+    if fam is not None:
+        return fam
     return default
 
 

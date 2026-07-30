@@ -40,6 +40,7 @@ from .contracts import (
     validate_purpose,
 )
 from .manifest import (
+    DTYPE_SIZES,
     FIXED_WIDTH_CONTAINERS,
     FIXED_WIDTH_UNITS,
     ManifestEntry,
@@ -164,9 +165,18 @@ def _join(prefix: str, path: str) -> str:
 
 
 def _is_control_key(rel: str) -> bool:
+    """Whether a dataset-relative key is a control file rather than payload.
+
+    Control BASENAMES are anchored to the dataset root (or one level down, where a group's
+    manifest.json lives). Matching a basename anywhere in the tree let `sneaky/README.md` and
+    `sneaky/dataset.json` hide from the exhaustiveness sweep entirely.
+    """
     base = rel.rsplit("/", 1)[-1]
-    if base in CONTROL_BASENAMES:
+    depth = rel.count("/")
+    if base in CONTROL_BASENAMES and depth == 0:
         return True
+    if base == "manifest.json" and depth == 1:
+        return True  # a group's own manifest, e.g. tokens/manifest.json
     return any(rel.startswith(cp) for cp in CONTROL_PREFIXES)
 
 
@@ -519,6 +529,10 @@ _DECODE_BOUND_ALIASES = {
 
 #: Family ``decode_smoke_test`` keys that intentionally map to nothing, with the reason. Keeping
 #: this explicit means a NEW unmapped key is a test failure rather than a silent no-op.
+#: Units whose values may be summed into a partition row count. Superset of
+#: manifest.FIXED_WIDTH_UNITS ({tokens, indices}) plus the line-oriented units.
+_COUNTABLE_UNITS = FIXED_WIDTH_UNITS | {"rows", "items"}
+
 _DECODE_BOUNDS_NOT_ENFORCED = {
     "window_bytes": "the decode window is the fixed DECODE_SAMPLE_BYTES constant, not tunable",
 }
@@ -583,9 +597,31 @@ def _check_dataset_exhaustive_and_splits(
     the fix is free — rename the shard or declare the partition, while the bytes are still
     mutable.
     """
+    # A group whose profile EXEMPTS it from shard naming says nothing about splits through its
+    # filenames. families/vendor.json grants that exemption on purpose — renaming an upstream
+    # mirror destroys the byte-for-byte correspondence that makes it verifiable — and a
+    # tokenizer's files (tokenizer.json, merges.txt) are not shards at all. Applying the split
+    # sweep to them revokes an exemption the standard deliberately gives, so a vendored
+    # `test-00000.parquet` was being rejected for keeping its own name.
+    exempt_prefixes: list[str] = []
+    for group in groups:
+        if not isinstance(group, Mapping):
+            continue
+        prof = str(group.get("profile", ""))
+        if prof.startswith(("vendor/", "tokenizer/")):
+            gpfx = str(group.get("prefix") or group.get("name") or "").strip("/")
+            if gpfx:
+                exempt_prefixes.append(gpfx + "/")
+
     claimed: set[str] = set()
     for paths in group_manifest_paths.values():
         claimed |= paths
+
+    # If a group's manifest never parsed, `collect_paths` has no entry for it and its payload
+    # would read as dataset-level orphans — reporting healthy objects from an unrelated group as
+    # stray. Only reconcile groups we actually managed to read.
+    unread = [str(g.get("name")) for g in groups
+              if isinstance(g, Mapping) and str(g.get("name")) not in group_manifest_paths]
 
     listed = s3.list(landing_bucket, prefix + "/")
     observed: dict[str, list[str]] = {}
@@ -597,11 +633,17 @@ def _check_dataset_exhaustive_and_splits(
             continue
         if rel not in claimed:
             orphans.append(rel)
+        if any(rel.startswith(px) for px in exempt_prefixes):
+            continue  # vendored / tokenizer group: its filenames carry no split claim
         parsed = parse_shard_name(rel)
-        if parsed is not None and not is_cas_name(rel):
+        # Only words in the SPLIT VOCABULARY are split claims. ``SHARD_RE`` matches any
+        # ``<word>-NNNNN.<ext>`` name, so an eval dataset's ``results/eval-00000.jsonl`` parses
+        # as a "split" called ``eval`` — a shard-naming convention, not a split declaration. The
+        # vocabulary is closed precisely so this distinction is a lookup.
+        if parsed is not None and parsed[0] in SPLITS and not is_cas_name(rel):
             observed.setdefault(parsed[0], []).append(rel)
 
-    for rel in sorted(orphans):
+    for rel in sorted(orphans) if not unread else []:
         v.append(Violation(
             "unlisted-object-dataset-level",
             f"{rel!r} is under the dataset prefix but is in no group's manifest. It belongs to "
@@ -615,9 +657,9 @@ def _check_dataset_exhaustive_and_splits(
         for part in (group.get("partitions") or []):
             if isinstance(part, Mapping) and part.get("name"):
                 declared.add(str(part["name"]))
-    if not declared:
-        return  # a group may legitimately declare no partitions; a different rule owns that
-
+    # NOT an early return when nothing is declared. If objects on disk carry split-shaped names
+    # and no partition claims them, that is exactly the undeclared-split condition — and
+    # declaring nothing used to switch this whole sweep off (see _check_validation_present).
     for split_word, paths in sorted(observed.items()):
         if split_word not in declared:
             v.append(Violation(
@@ -656,15 +698,30 @@ def _check_validation_present(
     """
     if family_defaults.get("validation_required") is not True:
         return
-    # A group with no partitions at all declares no splits; that is caught by the
-    # partitions-required rule, not here, so this check only reads declared partition names.
     declared: set[str] = set()
     for group in groups:
-        for part in (group.get("partitions") or []):
-            if isinstance(part, Mapping) and part.get("name"):
-                declared.add(str(part["name"]))
+        parts = group.get("partitions")
+        if isinstance(parts, list):
+            for part in parts:
+                if isinstance(part, Mapping) and part.get("name"):
+                    declared.add(str(part["name"]))
     if not declared:
-        return  # nothing declares splits; a different check owns that
+        # DECLARING NOTHING MUST NOT BE A WAY OUT. This used to return, deferring to a
+        # "partitions-required rule" that was never written — so `partitions: null` (which is
+        # families/curriculum.json's own default) disabled this check, disabled the
+        # undeclared-split backstop, and then made the reader see no trainable split and return
+        # EVERYTHING. An ordinary curriculum publish leaked its val shards as trainable with no
+        # adversarial input at all, while `.val` reported None.
+        v.append(Violation(
+            "missing-required-split",
+            f"{dataset_id} declares no partitions at all, so nothing marks which objects are "
+            f"held out. Its family requires validation data. Declaring nothing is not an "
+            f"exemption: a reader cannot distinguish 'no held-out data' from 'held-out data "
+            f"nobody labelled', and it resolves that ambiguity by treating everything as "
+            f"trainable. Declare train and {sorted(SPLITS - TRAINABLE_SPLITS)} partitions, or "
+            f"set validation_required=false in families/<family>.json with a reason.",
+        ))
+        return
     held_out = {s for s in declared if not is_trainable(s)}
     if held_out:
         return
@@ -753,15 +810,45 @@ def _check_dtype_width_vs_vocab(
     for entry in entries:
         fmt = entry.format
         declared = fmt.dtype_size
-        if not declared or fmt.container not in FIXED_WIDTH_CONTAINERS:
-            continue  # jsonl/tar and friends have no token width to check
+        unit_for_scope = entry.count.get("unit") if isinstance(entry.count, Mapping) else None
+        # A dtype NAME the standard does not know sizes for is not "nothing to check" — it is a
+        # width nobody can verify, and skipping silently is how the whole lie gets through.
+        # `Format.dtype_size` is `DTYPE_SIZES.get(dtype)`, an 8-entry map, while numpy happily
+        # accepts aliases like "u2" and "<u2" for uint16. Declaring one of those made this check
+        # AND verify_arithmetic (which returns early on dtype_size=None) both skip, so a uint32
+        # corpus could claim half-width and ship a 2x-inflated token count.
+        if fmt.dtype is not None and declared is None:
+            v.append(Violation(
+                "dtype-not-checkable",
+                f"{entry.path}: dtype {fmt.dtype!r} is not one of {sorted(DTYPE_SIZES)}, so its "
+                f"width cannot be verified against the tokenizer's vocab — and the count "
+                f"arithmetic cannot be checked either. Use the canonical name (e.g. 'uint32', "
+                f"not 'u4' or '<u4'); an alias no gate can size is indistinguishable from a lie.",
+                path=entry.path,
+            ))
+            continue
+        # A fixed-width dtype declared inside a container that is NOT byte-addressable raw is a
+        # contradiction, and it used to route around the width check entirely (e.g.
+        # container: "memmap" or "raw " with a trailing space).
+        if declared and fmt.container not in FIXED_WIDTH_CONTAINERS:
+            if unit_for_scope in FIXED_WIDTH_UNITS:
+                v.append(Violation(
+                    "fixed-width-dtype-in-nonraw-container",
+                    f"{entry.path}: declares a fixed-width dtype {fmt.dtype!r} and a "
+                    f"{unit_for_scope} count, but container is {fmt.container!r}, not one of "
+                    f"{sorted(FIXED_WIDTH_CONTAINERS)}. Token width is only meaningful for a raw "
+                    f"byte-addressable array, so this combination cannot be verified.",
+                    path=entry.path,
+                ))
+            continue
+        if not declared:
+            continue  # jsonl/tar and friends genuinely have no token width to check
         # Only entries whose count is in TOKEN units are token arrays. A group can legitimately
         # carry a fixed-width sidecar that is NOT tokens — float16 activations, a uint8 blob —
         # and a *vocab* bound says nothing about those. `verify_arithmetic` scopes itself the
         # same way (manifest.py: `unit not in FIXED_WIDTH_UNITS`), so this mirrors it rather
         # than inventing a second notion of "is this a token array".
-        unit = entry.count.get("unit") if isinstance(entry.count, Mapping) else None
-        if unit not in FIXED_WIDTH_UNITS:
+        if unit_for_scope not in FIXED_WIDTH_UNITS:
             continue
         if declared < required:
             v.append(Violation(
@@ -823,6 +910,13 @@ def _validate_partitions(
 
     if coverage == "partition" and by_name:
         _check_coverage_is_a_partition(by_name, manifest_paths, v, gname)
+    # TRAIN/HELD-OUT LEAKAGE IS AN ERROR UNDER EVERY COVERAGE MODE. `overlapping` exists so
+    # curriculum replay can revisit the same shards across trainable partitions — it is not a
+    # licence for a trainable and a held-out partition to share objects. Declaring
+    # `coverage: "overlapping"` with train and val both globbing `*` used to make the two
+    # identical sets and validate clean, which is 100% leakage waived by one word.
+    if by_name:
+        _check_no_trainable_heldout_overlap(by_name, v, gname)
 
 
 def _check_partition_rows(
@@ -844,14 +938,29 @@ def _check_partition_rows(
     this reads no payload bytes.
     """
     declared = part.get("rows")
-    if not isinstance(declared, int) or isinstance(declared, bool):
-        return  # absent or malformed — partition-no-rows / schema validation owns that
+    if declared is None or isinstance(declared, bool) or not isinstance(declared, int) or declared < 0:
+        # A VIOLATION, not a silent return. `if "rows" not in p` is satisfied by an explicit
+        # `rows: null`, and returning early here meant that shape passed Gate A and reached a
+        # trainer as `ResolvedSplit.rows = None` — a presence check and a value check that each
+        # assumed the other would catch it.
+        if "rows" in part:
+            v.append(Violation(
+                "partition-bad-rows",
+                f"group {gname!r} partition {pname!r} declares rows={declared!r}, which is not a "
+                f"non-negative integer. An explicit null satisfies the presence check and then "
+                f"reaches a trainer as an unknown split size.",
+                path=gname,
+            ))
+        return
     actual = 0
     countable = False
     for e in entries:
         if e.path not in matched:
             continue
-        if e.count and e.count.get("unit") in {"tokens", "rows", "items"}:
+        # The same unit set manifest.verify_arithmetic uses, plus "rows"/"items" for
+        # jsonl-shaped groups. Previously this list omitted "indices", so a legal
+        # token-order partition skipped the recompute entirely.
+        if e.count and e.count.get("unit") in _COUNTABLE_UNITS:
             actual += int(e.count["value"])
             countable = True
     if not countable:
@@ -864,6 +973,33 @@ def _check_partition_rows(
             f"({declared - actual:+,}). A trainer reads this number as the split's size.",
             path=gname,
         ))
+
+
+def _check_no_trainable_heldout_overlap(
+    by_name: dict[str, set[str]], v: list[Violation], gname: str
+) -> None:
+    """No object may belong to both a trainable and a held-out partition, ever.
+
+    Independent of ``coverage`` on purpose. ``coverage: "overlapping"`` is a statement about
+    replay — the same shards legitimately appearing in several *trainable* orderings — and it
+    must not double as permission for train and val to be the same bytes. That is the one
+    overlap no research claim survives.
+    """
+    trainable = {n for n in by_name if is_trainable(n)}
+    held_out = {n for n in by_name if n in SPLITS and not is_trainable(n)}
+    for t in sorted(trainable):
+        for h in sorted(held_out):
+            shared = by_name[t] & by_name[h]
+            if shared:
+                v.append(Violation(
+                    "train-heldout-leakage",
+                    f"group {gname!r}: partition {t!r} (trainable) and {h!r} (held out) both "
+                    f"select {len(shared)} object(s), e.g. {sorted(shared)[0]}. Every number "
+                    f"produced from a model trained on this is meaningless — it was evaluated "
+                    f"on data it trained on. This is an error under EVERY coverage mode; "
+                    f"'overlapping' waives replay between trainable partitions, not this.",
+                    path=gname,
+                ))
 
 
 def _check_coverage_is_a_partition(
@@ -991,6 +1127,27 @@ def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucke
     if not result.ok:
         raise ValueError("refusing to promote a dataset that did not pass Gate A")
 
+    prefix_check = f"{result.dataset_id}/{result.version}"
+    # REFUSE TO RE-PROMOTE A SEALED PREFIX. Without this, "frozen means frozen" was defeated by
+    # PutObject alone — no Delete call, so the new Delete Deny never fires. Landing expires after
+    # 14 days, so the same vN prefix genuinely frees up; re-running publish+promote then
+    # OVERWRITES the published payload, the manifest, and the seal together, leaving
+    # verify_seal reporting INTACT on substituted data. Versioning keeps the old bytes
+    # noncurrent, but nothing on any read path looks at a noncurrent version.
+    #
+    # The seal is the marker to check because it is written LAST, so its presence is exactly the
+    # "this prefix is complete and published" claim. Republishing means a new version.
+    try:
+        s3.head(data_bucket, f"{prefix_check}/_VALIDATED.json")
+    except NotFound:
+        pass
+    else:
+        raise ValueError(
+            f"refusing to re-promote {prefix_check!r}: it is already sealed in {data_bucket!r}. "
+            f"Frozen means frozen — publish a new version rather than overwriting a published "
+            f"one. (An overwrite needs no Delete call, so no policy would stop it.)"
+        )
+
     prefix = f"{result.dataset_id}/{result.version}"
     # copy dataset.json + every group manifest + every payload object
     ds = _load_json(s3, landing_bucket, f"{prefix}/dataset.json")
@@ -1010,7 +1167,12 @@ def promote(result: ValidationResult, s3: S3, *, data_bucket: str, landing_bucke
     # and neither the seal nor the catalog bound to any content. "Frozen means frozen" was
     # therefore unfalsifiable: you could not tell a tampered dataset.json from the sealed one.
     # With a root, a reader confirms the whole tree with one HEAD + one GET.
-    dataset_sha256 = sha256_bytes(s3.get(landing_bucket, f"{prefix}/dataset.json"))
+    # Hash what was PUBLISHED, not the landing copy. Landing is write-anything by design and
+    # `_put_create_only` is documented as "not a lock", so a producer re-putting dataset.json
+    # between the copy loop above and this read would make the seal bind to bytes that never
+    # reached the data bucket — verify_seal would then report a never-tampered dataset as
+    # tampered, permanently, on a frozen prefix. A verifier with false positives gets ignored.
+    dataset_sha256 = sha256_bytes(s3.get(data_bucket, f"{prefix}/dataset.json"))
 
     catalog = {
         "schema_version": "edullm-catalog/v1",

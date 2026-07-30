@@ -53,8 +53,16 @@ def _build(s3: FakeS3, *, entries=None, group_over=None, ds_over=None, dataset_i
     """Seed a valid single-group pretrain-tokens dataset, return (dataset_dict, manifest)."""
     if entries is None:
         body = _tokens_body()
-        entries = [_entry("tokens/train-00000.u32le.bin", body)]
+        # A train AND a val shard: the pretrain family requires held-out data
+        # (families/pretrain.json validation_required=true), and declaring no partitions is
+        # itself a violation now — declaring nothing used to disable the check entirely.
+        vbody = body[: (len(body) // 3 // 4) * 4]
+        entries = [
+            _entry("tokens/train-00000.u32le.bin", body),
+            _entry("tokens/val-00000.u32le.bin", vbody),
+        ]
         s3.seed(LANDING, f"{dataset_id}/{version}/tokens/train-00000.u32le.bin", body)
+        s3.seed(LANDING, f"{dataset_id}/{version}/tokens/val-00000.u32le.bin", vbody)
     man = build_manifest(entries, group_name="tokens")
     s3.seed(LANDING, f"{dataset_id}/{version}/tokens/manifest.json", canonical_json(man))
     group = {
@@ -64,6 +72,13 @@ def _build(s3: FakeS3, *, entries=None, group_over=None, ds_over=None, dataset_i
         "manifest": "tokens/manifest.json",
         "manifest_sha256": manifest_sha256(man),
         "tokenizer": _tokenizer(),
+        "coverage": "partition",
+        "partitions": [
+            {"name": "train", "by": "path", "glob": "train-*.u32le.bin",
+             "rows": len(_tokens_body()) // 4},
+            {"name": "val", "by": "path", "glob": "val-*.u32le.bin",
+             "rows": ((len(_tokens_body()) // 3 // 4) * 4) // 4},
+        ],
     }
     if group_over:
         group.update(group_over)
