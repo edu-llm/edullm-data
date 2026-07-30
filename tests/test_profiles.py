@@ -122,14 +122,14 @@ def test_pretrain_clean_uint32_shard_passes():
     assert out == [], f"clean shard should pass, got {[str(v) for v in out]}"
 
 
-def test_pretrain_all_zeros_shard_fails_distinct_and_zero_fraction():
+def test_pretrain_all_zeros_shard_fails_distinct_and_zero_run():
     body = np.zeros(200_000, dtype=np.uint32).tobytes()
     entry = _tok_entry("tokens/train-00000.u32le.bin", body)
     ctx = _seed_and_ctx(prefix="tokens", group=_tok_group(), entries=[entry],
                         bodies={"tokens/train-00000.u32le.bin": body})
     codes = _codes(pretrain_tokens_v1.check_decode_smoke(ctx))
     assert "distinct-too-few" in codes
-    assert "zero-fraction-out-of-bounds" in codes
+    assert "zero-run-in-shard" in codes
 
 
 def test_pretrain_uint16_bytes_declared_uint32_fails_vocab_range():

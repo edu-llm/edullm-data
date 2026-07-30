@@ -502,7 +502,7 @@ def _validate_group(
 _DECODE_BOUND_ALIASES = {
     "distinct_ids_min": "min_distinct_ids",
     "eos_fraction_max": "max_eos_fraction",
-    "zero_fraction_max": "max_zero_fraction",
+    "zero_run_max": "max_zero_run",
 }
 
 #: Family ``decode_smoke_test`` keys that intentionally map to nothing, with the reason. Keeping
