@@ -1,8 +1,14 @@
 # HANDOFF — eduLLM Dataset Standard
 
 Last updated: 2026-07-29 (post olmo30b migration + public release + per-dataset generated READMEs,
-MERGED to main as `afac933` via PR #1; then the `v0.2.0` release bump — see Next Step #6). Author:
-prior agent. Read this file alone and you can continue with no other context.
+MERGED to main as `afac933` via PR #1; then the `v0.2.0` release bump — see Next Step #6; then the
+**schema-v2 / validator-recompute-gaps** branch, see "THIS BRANCH" below). Author: prior agent. Read
+this file alone and you can continue with no other context.
+
+> **YOU ARE NOT ON `main`.** Branch `fix/validator-recompute-gaps-schema-v2`, **12 commits ahead of
+> `main`** (`a5818ac`), **NOT merged and NOT pushed** — `origin/main == main == a5818ac`, so these
+> commits exist only on this laptop. **541 tests passing.** Read "THIS BRANCH" and "DEFERRED
+> DECISIONS" before doing anything else.
 
 ---
 
@@ -45,7 +51,8 @@ two datasets are live, validated, promoted, and READABLE in `edullm-data`.
   `.npy` shards were headerless-raw-uint32 (the ".npy lie"), so migration was a pure server-side
   rename `.npy → .u32le.bin` + publish — zero re-encode, zero bytes through the laptop.
 
-**Code** (this repo, `edullm-data/`, its own git root; **380 tests passing**):
+**Code** (this repo, `edullm-data/`, its own git root; **541 tests passing** on this branch — was 380
+on `main`):
 - `src/edullm_data/contracts.py` — canonical JSON, hashing, naming/purpose validation (7-family enum)
 - `src/edullm_data/manifest.py` — per-file format, manifest build/verify, arithmetic + extension checks
 - `src/edullm_data/s3.py` — `S3` protocol, `Boto3S3` (real), `FakeS3` (tests). Now also
@@ -59,7 +66,10 @@ two datasets are live, validated, promoted, and READABLE in `edullm-data`.
 - `src/edullm_data/readme.py` — **NEW** pure `render_readme(dataset.json) -> markdown`. The README is a
   DERIVED artifact (§3): one source of truth, can't drift from the manifest. Omits any section whose
   data is absent (never fabricates); prints an upstream-scope caveat for `sources[].scope == "upstream…"`
-- `src/edullm_data/read.py` — `dataset_paths()` (returns correct dtype), `resolve_latest()`
+- `src/edullm_data/read.py` — `dataset_paths()`, `resolve_latest()`, and now `verify_seal()` +
+  `SealMismatch` + `MixedFormat`; an unsplit read returns TRAINABLE data only; `ResolvedSplit` carries
+  the FULL format triple (`dtype`, `byte_order`, `header_bytes`) plus a `numpy_dtype` property that
+  emits `"<u4"` — `np.dtype("uint32")` silently uses HOST byte order (all this branch)
 - `src/edullm_data/fsck.py` — `wu-fsck` Gate B (post-publish decay sweep), owner Eric Wu
 - `src/edullm_data/profiles/` — registry + **5** v1 profiles: pretrain-tokens, eval-results,
   token-order, sft-conversations, **tokenizer** (`tokenizer_v1.derive_vocab` computes vocab from tokenizer.json)
@@ -69,8 +79,15 @@ two datasets are live, validated, promoted, and READABLE in `edullm-data`.
   Both copies now instruct writing a generated README for EVERY dataset, incl. already-promoted ones.
 - `USAGE.md` — human how-to. Install line (all docs): `uv add "edullm-data @
   git+https://github.com/edu-llm/edullm-data@v0.1.0"` (public repo, no auth).
-- `docs/ONBOARDING.md` — **NEW** 2-minute, paste-friendly intro to the pipeline for a teammate who
+- `docs/ONBOARDING.md` — 2-minute, paste-friendly intro to the pipeline for a teammate who
   has never worked on it (the airlock, bucket layout, the address shape, what the validator forces).
+  Its integrity bullet was corrected this session — it no longer implies Gate A re-hashes payload.
+- `docs/CONSUMER-CONTRACT.md` — **NEW (this session)** the read side, stated precisely enough for a
+  training adapter to be written against it: the address + `resolve_latest`/`dataset_paths`, every
+  `ResolvedSplit` field, THE dtype rule and the silent-failure asymmetry, splits/trainability, the
+  seal, the OLMo-core constraints (marked `[CONSUMER]` — this repo cannot enforce them), and an
+  honest "not guaranteed" section. Every claim carries a `file:line`.
+- `docs/DECISIONS.md` — one entry per settled decision, sourced from the standard.
 
 **Git commits — branch `main`, PUSHED to `origin` (github.com/edu-llm/edullm-data), newest last:**
 - `f177e19`…`b69e3be` — original build (core, airlock infra, publish/read/fsck, skill, streaming
@@ -87,8 +104,213 @@ two datasets are live, validated, promoted, and READABLE in `edullm-data`.
   `feat/per-dataset-readme` merged + deleted; local `main` == `origin/main` == `afac933`, tree clean.
   NOTE: no new `v0.x` tag was cut for this — `v0.1.0` still points at `3b38288`. The `_dist` wheel was
   already rebuilt from this code, so git now matches what's deployed.
+- `a5818ac` — `release: v0.2.0` (per-dataset README publisher) + refresh team install pins (PR #3).
+  **This is the current tip of `main` and of `origin/main`.**
 
-Working tree is CLEAN — nothing uncommitted as of this handoff.
+---
+
+## THIS BRANCH — `fix/validator-recompute-gaps-schema-v2` (12 commits, UNMERGED, UNPUSHED)
+
+Branched from `a5818ac`. **380 → 541 tests.** Nothing here is on `origin`; if this laptop dies the work
+is gone. Commits, newest last:
+
+```
+9bd5213  fix(validator): derive dtype from vocab; wire family defaults into the gate
+63e001c  feat(validator): root the hash chain so the seal binds to content
+c9d2816  fix(publish): fill rows for caller-supplied partitions, not just family defaults
+e2cd07c  fix(infra): split the airlock Deny so Delete binds the validator too
+ea294d9  feat(schema): v2 adds entry.split + entry.labels; closed split vocabulary
+6575a97  feat: validation required by default; an unsplit read returns trainable data only
+8e94112  fix(validator): recompute partition rows, coverage, and dataset-level exhaustiveness
+72df9f7  fix(profile): scale the distinct-ids floor to the sampled size
+ad75062  fix: package families/ into the wheel; scope the dtype check to token units
+cdc2587  fix: close every hole two adversarial reviews found in the split defence
+2f0cd7c  docs: retract the false claim that the validator re-hashes payload bytes
+4dfad55  chore: phase 4 housekeeping — lint clean, fsck weekly + CRC64NVME, reader format detail
+```
+
+### Schema v2
+
+- `SCHEMA_VERSION = "edullm-dataset/v2"` (`contracts.py:50`). New manifest-entry fields
+  **`entry.split`** (`manifest.py:211-215`) and **`entry.labels`** (a flat `{str: str}` map,
+  `manifest.py:216-219`). Both validated: `split` must be in the vocabulary
+  (`manifest.py:267-276`), `labels` must be flat strings and **must not carry a `split` key**
+  (`manifest.py:286-289`) — one fact, one place.
+- **Closed split vocabulary.** `SPLITS = {"train", "val", "test"}` (`contracts.py:138`),
+  `TRAINABLE_SPLITS = {"train"}` (`:142`), and `is_trainable()` (`:145-154`) with
+  `is_trainable(None) == False` — an unlabelled object is *unknown*, and unknown is not
+  safe-to-train. `held_out` is **derived**, never a field.
+- **`READABLE_SCHEMA_VERSIONS = {"edullm-dataset/v1", "edullm-dataset/v2"}`** (`contracts.py:57`),
+  and Gate A membership-checks against that set rather than equality against the current version
+  (`validate.py:218-227`). v1 datasets stay readable — this standard does not retroactively
+  invalidate. Both live datasets are `schema_version: edullm-dataset/v1`.
+
+### Validation required by default, per family, with an explicit opt-out
+
+`_check_validation_present` (`validate.py:686+`) fires when `family_defaults["validation_required"]
+is not True`. **Opt-OUT, not opt-in, and the polarity is the design**: under opt-in, "no val split"
+and "nobody thought about it" are indistinguishable, and you learn which weeks later from a
+suspiciously good eval. Four families opt out in their own file with a stated reason —
+`eval.json:11-12`, `probe.json:33-34`, `tokenizer.json:13-14`, `vendor.json:27-28`. `pretrain` and
+`sft` and `curriculum` require it.
+
+**Declaring nothing is not an exemption.** `partitions: []` used to switch this check off *and* the
+undeclared-split backstop *and* make the reader see no trainable split and return EVERYTHING
+(`validate.py:710-726`). It is now `missing-required-split`.
+
+### The reader
+
+- **`split=None` returns TRAINABLE data only** (`read.py:238-243`). It used to return every entry.
+- **Both splits come back separately keyed** in `.splits` / `.train` / `.val`, never concatenated
+  into `.paths` (`read.py:58-66`, properties at `:68-85`). `.val` is `None` — not `[]` — when there
+  is no held-out data (`read.py:82`).
+- **`include_held_out=True`** is the deliberate, code-review-visible escape hatch (`read.py:116`).
+- **The reader recomputes split from each object's own FILENAME** and drops non-trainable shards
+  whatever was declared (`read.py:255-271`). Everything above that line reasons from declared
+  partition names — i.e. from a claim.
+- **`dataset_paths` verifies the seal on every read** and raises `SealMismatch` (`read.py:209-231`);
+  `verify_seal()` is the standalone form (`read.py:418-494`). Before this, `verify_seal` had **zero
+  callers**, so rooting the hash chain bought nothing. Catches a `dataset.json` whose train/val globs
+  were swapped: marker present, manifests intact, `split="train"` hands back val.
+- A pre-root seal (no `dataset_sha256`) is reported **unverifiable but allowed through**
+  (`read.py:457-465`, filtered at `:224-225`). See DEFERRED DECISIONS — both live datasets.
+- **The FULL format triple now crosses the boundary** (`4dfad55`): `ResolvedSplit` carries
+  `byte_order` and `header_bytes` alongside `dtype`, plus a `numpy_dtype` property emitting `"<u4"`
+  (`read.py:137-155`). Both were declared in the manifest and dropped on the floor — and
+  `np.dtype("uint32")` uses the HOST's byte order, so a big-endian shard decodes to different,
+  in-range-looking ids that nothing downstream notices. `_resolve_format` (`read.py:362-394`) now
+  **raises `MixedFormat`** when a group's typed shards disagree, instead of returning `dtype=None`
+  — a loader cannot memmap one array two ways, and `None` was indistinguishable from the legitimate
+  "container types itself" answer, so it got defaulted. Recourse is `group=`.
+
+### New Gate A checks (all recompute; violation codes)
+
+| code | where | recomputes |
+| --- | --- | --- |
+| `dtype-too-narrow-for-vocab` | `validate.py:858`, `manifest.py:602` | declared dtype width vs the vocab DERIVED from the pinned tokenizer |
+| `dtype-not-checkable` | `validate.py:825` | dtype name is outside the 8-entry `DTYPE_SIZES` map — a width nobody can verify (numpy accepts `u2`/`<u2`; that made this check AND `verify_arithmetic` both skip) |
+| `fixed-width-dtype-in-nonraw-container` | `validate.py:839` | a fixed-width dtype declared under `container: "memmap"` / `"raw "` — routed around the width check entirely |
+| `split-contradicts-filename` | `validate.py:773` | `entry.split` vs the split parsed from the object's own name |
+| `missing-required-split` | `validate.py:719`, `:732` | family requires held-out data and none is declared (incl. the declared-nothing case) |
+| `partition-rows-mismatch` | `validate.py:973` | sums the per-entry counts a partition selects vs its declared `rows` |
+| `partition-bad-rows` | `validate.py:951` | an explicit `rows: null` satisfied the presence check and skipped the value check; reached a trainer as an unknown split size |
+| `coverage-not-disjoint` | `validate.py:1027` | `coverage: "partition"` claimed disjointness — now checked pairwise |
+| `coverage-incomplete` | `validate.py:1039` | `coverage: "partition"` claimed exhaustiveness — objects belonging to no partition |
+| `train-heldout-leakage` | `validate.py:998`, `profiles/sft_conversations_v1.py:245` | a trainable and a held-out partition selecting the same object. An error under EVERY coverage mode; `"overlapping"` waives replay between *trainable* partitions only |
+| `unlisted-object-dataset-level` | `validate.py:651` | LIST the dataset prefix; anything in no group's manifest is an orphan a globbing reader would still find |
+| `undeclared-split` | `validate.py:669` | objects named `<word>-NNNNN.*` where `<word>` is in `SPLITS` but no partition declares it |
+| `empty-split` | `validate.py:679` | a partition declared with no object matching its name — "a reader asking for it gets silence" |
+
+Exemptions the standard deliberately grants are preserved: only **vocabulary words** count as split
+claims (so an eval set's `results/eval-00000.jsonl` is a naming convention, not a split), and
+vendor/tokenizer prefixes are skipped (renaming a vendored tree destroys the byte-for-byte
+correspondence that makes it verifiable).
+
+### Three more structural fixes
+
+- **`families/` is now force-included into the wheel** — `[tool.hatch.build.targets.wheel.force-include]`
+  maps `"families" → "edullm_data/families"` (`pyproject.toml:42-43`). This retires old Next Step #1
+  and the `_dist/families/` + `FAMILIES_DIR` override the Batch publisher needed. **The deployed
+  `_dist` wheel is still `0.1.0` and predates this** — reship before relying on it.
+- **A group override may TIGHTEN a family bound but not LOOSEN it** (`profiles/pretrain_tokens_v1.py:109-135`):
+  a floor may be raised, a ceiling lowered, never the reverse. Without the clamp the family bounds were
+  decoration — a group declaring `{"min_distinct_ids": 1, "max_zero_fraction": 1.0}` published an
+  all-zeros corpus clean. Loosening now requires editing the FAMILY file, where it applies to everyone.
+- **`promote()` refuses an already-sealed prefix** (`validate.py:1143-1151`). Overwriting a published
+  dataset needs **no Delete call**, so the new Delete Deny would never have fired; landing expires
+  after 14 days so the same `vN` genuinely frees up, and re-publishing would replace payload +
+  manifest + seal together, leaving `verify_seal` reporting INTACT on substituted data. Also:
+  `promote()` now hashes the **published** copy, not the landing copy after the copy loop (a
+  concurrent re-put made the seal bind to bytes that were never published).
+- **The seal now records per-object `crc64nvme`, HEADed in the DESTINATION post-copy** (`4dfad55`), and
+  `fsck._check_crc64nvme` compares against it — the one check that catches a byte replacement at
+  identical length. Destination-post-copy matters because **CopyObject RECOMPUTES the checksum**, so a
+  value inherited from landing would be wrong by construction. A missing reference is skipped
+  **silently**: a pre-CRC seal would otherwise emit one finding per object per week forever. Both live
+  datasets predate this, so their CRC checks no-op until re-promotion.
+- **Deleted `fsck._check_catalog_matches`** — it summed the manifests' DECLARED bytes and never HEAD
+  sizes, so both sides derived from frozen control files Gate A had already reconciled: it **could not
+  fire**. Rewrites of those files are now caught cryptographically by `verify_seal`'s root instead.
+- **`pyproject.toml` console script `edullm-data = "edullm_data.cli:main"` pointed at a module that has
+  never existed in any commit** — `pip install` succeeded and the script died with `ModuleNotFoundError`
+  the first time anyone ran it. Fixed in `4dfad55`. All 11 pre-existing ruff errors also fixed (0
+  remaining), and the suite was verified green on real CPython 3.10.20 rather than grepped for 3.11
+  constructs.
+
+**Working tree at the time of writing:** `HANDOFF.md` modified. Untracked:
+`docs/CONSUMER-CONTRACT.md` + `docs/PLATFORM-INTEGRATION.md` (new this session), and the
+150B-migration working state — `docs/MIGRATION-olmo-150b-dolma2.md`,
+`docs/olmo-150b-publish-spec.json`, `infra/publish_driver_v2.py`, `infra/submit-olmo150-publish.md`
+(see DEFERRED DECISIONS #1). Two agents were editing this repo concurrently, so re-run
+`git status` rather than trusting this list.
+
+---
+
+## DEFERRED DECISIONS — explicit user decisions, not open questions
+
+Do not relitigate these; they were decided. Do not act on them without re-asking.
+
+1. **The 150B migration is PAUSED BY CHOICE** (the user's own migration; state in
+   `docs/MIGRATION-olmo-150b-dolma2.md` — Phase 2 halted at 147/6,921 objects on a throughput wall).
+   **When resumed: ONE `tokens/` group + labels, NOT six groups per source.** Reason: a group is a
+   unit of **validation**, not of selection. Six sources with identical checks and one tokenizer pay
+   six manifests and buy nothing — and six groups **permanently loses the 24 domain labels**, which
+   `entry.labels` (schema v2) is exactly the right carrier for. The runbook's "LOCKED STRUCTURE"
+   section still describes the six-group plan; **that is superseded by this decision.**
+2. **Slurm/ORCD is OUT OF SCOPE entirely.** Training goes through `edu-llm/platform` → AWS Batch.
+   Do not write Slurm submission scripts, sbatch wrappers, or ORCD docs.
+3. **The 31B corpus is EXPECTED to fail `missing-required-split`** — it has no val split, predates
+   the rule, and is frozen so it cannot gain one in place. The violation message itself says so
+   (`validate.py:747-753`). It is **slated for deletion once a compliant replacement exists.** When
+   that happens:
+   - **KEEP `tokenizer/dolma2-bpe/v1`** — the replacement will pin it by `manifest_sha256`
+     (currently `b37b8954…`, per the 31B corpus's `depends_on`).
+   - **CLEAR `_catalog/pretrain/olmo-mix-1124-31b/v1.json`**, or `resolve_latest()` will keep
+     reporting `v1` for a dataset whose data is gone (it reads the catalog only, `read.py:294-305`).
+4. **`infra/02-bucket-policy.json` is v2 in the repo but the LIVE bucket still has the v1 2-statement
+   policy.** Deploying it is a documented step — `infra/DEPLOY.md:256+` ("Deploying the split Delete
+   Deny"). What v1 got wrong: one Deny covered Put *and* Delete and exempted the validator + deployer
+   from **all five actions**, so the only thing stopping the validator from deleting published data was
+   an identity policy on a role whose inline policies are editable with `iam:PutRolePolicy` — which the
+   intern session has. v2 splits it: `OnlyValidatorWrites` (Put, validator+deployer exempt) and
+   `NobodyDeletesPublishedData` (Delete, **nobody** exempt). **Consequence once deployed: deleting a
+   published dataset becomes two deliberate steps** — remove the Deny, then delete — which is the
+   point.
+5. **Both live seals are UNROOTED.** Verified against the live bucket this session: both
+   `_VALIDATED.json` files carry only `{bytes, dataset_id, objects, validated_at, version}` — **no
+   `dataset_sha256`, no `manifest_sha256` map.** `verify_seal` reports them *unverifiable* (not
+   invalid) and `dataset_paths` lets them through (`read.py:154-155`). They stay that way until
+   re-promoted — and since `promote()` now refuses a sealed prefix, that means a **new version**, not
+   a rewrite of `v1`.
+6. **The platform needs 4 changes owned by a TEAMMATE, not by this repo.** See
+   `docs/PLATFORM-INTEGRATION.md` (being written by another agent concurrently with this handoff).
+
+---
+
+## What is NOT done
+
+- **No training-side adapter has been written.** `docs/CONSUMER-CONTRACT.md` is the specification it
+  should be written against; the adapter itself does not exist.
+- **No training run has happened** against any `edullm-data` dataset.
+- **`entry.split` is DORMANT.** The v2 field exists, is validated (`manifest.py:215`, `:267-276`), and
+  Gate A checks a declared value against the filename (`validate.py:773`) — but **`publish()` never
+  populates it**: `ManifestEntry(...)` at `publish.py:281-287` passes no `split=`, and
+  `grep -c "split=" publish.py` is 0. Split information in practice comes from partitions and
+  filenames. Populating it in `publish()` is the obvious next step and would make
+  `split-contradicts-filename` actually reachable in production. Same for `entry.labels`, which the
+  150B migration needs (DEFERRED DECISIONS #1).
+- **`sft_conversations_v1._partition_globs` still substring-matches partition names** against
+  `heldout|held-out|holdout|test|val|eval` (`profiles/sft_conversations_v1.py:92-117`) instead of
+  using `contracts.is_trainable`. So the `SPLITS` docstring (`contracts.py:132-135`), which cites this
+  exact substring-matching as the problem the closed vocabulary fixed, **overstates the fix** — the
+  vocabulary is closed but this profile does not consult it. The `trainval`-classified-as-held-out and
+  `dev`-rejected bugs it describes are still live in that one function.
+- **The `v0.2.0` wheel reship is still outstanding** (Next Step #6) — and now `families/`-in-the-wheel
+  depends on it too.
+
+---
+
+Working tree was CLEAN as of the `a5818ac` handoff; it is not clean now (see THIS BRANCH).
 
 **Deployed live in AWS account `sbsandbox` (<ACCOUNT_ID>), us-east-1** (NOT in git — broker-applied):
 - Buckets: `edullm-landing` (write-anything, expiry) + `edullm-data` (read-only; validator writes only)
@@ -104,7 +326,13 @@ Working tree is CLEAN — nothing uncommitted as of this handoff.
 - Batch job defs: `edullm-validator:1` (self-discovering validate+promote), `edullm-fsck:1`
 - **Event rule `edullm-landing-manifest-created` — ENABLED**: manifest.json upload → validate+promote,
   RoleArn `<EVENTBRIDGE_INVOKE_ROLE>` + its inline `edullm-validator-submit` (SubmitJob+PassRole)
-- **Schedule rule `edullm-wu-fsck-nightly` — ENABLED**: `cron(6 9 * * ? *)` UTC (04:06 local) → fsck
+- **Schedule rule `edullm-wu-fsck-nightly` — ENABLED**: `cron(6 9 * * ? *)` UTC (04:06 local) → fsck.
+  **DRIFT, not yet reconciled:** `fsck.py` now documents itself as **WEEKLY** (`4dfad55`) — the facts
+  it re-checks change only when something mutates a frozen prefix, so nightly bought 7× the
+  false-alarm exposure and an owned job that cries wolf gets muted. **A code deploy does NOT change
+  the live rule.** Exact `put-rule` (`cron(6 9 ? * MON *)`) is in `infra/DEPLOY.md:738+`, with the
+  note that *renaming* the rule means delete+recreate with the target re-attached — so changing only
+  the expression is the smaller move.
 - S3 Inventory (weekly) on `edullm-data`; landing lifecycle scoped to family prefixes (keeps `_dist/`)
 - `s3://edullm-landing/_dist/edullm_data-0.1.0-py3-none-any.whl` — the durable bootstrap wheel
 
@@ -116,8 +344,10 @@ Working tree is CLEAN — nothing uncommitted as of this handoff.
    SUCCEEDED → "PASS + promoted", zero human steps
 5. `wu-fsck` runs cleanly on Batch (clean JSON report, exit 0)
 
-**Official bucket contents RIGHT NOW: `edullm-data` is EMPTY (0 objects).** No real dataset has
-been published yet — only test probes, all cleaned up. This is the correct expected state.
+**Official bucket contents RIGHT NOW** (re-verified live this session via the `sb-aws` broker):
+`_catalog/pretrain/olmo-mix-1124-31b/v1.json` + `_catalog/tokenizer/dolma2-bpe/v1.json`, and the two
+dataset prefixes behind them. (The line that used to sit here — *"`edullm-data` is EMPTY (0
+objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ---
 
@@ -209,7 +439,20 @@ been published yet — only test probes, all cleaned up. This is the correct exp
 - **No `-of-N` in shard names** — unknowable at write time; completeness via manifest path-set equality.
 - **Profile on the GROUP, not the dataset** — one dataset can hold multiple typed payload groups.
 - **Validators RECOMPUTE, never just assert a field is present** — the only check that ever rejected
-  bad work in the audit recomputed a hash. This is the golden rule (CONTRIBUTING.md).
+  bad work in the audit recomputed a hash. This is the golden rule (CONTRIBUTING.md). What Gate A
+  actually recomputes: HEAD size vs `entry.bytes`; the count arithmetic; extension-vs-format; shard
+  naming; dtype width vs the tokenizer's derived vocab; partition `rows`; coverage disjointness;
+  exhaustiveness (LIST both directions); the `manifest_sha256`/`dataset_sha256` chain; and the
+  profile checks, which read ~64 KB per shard and decode it.
+- **Gate A does NOT re-hash payload bytes — `sha256` is an unfalsified producer assertion.**
+  `s3.hash_object`'s only non-definition caller is `publish.py:280` (the producer); the per-entry
+  loop at `validate.py:399-431` HEADs for size and does set-membership on the *declared* digest, and
+  `fsck.py:10` reads "never a payload byte" on purpose. `sha256`'s real jobs are content addressing
+  (`duplicate-shard-digest`; `shared-sha-with-parent`, the 37 GB re-materialization) and the hash
+  chain. Integrity of the bytes rests on the airlock's IAM Deny + S3 durability + CRC64NVME
+  (`s3.head()` returns `crc64nvme` and deliberately omits `sha256` — S3 stores no whole-object
+  SHA-256 for a multipart object). A full re-hash is affordable (~16.5 min / ~$0.18 for 758 GB) but
+  is an OPEN DECISION, not something the pipeline does today. Do not document it as existing.
 - **`experimental/v1` is quota-limited (2 live per family), not approval-gated** — approvals erode.
 - **Greenfield** — legacy ~2.53 TB is NOT migrated; new datasets only.
 - **No dataset byte is ever managed locally.** `publish()` stream-hashes (never loads a payload
@@ -255,10 +498,14 @@ is clean; local `main` == `origin/main`. The two live datasets were verified by 
 re-run in place (job `e72522a4…`, SUCCEEDED): both `ok=True, violations=0`, READMEs present. Nothing
 outstanding to commit for this feature.
 
-1. **Package `families/` INTO the wheel** (drops the `_dist/families` + `FAMILIES_DIR` override the
-   Batch publisher currently needs). Either move `families/` under `src/edullm_data/families/` +
-   `importlib.resources`, or add `[tool.hatch.build.targets.wheel.force-include]`. Then rebuild the
-   wheel + `aws s3 cp` to `_dist/` (same filename) and simplify `_dist/publish_driver.py`.
+0. **FIRST: get this branch off the laptop.** `fix/validator-recompute-gaps-schema-v2` is 10 commits
+   of unmerged, unpushed work (527 tests). Branch + PR per the repo's own rule, not a direct push to
+   `main`. Everything below assumes it lands.
+1. ~~Package `families/` INTO the wheel.~~ **DONE on this branch** (`ad75062`) via
+   `[tool.hatch.build.targets.wheel.force-include]` in `pyproject.toml:42-43`. **Still outstanding:**
+   rebuild the wheel + `aws s3 cp` it to `_dist/`, then simplify `_dist/publish_driver.py` to drop the
+   `FAMILIES_DIR` override. The deployed `_dist` wheel is `0.1.0` and predates this — until it is
+   reshipped, the Batch publisher still needs `_dist/families/`. Folds into Next Step #6.
 2. **Add per-shard progress logging to `publish()` / the driver.** The ~8-min silent hash of 125 GB
    looked exactly like a hang (I had to probe S3 object counts to tell progress from stall). Emit a
    line every N shards from `build_plan`'s hash loop and the copy loop.
@@ -299,13 +546,24 @@ outstanding to commit for this feature.
 7. **Migrate more high-value legacy datasets** using the proven playbook: server-side rename any
    headerless `.npy`→`.u32le.bin` into `s3://edullm-landing/_migrate/<name>/`, then run the Batch
    publish driver with `PUB_HASH_WORKERS`/`PUB_COPY_WORKERS=16`. (Verify each shard is headerless first:
-   first bytes ≠ `\x93NUMPY` and `tokens×dtype_size == bytes`.)
+   first bytes ≠ `\x93NUMPY` and `tokens×dtype_size == bytes`.) **The 150B corpus is PAUSED BY CHOICE
+   — see DEFERRED DECISIONS #1 before touching it, including the one-group-not-six decision.**
+8. **Populate `entry.split` in `publish()`.** The v2 field, its validation, and the
+   `split-contradicts-filename` gate all exist; the producer never writes it, so the gate is
+   unreachable in production. See "What is NOT done".
+9. **Make `sft_conversations_v1._partition_globs` use `contracts.is_trainable`** instead of substring
+   matching. Until then the `SPLITS` docstring overstates the fix. See "What is NOT done".
+10. **Deploy bucket-policy v2** — DEFERRED DECISIONS #4, runbook at `infra/DEPLOY.md:256+`.
+11. **Reconcile the fsck schedule** — the live rule is nightly, `fsck.py` argues weekly.
 
 ## How to operate it (quick reference)
 
 - **Publish**: `from edullm_data.publish import publish` — args (source, dataset_id, purpose,
   profile) + `tokenizer="tokenizer/<name>"` for a pretrain corpus + optional group_meta. See `USAGE.md`.
-- **Read**: `from edullm_data.read import dataset_paths, resolve_latest`.
+- **Read**: `from edullm_data.read import dataset_paths, resolve_latest`. An unsplit read returns
+  **trainable data only**; both splits come back separately keyed in `.splits`/`.train`/`.val`; the
+  seal is recomputed on every read. **Always pass `r.dtype` to the loader.** Full read-side contract
+  (every field, the dtype asymmetry, the OLMo-core constraints): `docs/CONSUMER-CONTRACT.md`.
 - **Discover what's published**: list `s3://edullm-data/_catalog/` (now has `tokenizer/dolma2-bpe/v1`
   + `pretrain/olmo-mix-1124-31b/v1`).
 - **Migrate a legacy corpus (proven playbook)**: broker-copy headerless `.npy`→`.u32le.bin` into
