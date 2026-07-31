@@ -1,9 +1,14 @@
-# The array-ingest segfault: RESOLVED — pyarrow's `pre_buffer` default
+# The array-ingest segfault: pyarrow's `pre_buffer` default
 
-**Status: ROOT-CAUSED AND FIXED.** `edullm-reservoir-ingest` array children died with exit 139
-because `pq.ParquetFile(rf)` uses pyarrow's default `pre_buffer=True`, which dispatches a Python
-file object's range reads to **Arrow's native C++ IO thread pool**. The fix is one keyword:
+**Status: MECHANISM IDENTIFIED, FIX APPLIED, CONFIRMATION PENDING.**
+`edullm-reservoir-ingest` array children die with exit 139, and the evidence points at
+`pq.ParquetFile(rf)` taking pyarrow's default `pre_buffer=True`, which dispatches a Python file
+object's range reads to **Arrow's native C++ IO thread pool**. The fix is one keyword:
 `pq.ParquetFile(rf, pre_buffer=False)`.
+
+The A/B is 3/4 crashes unpatched vs 0/4 patched — strong, but one unpatched child survived on the
+slow path, so a speed confound is not yet excluded. See the warning under "The A/B" before
+treating this as closed. A 2×8 replication is in flight.
 
 ## The one-line answer
 
@@ -20,17 +25,32 @@ Two 4-child arrays, submitted together, on the same queue, same image, same whee
 pyarrow (25.0.0) / numpy (2.4.6), same shard/worker/file counts. The **only** difference is a shim
 that forces `pre_buffer=False`. Job def `edullm-reservoir-shim`, 2026-07-31:
 
-| job | patch | outcome |
+| job | patch | children: crashed / total |
 |---|---|---|
-| `resshim-J-noop` | none (unpatched control) | **3 of 3 decided children exit 139**, `Segmentation fault (core dumped)` |
-| `resshim-K-prebuf` | `pre_buffer=False` only | **exit 0** — all four configs in 95 s, no crash |
-
-Zero crossover: no `noop` child survived to a verdict, and no `prebuf` child crashed. (Some
-children of each arm were still grinding through 429 backoff when this was written; every child
-that reached a verdict agreed with its arm.)
+| `resshim-J-noop` | none (unpatched control) | **3 of 4** exit 139 |
+| `resshim-K-prebuf` | `pre_buffer=False` only | **0 of 4** — all completed all four configs |
 
 The `noop` arm matters: it runs the same wrapper script with **no patch applied**, which rules out
 "the wrapper masked it." Unpatched-in-a-wrapper still crashes; patched does not.
+
+### ⚠️ The one `noop` survivor, and the confound it exposes
+
+**`resshim-J-noop` child 1 SURVIVED**, so this is 3/4 vs 0/4, not a clean separation. That child
+spent **383 s in `math` with 40 rate-limit pauses**; the three that died were on the fast path
+(child 0 crashed 58 s into `math`). This is the same "slow runs survive" pattern that made every
+early instrumented run pass, and it means **arrival rate is a live confound in this A/B**:
+
+- If `pre_buffer=False` merely made the `prebuf` children *slower*, they could have survived for
+  the survivor's reason rather than the fix's.
+- Against that: the `prebuf` children were **not** uniformly slow. Child 3 finished all four
+  configs in **95 s** — faster than the crashing `noop` children lived — and children 0/1/2 logged
+  **52 / 40 / 31** pauses, straddling the survivor's 40. So `prebuf` includes both fast and heavily
+  throttled children and **none** crashed, while `noop` crashed on every fast child.
+
+That is suggestive but **not conclusive at n=4 per arm**. A 2×8 replication
+(`resshim-L-noop8` / `resshim-M-prebuf8`) is running to settle it. Until it reports, treat the
+mechanism below as **strongly supported, not proven**, and read the fix as "the best-evidenced
+change we have" rather than a closed case.
 
 Independently reproduced on the deployed job def itself (`edullm-reservoir-ingest:6`, unmodified):
 `resdiag-F-plainarray` → children 0, 1, 2 exit 139; `resdiag-G-faulthandler` → all 4 exit 139.
