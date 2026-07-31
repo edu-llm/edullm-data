@@ -1,0 +1,3147 @@
+{
+ "_disclaimer": "RESEARCH FINDINGS, NOT LEGAL ADVICE. License strings are transcribed from OpenStax's own machine-readable metadata; they are not a legal opinion on permitted use.",
+ "collected_utc": "2026-07-31",
+ "method": {
+  "catalog_source": "OpenStax Wagtail CMS REST API, type=books.Book (fully machine-readable; no HTML scraping needed for the catalog)",
+  "catalog_endpoint": "https://openstax.org/apps/cms/api/v2/pages/?type=books.Book&limit=200&fields=title,slug,license_name,license_version,license_url,book_subjects,k12book_subjects,book_state,is_ap,book_uuid",
+  "coverage": "COMPLETE for the catalog the API exposes: meta.total_count=129, items returned=129 (100%).",
+  "second_independent_source": "OpenStax REX content archive. Per-book version pins read from https://openstax.org/rex/release.json (archiveUrl=/apps/archive/20260604.144757, 127 book pins), then GET {archive}/contents/{book_uuid}@{defaultVersion}.json and read the top-level `license` object.",
+  "why_two_sources": "The CMS `license_name` field is the publisher's catalog claim. The archive `license` object is what actually ships inside the book content. Reading both makes each a check on the other rather than a single unverified assertion.",
+  "cross_check_result": "116 books had a license from BOTH sources. Agreements: 116. Disagreements: 0.",
+  "detail_pages_not_scraped": "openstax.org/details/books/<slug> is a JavaScript shell (~12 KB, no license string in the served HTML). The CMS API backing those pages was used instead - it is the same data source the page renders from.",
+  "verified_vs_inferred": "VERIFIED: every cc_variant below is transcribed from a license_url returned by one or both OpenStax APIs. INFERRED: nothing. The single unresolved row is reported as null, not guessed."
+ },
+ "totals": {
+  "books_in_catalog": 129,
+  "books_with_resolved_variant": 128,
+  "books_unresolved": 1,
+  "variant_breakdown_all_states": {
+   "CC BY 4.0": 53,
+   "CC BY-NC-SA 4.0": 75,
+   "null": 1
+  },
+  "variant_breakdown_live_only": {
+   "CC BY 4.0": 11,
+   "CC BY-NC-SA 4.0": 73
+  },
+  "book_state_breakdown": {
+   "retired": 34,
+   "unlisted": 8,
+   "live": 84,
+   "deprecated": 3
+  },
+  "non_cc_licenses_found": 0,
+  "non_cc_note": "ZERO books carry a non-CC license. The owner's premise in DATASET-DESIGN-reservoir.md §7 item 2 ('OpenStax is Creative Commons throughout') is CONFIRMED for all 128 resolvable books.",
+  "non_commercial_only_count": 75,
+  "commercially_usable_count": 53
+ },
+ "caveats": [
+  "The 4 book_state values are NOT interchangeable: live=84, retired=34, unlisted=8, deprecated=3. Only `live` is the current public catalog. Filter on book_state before treating this as an ingest list.",
+  "CC BY-NC-SA 4.0 DOMINATES the live catalog (73 of 84 = 86.9%). The commercially-clean CC BY subset is only 11 live books. A future commercial question therefore removes most of OpenStax, not a fringe.",
+  "8 Polish-language books report the license via the localized CC deed URL (.../licenses/by/4.0/deed.pl) in the archive while the CMS reports plain CC BY 4.0. Same license, localized deed page; normalized to CC BY 4.0. All 8 are book_state=unlisted.",
+  "1 unresolved row: 'College Physics with Courseware' (retired). It is an EMPTY CMS STUB - book_uuid=null, cnx_id=null, webview_link='', license_name=null. There is no content behind it, so there is nothing to license and nothing to ingest. It is not evidence of a non-CC book.",
+  "OpenStax states CC BY-NC-SA books may contain third-party material under separate terms; per-book variant does not resolve embedded-asset rights.",
+  "'is_non_commercial_only' is derived mechanically from the presence of the NC clause in the license URL. It is a routing hint for queries, not a legal conclusion."
+ ],
+ "books": [
+  {
+   "title": "Algebra and Trigonometry",
+   "slug": "algebra-and-trigonometry",
+   "book_uuid": "13ac107a-f15f-49d2-97e8-60ab2e3b519c",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/algebra-and-trigonometry",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/38/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "American Government",
+   "slug": "american-government",
+   "book_uuid": "5bcc0e59-7345-421d-8507-a1e4608685e8",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/american-government",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/84/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "American Government 2e",
+   "slug": "american-government-2e",
+   "book_uuid": "9d8df601-4f12-4ac1-8224-b450bf739e5f",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/american-government-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/300/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "American Government 3e",
+   "slug": "american-government-3e",
+   "book_uuid": "30e47181-f52c-4a91-9c11-33380c428268",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/american-government-3e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/518/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Anatomy and Physiology",
+   "slug": "anatomy-and-physiology",
+   "book_uuid": "14fb4ad7-39a1-4eee-ab6e-3ef2482e3e22",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/anatomy-and-physiology",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/35/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Astronomy",
+   "slug": "astronomy",
+   "book_uuid": "2e737be8-ea65-48c3-aa0a-9f35b4c6a966",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/astronomy",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/81/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Biology",
+   "slug": "biology",
+   "book_uuid": "185cbf87-c72e-48f5-b51e-f14f21b5eabd",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/biology",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/121/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Chemistry",
+   "slug": "chemistry",
+   "book_uuid": "85abf193-2bd2-4908-8563-90b8a7ac8df6",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/chemistry",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/43/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Chemistry: Atoms First",
+   "slug": "chemistry-atoms-first",
+   "book_uuid": "4539ae23-1ccc-421e-9b25-843acbb6c4b0",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/chemistry-atoms-first",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/93/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "College Algebra",
+   "slug": "college-algebra",
+   "book_uuid": "9b08c294-057f-4201-9f48-5d6ad992740d",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/college-algebra",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/39/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "College Algebra with Corequisite Support",
+   "slug": "college-algebra-corequisite-support",
+   "book_uuid": "507feb1e-cfff-4b54-bc07-d52636cecfe3",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/college-algebra-corequisite-support",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/443/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "College Physics",
+   "slug": "college-physics",
+   "book_uuid": "031da8d3-b525-429c-80cf-6c8ed997733a",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/college-physics",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/31/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Elementary Algebra",
+   "slug": "elementary-algebra",
+   "book_uuid": "0889907c-f0ef-496a-bcb8-2a5bb121717f",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/elementary-algebra",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/130/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Fizyka dla szkół wyższych. Tom 1",
+   "slug": "fizyka-dla-szkół-wyższych-tom-1",
+   "book_uuid": "4eaa8f03-88a8-485a-a777-dd3602f6c13e",
+   "book_state": "unlisted",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Uznanie autorstwa (CC BY)",
+   "license_url_archive": "https://creativecommons.org/licenses/by/4.0/deed.pl",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/fizyka-dla-szkół-wyższych-tom-1",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/190/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Fizyka dla szkół wyższych. Tom 2",
+   "slug": "fizyka-dla-szkół-wyższych-tom-2",
+   "book_uuid": "16ab5b96-4598-45f9-993c-b8d78d82b0c6",
+   "book_state": "unlisted",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Uznanie autorstwa (CC BY)",
+   "license_url_archive": "https://creativecommons.org/licenses/by/4.0/deed.pl",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/fizyka-dla-szkół-wyższych-tom-2",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/219/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Fizyka dla szkół wyższych. Tom 3",
+   "slug": "fizyka-dla-szkół-wyższych-tom-3",
+   "book_uuid": "bb62933e-f20a-4ffc-90aa-97b36c296c3e",
+   "book_state": "unlisted",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Uznanie autorstwa (CC BY)",
+   "license_url_archive": "https://creativecommons.org/licenses/by/4.0/deed.pl",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/fizyka-dla-szkół-wyższych-tom-3",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/245/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Física universitaria volumen 1",
+   "slug": "física-universitaria-volumen-1",
+   "book_uuid": "175c88b6-f89b-4eba-9514-bc45e2139a1d",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Ciencia"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/física-universitaria-volumen-1",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/534/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Física universitaria volumen 2",
+   "slug": "física-universitaria-volumen-2",
+   "book_uuid": "da02605d-6d69-447c-a9b9-caf06dc4f413",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Ciencia"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": null,
+   "license_version_cms": null,
+   "license_url_cms": null,
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": null,
+   "detail_url": "https://openstax.org/details/books/física-universitaria-volumen-2",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/547/",
+   "evidence": "archive"
+  },
+  {
+   "title": "Física universitaria volumen 3",
+   "slug": "física-universitaria-volumen-3",
+   "book_uuid": "b647a9b9-7631-45a1-a8e7-5acc3a44fc01",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Ciencia"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": null,
+   "license_version_cms": null,
+   "license_url_cms": null,
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": null,
+   "detail_url": "https://openstax.org/details/books/física-universitaria-volumen-3",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/548/",
+   "evidence": "archive"
+  },
+  {
+   "title": "Intermediate Algebra",
+   "slug": "intermediate-algebra",
+   "book_uuid": "02776133-d49d-49cb-bfaa-67c7f61b25a1",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/intermediate-algebra",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/131/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introducción a la estadística",
+   "slug": "introducción-estadística",
+   "book_uuid": "e53d6c8b-fd9e-4a28-8930-c564ca6fd77d",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Matemáticas"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": null,
+   "license_version_cms": null,
+   "license_url_cms": null,
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": null,
+   "detail_url": "https://openstax.org/details/books/introducción-estadística",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/564/",
+   "evidence": "archive"
+  },
+  {
+   "title": "Introducción a la estadística empresarial",
+   "slug": "introducción-estadística-empresarial",
+   "book_uuid": "f346fe75-ae39-4d11-ad32-d80c03df58cb",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Matemáticas",
+    "Empresarial"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": null,
+   "license_version_cms": null,
+   "license_url_cms": null,
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": null,
+   "detail_url": "https://openstax.org/details/books/introducción-estadística-empresarial",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/565/",
+   "evidence": "archive"
+  },
+  {
+   "title": "Introduction to Business",
+   "slug": "introduction-business",
+   "book_uuid": "4e09771f-a8aa-40ce-9063-aa58cc24e77f",
+   "book_state": "deprecated",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [
+    "Business"
+   ],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introduction-business",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/259/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introduction to Intellectual Property",
+   "slug": "introduction-intellectual-property",
+   "book_uuid": "1b4ee0ce-ee89-44fa-a5e7-a0db9f0c94b1",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introduction-intellectual-property",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/489/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introduction to Sociology",
+   "slug": "introduction-sociology",
+   "book_uuid": "afe4332a-c97f-4fc4-be27-4e4d384a32d8",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": null,
+   "license_url_archive": null,
+   "archive_status": "error: HTTP Error 404: Not Found",
+   "cms_archive_agree": null,
+   "detail_url": "https://openstax.org/details/books/introduction-sociology",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/466/",
+   "evidence": "cms"
+  },
+  {
+   "title": "Introduction to Sociology 2e",
+   "slug": "introduction-sociology-2e",
+   "book_uuid": "02040312-72c8-441e-a685-20e9333f3e1d",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introduction-sociology-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/32/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introductory Business Statistics",
+   "slug": "introductory-business-statistics",
+   "book_uuid": "b56bb9e9-5eb8-48ef-9939-88b1b12ce22f",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Math",
+    "Business"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introductory-business-statistics",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/189/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introductory Statistics",
+   "slug": "introductory-statistics",
+   "book_uuid": "30189442-6998-4686-ac05-ed152b91b9de",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introductory-statistics",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/36/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Life, Liberty, and the Pursuit of Happiness",
+   "slug": "life-liberty-and-pursuit-happiness",
+   "book_uuid": "36004586-651c-4ded-af87-203aca22d946",
+   "book_state": "retired",
+   "is_ap": true,
+   "subjects": [
+    "Humanities"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": null,
+   "license_url_archive": null,
+   "archive_status": "not-in-rex-release",
+   "cms_archive_agree": null,
+   "detail_url": "https://openstax.org/details/books/life-liberty-and-pursuit-happiness",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/391/",
+   "evidence": "cms"
+  },
+  {
+   "title": "Makroekonomia – Podstawy",
+   "slug": "makroekonomia-podstawy",
+   "book_uuid": "823ae3e1-57c4-44c5-b54a-310091040cf6",
+   "book_state": "unlisted",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences",
+    "Business"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Uznanie autorstwa (CC BY)",
+   "license_url_archive": "https://creativecommons.org/licenses/by/4.0/deed.pl",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/makroekonomia-podstawy",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/743/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Marketing Podstawy",
+   "slug": "marketing-podstawy",
+   "book_uuid": "834a50e2-a7ad-4f31-872e-16807cfe4f44",
+   "book_state": "unlisted",
+   "is_ap": false,
+   "subjects": [],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Uznanie autorstwa (CC BY)",
+   "license_url_archive": "https://creativecommons.org/licenses/by/4.0/deed.pl",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/marketing-podstawy",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/843/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Mikroekonomia – Podstawy",
+   "slug": "mikroekonomia-podstawy",
+   "book_uuid": "c9cbc0aa-3afa-448b-8048-3ca2e0ee2f6a",
+   "book_state": "unlisted",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences",
+    "Business"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Uznanie autorstwa (CC BY)",
+   "license_url_archive": "https://creativecommons.org/licenses/by/4.0/deed.pl",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/mikroekonomia-podstawy",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/610/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Physics",
+   "slug": "physics",
+   "book_uuid": "cce64fde-f448-43b8-ae88-27705cceb0da",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Physics"
+   ],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/physics",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/415/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Prealgebra",
+   "slug": "prealgebra",
+   "book_uuid": "caa57dab-41c7-455e-bd6f-f443cda5519c",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/prealgebra",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/46/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Precalculus",
+   "slug": "precalculus",
+   "book_uuid": "fd53eae1-fa23-47c7-bb1b-972349835c3c",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/precalculus",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/37/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Precálculo 2ed",
+   "slug": "precálculo-2ed",
+   "book_uuid": "52f5163f-a7e1-4545-b0fa-8001df262ca9",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Matemáticas"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": null,
+   "license_version_cms": null,
+   "license_url_cms": null,
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": null,
+   "detail_url": "https://openstax.org/details/books/precálculo-2ed",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/597/",
+   "evidence": "archive"
+  },
+  {
+   "title": "Principles of Economics",
+   "slug": "principles-economics",
+   "book_uuid": "69619d2b-68f0-44b0-b074-a9b2bf90b2c6",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-economics",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/40/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Economics 2e",
+   "slug": "principles-economics-2e",
+   "book_uuid": "bc498e1f-efe9-43a0-8dea-d3569ad09a82",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-economics-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/177/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Macroeconomics",
+   "slug": "principles-macroeconomics",
+   "book_uuid": "4061c832-098e-4b3c-a1d9-7eb593a2cb31",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-macroeconomics",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/41/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Macroeconomics 2e",
+   "slug": "principles-macroeconomics-2e",
+   "book_uuid": "27f59064-990e-48f1-b604-5188b9086c29",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-macroeconomics-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/178/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Macroeconomics for AP® Courses",
+   "slug": "principles-macroeconomics-ap-courses",
+   "book_uuid": "33076054-ec1d-4417-8824-ce354efe42d0",
+   "book_state": "retired",
+   "is_ap": true,
+   "subjects": [],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-macroeconomics-ap-courses",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/48/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Macroeconomics for AP® Courses 2e",
+   "slug": "principles-macroeconomics-ap-courses-2e",
+   "book_uuid": "9117cf8c-a8a3-4875-8361-9cb0f1fc9362",
+   "book_state": "retired",
+   "is_ap": true,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [
+    "Economics",
+    "College Success"
+   ],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-macroeconomics-ap-courses-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/186/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Microeconomics",
+   "slug": "principles-microeconomics",
+   "book_uuid": "ea2f225e-6063-41ca-bcd8-36482e15ef65",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-microeconomics",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/42/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Microeconomics 2e",
+   "slug": "principles-microeconomics-2e",
+   "book_uuid": "5c09762c-b540-47d3-9541-dda1f44f16e5",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-microeconomics-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/155/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Microeconomics for AP® Courses",
+   "slug": "principles-microeconomics-ap-courses",
+   "book_uuid": "ca344e2d-6731-43cd-b851-a7b3aa0b37aa",
+   "book_state": "retired",
+   "is_ap": true,
+   "subjects": [],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-microeconomics-ap-courses",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/49/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Microeconomics for AP® Courses 2e",
+   "slug": "principles-microeconomics-ap-courses-2e",
+   "book_uuid": "636cbfd9-4e37-4575-83ab-9dec9029ca4e",
+   "book_state": "retired",
+   "is_ap": true,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [
+    "Economics",
+    "College Success"
+   ],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-microeconomics-ap-courses-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/188/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Psychologia",
+   "slug": "psychologia-polska",
+   "book_uuid": "728df0bb-e07f-489d-91e3-4734a5932f92",
+   "book_state": "unlisted",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Uznanie autorstwa (CC BY)",
+   "license_url_archive": "https://creativecommons.org/licenses/by/4.0/deed.pl",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/psychologia-polska",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/470/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Psychology",
+   "slug": "psychology",
+   "book_uuid": "4abf04bf-93a0-45c3-9cbc-2cefd46e68cc",
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/psychology",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/45/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Química 2ed",
+   "slug": "química-2ed",
+   "book_uuid": "462aa3f1-d65d-4cd9-a5ee-3214f95769b8",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Ciencia"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": null,
+   "license_version_cms": null,
+   "license_url_cms": null,
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": null,
+   "detail_url": "https://openstax.org/details/books/química-2ed",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/599/",
+   "evidence": "archive"
+  },
+  {
+   "title": "Química: Comenzando con los átomos 2ed",
+   "slug": "química-comenzando-átomos-2ed",
+   "book_uuid": "9702782f-fd50-4310-92ac-d29d39065419",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Ciencia"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": null,
+   "license_version_cms": null,
+   "license_url_cms": null,
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": null,
+   "detail_url": "https://openstax.org/details/books/química-comenzando-átomos-2ed",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/600/",
+   "evidence": "archive"
+  },
+  {
+   "title": "Statistics",
+   "slug": "statistics",
+   "book_uuid": "394a1101-fd8f-4875-84fa-55f15b06ba66",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [
+    "Statistics"
+   ],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/statistics",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/413/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "The AP Physics Collection",
+   "slug": "college-physics-ap-courses",
+   "book_uuid": "8d04a686-d5e8-4798-a27d-c608e4d0e187",
+   "book_state": "retired",
+   "is_ap": true,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Physics",
+    "College Success"
+   ],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Creative Commons Attribution License",
+   "license_url_archive": "http://creativecommons.org/licenses/by/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/college-physics-ap-courses",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/47/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Zywienie",
+   "slug": "zywienie",
+   "book_uuid": "86922e8e-fc18-4fa6-af62-0e0e2e0f8df0",
+   "book_state": "unlisted",
+   "is_ap": false,
+   "subjects": [],
+   "k12_subjects": [],
+   "cc_variant": "CC BY 4.0",
+   "is_non_commercial_only": false,
+   "license_name_cms": "Creative Commons Attribution License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by/4.0/",
+   "license_name_archive": "Uznanie autorstwa (CC BY)",
+   "license_url_archive": "https://creativecommons.org/licenses/by/4.0/deed.pl",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/zywienie",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/939/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Additive Manufacturing Essentials",
+   "slug": "additive-manufacturing-essentials",
+   "book_uuid": "851baf99-d993-44bf-8b4d-5b0cadfe2445",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science",
+    "Business"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/additive-manufacturing-essentials",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/873/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Algebra 1",
+   "slug": "algebra-1",
+   "book_uuid": "c437e8a1-8b36-4723-ba43-b2afd6abad0c",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [
+    "Algebra"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/algebra-1",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/867/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Algebra and Trigonometry 2e",
+   "slug": "algebra-and-trigonometry-2e",
+   "book_uuid": "eaefdaf1-bda0-4ada-a9fe-f1c065bfcc4e",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [
+    "Algebra"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/algebra-and-trigonometry-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/553/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "American Government 4e",
+   "slug": "american-government-4e",
+   "book_uuid": "cf61aefd-61e9-4bee-8340-db083e1898d9",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [
+    "American Government"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/american-government-4e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/931/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Anatomy and Physiology 2e",
+   "slug": "anatomy-and-physiology-2e",
+   "book_uuid": "4fd99458-6fdf-49bc-8688-a6dc17a1268d",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Anatomy & Physiology",
+    "Health Science",
+    "Biology"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/anatomy-and-physiology-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/585/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Astronomy 2e",
+   "slug": "astronomy-2e",
+   "book_uuid": "4c29f9e5-a53d-42c0-bdb5-091990527d79",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Astronomy"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/astronomy-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/576/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Biology 2e",
+   "slug": "biology-2e",
+   "book_uuid": "8d50a0af-948b-4204-a71d-4826cba765b8",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Biology"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/biology-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/207/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Biology for AP® Courses",
+   "slug": "biology-ap-courses",
+   "book_uuid": "6c322e32-9fb0-4c4d-a1d7-20c95c5c7af2",
+   "book_state": "live",
+   "is_ap": true,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Biology"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/biology-ap-courses",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/162/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Business Ethics",
+   "slug": "business-ethics",
+   "book_uuid": "914ac66e-e1ec-486d-8a9c-97b0f7a99774",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [
+    "Business"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/business-ethics",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/261/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Business Law I Essentials",
+   "slug": "business-law-i-essentials",
+   "book_uuid": "464a3fba-68c1-426a-99f9-597e739dc911",
+   "book_state": "deprecated",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/business-law-i-essentials",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/340/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Business Law I Essentials 2e",
+   "slug": "business-law-i-essentials-2e",
+   "book_uuid": "1e22d1f5-bfd0-4e4e-bbb1-71452f363d19",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [
+    "Business"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/business-law-i-essentials-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/975/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Calculus Volume 1",
+   "slug": "calculus-volume-1",
+   "book_uuid": "8b89d172-2927-466f-8661-01abc7ccdba4",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [
+    "Calculus"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/calculus-volume-1",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/74/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Calculus Volume 2",
+   "slug": "calculus-volume-2",
+   "book_uuid": "1d39a348-071f-4537-85b6-c98912458c3c",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [
+    "Calculus"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/calculus-volume-2",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/75/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Calculus Volume 3",
+   "slug": "calculus-volume-3",
+   "book_uuid": "a31cd793-2162-4e9e-acb5-6e6bbd76a5fa",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [
+    "Calculus"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/calculus-volume-3",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/76/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Chemistry 2e",
+   "slug": "chemistry-2e",
+   "book_uuid": "7fccc9cf-9b71-44f6-800b-f9457fd64335",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Chemistry"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/chemistry-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/298/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Chemistry: Atoms First 2e",
+   "slug": "chemistry-atoms-first-2e",
+   "book_uuid": "d9b85ee6-c57f-4861-8208-5ddf261e9c5f",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Chemistry"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/chemistry-atoms-first-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/299/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Clinical Nursing Skills",
+   "slug": "clinical-nursing-skills",
+   "book_uuid": "75dc0490-e1d0-4c96-b05a-d59274e287cc",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Nursing"
+   ],
+   "k12_subjects": [
+    "Health Science"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/clinical-nursing-skills",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/814/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "College Algebra 2e",
+   "slug": "college-algebra-2e",
+   "book_uuid": "35d7cce2-48dd-4403-b6a5-e828cb5a17da",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [
+    "Algebra"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/college-algebra-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/550/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "College Algebra 2e with Corequisite Support",
+   "slug": "college-algebra-corequisite-support-2e",
+   "book_uuid": "59024a63-2b1a-4631-94c5-ae275a77b587",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [
+    "Algebra"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/college-algebra-corequisite-support-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/554/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "College Physics 2e",
+   "slug": "college-physics-2e",
+   "book_uuid": "a31df062-930a-4f46-8953-605711e6d204",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Physics"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/college-physics-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/603/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "College Physics For AP® Courses 2e",
+   "slug": "college-physics-ap-courses-2e",
+   "book_uuid": "fc65697b-5a9e-4dfe-ac03-035129f7be28",
+   "book_state": "live",
+   "is_ap": true,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Physics"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/college-physics-ap-courses-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/604/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "College Success",
+   "slug": "college-success",
+   "book_uuid": "e8668a14-9a7d-4d74-b58c-3681f8351224",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "College Success"
+   ],
+   "k12_subjects": [
+    "College Success"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/college-success",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/382/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "College Success Concise",
+   "slug": "college-success-concise",
+   "book_uuid": "62a49025-8cd8-407c-9cfb-c7eba55cf1c6",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "College Success"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/college-success-concise",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/694/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Concepts of Biology",
+   "slug": "concepts-biology",
+   "book_uuid": "b3c1e1d2-839c-42b0-a314-e119a8aafbdd",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Biology"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/concepts-biology",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/34/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Contemporary Mathematics",
+   "slug": "contemporary-mathematics",
+   "book_uuid": "7193a423-3ad7-4ac6-98dd-90c70e4724b7",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/contemporary-mathematics",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/689/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Cálculo volumen 1",
+   "slug": "cálculo-volumen-1",
+   "book_uuid": "8635f0be-e734-4cd1-a10e-8063e5b863b6",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Matemáticas"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": null,
+   "license_version_cms": null,
+   "license_url_cms": null,
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": null,
+   "detail_url": "https://openstax.org/details/books/cálculo-volumen-1",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/578/",
+   "evidence": "archive"
+  },
+  {
+   "title": "Cálculo volumen 2",
+   "slug": "cálculo-volumen-2",
+   "book_uuid": "8079f22f-c0a0-43ed-bb35-871d8d9743f3",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Matemáticas"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": null,
+   "license_version_cms": null,
+   "license_url_cms": null,
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": null,
+   "detail_url": "https://openstax.org/details/books/cálculo-volumen-2",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/579/",
+   "evidence": "archive"
+  },
+  {
+   "title": "Cálculo volumen 3",
+   "slug": "cálculo-volumen-3",
+   "book_uuid": "21b1d0df-a716-4205-8e86-0d0787b2c991",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Matemáticas"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": null,
+   "license_version_cms": null,
+   "license_url_cms": null,
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": null,
+   "detail_url": "https://openstax.org/details/books/cálculo-volumen-3",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/580/",
+   "evidence": "archive"
+  },
+  {
+   "title": "Elementary Algebra 2e",
+   "slug": "elementary-algebra-2e",
+   "book_uuid": "55931856-c627-418b-a56f-1dd0007683a8",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [
+    "Algebra"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/elementary-algebra-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/414/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Entrepreneurship",
+   "slug": "entrepreneurship",
+   "book_uuid": "d380510e-6145-4625-b19a-4fa68204b6b1",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [
+    "Business"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/entrepreneurship",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/314/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Foundations of Information Systems",
+   "slug": "foundations-information-systems",
+   "book_uuid": "372b4fed-e101-433d-9ba2-6ab71f087543",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Computer Science"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/foundations-information-systems",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/870/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Fundamentals of Nursing",
+   "slug": "fundamentals-nursing",
+   "book_uuid": "4738cffb-5d2b-49c0-8368-47cb6dafdaa6",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Nursing"
+   ],
+   "k12_subjects": [
+    "Health Science"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/fundamentals-nursing",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/815/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Intermediate Algebra 2e",
+   "slug": "intermediate-algebra-2e",
+   "book_uuid": "4664c267-cd62-4a99-8b28-1cb9b3aee347",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [
+    "Algebra"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/intermediate-algebra-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/418/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introduction to Anthropology",
+   "slug": "introduction-anthropology",
+   "book_uuid": "cf0085c6-528c-4101-ad26-19c612c5a2fa",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introduction-anthropology",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/573/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introduction to Behavioral Neuroscience",
+   "slug": "introduction-behavioral-neuroscience",
+   "book_uuid": "44175f46-f8f3-41e4-ab0d-35c454db6db8",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences",
+    "Science"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introduction-behavioral-neuroscience",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/844/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introduction to Business 2e",
+   "slug": "introduction-business-2e",
+   "book_uuid": "71e876a1-22c3-4259-be71-f32796a23e8c",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [
+    "Business"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introduction-business-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/960/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introduction to Computer Science",
+   "slug": "introduction-computer-science",
+   "book_uuid": "4f06ce31-1d04-410f-8328-ac4e02c4f217",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Computer Science"
+   ],
+   "k12_subjects": [
+    "Information Technology"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introduction-computer-science",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/847/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introduction to Philosophy",
+   "slug": "introduction-philosophy",
+   "book_uuid": "fe58be6f-3b61-4e16-b3b6-db6924f0b2f2",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Humanities"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introduction-philosophy",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/601/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introduction to Political Science",
+   "slug": "introduction-political-science",
+   "book_uuid": "89060098-2918-4037-8ebe-d90622d7a6bf",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introduction-political-science",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/598/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introduction to Python Programming",
+   "slug": "introduction-python-programming",
+   "book_uuid": "8d08a72f-5463-4856-b05c-58b0d65f5e61",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Computer Science"
+   ],
+   "k12_subjects": [
+    "Information Technology"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introduction-python-programming",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/775/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introduction to Sociology 3e",
+   "slug": "introduction-sociology-3e",
+   "book_uuid": "746f171e-0d6a-4ef2-b69d-367880872f4a",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [
+    "Sociology"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introduction-sociology-3e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/515/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introductory Business Statistics 2e",
+   "slug": "introductory-business-statistics-2e",
+   "book_uuid": "547026cb-a330-4809-94bf-126be5f62381",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Business",
+    "Math"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introductory-business-statistics-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/751/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Introductory Statistics 2e",
+   "slug": "introductory-statistics-2e",
+   "book_uuid": "c4b474e4-4e3b-4232-b35c-2c3535bfae73",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/introductory-statistics-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/750/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Lifespan Development",
+   "slug": "lifespan-development",
+   "book_uuid": "03481f82-baf1-407d-9bac-e614dae0a694",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [
+    "Health Science"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/lifespan-development",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/834/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Maternal-Newborn Nursing",
+   "slug": "maternal-newborn-nursing",
+   "book_uuid": "63229ab9-f9ed-4be4-9d2b-ad5035a02f72",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Nursing"
+   ],
+   "k12_subjects": [
+    "Health Science"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/maternal-newborn-nursing",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/813/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Medical-Surgical Nursing",
+   "slug": "medical-surgical-nursing",
+   "book_uuid": "cede1974-4a2e-47e9-bf60-8ab91962bb1f",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Nursing"
+   ],
+   "k12_subjects": [
+    "Health Science"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/medical-surgical-nursing",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/820/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Microbiology",
+   "slug": "microbiology",
+   "book_uuid": "e42bd376-624b-4c0f-972f-e0c57998e765",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Biology"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/microbiology",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/83/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Nutrition for Nurses",
+   "slug": "nutrition",
+   "book_uuid": "7db4d55f-5c0e-4c05-8b72-841685444165",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Nursing"
+   ],
+   "k12_subjects": [
+    "Health Science"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/nutrition",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/771/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Organic Chemistry: A Tenth Edition",
+   "slug": "organic-chemistry",
+   "book_uuid": "6c2f7d1d-fbad-42e8-b977-9b903e6cb83b",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/organic-chemistry",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/707/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Organizational Behavior",
+   "slug": "organizational-behavior",
+   "book_uuid": "2d941ab9-ac5b-4eb8-b21c-965d36a4f296",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/organizational-behavior",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/315/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Pharmacology for Nurses",
+   "slug": "pharmacology",
+   "book_uuid": "2f805b43-bce4-4379-add2-4fbf46700e4c",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Nursing"
+   ],
+   "k12_subjects": [
+    "Health Science"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/pharmacology",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/770/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Population Health for Nurses",
+   "slug": "population-health",
+   "book_uuid": "9331ec14-7ea7-4415-a8dd-ee34f0c5f9c4",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Nursing"
+   ],
+   "k12_subjects": [
+    "Health Science"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/population-health",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/772/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Prealgebra 2e",
+   "slug": "prealgebra-2e",
+   "book_uuid": "f0fa90be-fca8-43c9-9aad-715c0a2cee2b",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [
+    "Algebra"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/prealgebra-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/392/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Precalculus 2e",
+   "slug": "precalculus-2e",
+   "book_uuid": "f021395f-fd63-46cd-ab95-037c6f051730",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Math"
+   ],
+   "k12_subjects": [
+    "Precalculus"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/precalculus-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/551/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Preparing for College Success",
+   "slug": "preparing-for-college-success",
+   "book_uuid": "503d9717-0d3a-409f-893e-d25740d237dc",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "College Success"
+   ],
+   "k12_subjects": [
+    "College Success"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/preparing-for-college-success",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/720/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Accounting, Volume 1: Financial Accounting",
+   "slug": "principles-financial-accounting",
+   "book_uuid": "9ab4ba6d-1e48-486d-a2de-38ae1617ca84",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [
+    "Business"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-financial-accounting",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/303/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Accounting, Volume 2: Managerial Accounting",
+   "slug": "principles-managerial-accounting",
+   "book_uuid": "920d1c8a-606c-4888-bfd4-d1ee27ce1795",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [
+    "Business"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-managerial-accounting",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/292/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Data Science",
+   "slug": "principles-data-science",
+   "book_uuid": "54ef6090-af3e-47f9-8277-4a312aff4b2c",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Computer Science",
+    "Business",
+    "Math"
+   ],
+   "k12_subjects": [
+    "Information Technology"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-data-science",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/865/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Economics 3e",
+   "slug": "principles-economics-3e",
+   "book_uuid": "4c34671f-b057-4918-8796-38ca1b2f4151",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences",
+    "Business"
+   ],
+   "k12_subjects": [
+    "Economics"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-economics-3e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/620/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Finance",
+   "slug": "principles-finance",
+   "book_uuid": "052b8372-0c5e-4ff6-8fd3-326377e9e91f",
+   "book_state": "deprecated",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-finance",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/583/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Finance 2e",
+   "slug": "principles-finance-2e",
+   "book_uuid": "b8bda7b2-debc-47eb-8372-2639d8ef8b03",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [
+    "Business"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-finance-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/976/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Macroeconomics 3e",
+   "slug": "principles-macroeconomics-3e",
+   "book_uuid": "aff0c733-b223-4dfb-aad6-297bd361bdcf",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences",
+    "Business"
+   ],
+   "k12_subjects": [
+    "Economics"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-macroeconomics-3e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/622/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Management",
+   "slug": "principles-management",
+   "book_uuid": "c3acb2ab-7d5c-45ad-b3cd-e59673fedd4e",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [
+    "Business"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-management",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/304/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Marketing",
+   "slug": "principles-marketing",
+   "book_uuid": "2731eee8-0eb1-4d80-ae83-01b4af642ff6",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Business"
+   ],
+   "k12_subjects": [
+    "Business"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-marketing",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/629/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Principles of Microeconomics 3e",
+   "slug": "principles-microeconomics-3e",
+   "book_uuid": "759181db-a886-4a98-8f5c-770a83a78832",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences",
+    "Business"
+   ],
+   "k12_subjects": [
+    "Economics"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/principles-microeconomics-3e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/621/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Psychiatric-Mental Health Nursing",
+   "slug": "psychiatric-mental-health",
+   "book_uuid": "652f4496-b33e-4b0f-8c8c-a712da36c7a3",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Nursing"
+   ],
+   "k12_subjects": [
+    "Health Science"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/psychiatric-mental-health",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/810/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Psychology 2e",
+   "slug": "psychology-2e",
+   "book_uuid": "06aba565-9432-40f6-97ee-b8a361f118a8",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Social Sciences"
+   ],
+   "k12_subjects": [
+    "Psychology"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/psychology-2e",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/417/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "U.S. History",
+   "slug": "us-history",
+   "book_uuid": "a7ba2fb8-8925-4987-b182-5f4429d48daa",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Humanities"
+   ],
+   "k12_subjects": [
+    "U.S. History"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/us-history",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/44/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "University Physics Volume 1",
+   "slug": "university-physics-volume-1",
+   "book_uuid": "d50f6e32-0fda-46ef-a362-9bd36ca7c97d",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science",
+    "Science"
+   ],
+   "k12_subjects": [
+    "Physics"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/university-physics-volume-1",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/82/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "University Physics Volume 2",
+   "slug": "university-physics-volume-2",
+   "book_uuid": "7a0f9770-1c44-4acd-9920-1cd9a99f2a1e",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Physics"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/university-physics-volume-2",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/94/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "University Physics Volume 3",
+   "slug": "university-physics-volume-3",
+   "book_uuid": "af275420-6050-4707-995c-57b9cc13c358",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Science"
+   ],
+   "k12_subjects": [
+    "Physics"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/university-physics-volume-3",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/95/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Workplace Software and Skills",
+   "slug": "workplace-software-skills",
+   "book_uuid": "3d2454dc-2735-4e24-a7e0-f89a79893699",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Business",
+    "Computer Science"
+   ],
+   "k12_subjects": [
+    "Business",
+    "Information Technology"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/workplace-software-skills",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/745/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "World History, Volume 1: to 1500",
+   "slug": "world-history-volume-1",
+   "book_uuid": "685e3163-1032-4529-bb3a-f97a54407214",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Humanities"
+   ],
+   "k12_subjects": [
+    "World History"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/world-history-volume-1",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/690/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "World History, Volume 2: from 1400",
+   "slug": "world-history-volume-2",
+   "book_uuid": "685e3163-1032-4529-bb3a-f97a54412704",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Humanities"
+   ],
+   "k12_subjects": [
+    "World History"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/world-history-volume-2",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/623/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "Writing Guide with Handbook",
+   "slug": "writing-guide",
+   "book_uuid": "ee7ce46b-0972-4b2c-bc6e-8998c785cd57",
+   "book_state": "live",
+   "is_ap": false,
+   "subjects": [
+    "Humanities"
+   ],
+   "k12_subjects": [
+    "College Success"
+   ],
+   "cc_variant": "CC BY-NC-SA 4.0",
+   "is_non_commercial_only": true,
+   "license_name_cms": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_version_cms": "4.0",
+   "license_url_cms": "https://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "license_name_archive": "Creative Commons Attribution-NonCommercial-ShareAlike License",
+   "license_url_archive": "http://creativecommons.org/licenses/by-nc-sa/4.0/",
+   "archive_status": "ok",
+   "cms_archive_agree": true,
+   "detail_url": "https://openstax.org/details/books/writing-guide",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/555/",
+   "evidence": "cms+archive"
+  },
+  {
+   "title": "College Physics with Courseware",
+   "slug": "college-physics-courseware",
+   "book_uuid": null,
+   "book_state": "retired",
+   "is_ap": false,
+   "subjects": [],
+   "k12_subjects": [],
+   "cc_variant": null,
+   "is_non_commercial_only": null,
+   "license_name_cms": null,
+   "license_version_cms": null,
+   "license_url_cms": null,
+   "license_name_archive": null,
+   "license_url_archive": null,
+   "archive_status": null,
+   "cms_archive_agree": null,
+   "detail_url": "https://openstax.org/details/books/college-physics-courseware",
+   "source_url_cms_api": "https://openstax.org/apps/cms/api/v2/pages/506/",
+   "evidence": "none"
+  }
+ ]
+}

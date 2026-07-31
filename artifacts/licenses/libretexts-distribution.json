@@ -1,0 +1,156 @@
+{
+ "_disclaimer": "RESEARCH FINDINGS, NOT LEGAL ADVICE. Values are transcribed verbatim from the dataset's own metadata.license field; they are not a legal opinion, and (see conflicts below) they are not necessarily correct.",
+ "collected_utc": "2026-07-31",
+ "dataset": "common-pile/libretexts_filtered",
+ "claim_under_test": "DATASET-DESIGN-reservoir.md §7 item 2: 'common-pile/libretexts_filtered carries metadata.license; filter on it rather than assuming the collection is uniform.'",
+ "verdict": "VERIFIED, BOTH HALVES. (a) The field exists as a real typed struct member. (b) The collection is genuinely NON-uniform - 7 distinct values - so filtering rather than assuming is the correct instruction.",
+ "schema_evidence": {
+  "endpoint": "https://datasets-server.huggingface.co/first-rows?dataset=common-pile%2Flibretexts_filtered&config=default&split=train",
+  "top_level_columns": [
+   "added",
+   "created",
+   "id",
+   "metadata",
+   "source",
+   "text"
+  ],
+  "metadata_is": "a struct, NOT a free-form JSON string - so it is queryable server-side",
+  "metadata_subfields": [
+   "author",
+   "book_url",
+   "license",
+   "provenance",
+   "title",
+   "url"
+  ],
+  "license_dtype": "string (Value)",
+  "verified": "YES - metadata.license is present in the declared feature schema and populated in every row."
+ },
+ "population_evidence": {
+  "num_examples": 40049,
+  "statistics_partial_flag": false,
+  "rows_where_license_IS_NOT_NULL": 40049,
+  "rows_where_license_is_empty_string": 0,
+  "null_or_empty": 0,
+  "note": "Coverage is 100%: 40049/40049. No imputation needed."
+ },
+ "method": {
+  "approach": "NO DOWNLOAD. Exact server-side aggregation via the datasets-server /filter endpoint (DuckDB-backed), which returns num_rows_total for a WHERE clause. Every count below is an EXACT full-corpus count, not a sample extrapolation.",
+  "distinct_value_discovery": "Iterative exclusion: repeatedly query `license IS NOT NULL AND license <> <each value already found>`, take one row, then count that value exactly. Terminated when the residual query returned num_rows_total=0, which PROVES the enumeration is complete.",
+  "completeness_proof": "The 7 exact counts sum to 40049 = num_examples exactly, and the residual set was empty. No value was missed.",
+  "sampling_caveat": "The /first-rows sample (32 rows) showed only ONE license value and would have been badly misleading. Reported distribution is from full-corpus counts instead."
+ },
+ "distribution": [
+  {
+   "license_string": "Creative Commons - Attribution - https://creativecommons.org/licenses/by/4.0/",
+   "count": 24205,
+   "fraction": 0.604385,
+   "family": "CC",
+   "class": "permissive-attribution",
+   "is_non_commercial_only": false
+  },
+  {
+   "license_string": "Creative Commons - Attribution Share-Alike - https://creativecommons.org/licenses/by-sa/4.0/",
+   "count": 12141,
+   "fraction": 0.303154,
+   "family": "CC",
+   "class": "share-alike",
+   "is_non_commercial_only": false
+  },
+  {
+   "license_string": "Public Domain",
+   "count": 1191,
+   "fraction": 0.029739,
+   "family": "NON-CC",
+   "class": "public-domain",
+   "is_non_commercial_only": false
+  },
+  {
+   "license_string": "Creative Commons - Attribution - https://creativecommons.org/licenses/by/3.0/",
+   "count": 1060,
+   "fraction": 0.026468,
+   "family": "CC",
+   "class": "permissive-attribution",
+   "is_non_commercial_only": false
+  },
+  {
+   "license_string": "GNU Free Documentation License",
+   "count": 757,
+   "fraction": 0.018902,
+   "family": "NON-CC",
+   "class": "copyleft-non-CC",
+   "is_non_commercial_only": false
+  },
+  {
+   "license_string": "Creative Commons - Attribution Share-Alike - https://creativecommons.org/licenses/by-sa/3.0/",
+   "count": 692,
+   "fraction": 0.017279,
+   "family": "CC",
+   "class": "share-alike",
+   "is_non_commercial_only": false
+  },
+  {
+   "license_string": "Creative Commons - Attribution Share-Alike - https://creativecommons.org/licenses/by-sa/2.5/",
+   "count": 3,
+   "fraction": 7.5e-05,
+   "family": "CC",
+   "class": "share-alike",
+   "is_non_commercial_only": false
+  }
+ ],
+ "rollup": {
+  "distinct_license_values": 7,
+  "cc_rows": 38101,
+  "non_cc_rows": 1948,
+  "non_commercial_only_rows": 0,
+  "share_alike_rows": 12836,
+  "permissive_attribution_rows": 25265
+ },
+ "key_findings": [
+  "ZERO non-commercial rows. No NC variant appears anywhere in libretexts_filtered (verified: LIKE '%by-nc%' -> 0, LIKE '%NonCommercial%' -> 0). Common Pile filtered NC content OUT before publishing. So for THIS corpus the NC question is already answered - but see the conflict finding, which is why you should still record it.",
+  "1948 rows (4.86%) are NOT Creative Commons at all: 1191 'Public Domain' + 757 'GNU Free Documentation License'. The design doc's 'declares licenses per page' framing is right, but a reader who assumes 'CC variant' as the value domain will mis-parse ~5% of rows. The _licenses.parquet schema must NOT model the value as a CC-only enum.",
+  "Share-alike is 32.0% (12836 rows: by-sa 4.0/3.0/2.5). That collides with DATASET-DESIGN §7 item 4 (share-alike segregation), which currently names only FineWiki and StackExchange. LibreTexts is a THIRD share-alike source and should be added there.",
+  "Version drift within the same variant: by-sa appears at 4.0, 3.0 AND 2.5; by appears at 4.0 and 3.0. Store the version separately from the variant or version-specific obligations become unqueryable."
+ ],
+ "conflict_with_openstax_upstream": {
+  "severity": "HIGH - this is the finding that justifies recording licenses per book even though libretexts_filtered has zero NC rows",
+  "what_was_measured": "7121 rows (17.8% of the corpus) have metadata.author LIKE '%OpenStax%'. Their declared licenses: 6974 CC BY 4.0, 126 CC BY-SA 4.0, 19 Public Domain, 2 CC BY 3.0. ZERO NC.",
+  "why_that_is_suspicious": "OpenStax's own APIs declare 73 of its 84 live books (86.9%) as CC BY-NC-SA 4.0. LibreTexts relabels OpenStax-derived pages as CC BY 4.0 - dropping the NC clause - at scale.",
+  "spot_checks": [
+   {
+    "libretexts_url_pattern": "U.S._History_(OpenStax)",
+    "libretexts_declares": "CC BY 4.0",
+    "rows": 138,
+    "openstax_declares_for_that_title": "CC BY-NC-SA 4.0"
+   },
+   {
+    "libretexts_url_pattern": "Pharmacology_for_Nurses_(Openstax)",
+    "libretexts_declares": "CC BY 4.0",
+    "rows": 327,
+    "openstax_declares_for_that_title": "CC BY-NC-SA 4.0"
+   },
+   {
+    "libretexts_url_pattern": "Nutrition_for_Nurses_(OpenStax)",
+    "libretexts_declares": "CC BY 4.0",
+    "rows": 178,
+    "openstax_declares_for_that_title": "CC BY-NC-SA 4.0"
+   },
+   {
+    "libretexts_url_pattern": "Psychology",
+    "libretexts_declares": "CC BY 4.0",
+    "rows": 639,
+    "openstax_declares_for_that_title": "CC BY-NC-SA 4.0 (OpenStax Psychology 2e)"
+   },
+   {
+    "libretexts_url_pattern": "American_Government",
+    "libretexts_declares": "CC BY 4.0",
+    "rows": 93,
+    "openstax_declares_for_that_title": "CC BY-NC-SA 4.0"
+   }
+  ],
+  "conservatively_affected_rows": 1375,
+  "affected_rows_caveat": "1375 is a NON-EXHAUSTIVE lower bound from 5 URL probes only. The true figure is bounded above by the 6974 OpenStax-attributed CC BY 4.0 rows. Some OpenStax books ARE genuinely CC BY (e.g. 1st-edition College Physics is CC BY 4.0 while College Physics 2e is CC BY-NC-SA 4.0), so the two sources are not automatically in conflict on every title - resolution requires per-title edition matching, which was NOT done here.",
+  "implication": "metadata.license cannot be treated as authoritative on its own. A commercial-use query answered purely from LibreTexts metadata would return CLEAN for content whose upstream publisher asserts NC. This is exactly why the schema below carries license_source/license_authority per row rather than one license column.",
+  "not_a_legal_claim": "Which party is correct is a legal question and is NOT resolved here. The finding is that the two declarations DISAGREE and the disagreement is machine-detectable."
+ }
+}

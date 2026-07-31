@@ -11,10 +11,12 @@ orients you, it is not the spec.
 2. **`docs/ONBOARDING.md`** — the 2-minute mental model (the airlock, the bucket layout, the address
    shape `<family>/<name>/<version>/`, what the pipeline forces).
 3. **`CONTRIBUTING.md`** — the golden rule and how to add a profile.
-4. The full spec lives **outside this repo** at `../docs/dataset-creation/DATASET-STANDARD.md`
-   (+ `-DIAGRAMS.md`, + the motivating `s3-dataset-audit-2026-07-28.md`). If launched with this repo
-   as the root you won't have it in scope — `--add-dir ../docs` or read it on request. **If the code
-   and the standard disagree, the standard wins and this package has a bug.**
+4. **`docs/dataset-creation/DATASET-STANDARD.md`** — the full spec (+ `-DIAGRAMS.md`, + the motivating
+   `s3-dataset-audit-2026-07-28.md`). **In this repo as of 2026-07-31**; it used to live in `../docs`
+   and need `--add-dir`, which is why older notes mention that. No flag needed now. **If the code and
+   the standard disagree, the standard wins and this package has a bug** — which is the reason it is
+   versioned alongside the code: a document that adjudicates the implementation has to move with it,
+   or the two drift and nobody notices which is stale.
 
 ## The one rule that governs every check
 
@@ -71,10 +73,23 @@ If you ship a wheel-from-S3 Batch job (validate/publish/backfill), all four bite
    profile's laxer constant — so it fails **only in production**, which is how the live corpus
    came to be validated at 50% EOS instead of the declared 5%.
 3. **pip requires the PEP-427 wheel filename** — keep `edullm_data-<version>-py3-none-any.whl`
-   end-to-end; a renamed `w.whl` is rejected. **The live job defs (`edullm-validator:2`,
-   `edullm-fsck:2`) bootstrap `0.2.0` by exact filename**, so shipping a new wheel changes
-   nothing until those are re-registered. Both EventBridge rules target the job def by
-   unversioned name, so a new revision cuts over immediately — for better and worse.
+   end-to-end; a renamed `w.whl` is rejected. The live job defs bootstrap a wheel **by exact
+   filename**, so shipping a new wheel changes nothing until those are re-registered. Both
+   EventBridge rules target the job def by unversioned name, so a new revision cuts over
+   immediately — for better and worse.
+   **Current: `edullm-validator:8` and `edullm-fsck:5` bootstrap `0.6.0`** (2026-07-31, tag
+   `v0.6.0`), timeouts 7200 s and 3600 s.
+
+   ⚠️ **NEVER TRUST A VERSION STRING AS A DEPLOYMENT CHECK — DIFF THE ARTIFACT.** The wheel
+   deployed before this, `0.5.1`, contained a Gate A function
+   (`pretrain_tokens_v1._cap_min_distinct_by_vocab`) that existed in **no commit on any branch**;
+   `git log --all -S` found nothing. It was built from a dirty tree, and `__version__` was the
+   only *other* difference from `main` — so comparing versions said "stale but equivalent" while a
+   real behaviour lived only in S3. Rebuilding from git and reshipping would have silently
+   regressed a check that published frozen data depends on (`pretrain/lean4-mathlib-bytes/v3`'s
+   own `about` names it). Recovered and tested in `0.6.0`. To audit a deployed wheel, download it
+   and diff every `.py` against the tag — normalising line endings, since a Windows-built wheel
+   differs from `main` on every line otherwise.
 4. Single-threaded publish **times out** on large corpora (the 218-shard/125GB olmo run hit the
    60-min job-def limit). Use `hash_workers`/`copy_workers` and pass
    `--timeout attemptDurationSeconds=7200`.

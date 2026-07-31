@@ -143,7 +143,7 @@ Worth stating so you don't budget for work that isn't needed:
 edullm-data-airlock-v1`. Its one `Deny` statement (`Sid: OnlyValidatorWrites`) enumerates
 `s3:PutObject`, `s3:DeleteObject`, `s3:DeleteObjectVersion`, `s3:PutObjectTagging`,
 `s3:AbortMultipartUpload` — **write actions only**. `s3:GetObject` and `s3:ListBucket` appear
-nowhere in it. The bucket and the role are in the same account (`056956104102`), so a same-account
+nowhere in it. The bucket and the role are in the same account (`<ACCOUNT_ID>`), so a same-account
 IAM `Allow` is sufficient on its own; no bucket-policy change is needed and none is being asked
 for. **The ask is one-sided.**
 

@@ -1,0 +1,47 @@
+{
+  "_comment": [
+    "Adds an expiry rule for the reservoir build's staging prefix on edullm-landing.",
+    "",
+    "WHY THIS FILE EXISTS. Landing's expiry is PREFIX-SCOPED, not bucket-wide. As deployed on",
+    "2026-07-31 the rules cover pretrain/ curriculum/ sft/ eval/ probe/ vendor/ and _pending/ —",
+    "one per dataset family, plus the pending prefix. The reservoir build stages ~2.5 TB of",
+    "upstream documents under _ingest/, which matches NONE of them, so that data would persist",
+    "indefinitely: ~$59/month, forever, for a working set whose whole purpose ends when the",
+    "corpus is published. `ingest_reservoir.py` refuses to start until a rule covers its",
+    "destination, so deploying this is a precondition for a full run rather than a cleanup task.",
+    "",
+    "WHY 30 DAYS AND NOT 14. Every existing rule is 14 days, matching the airlock's documented",
+    "scratch window. This one is longer on purpose: 14 days is the window for a PUBLISH, which is",
+    "hours of work, whereas _ingest/ holds the input to a multi-stage build whose MinHash",
+    "connected-components stage alone runs 1-2 days on-demand (§5.7), with dedup and",
+    "decontamination ahead of it. A 14-day clock could expire the corpus mid-build, and the",
+    "failure would be a partially-vanished input rather than a clean error. 30 days covers the",
+    "documented build with margin and still guarantees the bytes leave.",
+    "",
+    "HOW TO DEPLOY. Lifecycle configuration is WHOLE-BUCKET: PutBucketLifecycleConfiguration",
+    "REPLACES every rule. Do not apply this file alone — it would delete the seven existing",
+    "expiry rules and the multipart-abort rule. Read the live config, append this rule, and put",
+    "the union:",
+    "",
+    "  aws s3api get-bucket-lifecycle-configuration --bucket edullm-landing > /tmp/live.json",
+    "  # merge Rules[] from this file into /tmp/live.json, then:",
+    "  aws s3api put-bucket-lifecycle-configuration --bucket edullm-landing \\",
+    "      --lifecycle-configuration file:///tmp/merged.json",
+    "",
+    "Then verify the union survived, not just that the put returned 200:",
+    "",
+    "  aws s3api get-bucket-lifecycle-configuration --bucket edullm-landing \\",
+    "      --query 'Rules[].ID' --output text   # expect 9 IDs, not 1",
+    "",
+    "This requires the infra-deployer role; the intern session cannot and should not do it."
+  ],
+  "Rules": [
+    {
+      "ID": "expire-ingest-30d",
+      "Filter": { "Prefix": "_ingest/" },
+      "Status": "Enabled",
+      "Expiration": { "Days": 30 },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 1 }
+    }
+  ]
+}

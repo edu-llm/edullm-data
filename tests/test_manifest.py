@@ -22,6 +22,16 @@ from edullm_data.manifest import (
     parse_shard_name,
     verify_arithmetic,
 )
+from edullm_data.manifest import (
+    DEFAULT_DOMAIN_KEEP,
+    MAX_SEGMENT_CHARS,
+    OTHER_SEGMENT,
+    SAFE_SEGMENT_RE,
+    SlugError,
+    build_domain_slug_map,
+    labels_from_path,
+    slug_path_segment,
+)
 
 HEX = "a" * 64
 HEX2 = "b" * 64
@@ -731,3 +741,304 @@ def test_the_audits_fake_npy_group_fails_two_independent_gates():
     )
     assert check_extension_matches_format(entry.path, entry.format)
     assert verify_arithmetic(entry)
+
+
+# --------------------------------------------------------------------------------------
+# §5 — slugging an INHERITED domain value into a path segment
+# --------------------------------------------------------------------------------------
+#
+# The hazard, verified by execution before any of this was written:
+#
+#   s3://edullm-data/pretrain/x/v1/tokens/stackv2-edu/C#/train-00000.u32le.bin
+#     urlparse -> path='/pretrain/x/v1/tokens/stackv2-edu/C'  fragment='/train-00000.u32le.bin'
+#
+# The shard name leaves the path entirely. And NOTHING in the pipeline catches it:
+# `labels_from_path` returns {'source': 'stackv2-edu', 'domain': 'C#'} without complaint and
+# `fnmatch` matches 'tokens/stackv2-edu/*/train-*.u32le.bin'. It surfaces at read time, in a
+# consumer, on a segment that is already inside `manifest_sha256` and therefore unfixable
+# without republishing every byte. So these tests are the gate, and the collision tests below
+# are the most load-bearing ones in the file: a collision is the failure that costs a re-copy
+# while every count still adds up.
+
+
+def test_the_four_verified_upstream_values_slug_as_specified():
+    """The exact values read out of real records: gha_language, metadata.site."""
+    assert slug_path_segment("C#") == "c-sharp"
+    assert slug_path_segment("C++") == "c-plus-plus"
+    assert slug_path_segment("Jupyter Notebook") == "jupyter-notebook"
+    assert slug_path_segment("3dprinting.stackexchange.com") == "3dprinting"
+
+
+def test_c_sharp_and_c_plus_plus_do_not_collapse_to_the_same_thing():
+    """THE check. Generic character-stripping maps both to 'c' — one directory, two languages,
+    permanently, with every token count still adding up."""
+    assert slug_path_segment("C#") != slug_path_segment("C++")
+    assert "c" not in (slug_path_segment("C#"), slug_path_segment("C++"))
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("Python", "python"),
+        ("Objective-C++", "objective-c-plus-plus"),
+        ("F*", "f-star"),
+        ("Emacs Lisp", "emacs-lisp"),
+        ("mathoverflow.stackexchange.com", "mathoverflow"),
+        ("Café", "cafe"),  # an accent renders a letter; it does not name a different thing
+        ("science & technology", "science-technology"),
+        ("500 - Natural sciences and mathematics", "500-natural-sciences-and-mathematics"),
+        ("  Rust  ", "rust"),
+    ],
+)
+def test_slugging_covers_the_shapes_the_real_vocabularies_contain(value, expected):
+    assert slug_path_segment(value) == expected
+
+
+def test_every_slug_matches_the_safe_segment_shape():
+    for value in ("C#", "C++", "Jupyter Notebook", "3dprinting.stackexchange.com", "F*"):
+        assert SAFE_SEGMENT_RE.match(slug_path_segment(value))
+
+
+# ---- the three consumers that actually matter ----
+
+
+@pytest.mark.parametrize("value", ["C#", "C++", "Jupyter Notebook", "3dprinting.stackexchange.com"])
+def test_a_slug_round_trips_through_urlparse_fnmatch_and_labels_from_path(value):
+    """The regex is the cheap gate; these three are the real ones. Recompute, never trust."""
+    import fnmatch
+    from urllib.parse import urlparse
+
+    segment = slug_path_segment(value)
+    rel = f"tokens/stackv2-edu/{segment}/train-00000.u32le.bin"
+    key = f"pretrain/reservoir-260b/v1/{rel}"
+
+    parsed = urlparse(f"s3://edullm-data/{key}")
+    assert parsed.path == f"/{key}"
+    assert parsed.fragment == "" and parsed.query == ""
+
+    assert fnmatch.fnmatch(rel, rel), "a literal glob built from the key must match the key"
+    assert fnmatch.fnmatch(rel, "tokens/stackv2-edu/*/train-*.u32le.bin")
+
+    assert labels_from_path(rel) == {"source": "stackv2-edu", "domain": segment}
+
+
+def test_the_raw_values_fail_the_same_round_trip_that_the_slugs_pass():
+    """The failing half: proves the round-trip check above is not vacuous."""
+    import fnmatch
+    from urllib.parse import urlparse
+
+    # `#` truncates the URI: the shard name lands in the fragment.
+    parsed = urlparse("s3://edullm-data/pretrain/x/v1/tokens/stackv2-edu/C#/train-00000.u32le.bin")
+    assert parsed.path.endswith("/stackv2-edu/C")
+    assert parsed.fragment == "/train-00000.u32le.bin"
+
+    # …while the pipeline's own checks are perfectly happy with it.
+    raw = "tokens/stackv2-edu/C#/train-00000.u32le.bin"
+    assert labels_from_path(raw) == {"source": "stackv2-edu", "domain": "C#"}
+    assert fnmatch.fnmatch(raw, "tokens/stackv2-edu/*/train-*.u32le.bin")
+
+    # And a bracketed value is not even fnmatch-inert against itself.
+    bracketed = "tokens/stackv2-edu/a[b]/train-00000.u32le.bin"
+    assert not fnmatch.fnmatch(bracketed, bracketed)
+
+
+def test_a_segment_that_fails_its_consumers_is_refused_even_via_an_override():
+    """An override is the one path the generic rules cannot clean up, so verification still runs."""
+    with pytest.raises(SlugError) as e:
+        slug_path_segment("Whatever", overrides={"whatever": "not#safe"})
+    assert "not a safe segment" in str(e.value) or "does not survive" in str(e.value)
+
+
+# ---- what it refuses, and why refusing beats guessing ----
+
+
+def test_an_unknown_meaningful_character_is_refused_rather_than_dropped():
+    with pytest.raises(SlugError) as e:
+        slug_path_segment("x\x01y")
+    msg = str(e.value)
+    assert "neither punctuation nor" in msg
+    assert "'C#' and 'C++' both become 'c'" in msg, "the message must name the real hazard"
+
+
+def test_a_value_that_slugs_to_nothing_is_refused():
+    """An empty segment collapses the key by a level, so the SHARD NAME becomes the domain."""
+    with pytest.raises(SlugError) as e:
+        slug_path_segment("日本語")
+    assert "nothing survives" in str(e.value)
+
+
+def test_an_over_long_value_is_refused_not_truncated():
+    """Truncation is how two distinct values silently become one directory."""
+    with pytest.raises(SlugError) as e:
+        slug_path_segment("z" * (MAX_SEGMENT_CHARS + 1))
+    assert "Refused rather than truncated" in str(e.value)
+    assert slug_path_segment("z" * MAX_SEGMENT_CHARS) == "z" * MAX_SEGMENT_CHARS
+
+
+@pytest.mark.parametrize("value", ["", "   ", "\t\n"])
+def test_an_empty_value_is_refused(value):
+    with pytest.raises(SlugError):
+        slug_path_segment(value)
+
+
+def test_a_non_string_is_refused():
+    with pytest.raises(SlugError):
+        slug_path_segment(None)  # type: ignore[arg-type]
+
+
+# ---- the fold, and the collision check that makes the fold safe ----
+
+
+def test_the_top_n_keep_their_names_and_the_tail_folds_to_other():
+    weights = {"Python": 100, "C#": 90, "C++": 80, "Rust": 70, "Go": 6, "Zig": 5, "Nim": 4}
+    m = build_domain_slug_map(weights, keep=4, unit="tokens")
+    assert m.kept == ("Python", "C#", "C++", "Rust")
+    assert m.folded == ("Go", "Zig", "Nim")
+    assert m.apply("C#") == "c-sharp"
+    assert m.apply("Go") == m.apply("Zig") == m.apply("Nim") == OTHER_SEGMENT
+    assert m.segments == ("c-plus-plus", "c-sharp", "other", "python", "rust")
+
+
+def test_the_default_keep_is_twenty_because_cardinality_is_permanent():
+    """73 gha_language values and ~180 StackExchange sites are the verified tails; every
+    distinct value is a directory inside manifest_sha256 forever."""
+    assert DEFAULT_DOMAIN_KEEP == 20
+    m = build_domain_slug_map({f"lang{i:03d}": 1000 - i for i in range(73)})
+    assert len(m.kept) == 20
+    assert len(m.folded) == 53
+    assert len(m.segments) == 21  # 20 named + `other`
+
+
+def test_a_collision_between_two_upstream_values_RAISES():
+    """The single most important property. Two values in one directory is unfixable after
+    publish, and nothing downstream can see it: the counts still add up."""
+    with pytest.raises(SlugError) as e:
+        build_domain_slug_map({"C#": 10, "C sharp": 9}, keep=5)
+    msg = str(e.value)
+    assert "COLLISION" in msg
+    assert "'C#'" in msg and "'C sharp'" in msg, "both raw values must be named"
+    assert "overrides" in msg, "the message must state the fix"
+
+
+def test_case_only_and_host_only_differences_also_collide_loudly():
+    for weights in ({"Python": 9, "python": 8}, {"foo.com": 9, "foo.org": 8}):
+        with pytest.raises(SlugError) as e:
+            build_domain_slug_map(weights, keep=5)
+        assert "COLLISION" in str(e.value)
+
+
+def test_an_override_resolves_a_collision():
+    """The documented escape hatch has to actually work, or the error is a dead end."""
+    m = build_domain_slug_map(
+        {"C#": 10, "C sharp": 9}, keep=5, overrides={"C sharp": "c-sharp-prose"}
+    )
+    assert m.apply("C#") == "c-sharp"
+    assert m.apply("C sharp") == "c-sharp-prose"
+
+
+def test_a_real_value_slugging_to_the_fold_target_is_refused():
+    """One directory meaning both 'the value literally named other' and 'the tail'."""
+    with pytest.raises(SlugError) as e:
+        build_domain_slug_map({"Other": 10, "Python": 9, "Rust": 8}, keep=2)
+    assert "fold-target segment" in str(e.value)
+
+
+def test_the_fold_is_the_only_many_to_one_and_it_is_itemised():
+    """`other` merges, which is why every folded value is listed rather than summarised."""
+    m = build_domain_slug_map({"a": 5, "b": 4, "c": 3, "d": 2}, keep=1)
+    assert m.folded == ("b", "c", "d")
+    assert [v for v in m.folded if v in m.readme_table()] == ["b", "c", "d"]
+
+
+def test_a_tail_of_exactly_one_is_kept_rather_than_folded():
+    """`other` holding one value costs the same directory and destroys the value's name."""
+    m = build_domain_slug_map({"a": 3, "b": 2, "c": 1}, keep=2)
+    assert m.folded == ()
+    assert m.kept == ("a", "b", "c")
+    assert OTHER_SEGMENT not in m.segments
+
+
+# ---- determinism, and the published mapping ----
+
+
+def test_the_map_is_deterministic_under_reordered_input_and_ties():
+    """A map that depends on dict order cannot be published: re-running the build would move
+    segments that are already inside manifest_sha256."""
+    values = {f"lang{i}": 10 for i in range(30)}  # ALL tied, so only the tiebreak orders them
+    forward = build_domain_slug_map(dict(sorted(values.items())), keep=5)
+    reverse = build_domain_slug_map(dict(sorted(values.items(), reverse=True)), keep=5)
+    assert forward.kept == reverse.kept
+    assert forward.slug_of == reverse.slug_of
+    assert forward.segments == reverse.segments
+
+
+def test_the_mapping_is_returned_so_a_slug_is_reversible():
+    """Without this table `c-sharp` is unreadable — nobody can show it means C# and not CSharp."""
+    m = build_domain_slug_map({"C#": 10, "C++": 9, "Jupyter Notebook": 8}, keep=3, unit="tokens")
+    assert {v: k for k, v in m.slug_of.items()}["c-sharp"] == "C#"
+    assert m.to_dict()["slug_of"]["Jupyter Notebook"] == "jupyter-notebook"
+
+
+def test_the_readme_table_carries_the_reverse_mapping_and_the_fold_cost():
+    m = build_domain_slug_map({"C#": 900, "C++": 80, "Go": 10, "Zig": 10}, keep=2, unit="tokens")
+    table = m.readme_table()
+    assert "`c-sharp` | `C#`" in table
+    assert "`other`" in table and "`Go`" in table and "`Zig`" in table
+    assert f"{m.folded_fraction * 100:.2f}%" in table
+    assert "tokens" in table, "the ranking unit must be stated; docs and tokens rank differently"
+
+
+def test_folded_fraction_is_what_says_whether_keep_was_set_well():
+    m = build_domain_slug_map({"big": 980, "a": 10, "b": 5, "c": 5}, keep=1, unit="tokens")
+    assert m.kept_weight == 980 and m.folded_weight == 20
+    assert m.folded_fraction == pytest.approx(0.02)
+
+
+def test_a_value_the_map_never_saw_raises_instead_of_folding_silently():
+    """It means the counts and the data disagree; hiding that under `other` writes a permanent
+    directory to cover it up."""
+    m = build_domain_slug_map({"a": 3, "b": 2, "c": 1}, keep=1)
+    with pytest.raises(SlugError) as e:
+        m.apply("surprise")
+    assert "not in this slug map" in str(e.value)
+
+
+@pytest.mark.parametrize("bad", [{}, {"a": -1}, {"a": "lots"}, {"": 5}])
+def test_a_malformed_weight_table_is_refused(bad):
+    with pytest.raises(SlugError):
+        build_domain_slug_map(bad, keep=3)
+
+
+@pytest.mark.parametrize("keep", [0, -1, True, 1.5])
+def test_a_malformed_keep_is_refused(keep):
+    with pytest.raises(SlugError):
+        build_domain_slug_map({"a": 1, "b": 2}, keep=keep)
+
+
+def test_every_segment_a_real_reservoir_map_produces_is_publishable():
+    """End to end on the two real vocabularies: 73 languages folded, ~180 SE sites folded, and
+    every surviving segment round-trips through all three consumers."""
+    import fnmatch
+    from urllib.parse import urlparse
+
+    languages = {
+        "Python": 900, "C#": 800, "C++": 700, "Jupyter Notebook": 600, "Java": 500,
+        "JavaScript": 400, "Go": 300, "Rust": 200, "Objective-C++": 100, "F*": 90,
+        "Emacs Lisp": 80, "Vim script": 70, "Shell": 60, "TypeScript": 50, "Ruby": 40,
+        **{f"Lang{i}": 10 - (i % 5) for i in range(58)},
+    }
+    sites = {
+        "mathoverflow.stackexchange.com": 900, "physics.stackexchange.com": 800,
+        "3dprinting.stackexchange.com": 700,
+        **{f"site{i:03d}.stackexchange.com": 100 - (i % 7) for i in range(177)},
+    }
+    for weights in (languages, sites):
+        m = build_domain_slug_map(weights, unit="tokens")
+        assert len(m.segments) == DEFAULT_DOMAIN_KEEP + 1
+        assert len(set(m.slug_of.values())) == len(m.segments)
+        for segment in m.segments:
+            rel = f"tokens/stackv2-edu/{segment}/train-00000.u32le.bin"
+            key = f"pretrain/reservoir-260b/v1/{rel}"
+            assert urlparse(f"s3://edullm-data/{key}").path == f"/{key}"
+            assert fnmatch.fnmatch(rel, rel)
+            assert labels_from_path(rel)["domain"] == segment

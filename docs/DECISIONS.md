@@ -1,7 +1,7 @@
 # Decisions
 
 One entry per settled decision. Sourced from
-[`../../docs/dataset-creation/DATASET-STANDARD.md`](../../docs/dataset-creation/DATASET-STANDARD.md);
+[`dataset-creation/DATASET-STANDARD.md`](dataset-creation/DATASET-STANDARD.md);
 see that document for the full argument. Format: Decision / Why / Rejected alternative.
 
 ---

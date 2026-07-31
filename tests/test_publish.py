@@ -104,6 +104,115 @@ def test_pretrain_publish_then_validate_partition_rows_computed():
     assert part["name"] == "train" and part["rows"] == 60000  # computed from the manifest
 
 
+# --------------------------------------------------------------------------------------
+# sidecar control files — the producer half. Bug B: publish() treated them as PAYLOAD.
+# --------------------------------------------------------------------------------------
+
+
+def _tokens_dir_with_sidecars() -> Path:
+    d = _tokens_dir()
+    (d / "_dedup").mkdir()
+    (d / "_dedup" / "clusters.parquet").write_bytes(b"PAR1-cluster-table")
+    (d / "_dedup" / "2026").mkdir()
+    (d / "_dedup" / "2026" / "part-00000.parquet").write_bytes(b"PAR1-nested")
+    (d / "_licenses").mkdir()
+    (d / "_licenses" / "licenses.parquet").write_bytes(b"PAR1-licenses")
+    return d
+
+
+def test_sidecars_never_become_manifest_entries_or_enter_the_hash_chain():
+    """Bug B regression, and the sharp one. publish() matched control files by BASENAME ONLY
+    with no prefix support, so a staged `_dedup/clusters.parquet` was enumerated as payload:
+    `_group_of` made it the first path segment, producing a whole spurious `_dedup` GROUP whose
+    only manifest entry was the parquet — folding a MUTABLE sidecar into `manifest_sha256`, i.e.
+    into the frozen dataset's identity. Recomputing the cluster table (which §1.3 expects as
+    sources are added) would then invalidate the hash chain of an already-published dataset.
+
+    The load-bearing assertion is the hash chain one: `manifest_sha256` must be byte-identical
+    to the same publish without any sidecar staged. That is what proves the sidecar is outside
+    the dataset's identity, rather than merely absent from a list.
+    """
+    def run(src: Path) -> tuple[P.PublishPlan, FakeS3]:
+        s3 = FakeS3()
+        plan = P.publish(
+            src,
+            dataset_id="pretrain/dolma2-150b",
+            purpose="150B-token Dolma2 mix for 370M ladder pretraining at 1.25xC",
+            profile="pretrain-tokens/v1",
+            s3=s3,
+            created_at=CREATED,
+            group_meta=_tokens_meta(),
+            env=ENV,
+        )
+        return plan, s3
+
+    plan_with, s3_with = run(_tokens_dir_with_sidecars())
+    plan_without, _ = run(_tokens_dir())
+
+    # 1. no spurious group, and no sidecar anywhere in any manifest
+    assert sorted(plan_with.manifests) == ["tokens"], "a sidecar prefix became a GROUP"
+    listed = [e["path"] for m in plan_with.manifests.values() for e in m["entries"]]
+    assert listed == ["tokens/train-00000.u32le.bin", "tokens/val-00000.u32le.bin"]
+    assert not [p for p in listed if p.startswith(("_dedup/", "_licenses/"))]
+
+    # 2. THE HASH CHAIN IS UNMOVED — identical to the no-sidecar publish, byte for byte
+    assert plan_with.manifests["tokens"] == plan_without.manifests["tokens"]
+    sha_with = plan_with.dataset_json["groups"][0]["manifest_sha256"]
+    sha_without = plan_without.dataset_json["groups"][0]["manifest_sha256"]
+    assert sha_with == sha_without, "a sidecar changed manifest_sha256 — it is inside the chain"
+
+    # 3. inventory counts payload only, so dataset.json does not claim the sidecar either
+    assert plan_with.dataset_json["inventory"] == plan_without.dataset_json["inventory"]
+
+    # 4. and it is not staged/copied into landing at all (so promote() cannot silently drop it)
+    keys = {k for (b, k) in s3_with._store if b == "edullm-landing"}
+    assert not [k for k in keys if "_dedup/" in k or "_licenses/" in k]
+
+
+def test_publish_with_sidecars_still_passes_gate_a_and_promotes():
+    """Round-trip: the producer and the validator must agree. Publishing a tree that contains
+    sidecars still passes Gate A, and re-validating the PROMOTED prefix after the sidecars are
+    backfilled in place (the sanctioned descriptive-keys-only write) also passes — which is the
+    route §1.3/§1.5 assume, since they are explicitly backfillable."""
+    s3 = FakeS3()
+    plan = P.publish(
+        _tokens_dir_with_sidecars(),
+        dataset_id="pretrain/dolma2-150b",
+        purpose="150B-token Dolma2 mix for 370M ladder pretraining at 1.25xC",
+        profile="pretrain-tokens/v1",
+        s3=s3,
+        created_at=CREATED,
+        group_meta=_tokens_meta(),
+        env=ENV,
+    )
+    prefix = f"pretrain/dolma2-150b/{plan.version}"
+    r = V.validate_dataset("edullm-landing", prefix, s3, data_bucket="edullm-data")
+    assert r.ok, [str(v) for v in r.violations]
+    V.promote(r, s3, data_bucket="edullm-data", landing_bucket="edullm-landing")
+
+    # backfill the sidecars beside the published payload, then re-run Gate A over the result
+    s3.put("edullm-data", f"{prefix}/_dedup/clusters.parquet", b"PAR1-cluster-table")
+    s3.put("edullm-data", f"{prefix}/_licenses/licenses.parquet", b"PAR1-licenses")
+    r2 = V.validate_dataset("edullm-data", prefix, s3, data_bucket="edullm-data")
+    assert r2.ok, [str(v) for v in r2.violations]
+
+
+def test_producer_and_validator_share_one_control_definition():
+    """The `families/`-half-fix guard. `publish.py` and `validate.py` each used to carry their
+    own literal copy of the allowlist; the copies were identical, so a green suite proved only
+    that they AGREED, never that there was one definition to change. Assert IDENTITY (same
+    object), not equality — equality is exactly what the two duplicates already satisfied.
+    """
+    from edullm_data import contracts as C
+
+    assert P._CONTROL_BASENAMES is C.CONTROL_BASENAMES
+    assert V.CONTROL_BASENAMES is C.CONTROL_BASENAMES
+    assert V.CONTROL_PREFIXES is C.CONTROL_PREFIXES
+    # and the prefix half is one function, not two startswith loops
+    assert P.is_control_prefix is C.is_control_prefix
+    assert V.is_control_prefix is C.is_control_prefix
+
+
 def _multishard_tokens_dir(shards: int = 6) -> Path:
     """A multi-shard token group with varied per-shard sizes, so parallel hashing/copying
     has something to reorder if it were going to."""

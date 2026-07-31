@@ -1,0 +1,25 @@
+{
+  "status": "ok",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "tokens_per_byte_ci95_cluster_bootstrap": [
+    0.33753505476236473,
+    0.35745840978965315
+  ],
+  "tokens_per_byte_ci95_rel_halfwidth": 0.0287,
+  "n_row_groups_sampled": 20,
+  "n_docs_sampled": 360,
+  "sample_text_bytes": 26946983,
+  "sample_tokens": 9356581,
+  "tokens_per_byte": 0.3472218392686113,
+  "tokens_per_byte_doc_mean": 0.323245841811587,
+  "tokens_per_byte_cv_per_doc": 0.17038103927922263,
+  "tokens_per_byte_cv_per_rowgroup": 0.06219239303592751,
+  "bytes_per_token": 2.880003176373934,
+  "mean_doc_bytes_in_sample": 74852.73055555555,
+  "payload_bytes_read": 3010000286,
+  "errors": [],
+  "source": "arxiv_papers",
+  "seed": 3337,
+  "text_bytes_corrected_raw": 20696587734,
+  "raw_tokens_estimate": 7186307259
+}

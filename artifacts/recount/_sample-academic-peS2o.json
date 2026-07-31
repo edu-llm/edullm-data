@@ -1,0 +1,25 @@
+{
+  "status": "ok",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "tokens_per_byte_ci95_cluster_bootstrap": [
+    0.21654292362729666,
+    0.2214786706611982
+  ],
+  "tokens_per_byte_ci95_rel_halfwidth": 0.0113,
+  "n_row_groups_sampled": 20,
+  "n_docs_sampled": 360,
+  "sample_text_bytes": 10990338,
+  "sample_tokens": 2408164,
+  "tokens_per_byte": 0.21911646393404824,
+  "tokens_per_byte_doc_mean": 0.22068155466334324,
+  "tokens_per_byte_cv_per_doc": 0.09208353184032578,
+  "tokens_per_byte_cv_per_rowgroup": 0.024910921561014893,
+  "bytes_per_token": 4.563783031388228,
+  "mean_doc_bytes_in_sample": 30528.716666666667,
+  "payload_bytes_read": 3346196072,
+  "errors": [],
+  "source": "peS2o",
+  "seed": 1337,
+  "text_bytes_corrected_raw": 188231620481,
+  "raw_tokens_estimate": 41244647080
+}

@@ -209,6 +209,36 @@ def _tokenizer(ctx: GroupContext) -> Mapping[str, Any]:
     return tok if isinstance(tok, Mapping) else {}
 
 
+def _cap_min_distinct_by_vocab(min_distinct: int, vocab_size: Any) -> int:
+    """Never require more ID diversity than a sensible fraction of the vocabulary.
+
+    The pretrain family floor of 256 is calibrated for ~100k BPE vocabs, where a healthy
+    English shard easily exceeds 256 distinct ids in a 64 KB sample. A raw UTF-8 byte
+    tokenizer has ``vocab_size=256``, so the same floor demands every byte value appear —
+    including control bytes ASCII-heavy formal text (e.g. Lean) never uses. Publishers then
+    interleaved full ``0..255`` alphabet markers into training shards to pass Gate A,
+    contaminating the corpus.
+
+    Cap at ``max(profile_default, vocab_size // 16)`` when vocab is known: byte LMs get 16
+    (still catches all-zeros / all-one-token); large BPE vocabs keep the family floor of 256
+    unchanged (``min(256, max(16, 100000 // 16)) == 256``).
+
+    ⚠️ **RECOVERED FROM THE DEPLOYED `0.5.1` WHEEL, WHICH EXISTS IN NO COMMIT.** This function
+    was live in production and present in no branch — found by installing the deployed artifact
+    into a clean venv and running the live job definition's own assertion against a rebuild,
+    which failed on `ImportError`. Reshipping without it would have silently REGRESSED a Gate A
+    behaviour that real published datasets depend on (`pretrain/lean4-mathlib-bytes`,
+    `tokenizer/bytes-utf8`), reopening the contamination it exists to prevent.
+
+    The lesson is the reason `--version` alone is not a deployment check: `0.5.1`'s
+    `__version__` string was the only *other* difference from `main`, so a version comparison
+    would have called the wheel stale-but-equivalent. Diff the artifact, not the number.
+    """
+    if not isinstance(vocab_size, int) or isinstance(vocab_size, bool) or vocab_size <= 0:
+        return min_distinct
+    return min(min_distinct, max(_DEFAULT_MIN_DISTINCT, vocab_size // 16))
+
+
 def _entries(ctx: GroupContext):
     """Yield ``(raw_dict, ManifestEntry | None, Violation | None)`` per manifest entry."""
     for raw in ctx.manifest.get("entries", []):
@@ -284,7 +314,10 @@ def check_decode_smoke(ctx: GroupContext) -> list[Violation]:
     tok = _tokenizer(ctx)
     vocab_size = tok.get("vocab_size")
     eos_id = tok.get("eos_token_id")
-    min_distinct = int(_bound(ctx, "min_distinct_ids", _DEFAULT_MIN_DISTINCT))
+    min_distinct = _cap_min_distinct_by_vocab(
+        int(_bound(ctx, "min_distinct_ids", _DEFAULT_MIN_DISTINCT)),
+        vocab_size,
+    )
     max_eos = float(_bound(ctx, "max_eos_fraction", _DEFAULT_MAX_EOS_FRACTION))
     max_zero_run = int(_bound(ctx, "max_zero_run", _DEFAULT_MAX_ZERO_RUN))
 

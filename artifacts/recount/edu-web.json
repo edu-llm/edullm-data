@@ -1,0 +1,133 @@
+{
+  "category": "edu-filtered web / PDF",
+  "plan_pool_tokens": 48000000000,
+  "peak_demand_tokens": 12400000000,
+  "peak_demand_note": "62% of a 20B run; pool must hold >= 3x = 37,200,000,000",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "sources": [
+    {
+      "dataset": "HuggingFaceFW/finepdfs-edu",
+      "config": "eng_Latn",
+      "status": "measured",
+      "card_tokens": 350000000000,
+      "card_tokens_note": "card says '350B+ tokens' for ALL 69 languages, not for eng_Latn. eng_Latn is 40.6% of the dataset's parquet bytes (298.7 GB of 735.6 GB) and 46.5% of its rows, so the card implies ~142B for English. No per-language table is published.",
+      "measured_tokens": 161067000000,
+      "measured_tokens_range": [156400000000, 161100000000],
+      "measured_tokens_note": "UPPER BOUND at the top of the range. The exact factor is utf8 BYTES, and bytes >= chars, so tokens_per_char applied to bytes overstates slightly. For English PDF text bytes/char is ~1.00-1.02, giving 157-161B. Card-implied 142B agrees within 13%.",
+      "estimator": "footer-ratio",
+      "estimator_detail": "exact_text_bytes(parquet footers, ALL 23,023,372 rows) x tokens_per_char(sampled)  =  575,753,674,201 x 0.27975",
+      "confidence": "medium",
+      "confidence_note": "The heavy-tailed factor is now EXACT (whole-split, all 100 parquet files, row count matched /size exactly: 23,023,372). The tight factor tokens_per_char=0.27975 (CV 0.1279) came from only 60 sampled docs before the rate limit hit -- 300 was the target. tokens/char is a property of script+domain so 60 docs pins it far better than 60 docs pins doc length, but this is why the grade is medium not high.",
+      "license": "odc-by",
+      "license_detail": "ODC-By v1.0 (cardData license: odc-by; card 'Licensing Information' names Open Data Commons Attribution License v1.0). Use also subject to CommonCrawl Terms of Use.",
+      "statistics_endpoint": "PERMANENTLY BROKEN -- not rate-limiting. Returns StatisticsComputationError on an UNRELATED column: \"Error for ListColumn=fw_edu_scores ... len(bin_edges=[1, 2]) is 2 but bin_edges[0]=1 != bin_edges[1]=2\". A histogram bug on fw_edu_scores. Retrying will never fix it, so recount.py can never produce a stats-ratio number for this corpus -- hence the footer method.",
+      "text_column": "text",
+      "text_column_chosen_by": "known-name",
+      "sampled_mean_chars_per_doc": 42009.4,
+      "footer_exact_mean_bytes_per_doc": 25007.4,
+      "sampling_bias_finding": "The 60-doc sample's mean doc length (42,009 chars) overstates the true whole-split mean (25,007 bytes) by 68%. The discarded sample-mean estimate was 270.6B -- 1.68x too high, with a bootstrap CI of [77B, 625B]. This is the README's heavy-tail warning firing on live data.",
+      "dolma2_to_upstream_ratio": 1.0378,
+      "dolma2_to_upstream_ratio_note": "vs the corpus's own token_count column, n=60. dolma2 counts finepdfs ~3.8% higher than upstream does.",
+      "lineage": "PDF text (rolmOCR-extracted) from CommonCrawl PDFs, CC-MAIN-2013-20..2025-08. Globally deduplicated. Structurally near-orthogonal to CC-HTML corpora."
+    },
+    {
+      "dataset": "HuggingFaceFW/fineweb-edu",
+      "config": "sample-100BT",
+      "status": "measured",
+      "card_tokens": 100000000000,
+      "card_tokens_note": "card: 'a subset randomly sampled from the whole dataset of around 100B gpt2 tokens'. The parent corpus is 1.3T tokens.",
+      "measured_tokens": 100244242760,
+      "estimator": "stats-ratio",
+      "estimator_detail": "num_rows(97,270,686 exact) x stats.mean_chars(4762.8) x tokens_per_char(0.21638)",
+      "confidence": "medium",
+      "confidence_note": "/statistics mean is PARTIAL (covers 1,453,000 of 97,270,686 rows) and was cross-checked against a random sample: the two estimators diverge only 12.5%, well under the 25% alarm. n_sampled was 160 of a targeted 300 (the run was cut short by the shared per-IP 429 quota), across 60 distinct random offsets. tokens_per_char CV was 0.1005 -- tight. Card figure confirmed within 0.25%.",
+      "license": "odc-by",
+      "license_detail": "ODC-By v1.0 (cardData license: odc-by; card 'Licensing Information' names Open Data Commons Attribution License v1.0). Use also subject to CommonCrawl Terms of Use.",
+      "text_column": "text",
+      "text_column_chosen_by": "known-name",
+      "dolma2_to_upstream_ratio": 0.9946,
+      "dolma2_to_upstream_ratio_note": "vs the corpus's own gpt2-based token_count column. dolma2 and gpt2 agree within 0.6% on this corpus, so FineWeb-Edu's advertised counts are usable as-is -- unlike peS2o's word counts.",
+      "estimator_divergence": 0.1248,
+      "lineage": "CommonCrawl HTML. FineWeb-Edu = FineWeb filtered at edu score >= 3 (removed 92% of FineWeb). sample-10BT subset-of sample-100BT subset-of sample-350BT subset-of fineweb-edu(1.3T) subset-of fineweb-edu-score-2(5.4T) subset-of fineweb."
+    },
+    {
+      "dataset": "EssentialAI/essential-web-v1.0",
+      "config": "default",
+      "status": "rate-limited-not-measured",
+      "status_detail": "Two independent blockers, only one of which is the rate limit. (1) STRUCTURAL: /size returns 0 configs and 0 rows with a failed job kind=config-size, and /statistics returns 'Job manager crashed while running this job (missing heartbeats)'. is-valid reports viewer:false, statistics:false. num_rows is the EXACT factor the whole method rests on, so with /size broken NEITHER estimator can be formed -- recount.py exits NO_SIZE regardless of quota. (2) The shared per-IP 429 quota then blocked the fallback /rows sampling that would at least have measured tokens_per_char.",
+      "card_tokens": 24000000000000,
+      "card_docs": 23600000000,
+      "card_implied_tokens_per_doc": 1017,
+      "card_tokens_note": "NOT MEASURED. Card/paper claim only (arXiv 2506.14111, 'Essential-Web v1.0: 24T tokens of organized web data'). Tokenizer unnamed on the card, so this figure is not comparable to a dolma2 count -- exactly the §3.1 problem this task exists to fix.",
+      "measured_tokens": null,
+      "estimator": null,
+      "confidence": "none",
+      "independent_scale_crosscheck": {
+        "method": "HF usedStorage and S3 object listing -- metadata only, no datasets-server",
+        "hf_used_storage_bytes": 75323026283042,
+        "one_crawl_prefix_measured": "crawl=CC-MAIN-2013-20 holds 1,411 parquet files / 1.061 TB; x101 crawls = 107 TB, consistent with the 75.3 TB HF figure",
+        "implied_tokens": "at fineweb-edu's measured 0.35 dolma2 tokens per parquet byte, 75.3 TB implies ~26T tokens; the card's 24T implies 0.32 tok/byte",
+        "verdict": "the 24T order of magnitude is corroborated, but this is a byte-ratio extrapolation from a DIFFERENT corpus, not a count of this one. Do not enter it in a sizing table."
+      },
+      "license": "odc-by",
+      "license_detail": "ODC-By (cardData license: odc-by; card 'License' section: 'Essential-Web-v1.0 contributions are made available under the ODC attribution license'). Users must also abide by CommonCrawl Terms of Use. 'We do not alter the license of any of the underlying data.' Not gated, not private.",
+      "taxonomy_field": "eai_taxonomy",
+      "taxonomy_subject_field": "eai_taxonomy.free_decimal_correspondence",
+      "taxonomy_name": "Free Decimal Correspondence (FDC) -- a Dewey-Decimal-inspired open taxonomy, 3 hierarchical levels, 12 top-level categories (0=General works, 1=Philosophy, 2=Religion, 3=Social Sciences, 4=Language, 5=Science, 6=Technology, 7=Arts, 8=Literature, 9=History/Geography)",
+      "taxonomy_all_dimensions": [
+        "free_decimal_correspondence (subject; 3-level FDC codes + labels)",
+        "bloom_cognitive_process (Anderson/Krathwohl 2001 revision)",
+        "bloom_knowledge_domain",
+        "document_type_v1",
+        "document_type_v2",
+        "extraction_artifacts",
+        "missing_content",
+        "reasoning_depth",
+        "technical_correctness",
+        "education_level"
+      ],
+      "taxonomy_shape_note": "Every dimension carries BOTH a .primary and a .secondary label, each with .code and .label (FDC uses .labels.level_1/2/3 instead of .label). Codes are STRINGS, and '-1' means 'Abstain' -- a real value that must not be read as a category. education_level and reasoning_depth are the two directly education-relevant axes. Verified live against the schema, not just the card.",
+      "verified_schema_columns": ["id", "text", "metadata", "line_start_n_end_idx", "quality_signals", "eai_taxonomy", "pid"],
+      "lineage": "89 resiliparse-extracted CommonCrawl snapshots from DCLM-Pool (CC-MAIN-2013-20..2022-49) plus 12 more re-extracted (CC-MAIN-2023-06..2024-38) = 101 total. Hash-based global dedup + per-snapshot MinHash LSH (Jaccard 0.7). Quality-filtered with a RedPajama-V2-variant pipeline including the DCLM-baseline fastText classifier."
+    }
+  ],
+  "category_total_measured": 261311242760,
+  "category_total_measured_note": "finepdfs-edu/eng_Latn (161.07B, PDF lineage) + fineweb-edu/sample-100BT (100.24B, CC-HTML lineage). These two are summable: §3.1 names FinePDFs as one of only three families structurally near-orthogonal to CC-HTML. essential-web is NOT added -- it is unmeasured AND it overlaps the CC-HTML branch.",
+  "meets_3x_peak_demand": true,
+  "meets_3x_peak_demand_detail": "Requirement is 37.2B (3 x 12.4B). Measured 261.3B = 7.0x peak demand and 5.4x the 48B plan pool. Either source clears it ALONE: finepdfs-edu/eng_Latn 161.1B = 4.3x peak, fineweb-edu/sample-100BT 100.2B = 2.7x peak (and 2.1x the plan pool). The 48B pool is met with large margin and essential-web is NOT needed to reach it -- its value is topic-label coverage, not volume.",
+  "overlaps": [
+    "essential-web shares 89 of its 101 CommonCrawl snapshots with DCLM-Pool. That makes it overlap the SEPARATE 'web (diverse)' category, whose source is mlfoundations/dclm-baseline-1.0 -- a cross-category hazard, not just an intra-category one. Do not size both from card figures independently.",
+    "fineweb-edu sample-100BT subset-of sample-350BT subset-of fineweb-edu (1.3T) subset-of fineweb-edu-score-2 (5.4T) subset-of fineweb. Never sum a sample with its parent or with another sample; sample-10BT is itself a subset of sample-100BT.",
+    "essential-web and fineweb-edu are BOTH CommonCrawl-HTML lineage. essential-web is DCLM-Pool resiliparse extractions, fineweb-edu is FineWeb's own extraction of overlapping crawls, so they cover much of the same underlying web pages via different extractors. Adding their token counts overstates unique tokens.",
+    "finepdfs-edu is the one genuinely orthogonal source here -- PDF text (rolmOCR), not HTML. It is also globally deduplicated, which fineweb-edu is NOT. This is why it is correctly first in the design's priority order.",
+    "finepdfs-edu carries fw_edu_scores, i.e. it was filtered with a FineWeb-Edu-derived classifier recipe. That is a shared FILTER lineage, not shared documents -- it does not create token overlap, but it does mean both corpora inherit the same educational-quality bias."
+  ],
+  "needs_streaming_count": [
+    {
+      "dataset": "EssentialAI/essential-web-v1.0",
+      "config": "default",
+      "why": "datasets-server cannot serve this corpus at all: /size returns 0 configs (failed config-size job) and /statistics reports a crashed job manager, so num_rows -- the exact factor -- is unavailable. This is structural, NOT the 429 quota; waiting for the quota to drain will not fix it. A real count needs a streaming/Batch job.",
+      "recommended_route": "Public AWS Open Data mirror, anonymously readable and verified during this task: s3://essential-web-v1.0 in us-west-2 (arn:aws:s3:::essential-web-v1.0), listed at registry.opendata.aws/eai-essential-web-v1. Listing works via ListObjectsV2 on the path-style host (https://s3.us-west-2.amazonaws.com/essential-web-v1.0/); the virtual-host form essential-web-v1-0.s3... does NOT resolve because of the dot in the bucket name. Layout is crawl=CC-MAIN-YYYY-NN/ prefixes, 101 of them, ~1,411 parquet files and ~1.06 TB per crawl. An in-region Batch job can read footers or stream a sample without egress cost.",
+      "cheaper_alternative": "The parquet-footer method used for finepdfs-edu in this task (artifacts/recount/_footer_chars.py) would give an EXACT whole-corpus text-byte total from footers alone -- ~100k files x ~1 MB of footer reads, no payload. Combined with a sampled tokens/byte that yields a high-confidence count without streaming 75 TB. This needs no datasets-server call, so the 429 quota is irrelevant to it.",
+      "note": "Not needed to meet the 48B pool -- that is already met 5.4x over without it. Count it only if its topic labels are wanted."
+    },
+    {
+      "dataset": "HuggingFaceFW/finepdfs-edu",
+      "config": "eng_Latn",
+      "why": "OPTIONAL REFINEMENT, not a blocker. The doc-length factor is already exact from parquet footers. What is thin is tokens_per_char: 60 sampled docs instead of 300, because the run was cut short by the shared per-IP 429 quota. Re-sampling 300 docs when the quota drains would move this from medium to high confidence and resolve the bytes-vs-chars upper bound. Note /statistics will still fail -- that bug is permanent -- so keep using the footer method for the doc-length factor.",
+      "recommended_route": "recount.py --config eng_Latn --n-sample 300 run serially, then recombine its tokens_per_byte with artifacts/recount/_footer-finepdfs-edu.json"
+    },
+    {
+      "dataset": "HuggingFaceFW/fineweb-edu",
+      "config": "sample-100BT",
+      "why": "OPTIONAL REFINEMENT, not a blocker. Already a real stats-ratio measurement that confirms the card to 0.25%. Two soft spots: n_sampled was 160 of a targeted 300, and the /statistics mean is partial (1.45M of 97.27M rows), which biases toward the head of the split if parquet row order correlates with crawl date. A footer scan would make the doc-length factor exact and remove the partial-mean caveat.",
+      "recommended_route": "artifacts/recount/_footer_chars.py HuggingFaceFW/fineweb-edu --config sample-100BT (footer reads only; unaffected by the 429 quota)"
+    }
+  ],
+  "method_notes": {
+    "no_dataset_downloads": "Honored. Only datasets-server metadata endpoints (/size, /splits, /statistics, /rows, /parquet), the huggingface.co dataset-info API, raw README fetches, and HTTP Range reads of parquet FOOTERS. The footer scan of finepdfs-edu's full 298.7 GB / 100 files transferred 102 MB total (200 range requests) and wrote nothing to disk. Total artifacts on disk: 380 KB.",
+    "new_tool_added": "artifacts/recount/_footer_chars.py -- recovers an EXACT whole-split mean bytes-per-doc for the text column from parquet footers (total_uncompressed_size per column chunk, summed over every row group of every file), as a substitute for /statistics when that endpoint is permanently broken. Corrects for parquet's 4-byte PLAIN length prefix per value (a 0.016% effect on finepdfs). CALIBRATED against fineweb-edu/sample-10BT where /statistics DOES work: footer 4780.4 bytes/doc vs /statistics 4746.6 chars/doc = 0.7% agreement, in the expected direction (bytes >= chars).",
+    "rate_limit_finding": "The datasets-server 429 quota is per-IP, not per-account: an authenticated Bearer request and an anonymous request from this machine both returned 429 within 0.1s while ~13 concurrent recount.py processes ran across agents. Adding a token does not raise it and retrying makes contention worse. Every FAILED/thin result in this category traces to that shared quota, not to a corpus defect -- with the two exceptions documented above (finepdfs /statistics histogram bug, essential-web /size+/statistics failure), which are real and permanent.",
+    "discarded_results": "An earlier finepdfs-edu sample-mean estimate of 270.6B (CI [77B, 625B], n=60) is NOT reported as a measurement. The footer scan shows its doc-length factor was 68% too high. It is recorded here only as evidence that the README's heavy-tail warning is correct."
+  }
+}

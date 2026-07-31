@@ -1,0 +1,52 @@
+{
+  "dataset": "HuggingFaceFW/dclm_100BT",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "method": "num_rows (exact) x mean_chars (/statistics, whole-split) x tokens/char (sampled); falls back to num_rows x sampled mean_tokens/doc when /statistics is unavailable",
+  "dataset_total_rows": 89269902,
+  "configs": [
+    {
+      "config": "default",
+      "split": "train",
+      "status": "ok",
+      "text_column": "text",
+      "text_column_chosen_by": "known-name",
+      "n_rows": 89269902,
+      "n_sampled": 125,
+      "n_distinct_offsets": 60,
+      "mean_tokens_per_doc": 1396.16,
+      "median_tokens_per_doc": 757,
+      "cv_tokens_per_doc": 1.839,
+      "mean_chars_per_doc_sampled": 6110.9,
+      "tokens_per_char": 0.22847,
+      "tokens_per_char_cv": 0.1111,
+      "tokens_per_byte": 0.22755,
+      "sample_mean_est_tokens": 124635066376,
+      "sample_mean_ci95": [
+        88504323320,
+        168494440467
+      ],
+      "sample_mean_rel_halfwidth": 0.3209,
+      "n_empty_text": 0,
+      "errors": [
+        "offset 153386: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 42439202: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 43648190: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 44318320: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 44712641: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor"
+      ],
+      "stats_available": true,
+      "stats_column": "text",
+      "stats_num_examples": 895229,
+      "stats_partial": true,
+      "stats_mean_chars": 5623.4,
+      "stats_median_chars": 2976.0,
+      "stats_ratio_est_tokens": 114691544533,
+      "estimator_divergence": 0.0798,
+      "est_total_tokens": 114691544533,
+      "estimator": "stats-ratio",
+      "confidence": "medium",
+      "confidence_note": "/statistics mean is partial; cross-checked against a random sample",
+      "parquet_bytes": 316008772992
+    }
+  ]
+}

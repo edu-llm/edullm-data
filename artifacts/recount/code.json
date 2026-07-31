@@ -1,0 +1,276 @@
+{
+  "category": "code",
+  "plan_pool_tokens": 40000000000,
+  "peak_plausible_demand_tokens": 8000000000,
+  "peak_demand_basis": "40% max share of a 20B-token run (DATASET-DESIGN-reservoir.md §2.1 'code' row: 12% default / 40% max share supported)",
+  "required_pool_at_3x_demand": 24000000000,
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "measured_at": "2026-07-31",
+  "supersedes": "the 2026-07-31 earlier revision of this file, which recorded category_total_measured: 0 with every source status=rate-limited-not-measured. Nothing in that revision was a measurement; the desk estimates it carried (61B / 63B / 11.9B) are superseded by the figures below and should not be re-cited.",
+
+  "status": "MEASURED. All three §3.2 sources now carry a dolma2 token count derived from EXACT whole-corpus byte totals. Zero datasets-server /rows or /statistics calls were used (exactly one /size call per repo, for the row-ratio cross-check only). No corpus was downloaded.",
+
+  "measurement_method": {
+    "headline": "tokens = total_text_bytes (EXACT, whole corpus) x tokens_per_byte (sampled, CV reported)",
+    "why_not_datasets_server": "Phase 0 stalled on HTTP 429; the quota is per-IP, not per-account, so retrying and authenticating both fail. Every figure here comes from the HF CDN (HTTP Range) or the repo tree API, neither of which is quota-shared with datasets-server.",
+    "method_A_parquet_footers": {
+      "applies_to": "common-pile/raw_v0.1_parquet (the RAW collection: stackv2/ 415 files, github_archive/ 72 files)",
+      "how": "A parquet footer carries total_uncompressed_size per column chunk. Summed over every row group of every file it gives the exact serialized byte total for the `text` column alone, over ALL rows. Corrected for the PLAIN BYTE_ARRAY 4-byte length prefix per value (a 0.02% effect at these document sizes).",
+      "cost": "27.2 MB of footers for 1,190 GB of stackv2 parquet; 4.7 MB for 72 GB of github_archive. 100% of files scanned, zero errors, zero payload bytes read.",
+      "validation": "STRONGEST CHECK IN THIS ARTIFACT: the stackv2 footer scan returns 218,364,133 rows and 4,774.70 GB of text. The common-pile/stackv2 card states 218,364,133 documents and 4,774.7 UTF-8 GB. Rows match EXACTLY (all 9 digits) and bytes to 5 significant figures, over the whole 415-file corpus. The footer method is therefore not merely plausible here, it is confirmed against an independent published figure."
+    },
+    "method_B_gzip_isize": {
+      "applies_to": "the *_filtered repos (stackv2_edu_filtered 95 shards, github_archive_filtered 19 shards), which are .json.gz with ZERO parquet files -- the reason Phase 0 could not measure them at all.",
+      "how": "text_bytes = SUM over shards of isize_i x (text_bytes/json_bytes)_i. isize_i is the gzip ISIZE trailer = EXACT uncompressed JSON bytes for shard i (an 8-byte read at the end of each file). The text/json structural fraction is measured on COMPLETE parsed JSON lines from each shard's head, so no partial-line or decompressor-buffer bookkeeping enters the total.",
+      "why_heads_not_random_offsets": "gzip is a single DEFLATE stream: a mid-file byte range is undecodable, so decompression can only begin at a member boundary. Reading the head of EVERY shard (95 of 95, 19 of 19) is a stratified sample across the whole corpus, NOT a contiguous head of one file.",
+      "isize_wrap_handled": "ISIZE is mod 2^32 and 47 of 95 stack-edu shards exceed 4 GiB uncompressed. The wrap count k is recovered from the head-measured json/compressed ratio and each file's choice asserted unambiguous (the neighbouring k is >4x worse). 94/95 and 19/19 resolved unambiguously; the one ambiguous shard (stack-edu-0088) is 1.05% of the corpus and both candidate k values sit inside the stated confidence band.",
+      "validation": "stackv2_edu_filtered: implied 68.64M documents vs the card's 69,588,607 (-1.4%) and implied 254.6 GB text vs the card's 255 UTF-8 GB (-0.16%). github_archive_filtered: implied 23.62M docs vs card 23,358,580 (+1.1%) and 40.32 GB vs card 40.4 GB (-0.2%). Both corpora reproduce two independent card figures each without being fitted to them."
+    },
+    "method_C_uncompressed_jsonl_random_offsets": {
+      "applies_to": "tokyotech-llm/swallow-code-v2 stage5-auto-format (the RELEASE)",
+      "how": "stage5 ships UNCOMPRESSED .jsonl, so unlike a .json.gz an arbitrary byte range in the middle of a file IS directly parseable. 60 random offsets across 150 files, probability-proportional-to-size, first and last partial lines discarded so only complete JSON objects are counted. Denominator = 953.67 GB total .jsonl bytes, exact from the tree API.",
+      "why_this_matters": "Phase 0 recorded this corpus as NOT MEASURABLE at any quota because its release config fails server-side parquet conversion (TypeError: Couldn't cast struct<type,message> to null) and /size does not enumerate it. Both obstacles are datasets-server obstacles. Neither applies to a range read of the raw files, so the corpus is measurable after all and no Batch streaming job is needed."
+    },
+    "tokens_per_byte_sampling": "allenai/dolma2-tokenizer run locally on documents pulled from random shard heads (methods B) / random row groups and offsets (methods A, C). Never a contiguous head of one file: Stack-v2 shards cluster by repo AND raw_v0.1_parquet is length-stratified (measured mean bytes/doc runs 389k in data_6 to 5.9k in data_412), so file choice is probability-proportional-to-text-bytes and the row group and offset within it are random.",
+    "no_download_compliance": "§5.7 honored. Total traffic is a few GB of Range reads against ~1.4 TB of corpora, nothing written to disk (disk at 92%). The single largest cost is the raw-parquet tokens/byte sample, because pyarrow must fetch whole data pages; the filtered corpora -- the ones that actually matter -- cost ~1.4 MB per shard."
+  },
+
+  "sources": [
+    {
+      "dataset": "common-pile/stackv2_edu_filtered",
+      "config": "default",
+      "split": "train",
+      "role": "PRIMARY -- and on this measurement it is sufficient on its own",
+      "status": "measured",
+      "measurement_method": "method B (gzip ISIZE x text/json fraction) x sampled dolma2 tokens/byte",
+      "is_the_filtered_corpus_§3.2_specifies": true,
+
+      "text_bytes_exact": 254595402218,
+      "text_bytes_note": "= 364,981,987,035 exact uncompressed JSON bytes (ISIZE, all 95 shards) x 0.69609 measured text/json fraction (CV 0.064 across 95 shards).",
+      "implied_documents": 68639609,
+      "mean_text_bytes_per_doc": 3709,
+
+      "tokens_per_byte": 0.2938,
+      "tokens_per_byte_basis": "byte-weighted over 4,275 documents sampled from all 95 shards",
+      "tokens_per_byte_cv_per_doc": 0.1665,
+      "tokens_per_byte_cv_per_shard": 0.0958,
+      "tokens_per_byte_95ci": [0.2924, 0.2953],
+
+      "measured_tokens": 74807714889,
+      "measured_tokens_95ci": [74430000000, 75180000000],
+      "measured_tokens_note": "74.81B. The design doc's 67.8B is 10% low but the right order; it was also unsourced (see card_tokens_note).",
+
+      "card_tokens": null,
+      "card_tokens_note": "The card carries NO token count -- only '69,588,607 documents / 255 UTF-8 GB' -- and its prose is a VERBATIM COPY of the stackv2 RAW card ('This is the raw version...', 'Other Versions' links to ITSELF). The doc/byte figures are nonetheless CORRECT for this filtered repo, which this measurement establishes independently: measured 68.64M docs / 254.6 GB against card 69.59M / 255 GB. So the copied prose is a card-authoring bug, not wrong statistics. The design doc's 67.8B has no basis on the card either way.",
+
+      "estimator": "exact-bytes x sampled-ratio",
+      "confidence": "high",
+      "confidence_note": "The byte total is exact-per-shard rather than sampled, and the sampled factor has a ±0.5% 95% CI. Two independent card figures (documents and UTF-8 GB) are reproduced to 1.4% and 0.16% without fitting. The residual risk is not statistical: it is that tokens/byte was sampled from shard HEADS, so if a shard's head is unrepresentative of its tail in language mix the ratio drifts. Bounded by the measured across-language spread being small (1.23x, below) and by the shard-level CV being 0.096 across 95 independent shards.",
+
+      "license": "per-document permissive; repo cardData declares NO license field",
+      "license_detail": "Every document carries metadata.license and metadata.license_type. Sampled 3,260 rows across 5 shards: license_type == 'permissive' for 3,260/3,260 (100%). Licenses: MIT 1,998, Apache-2.0 839, BSD-3-Clause 154, BSD-2-Clause 69, Unlicense 38, CC0-1.0 27, ISC 21, plus multi-license rows ('MIT,Apache-2.0'). All Blue Oak Council certified -- fine for redistribution. Two operational cautions: 9 rows carried an EMPTY license string despite license_type permissive, and the sibling github_archive_filtered proves the field is NOT case-normalised, so filter on license_type and match license case-insensitively.",
+
+      "ships_real_text": true,
+      "ships_real_text_note": "Confirmed by reading rows: `text` holds source code and markdown directly. No SWHID indirection, so this is the correct route around the Software Heritage bulk agreement (§7 item 3).",
+
+      "quality_signals_present": {
+        "edu_score": "Every row carries `score` (float) and `int_score`. Sampled 4,112 rows across 6 shards: mean 2.674, min 2.000, max 4.812. The hard floor at exactly 2.000 IS the edu filter -- this is what makes the corpus 5.33% of raw bytes. Useful downstream: a caller wanting a stricter pool can raise the threshold and re-measure, and the score is already in the data so it costs nothing to use.",
+        "is_generated": "0.68% of bytes (16 of 4,112 rows). Machine-generated files are essentially already excluded.",
+        "is_vendor": "1.89% of bytes (6 of 4,112 rows). Vendored/bundled third-party code is likewise near-absent. Both flags are present per row if a caller wants them at zero.",
+        "why_recorded": "These three fields mean the usual code-corpus hygiene worries (minified bundles, vendored deps, generated protobufs inflating a token count) are measurably NOT a problem here, rather than merely unexamined."
+      },
+
+      "language_composition_by_text_bytes": {
+        "method": "metadata.extension weighted by text BYTES (not documents -- a source file and a one-line config differ ~100x in size). Measured over 106,849 documents across all 95 shard heads.",
+        "why_extension_and_not_gha_language": "⚠ A TRAP worth recording, because using the obvious field gets the answer wrong. metadata.gha_language is the REPOSITORY's primary language, not the file's: it is null for 64% of rows, and for the rest it attributes a .md file in a Java repo to 'Java'. It never takes the value 'Markdown' at all. Resolving the nulls through metadata.language (also repo-level) gave Markdown 8.49% -- a 1.7x UNDERCOUNT. metadata.extension is per-file and effectively always present, so it is the reliable signal. Corollary for anyone sharding this corpus: the shards are largely HOMOGENEOUS by language (one sampled shard head was 1,146/1,148 .java), so a per-shard sample sees one language and only a full-corpus sweep gives the mix.",
+        "JavaScript": 0.1622, "Markdown": 0.1417, "Python": 0.1318, "Java": 0.1289,
+        "PHP": 0.0907, "C#": 0.0782, "C++": 0.0673, "Go": 0.0419,
+        "TypeScript": 0.0402, "C/C++ header": 0.0274, "Swift": 0.0232, "C": 0.0200,
+        "Rust": 0.0135, "Shell": 0.0101, "Ruby": 0.0095,
+        "note": "Genuinely multi-language, JavaScript-led, ~73 languages present. TWO consequences that matter downstream: (1) Python is only 13.2% of bytes, which is what bounds the swallow-code-v2 overlap. (2) MARKDOWN IS 14.2% OF BYTES -- the second-largest 'language' in the corpus, ahead of Python and Java. So ~1 byte in 7 of this nominal 'code' pool is developer PROSE (READMEs, docs, changelogs). That is defensible in a code pool -- documentation ships with code and OLMo-style mixes include it -- but it must be a stated fact rather than a surprise, and it is a direct reason this corpus tokenizes near the prose rate rather than well above it."
+      }
+    },
+
+    {
+      "dataset": "tokyotech-llm/swallow-code-v2",
+      "config": "stage5-auto-format/python/medium (== the swallowcode-v2 release)",
+      "config_note": "stage1-4 are successive intermediate filterings of the SAME documents and must never be summed with stage5 nor with each other. Only stage5 is the release.",
+      "split": "train",
+      "role": "secondary -- and NOT needed to meet either threshold",
+      "status": "measured",
+      "measurement_method": "method C (exact total .jsonl bytes x sampled text/json fraction) x sampled dolma2 tokens/byte",
+      "phase_0_said_unmeasurable": "SUPERSEDED. Phase 0 was right that datasets-server cannot reach this config and wrong that it therefore needs a Batch streaming count. Both obstacles were datasets-server obstacles; the raw .jsonl is uncompressed and range-readable.",
+
+      "total_jsonl_bytes_exact": 953666999988,
+      "text_bytes": 217571000000,
+      "text_bytes_note": "= 953.67 GB x 0.22814 measured text/json fraction (CV 0.057 over 55 random offsets). The fraction is low because each row carries FOUR near-duplicate copies of the code plus an LLM evaluation blob.",
+      "implied_documents": 29310000,
+      "mean_text_bytes_per_doc": 7423,
+
+      "tokens_per_byte": 0.2729,
+      "tokens_per_byte_basis": "byte-weighted over 1,104 documents from 45 distinct files at random offsets",
+      "tokens_per_byte_cv_per_doc": 0.0885,
+      "tokens_per_byte_cv_per_sample": 0.0225,
+      "tokens_per_byte_95ci": [0.2715, 0.2744],
+
+      "measured_tokens": 59385000000,
+      "measured_tokens_95ci": [59070000000, 59690000000],
+      "card_tokens": 49800000000,
+      "card_tokens_tokenizer": "Llama-3 (the card NAMES its tokenizer -- rare, and it makes the comparison meaningful)",
+      "dolma2_to_upstream_ratio": 1.192,
+      "dolma2_to_upstream_ratio_note": "dolma2 counts this corpus 19.2% higher than Llama-3 does. This is a REUSABLE comparability constant for Python code under these two tokenizers -- multiply a Llama-3 code figure by ~1.19 rather than re-measuring. It also independently corroborates the measurement: 59.4B measured against a card 49.8B under a different named tokenizer is exactly the direction and rough magnitude expected, whereas a bug would have no reason to land there.",
+
+      "estimator": "exact-bytes x sampled-ratio",
+      "confidence": "high on the token count, with a LICENSE caveat that is the real blocker",
+
+      "column_trap_verified": {
+        "correct_column": "text",
+        "byte_shares_measured": {"improved_text": 0.2579, "improved_code": 0.2461, "text": 0.2425, "Qwen3-14B_evaluation": 0.1568, "old_text": 0.0821},
+        "note": "§3.3 trap 1 checked and avoided. `text` is the unwrapped Qwen3 rewrite = the release payload. `old_text` and `text_formatted` hold PRE-rewrite Stack-v2 source; `improved_text` is the still-wrapped raw LLM output; `improved_code` is another near-copy. Counting old_text would measure unrewritten Stack-v2 code while labelling it synthetic -- and note the four copies are within 2 percentage points of each other by byte share, so a wrong column would NOT show up as an implausible total. Only the semantics distinguish them."
+      },
+
+      "license": "apache-2.0 on the dataset, but 74% of BYTES carry license_type 'no_license' on the underlying code",
+      "license_detail": "⚠ THE ONE FINDING HERE THAT SHOULD CHANGE A DECISION. The card declares Apache-2.0 and that is real (it is the headline improvement over v1's Llama-3.3 Community License). But the card also says 'Usage is subject to The-Stack-v2's licensing terms', and the per-row metadata tells a different story from stackv2_edu_filtered: sampled 170 rows at 14 random offsets, license_type == 'no_license' for 134 rows = 78.8% of documents and 74.0% of TEXT BYTES; 'permissive' for only 21.2% / 26.0%. gha_license_id was null for every row inspected. So ~3/4 of this corpus is LLM-rewritten code whose SOURCE repository had no detected open license -- which is precisely the material stackv2_edu_filtered's Blue Oak filter excludes by construction. Whether an Apache-2.0 wrapper cures that is a legal question this measurement cannot answer, and it is a different and weaker licensing position than the priority-1 source. Recommendation: do not draw on swallow-code-v2 until an owner decides that question, and note that the pool does not need it (below).",
+
+      "python_only": true,
+      "python_only_note": "Python plus a small stage1 C directory. Substituting swallow for stackv2_edu would collapse a 73-language corpus to one language even where the token total looks adequate."
+    },
+
+    {
+      "dataset": "common-pile/github_archive_filtered",
+      "config": "default",
+      "split": "train",
+      "role": "⚠ MEASURED BUT DISQUALIFIED FROM THIS CATEGORY -- belongs to QA/forum",
+      "status": "measured",
+      "measurement_method": "method B (gzip ISIZE x text/json fraction) x sampled dolma2 tokens/byte",
+
+      "text_bytes_exact": 40318339491,
+      "text_bytes_note": "= 51,816,771,608 exact uncompressed JSON bytes (ISIZE, all 19 shards) x 0.77809 text/json (CV 0.012 -- the tightest structural fraction in this artifact).",
+      "implied_documents": 23621760,
+      "mean_text_bytes_per_doc": 1707,
+
+      "tokens_per_byte": 0.2786,
+      "tokens_per_byte_cv_per_doc": 0.1503,
+      "tokens_per_byte_cv_per_shard": 0.0399,
+      "tokens_per_byte_95ci": [0.2758, 0.2815],
+
+      "measured_tokens": 11234494264,
+      "measured_tokens_95ci": [11120000000, 11350000000],
+      "card_tokens": null,
+      "card_documents": 23358580,
+      "card_utf8_gb": 40.4,
+      "card_cross_check": "measured 23.62M docs vs card 23,358,580 (+1.1%); measured 40.32 GB vs card 40.4 GB (-0.2%). The design doc's ~11.9B is confirmed within 6% -- and it turns out to have been arithmetic (40.4 GB x a prose tok/byte), which happened to be nearly right.",
+      "estimator": "exact-bytes x sampled-ratio",
+      "confidence": "high",
+
+      "license": "per-document permissive; repo cardData declares NO license field",
+      "license_detail": "Issue/PR text inherits its repository's license per GitHub ToS, and threads are kept only where the repo carried a Blue Oak-approved license. Sampled ~40k rows across all 19 shard heads: MIT 20,241, Apache-2.0 8,755, mit 4,137, CC-BY-4.0 3,154, apache-2.0 2,100, BSD-3-Clause 1,659, bsd-3-clause 567, BSD-2-Clause 395, CC0-1.0 377, Unlicense 213. license_type 'permissive' throughout. ⚠ metadata.license is NOT case-normalised ('MIT' and 'mit' both occur, as do 'Apache-2.0'/'apache-2.0' and 'BSD-3-Clause'/'bsd-3-clause') -- match case-insensitively or you will silently drop ~17% of rows.",
+
+      "is_actually_code": false,
+      "disqualifier": "NOT CODE, confirmed independently of Phase 0. Every row's `source` is 'gharchive/issue' or 'gharchive/pull-request' (sampled heads: 16,452 issue / 7,711 pull-request, zero other values). Payload is GitHub issue/PR/comment PROSE converted from GitHub-flavored markdown by PyMarkdown -- e.g. 'Field used but still warned as not used / Describe the bug / maxHP is used in line 39 but still reported as not used'. Mean document is 1,707 bytes, a comment thread, not a source file.",
+      "category_verdict": "Counts toward QA/forum, NOT code. It is claimed by both categories in §3.2 and that double-claim should be resolved in QA/forum's favour. Two further reasons beyond the payload inspection: (1) at 11.23B it is 94% of QA/forum's entire 12B plan pool, so QA/forum is where it is load-bearing, whereas code does not need it at all; (2) counting it as code would mean a run configured for 8B of code tokens could be served developer discussion instead -- the exact failure the category split exists to prevent.",
+      "reconcile_with": "artifacts/recount/qa-forum.json -- another agent measured this same corpus independently. RECONCILED: they report 11.511B, this artifact 11.234B -- a 2.4% spread, and both agree it belongs to QA/forum (their entry marks it role=CONTESTED with the same gharchive/issue + gharchive/pull-request evidence). Their qa-forum total of 25.93B already includes their 11.511B, so this category must NOT also count it; that is why category_total_measured here is stackv2_edu alone.",
+      "reconciliation_detail": "The 2.4% spread is explained and neither figure is wrong within its stated confidence. (a) BYTES: they derived the filtered byte total by scaling the RAW footer count by a card-ratio (filtered_card_GB / raw_card_GB = 0.7386) and got 40.658 GB; this artifact measured the filtered shards DIRECTLY by gzip ISIZE and got 40.318 GB. Direct measurement of the actual row set is the stronger basis, and it lands 0.2% under the card's 40.4 GB versus their 0.6% over. (b) TOKENS/BYTE: 0.2831 (theirs, 824 docs from 33 row groups of the converted parquet) vs 0.2786 (here, 855 docs from all 19 shard heads); the CIs (±2.5% and ±1.0%) overlap. Their sample also came from the datasets-server CONVERTED parquet, which is a ~5 GB partial-train PREFIX of the corpus, whereas the ISIZE route covers all 19 shards. Prefer 11.234B if a single number is needed, but the difference is immaterial to either category's sizing verdict."
+    }
+  ],
+
+  "raw_upper_bounds_do_not_use_as_pool_sizes": {
+    "why_this_section_exists": "The task's caveat, now QUANTIFIED rather than assumed. common-pile/raw_v0.1_parquet is the RAW collection; §3.2 specifies the *_filtered repos. These are different ROW SETS, so a raw footer count is an upper bound on the filtered corpus, not a measurement of it. For code the gap is very large.",
+    "stackv2_raw": {
+      "source": "common-pile/raw_v0.1_parquet stackv2/ -- 415 files, 1,190 GB parquet",
+      "rows_exact": 218364133,
+      "text_bytes_exact": 4774700069355,
+      "text_gb": 4774.7,
+      "card_agreement": "EXACT on rows (218,364,133) and 5 significant figures on bytes (4,774.7 UTF-8 GB) vs the common-pile/stackv2 card. This is the validation anchor for the whole footer method.",
+      "raw_to_filtered_ratio_bytes": 0.0533,
+      "raw_to_filtered_ratio_docs": 0.3143,
+      "gap": "The edu filter keeps 31.4% of DOCUMENTS but only 5.33% of BYTES -- an 18.8x byte reduction. It is aggressive AND strongly length-biased: it discards long files far more than short ones (raw mean 21,866 bytes/doc vs filtered 3,709). A raw-based estimate would overstate the usable pool by ~19x, so the raw figure must never be substituted into §2.1.",
+      "upper_bound_tokens_if_naively_scaled": 1402900000000,
+      "upper_bound_note": "~1,403B at the filtered corpus's 0.2938 tok/byte. Stated ONLY to show the size of the error a raw-for-filtered substitution would introduce. It is not a pool, it is not licensed the same way, and it is not what §3.2 specifies.",
+      "raw_tokens_per_byte_NOT_separately_measured": "The 0.2938 borrowed above is the FILTERED corpus's ratio, not the raw corpus's own. A dedicated raw sample was attempted and abandoned after 7 of 10 planned files (83 documents): raw_v0.1_parquet's row groups are enormous (median compressed text chunk 464 MB, max 26 GB, and only 0.3% of text bytes sit in row groups under 100 MB), so pyarrow must fetch whole multi-hundred-MB data pages to reach any document. It had pulled 4.6 GB for 83 documents when stopped -- disproportionate under §5.7 for a number that only refines a figure this artifact declares unusable. Consequence, stated so nobody treats the 1,403B as calibrated: raw documents average 21,866 bytes versus 3,709 filtered, and long files tokenize slightly differently, so the true raw ratio likely differs by a few percent. This does not affect any reported pool figure -- every source total above uses a ratio sampled from that source's own row set."
+    },
+    "github_archive_raw": {
+      "source": "common-pile/raw_v0.1_parquet github_archive/ -- 72 files",
+      "rows_exact": 139671944,
+      "text_bytes_exact": 246968692777,
+      "discrepancy_found_and_RESOLVED": "The footers report 139.67M rows / 247.5 GB, which is 4.6x the common-pile/github_archive card's 30,318,774 docs / 54.7 GB. Rather than pick one, both were measured: the raw repo ships TWO document directories, and their exact ISIZE totals settle it. gharchive/v0/documents (2,000 files) = 31.81M docs / 54.07 GB, which MATCHES the card (+4.9% docs, -1.15% bytes) and is the config the card's own data_files glob points at. gharchive/raw/documents (2,000 files) = 104.18M docs / 189.3 GB, the pre-license-filter set. The consolidated parquet bundle is larger still (139.67M / 247.5 GB), i.e. it is the widest pre-filter row set, consistent with the card's '177 million threads before license filtering'.",
+      "lesson": "A footer total is only as meaningful as the ROW SET it covers. A parquet bundle named after a corpus is not necessarily that corpus's published config, and here the difference was 4.6x. Verify a footer total against a card figure before reporting it -- for stackv2 that check passed exactly, for github_archive it failed and exposed a different row set.",
+      "independent_corroboration": "The qa-forum agent reached the same v0-vs-raw split by a different route and the two agree to 0.3%: they computed a v0 tree byte share of 0.222898 (from repo file sizes), while direct ISIZE measurement of both trees here gives v0/(v0+raw) = 0.2222. Two independent methods landing on the same 22.2% is strong evidence the two-tree explanation is correct rather than a convenient story. One refinement this artifact adds: they applied that share to the 246.97 GB PARQUET total, but the parquet (139.67M rows / 246.97 GB) is a THIRD and wider row set than v0+raw (136.0M rows / 243.33 GB), so scaling the parquet by the v0 share slightly overshoots -- their 55.05 GB vs the directly measured 54.07 GB, against a card of 54.7 GB."
+    }
+  },
+
+  "category_total_measured": 74807714889,
+  "category_total_measured_basis": "stackv2_edu_filtered ALONE -- the most conservative defensible figure, and the recommended one.",
+
+  "non_overlapping_total": {
+    "recommended_for_§2.1": 74807714889,
+    "recommended_basis": "stackv2_edu_filtered alone: 74.81B. Multi-language (73 languages), 100% Blue Oak permissive per-document, ships real text, and on its own it clears both the 40B plan pool (1.87x) and the 24B 3x-peak floor (3.12x). No summing across overlapping corpora is needed to meet the requirement, so the safest total is also a sufficient one.",
+    "included": ["common-pile/stackv2_edu_filtered = 74.81B"],
+    "excluded": [
+      "tokyotech-llm/swallow-code-v2 (59.39B) -- EXCLUDED for two independent reasons, either sufficient: (a) it is an LLM rewrite of Stack-v2 PYTHON that stackv2_edu_filtered holds as originals, so it is near-duplicate content at the document level; (b) 74% of its bytes are license_type 'no_license' upstream, a materially weaker licensing position than the rest of the pool.",
+      "common-pile/github_archive_filtered (11.23B) -- EXCLUDED as MISCATEGORIZED, not as overlapping. It is issue/PR prose and belongs to QA/forum.",
+      "bigcode/the-stack-v2 and HuggingFaceTB/stack-edu -- not measurable and not usable: SWHIDs only, contents require a Software Heritage bulk agreement whose LLM principles demand open model release (§7 item 3). the-stack-v2-train-smol-ids is gated='auto', license 'other'. stack-edu's own card confirms it: 'This dataset only contains the SWHIDs ... and not the content of the files itself'.",
+      "common-pile/raw_v0.1_parquet stackv2/ (~1,403B raw upper bound) -- EXCLUDED as a superset, not a source. It is the unfiltered corpus stackv2_edu_filtered is derived FROM; counting both double-counts by 19x."
+    ],
+    "if_swallow_is_later_cleared": {
+      "total": 124320000000,
+      "arithmetic": "74.81B - 9.88B (stackv2_edu's Python portion, = 13.2% of its bytes, dropped to avoid the rewrite/original collision) + 59.39B (swallow) = 124.32B",
+      "note": "This is the correct way to combine them IF the license question is resolved: drop the originals or drop the rewrites, never keep both. The naive sum 74.81 + 59.39 = 134.19B is WRONG by ~10B and should not appear in any sizing table.",
+      "caveat": "Even 124.32B would be a Python-heavy pool: swallow alone would be 48% of it, against Python's 13.2% share in the multi-language source. That is a mix change, not just a size change."
+    }
+  },
+
+  "meets_3x_peak_demand": true,
+  "meets_3x_peak_demand_detail": "REQUIREMENT MET, by the priority-1 source alone and with margin. Pool 74.81B vs the 24B floor (3x an 8B peak at 40% max share) = 3.12x the floor and 9.35x the 8B peak itself. The 40B plan pool is also exceeded (1.87x), so §2.1's 'code 40B' row is achievable and is in fact conservative -- 40B is only 53% of what the single primary source holds.",
+  "sizing_recommendation": "§2.1 should use 74.81B as the measured availability for code and may keep its 40B pool target unchanged. The binding constraint on this category was never supply; Phase 0's 0.00B was a measurement failure (per-IP HTTP 429), not a scarcity finding. If a Python-heavy variant is ever wanted, the ceiling rises to ~124B, but that needs the swallow license question answered first.",
+
+  "overlaps": [
+    "ALL code candidates descend from bigcode/the-stack-v2. stackv2_edu_filtered is an independent Blue Oak re-filter of it; swallow-code-v2 is 'a fully rewritten Python corpus derived from The-Stack-v2'; stack-edu is '125B tokens of educational code filtered from The Stack v2'; github_archive_filtered draws issues from the same repositories and sources part of its license metadata FROM Stack-v2 metadata. There is no Stack-v2-independent code source in §3.2 -- summing any two of these is not pool growth.",
+    "stackv2_edu_filtered vs swallow-code-v2 is the dangerous pair, and the danger was CONFIRMED by measurement, not assumed: both corpora carry Stack-v2's blob_id and content_id in identical 40-hex form, so they are indexed against the same upstream blobs. swallow's `text` is a Qwen3-235B rewrite of the blob whose ORIGINAL stackv2_edu holds; measured surface similarity between swallow's `text` and its own `old_text` (the original) is only 0.064 on the first 4,000 chars, with 0/14 exact matches. So the rewrite is aggressive enough that NO digest, MinHash, or n-gram decontamination will pair them -- rephrasing is exactly what defeats n-gram matching -- while the pair remains semantically the same file. Overlap must be handled by blob_id or by dropping one side wholesale; it cannot be deduplicated on content.",
+    "The blob_id intersection test I ran is UNDERPOWERED and must not be read as evidence of independence. Sampled 12,296 Python blob_ids from stackv2_edu and 1,396 from swallow: intersection 0. But two samples that size drawn from a ~10M-blob Python universe are expected to intersect only ~1.4-1.9 times EVEN UNDER FULL CONTAINMENT (P(0 hits | containment) = 0.15-0.25). A negative result at this power says nothing; the overlap is bounded structurally instead -- swallow is 100% Python, Python is 13.2% of stackv2_edu's bytes, so at most ~9.88B of the 74.81B can collide. A definitive test needs a full blob_id join on Batch, not a sample.",
+    "stack-edu, stackv2_edu_filtered and swallow-code-v2 are three overlapping views of ONE corpus (Stack v2). stack-edu's 125B is counted under the SmolLM2 tokenizer and its content is not retrievable without the Software Heritage agreement, so it is not an additive option.",
+    "Within swallow-code-v2, do not sum configs: stage1-auto-format -> stage2-length-filter -> stage3-llm-score -> stage4-llm-rewrite -> stage5-auto-format are successive stages over the same documents. Only stage5 is the release. The datasets-server parquet conversion exposes stage1-4 and NOT stage5, so a naive /size-driven count would sum four intermediate stages and miss the actual corpus.",
+    "github_archive_filtered overlaps the QA/forum category by CLAIM (§3.2 lists it under both), not by content. Its 11.23B must be counted once, in QA/forum."
+  ],
+
+  "tokens_per_byte_findings": {
+    "task_expectation": "The task expected code tokens/byte well above English prose's ~0.25 and a high spread (Phase 0 measured 2.15x within one corpus), and asked whether the single-ratio estimator weakens as a result.",
+    "measured_outcome": "BOTH EXPECTATIONS WERE WRONG FOR THESE CORPORA, and the estimator is therefore STRONGER here than warned, not weaker.",
+    "level": "stackv2_edu_filtered 0.2938, swallow 0.2729, github_archive_filtered 0.2786 -- all only modestly above prose (this repo's fineweb-edu measurement sits near 0.25-0.26 tok/char). Two measured reasons: dolma2's BPE handles common code idioms efficiently, and 14.2% of stackv2_edu's bytes are Markdown (14.2% markdown-ish including .rst/.txt) which tokenizes AT the prose rate -- so the corpus average is dragged toward prose by composition, not just by tokenizer behaviour.",
+    "across_language_spread": "1.23x, NOT 2.15x. Measured by binning 960 documents by gha_language: Java 0.2694, PHP 0.2775, Python 0.2910, JavaScript 0.2947, C++ 0.3177, Go 0.3234, HTML 0.3325. Across-language CV 0.069.",
+    "cv_verdict": "Per-document CV is 0.167 (stackv2_edu), 0.150 (github_archive), 0.089 (swallow) -- all comfortably BELOW the ~0.25 threshold at which the task said the single-ratio estimator would weaken. Per-SHARD CV is far tighter still (0.096 / 0.040), which is the figure that matters because the estimator multiplies a whole-corpus byte total by a corpus-wide ratio, not a per-document one. The resulting 95% CIs are ±0.50%, ±1.01% and ±0.52% on the ratio. A single ratio is fully defensible for all three sources.",
+    "why_it_is_tight_here_when_phase_0_saw_2.15x": "Phase 0's 2.15x spread was between code-heavy and prose-heavy DOCUMENTS within one corpus. That variance is real but it is per-document variance, and it averages out: the byte-weighted corpus ratio is a weighted mean over 68M documents, so its sampling error is governed by CV/sqrt(n) with n in the thousands, not by the per-document spread itself. The one bias this does NOT protect against is a systematic head-vs-tail difference in shard composition, which is why sampling covered all 95 shards rather than a few."
+  },
+
+  "needs_streaming_count": [],
+  "needs_streaming_count_note": "EMPTY, and that is the headline process result: all three sources were measured off the CDN, so no Batch streaming job is required for this category. Phase 0's three streaming-count entries are all discharged -- two were pure rate-limit artifacts, and the third (swallow-code-v2, recorded as 'NOT retriable at any quota') was blocked only by datasets-server, which this method does not use.",
+
+  "open_items": [
+    {
+      "item": "swallow-code-v2 licensing",
+      "detail": "74% of its bytes are license_type 'no_license' upstream while the dataset ships Apache-2.0 and defers to 'The-Stack-v2's licensing terms'. Needs an owner decision before the corpus is drawn on. Not urgent: the pool clears both thresholds without it.",
+      "owner_decision_required": true
+    },
+    {
+      "item": "definitive stackv2_edu <-> swallow overlap",
+      "detail": "Only a full blob_id join can measure it; sampling at feasible sizes is underpowered (shown above). Cheap on Batch if swallow is ever cleared: both corpora expose blob_id, so it is an exact join, not a similarity search. Until then the structural bound (<=9.88B, = stackv2_edu's Python bytes) stands and is sufficient for sizing.",
+      "blocking": false
+    },
+    {
+      "item": "markdown share of a 'code' pool",
+      "detail": "14.2% of stackv2_edu bytes are Markdown -- the second-largest 'language' in the corpus, ahead of Python and Java. Defensible (documentation ships with code) but it should be stated in the dataset README rather than discovered later, since it partly explains the near-prose tokens/byte. If a caller wants pure source code, filtering metadata.extension removes it cheaply and costs ~10.6B of the 74.81B, which still clears both thresholds (64.2B = 2.68x the 24B floor).",
+      "blocking": false
+    },
+    {
+      "item": "github_archive_filtered double-claim",
+      "detail": "§3.2 lists it under both code and QA/forum. This artifact assigns its 11.23B to QA/forum. artifacts/recount/qa-forum.json must be reconciled so the 11.23B is counted exactly once.",
+      "blocking": false
+    }
+  ],
+
+  "corrections_to_prior_artifacts": [
+    "The prior code.json's 'tool_bug_found' (recount.py multiplies by /size num_rows, which is a partial-conversion PREFIX count, not the corpus) is CONFIRMED and still worth propagating: /size returns partial=true for both filtered code corpora, with num_rows 1,240,916 vs estimated_num_rows 57,038,024 for stackv2_edu (46x) and 2,503,341 vs 23,306,158 for github_archive (9.3x). Independent evidence for the fix: this measurement's own document totals (68.64M and 23.62M) come from exact ISIZE bytes and land near the CARD figures and near estimated_num_rows -- NOT near num_rows. Note however that estimated_num_rows is itself imperfect: it gave 57.04M for stackv2_edu where the card says 69.59M and this measurement says 68.64M, a 17% shortfall. Use it for order-of-magnitude sanity only.",
+    "The prior artifact's desk estimates were directionally right but individually off: stackv2_edu 61-80B desk vs 74.81B measured (inside the range); swallow 63B desk vs 59.39B measured (6% high); github_archive 11.9B desk vs 11.23B measured (6% high). The stackv2_edu desk floor of 61B happened to be safe, but it rested on a compression-ratio guess borrowed from a different corpus -- the measured stack-edu ISIZE/compressed ratio is 4.35, not the 2.67-3.5 assumed.",
+    "The prior artifact stated the stackv2_edu_filtered card's '69,588,607 documents / 255 UTF-8 GB' describes the RAW superset rather than the filtered repo, on the grounds that the card prose is a verbatim copy of the raw card. The COPIED PROSE observation is correct but the INFERENCE was wrong: the raw corpus is 218,364,133 docs / 4,774.7 GB (measured exactly here), so 69.59M / 255 GB cannot be the raw figures -- and this measurement independently returns 68.64M / 254.6 GB for the filtered repo. The card's statistics are right; only its prose was pasted from the wrong source."
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "dataset": "tokyotech-llm/swallow-math-v2",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "method": "num_rows (exact) x mean_chars (/statistics, whole-split) x tokens/char (sampled); falls back to num_rows x sampled mean_tokens/doc when /statistics is unavailable",
+  "dataset_total_rows": 2632280,
+  "configs": [
+    {
+      "config": "swallow-math-v2-qa",
+      "split": "train",
+      "status": "FAILED",
+      "errors": [
+        "offset 2396: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 29447: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 84901: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 130609: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 154649: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor"
+      ],
+      "n_rows": 1627659,
+      "text_column": null,
+      "parquet_bytes": 2288504278
+    },
+    {
+      "config": "swallow-math-v2-textbook",
+      "split": "train",
+      "status": "ok",
+      "text_column": "text",
+      "text_column_chosen_by": "known-name",
+      "n_rows": 1004621,
+      "n_sampled": 195,
+      "n_distinct_offsets": 60,
+      "mean_tokens_per_doc": 1416.67,
+      "median_tokens_per_doc": 1288,
+      "cv_tokens_per_doc": 0.466,
+      "mean_chars_per_doc_sampled": 4922.0,
+      "tokens_per_char": 0.28782,
+      "tokens_per_char_cv": 0.1588,
+      "tokens_per_byte": 0.28739,
+      "sample_mean_est_tokens": 1423213083,
+      "sample_mean_ci95": [
+        1336728094,
+        1517029229
+      ],
+      "sample_mean_rel_halfwidth": 0.0633,
+      "n_empty_text": 0,
+      "errors": [
+        "offset 42450: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 318046: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 325213: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 331556: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 346236: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor"
+      ],
+      "stats_available": true,
+      "stats_column": "text",
+      "stats_num_examples": 1004621,
+      "stats_partial": true,
+      "stats_mean_chars": 4966.3,
+      "stats_median_chars": 4694.0,
+      "stats_ratio_est_tokens": 1435995200,
+      "estimator_divergence": 0.0089,
+      "est_total_tokens": 1435995200,
+      "estimator": "stats-ratio",
+      "confidence": "medium",
+      "confidence_note": "/statistics mean is partial; cross-checked against a random sample",
+      "parquet_bytes": 2602311613
+    }
+  ]
+}

@@ -1,0 +1,223 @@
+{
+  "category": "synthetic (rephrased)",
+  "plan_pool_tokens": 60000000000,
+  "plan_shape": "equal 15B from each of four formats (faq, math, table, tutorial)",
+  "peak_plausible_demand_tokens": 6000000000,
+  "three_x_peak_floor_tokens": 18000000000,
+  "status": "MEASURED. All four configs counted under allenai/dolma2-tokenizer via exact nested-leaf parquet footers plus 160 random row groups (160,000 rewrites tokenized). Phase 0's 0.00B and its card-only figures are superseded.",
+
+  "schema_note": "CONFIRMED BY DIRECT QUERY, NOT ASSUMED. The rewrite is at `rollout_results[0].text`. Full shape: FinePhrase carries 12 columns = the 11 columns of its FineWeb-Edu parent plus `rollout_results`. `rollout_results` is a LIST of STRUCT{finish_reason: string, text: string, usage: STRUCT{completion_tokens: int64, prompt_tokens: int64, prompt_tokens_details: null, total_tokens: int64}} -- verified against /info `dataset_info.features` for configs math, table and tutorial (all three byte-identical schemas) and against /first-rows for faq and all. Exactly ONE rollout per document, always: /statistics reports column `rollout_results` with column_type=list and mean=median=min=max=1.0 over 842,000 rows, and all 34 faq rows sampled had len(rollout_results)==1. So element [0] is the entire payload and there is no multi-rollout aggregation to perform. THE TRAP IS REAL AND CONFIRMED: the top-level `text` column holds the ORIGINAL, UNREPHRASED FineWeb-Edu document -- its sibling `dataset` field reads the literal string 'HuggingFaceFW/fineweb-edu' in 34/34 rows sampled, and `token_count` is FineWeb-Edu's own count of `text` (measured dolma2/token_count ratio 1.0091 on the original, i.e. token_count describes the ORIGINAL, never the rewrite). Counting `text` would build a corpus of unrephrased real web data labelled synthetic, at 27x the true token volume, and neither a size check nor a hash check can detect it because both the bytes and the digest would be internally consistent.",
+
+  "schema_note_phase0c_addendum": "Phase 0's schema claims are all CONFIRMED at n=160,000 (rollouts_per_row min=max=1 in every one of 160 row groups across all four configs; PRESERVED VERBATIM above). ONE FIGURE IN IT IS NOW CORRECTED: the trap's magnitude is 2.9x, not 27x. Phase 0's 27x came from dividing the original document's ~1,100 tokens by the head sample's anomalous 40.5 tokens/rewrite. Measured properly, per config the overcount from reading `text` instead of `rollout_results[0].text` is faq 2.25x, tutorial 2.37x, math 3.80x, table 3.92x, whole corpus 2.90x (478.15B rewrite vs 1,386.8B original). The trap is NO LESS SEVERE -- it substitutes 1.39 TRILLION tokens of unrephrased real FineWeb-Edu for the synthetic pool, and because `all` repeats the same 339M source documents 4x, the substituted originals would be 4 EXACT DUPLICATES of each other, which is worse than a mere volume error. Only the multiplier changes.",
+
+  "measurement_method": {
+    "headline": "EXACT nested-leaf parquet footers + calibration + sampled tokens/byte. No ratio correction was needed, because pyarrow exposes the nested leaf as its own column chunk.",
+    "the_nested_column_problem_and_how_it_was_solved": "The brief offered two routes: (a) read footers at LEAF level if pyarrow exposes per-leaf column chunks for the nested path, giving the exact figure; or (b) sample the ratio len(rollout_results[0].text)/parent-column-bytes and correct. WE TOOK ROUTE (a) -- IT WORKS. pyarrow 24.0.0's `ParquetFile.metadata.row_group(i).column(j).path_in_schema` returns dotted leaf paths, and FinePhrase's footers carry SIX separate leaves under rollout_results. Measured on faq/000_00000_0.parquet row group 0: `rollout_results.list.element.finish_reason` 78 B, `rollout_results.list.element.text` 1,769,213 B, `...usage.completion_tokens` 5,688 B, `...usage.prompt_tokens` 7,280 B, `...usage.prompt_tokens_details` 47 B, `...usage.total_tokens` 7,520 B. We select the ONE leaf `rollout_results.list.element.text` by exact path, so the sibling fields are never summed and route (b)'s sampling uncertainty is avoided entirely. NOTE the schema hazard route (a) also dodges: `md.schema.names` returns a FLAT 17-name list containing 'text' TWICE (index 0 = the original, index 12 = the rewrite leaf), so `.names.index('text')` -- which is exactly what the existing `_footer_chars.py` does -- silently returns the ORIGINAL. The trap is reachable through the footer path too, and matching on path_in_schema rather than index is what closes it.",
+    "naive_parent_overcount_quantified": "Had we summed the whole `rollout_results` subtree instead of the one leaf, we would have overcounted by faq +1.02%, tutorial +1.04%, table +1.53%, math +1.68%. Small, but measured rather than assumed, and it is a systematic bias in one direction.",
+    "two_remaining_corrections_and_their_validation": [
+      "PLAIN BYTE_ARRAY length prefix: parquet stores 4 bytes of length per value, and total_uncompressed_size is post-encoding. Subtracted as 4 x num_values (0.19-0.33% of the leaf here).",
+      "Nested-leaf repetition/definition levels: a nested leaf's pages also carry rep/def levels, which total_uncompressed_size includes. Rather than assume these are negligible we CALIBRATED: for every row group actually read, we compared sum(len(text.encode('utf8'))) against that same row group's footer figure minus the length prefix. Residual overhead measured at faq +0.0507%, tutorial +0.0516%, table +0.0934%, math +0.1123% -- i.e. the footer route is accurate to about one part in a thousand, and that residual is divided out of the final byte total. This is 'recompute, never trust' applied to our own estimator: the byte total is anchored on real decoded UTF-8 bytes, not on a claim about parquet internals."
+    ],
+    "extrapolation_from_files_to_config": "Every config has ~6.8k parquet files and a footer read costs ~680 KB, so scanning all 27,104 would move ~18 GB. Instead: 250 random files per config (1,000 total), then scale by the EXACT total parquet bytes per config from the Hub tree API. The scaled quantity is leaf_bytes/parquet_file_bytes, whose across-file CV is only 0.010-0.017 -- so the extrapolation contributes well under 0.1% at n=250.",
+    "extrapolation_validated_against_a_known_quantity": "The same byte-ratio scaling also predicts each config's ROW COUNT, and the row counts are independently known exactly from /size. Predicted vs known: faq 339,025,809 vs 339,039,447 (-0.004%), math 338,841,497 vs 338,747,732 (+0.028%), table 338,434,368 vs 338,546,433 (-0.033%), tutorial 337,943,860 vs 337,711,099 (+0.069%). Four independent hits inside 0.07% is direct evidence the extrapolation is sound, not just internally consistent. It also RETROACTIVELY CONFIRMS Phase 0's faq row count, which had to be derived by subtraction because /size, /rows and /info all 500 for that config.",
+    "tokens_per_byte_sampling": "12 random row groups per config from 12 distinct random files (one random row group each), read with pf.read_row_group(n, columns=['rollout_results', 'text', 'token_count']) -- ~12,000 rewrites per config. tokens/byte is computed pooled (sum tokens / sum bytes), and its per-document CV is reported.",
+    "final_estimator": "tokens = [ (leaf footer bytes, scaled to config) - 4 x n_values ] / (1 + calibrated_overhead) x (sampled dolma2 tokens/byte)",
+    "independent_cross_check": "num_rows(exact, /size) x mean dolma2 tokens/doc(sampled). This shares the tokenizer but NOT the byte-total machinery, so its agreement tests the footer arithmetic. Divergence: faq 0.19%, math 0.45%, tutorial 1.46%, table 3.14%.",
+    "third_cross_check": "The generator's own SmolLM2 completion_tokens were read from the same rows: dolma2/completion_token = faq 1.00248, tutorial 1.00049, table 0.97156, math 0.96500. dolma2 and SmolLM2 count this text within 3.5% of each other, so the card's completion-token figures are already near-dolma2 and needed little re-scaling -- which is why our measurements land so close to them.",
+    "datasets_server_avoided_entirely": "ZERO datasets-server calls in Phase 0c. Phase 0 died on the per-IP 429 quota, and for config faq /size, /rows and /info all return HTTP 500 anyway. Everything here goes to the Hub tree API (file listing) plus HTTP Range reads against resolve/main URLs. Total traffic: ~1.1 GB of footers + ~350 MB of row groups against a 3.79 TB corpus (0.04%). All four configs are now measurable, INCLUDING faq -- Phase 0's 'needs a streaming count on Batch' is resolved without one.",
+    "no_dataset_download": "Honored (§5.7). No load_dataset(), no hf_hub_download, no full file ever fetched. Footers via 2 Range requests per file; row groups via Range reads of individual column chunks. Nothing written to disk beyond ~30 KB of JSON (disk at 93%).",
+    "tokenizer": "allenai/dolma2-tokenizer",
+    "seeds": "footer/tokenization run seed=7; cluster-variance run seed=99 (a disjoint file sample, so the short-rewrite numbers are not the same rows as the tokens/byte numbers)"
+  },
+
+  "sources": [
+    {
+      "dataset": "HuggingFaceFW/finephrase",
+      "config": "faq",
+      "card_tokens": 148100000000,
+      "measured_tokens": 148544452608,
+      "card_divergence": 0.003,
+      "estimator": "footer-leaf-exact (nested leaf rollout_results.list.element.text) x sampled tokens/byte",
+      "confidence": "high",
+      "confidence_note": "Cross-checked by rows x mean-tokens to 0.19% and by the card to +0.30%. Extrapolation CV 0.0104 at n=250 files; footer calibration residual 0.051%; tokens/byte per-doc CV 0.148.",
+      "tokens_per_byte": 0.215625,
+      "tokens_per_byte_cv": 0.1481,
+      "mean_tokens_per_doc": 437.33,
+      "median_tokens_per_doc": 410,
+      "cv_tokens_per_doc": 0.6671,
+      "rewrite_utf8_bytes": 688907286261,
+      "rows": 339039447,
+      "rows_provenance": "/size-derived (Phase 0, by subtraction); INDEPENDENTLY CONFIRMED to -0.004% by this run's byte-ratio extrapolation (339,025,809)",
+      "license": "odc-by",
+      "gated": false,
+      "note": "Phase 0 called this 'the one config datasets-server cannot count at all'. Footers count it fine -- datasets-server was never required. Largest of the four and the second-longest rewrites."
+    },
+    {
+      "dataset": "HuggingFaceFW/finephrase",
+      "config": "tutorial",
+      "card_tokens": 147400000000,
+      "measured_tokens": 147915452258,
+      "card_divergence": 0.0035,
+      "estimator": "footer-leaf-exact x sampled tokens/byte",
+      "confidence": "high",
+      "confidence_note": "Cross-checked by rows x mean-tokens to 1.46% and by the card to +0.35%. Extrapolation CV 0.0105; calibration residual 0.052%; tokens/byte per-doc CV 0.148.",
+      "tokens_per_byte": 0.220412,
+      "tokens_per_byte_cv": 0.1483,
+      "mean_tokens_per_doc": 444.2,
+      "median_tokens_per_doc": 415,
+      "cv_tokens_per_doc": 0.6597,
+      "rewrite_utf8_bytes": 671088228104,
+      "rows": 337711099,
+      "rows_provenance": "/size num_rows (exact); byte-ratio extrapolation agrees to +0.069%",
+      "license": "odc-by",
+      "note": "Longest rewrites of the four (444 tok/doc). Phase 0's Arrow-byte cross-check predicted 146.3B; measured 147.9B -- Phase 0's cheap arithmetic was right to 1.1%."
+    },
+    {
+      "dataset": "HuggingFaceFW/finephrase",
+      "config": "math",
+      "card_tokens": 98400000000,
+      "measured_tokens": 94738337280,
+      "card_divergence": -0.0372,
+      "estimator": "footer-leaf-exact x sampled tokens/byte",
+      "confidence": "high",
+      "confidence_note": "Cross-checked by rows x mean-tokens to 0.45% and by the card to -3.72%. The card gap is REAL and explained: dolma2 counts this text at 0.965 tokens per SmolLM2 completion token (math notation tokenizes differently), so the card's generator-side figure overstates the dolma2 count. Extrapolation CV 0.0120; calibration residual 0.112%.",
+      "tokens_per_byte": 0.233647,
+      "tokens_per_byte_cv": 0.1949,
+      "mean_tokens_per_doc": 280.86,
+      "median_tokens_per_doc": 231,
+      "cv_tokens_per_doc": 0.9229,
+      "rewrite_utf8_bytes": 405476834727,
+      "rows": 338747732,
+      "rows_provenance": "/size num_rows (exact); byte-ratio extrapolation agrees to +0.028%",
+      "license": "odc-by",
+      "note": "Highest tokens/byte of the four (0.2336) and the shortest-rewrite-heaviest: 12.6% under 50 tokens, 3-4x the other configs. Phase 0's Arrow arithmetic predicted 89.6B; measured 94.7B (5.4% low)."
+    },
+    {
+      "dataset": "HuggingFaceFW/finephrase",
+      "config": "table",
+      "card_tokens": 92400000000,
+      "measured_tokens": 86953204776,
+      "card_divergence": -0.059,
+      "estimator": "footer-leaf-exact x sampled tokens/byte",
+      "confidence": "high",
+      "confidence_note": "Cross-checked by rows x mean-tokens to 3.14% (the widest of the four -- table rewrites are the most length-dispersed, CV 0.95) and by the card to -5.90%, again explained by dolma2/SmolLM2 = 0.972. Extrapolation CV 0.0168 (also the widest); calibration residual 0.093%.",
+      "tokens_per_byte": 0.201033,
+      "tokens_per_byte_cv": 0.2504,
+      "mean_tokens_per_doc": 265.25,
+      "median_tokens_per_doc": 207,
+      "cv_tokens_per_doc": 0.9528,
+      "rewrite_utf8_bytes": 432529746767,
+      "rows": 338546433,
+      "rows_provenance": "/size num_rows (exact); byte-ratio extrapolation agrees to -0.033%",
+      "license": "odc-by",
+      "note": "SMALLEST of the four at 86.95B, and the one config that came in below its card figure by more than 5%. Still 4.8x the 18B floor. Lowest tokens/byte (0.2010) and highest tokens/byte dispersion (CV 0.25) -- markdown table pipes and dashes tokenize unlike prose."
+    }
+  ],
+
+  "rewrite_to_original_ratio": {
+    "method": "PAIRED -- both columns read from the SAME 4,000 rows per config (16,000 pairs total), so the ratio is not two independent samples divided.",
+    "per_config_token_ratio": {"faq": 0.44469, "tutorial": 0.42299, "table": 0.26108, "math": 0.25749},
+    "per_config_byte_ratio": {"faq": 0.44131, "tutorial": 0.41698, "table": 0.26518, "math": 0.23813},
+    "per_config_median_of_per_doc_ratios": {"tutorial": 0.71001, "faq": 0.60774, "table": 0.35425, "math": 0.31294},
+    "whole_corpus_token_ratio": 0.3448,
+    "verdict": "REPHRASING COMPRESSES, HARD. Every format's rewrite is SHORTER than its source: the whole corpus is 478.15B rewrite tokens from 1,386.8B original tokens, a ratio of 0.345 -- rephrasing throws away roughly two thirds of the text. faq and tutorial retain ~43%, math and table only ~26%.",
+    "why_the_mean_and_median_ratios_differ_so_much": "The median PER-DOCUMENT ratio (0.31-0.71) is well above the pooled byte ratio (0.24-0.44) for every config. That is the max_tokens=2048 ceiling biting: long source documents get truncated hard while short ones are rephrased near-1:1, so the pooled ratio is dragged down by the long tail. Consequence for us: FinePhrase is NOT a uniform re-expression of FineWeb-Edu -- it systematically under-represents long documents. If document length correlates with anything we care about (and for educational text it does), the synthetic pool is length-biased relative to its own parent.",
+    "sanity_check_on_the_original_column": "dolma2 tokens / FineWeb-Edu's own `token_count` on the ORIGINAL = 0.9897-0.99905 across configs, i.e. within 1% of unity. So FineWeb-Edu's advertised counts are already dolma2-comparable, and the original column reads as the genuine parent document -- corroborating the trap diagnosis from a second direction."
+  },
+
+  "short_rewrite_stats": {
+    "n": 160000,
+    "n_note": "40 row groups per config x 4 configs x ~1000 rows = 159,961 rewrites, each row group drawn from a DIFFERENT randomly chosen parquet file (160 distinct files out of 27,104), at a random row-group offset within it. Seed 99, disjoint from the seed-7 sample used for tokens/byte.",
+    "sampling_method": "random file x random row group, via pf.read_row_group(n, columns=['rollout_results']). NOT /first-rows.",
+    "tokenizer": "allenai/dolma2-tokenizer",
+    "verdict_on_phase0_head_sample": "PHASE 0's n=34 HEAD SAMPLE WAS WRONG BY 10x, AND ITS OWN CAVEAT WAS CORRECT TO SUSPECT IT. Head sample: mean 40.5 tokens, median 33, 67.6% under 50. Properly sampled faq: mean 438.5, median 412, 5.3% under 50. Phase 0 flagged the ~437-vs-41 gap against the card and its own byte arithmetic and said 'the head is anomalously degenerate -- re-sample at random offsets before choosing a threshold'. That was the right call: the first ~34 rows of faq are a genuinely degenerate contiguous block, and parquet row order is content-clustered so a head read lands entirely inside it. The card and the byte arithmetic were right; the head sample was not.",
+    "per_config": {
+      "faq": {"n": 39969, "mean_tokens": 438.47, "median_tokens": 412, "under_16": 0.02074, "under_50": 0.05304, "under_100": 0.08627, "under_200": 0.17356},
+      "math": {"n": 40000, "mean_tokens": 282.3, "median_tokens": 234, "under_16": 0.0212, "under_50": 0.12557, "under_100": 0.22268, "under_200": 0.43115},
+      "table": {"n": 39992, "mean_tokens": 265.25, "median_tokens": 210, "under_16": 0.01083, "under_50": 0.03111, "under_100": 0.11585, "under_200": 0.46264},
+      "tutorial": {"n": 40000, "mean_tokens": 436.26, "median_tokens": 409, "under_16": 0.0154, "under_50": 0.03925, "under_100": 0.07228, "under_200": 0.15632}
+    },
+    "percentiles_from_the_seed7_sample": {
+      "faq": {"1": 10, "5": 43, "10": 116, "25": 267, "50": 410, "75": 551, "90": 718.9, "95": 889, "99": 1846.95},
+      "math": {"1": 10, "5": 24, "10": 39, "25": 115, "50": 231, "75": 372, "90": 540, "95": 677, "99": 1372},
+      "table": {"1": 11, "5": 63, "10": 93, "25": 143, "50": 207, "75": 297, "90": 445.9, "95": 635, "99": 1632.83},
+      "tutorial": {"1": 11, "5": 65, "10": 141, "25": 287, "50": 415, "75": 538, "90": 693, "95": 869, "99": 1948.22}
+    },
+    "cluster_aware_uncertainty": {
+      "why_this_is_reported": "A row group is 1000 CONSECUTIVE rows and FinePhrase inherits FineWeb-Edu's content-clustered row order, so 40,000 rewrites from 40 row groups are NOT 40,000 independent draws. Treating them as independent is precisely the error that made the Phase 0 head sample look precise. So the SE is computed from the SD of the 40 per-row-group statistics divided by sqrt(40), and compared against the naive binomial SE.",
+      "cluster_se_frac_under_50": {"faq": 0.00134, "math": 0.0021, "table": 0.00084, "tutorial": 0.00104},
+      "naive_binomial_se_frac_under_50": {"faq": 0.00112, "math": 0.00166, "table": 0.00087, "tutorial": 0.00097},
+      "design_effect_ratio": {"faq": 1.2, "math": 1.3, "table": 1.0, "tutorial": 1.1},
+      "cluster_se_mean_tokens": {"faq": 2.51, "math": 1.25, "table": 1.18, "tutorial": 2.66},
+      "per_group_range_frac_under_50": {"faq": [0.033, 0.069], "math": [0.091, 0.155], "table": [0.021, 0.048], "tutorial": [0.027, 0.056]},
+      "per_group_range_mean_tokens": {"faq": [415.2, 495.3], "math": [268.1, 305.3], "table": [246.5, 282.7], "tutorial": [393.6, 474.5]},
+      "interpretation": "The design effect is only 1.0-1.3x, so clustering is mild at THIS scale and the intervals are genuinely tight: frac-under-50 is pinned to within +/-0.2pp and mean tokens/doc to within +/-3 tokens. Critically, the per-group RANGE is narrow too -- no row group among 160 came anywhere near the head sample's 40.5 mean or 67.6% short rate. The head block is an outlier at the very start of the split, not a recurring regime. NOTE the asymmetry this implies: 40 well-spread clusters give a tight answer, but 1 cluster (which is what a /first-rows call is) gives an arbitrarily wrong one. The lesson is spread, not volume."
+    },
+    "degenerate_strings_verbatim": {
+      "note": "Distinct rewrites of <=5 dolma2 tokens, with occurrence counts, across the 160k sample. Phase 0's three examples ('No answer', 'Document:', 'A:') are the same failure family, and 'Document:' recurs in both faq (6x) and tutorial (3x) -- so it is a real prompt-echo mode, not a one-off.",
+      "faq": [["Yes", 13], ["FAQ", 9], ["Answer:", 8], ["Document:", 6], ["No", 4], ["FAQ:", 3]],
+      "math": [["Problem:", 9], ["Question:", 2], ["None", 2], ["Question and Solution:", 2], ["1954.", 1], ["What is the question?", 1]],
+      "table": [["No", 12], ["---", 11], ["None", 6], ["*", 4], ["No table is provided.", 4], ["No data found.", 3]],
+      "tutorial": [["---", 5], ["<no text provided>", 3], ["Document:", 3], ["Summary:", 2]]
+    },
+    "finish_reason_distribution": {
+      "faq": {"stop": 39526, "length": 443},
+      "math": {"stop": 39739, "length": 261},
+      "table": {"stop": 39635, "length": 365},
+      "tutorial": {"stop": 39504, "length": 496}
+    },
+    "finish_reason_significance": "PHASE 0's CONCLUSION STANDS, with the mechanism now visible. `length` DOES occur (0.65-1.24% of rows -- Phase 0's 34/34 'stop' was just too small to see it), but it marks rewrites that hit max_tokens=2048, i.e. the LONGEST outputs, not the degenerate ones. Every degenerate string above carries finish_reason='stop'. So finish_reason is not merely useless as a quality filter, it is ANTI-correlated with quality: filtering on finish_reason != 'stop' would delete the 2048-token outputs and keep 'No answer'. Length remains the only signal.",
+    "tokens_retained_if_filter_ge_50": {"faq": 0.99728, "math": 0.98748, "table": 0.99692, "tutorial": 0.998},
+    "docs_retained_if_filter_ge_50": {"faq": 0.94525, "math": 0.87357, "table": 0.96625, "tutorial": 0.95929},
+    "tokens_retained_if_filter_ge_200": {"faq": 0.96059, "math": 0.84741, "table": 0.76801, "tutorial": 0.96714},
+    "quality_filtering_verdict": "STILL WORTH DOING, BUT IT IS NOT LOAD-BEARING FOR POOL SIZING -- and this REVERSES Phase 0's 'LOAD-BEARING AND MANDATORY' on the sizing question while keeping it on the hygiene question. A >=50-token minimum on rollout_results[0].text costs 0.2-1.3% of tokens and removes 3.4-12.6% of documents; that is cheap hygiene we should absolutely apply, and a blocklist for the recurring prompt-echo strings ('Document:', 'Answer:', 'Problem:', 'FAQ', '---', '<no text provided>', 'No table is provided.') on top. But it does NOT threaten the 15B-per-format plan: even math, the worst case, retains 98.7% of its tokens. Phase 0's fear that filtering might eat the pool was an artifact of the 68%-under-50 head sample. Do NOT set the threshold above ~200 tokens: at >=200 table loses 23% of its tokens, because table rewrites are legitimately short (a markdown table IS a short document) -- a high threshold would silently reshape the format mix rather than remove failures."
+  },
+
+  "all_config_verdict": {
+    "question": "Is `all` a union of 4 independent corpora or 4 correlated views of the same documents?",
+    "answer": "FOUR CORRELATED VIEWS OF THE SAME DOCUMENTS. Confirmed from the repo's own config declaration, not inferred. RE-VERIFIED in Phase 0c against the live cardData.",
+    "evidence": [
+      "cardData declares config `all` as data_files path = ['faq/**/*.parquet','math/**/*.parquet','table/**/*.parquet','tutorial/**/*.parquet'] -- literally the concatenation of the other four configs. It is a SUPERSET by construction, and adds no data of its own. (Re-fetched 2026-07-31: unchanged.)",
+      "Card: 'Source documents in input split: 339,347,842'; 'Output samples across all configs: 1,354,044,711'. 4 x 339,347,842 = 1,357,391,368, and 1,354,044,711 / 1,357,391,368 = 99.75% -- i.e. essentially every source document was rephrased once per format, with a 0.25% generation-failure shortfall.",
+      "Per-config row counts are near-identical (338.7M / 338.5M / 337.7M / 339.0M), as expected if each is one pass over the same parent set.",
+      "Source is FineWeb-Edu config sample-350BT, a single fixed sample -- the same 339M documents feed all four prompt families.",
+      "PHASE 0c ADDITION, from the paired reads: the ORIGINAL `text` column's mean dolma2 tokens/doc is 985.5 / 1063.6 / 1008.3 / 1038.8 for faq / math / table / tutorial -- the same distribution four times over, within 8%, exactly as a shared parent set predicts. And its tokens/byte is 0.2140 / 0.2147 / 0.2151 / 0.2177, agreeing to 0.2%. Four independent 4,000-row samples of the parent look identical because they ARE the same parent.",
+      "PHASE 0c ADDITION: the file COUNT per config is 6791 / 6787 / 6772 / 6754 = 27,104 total, matching the brief's figure, and the four are within 0.5% of each other -- one pass per format."
+    ],
+    "consequence": "The advertised 486.4B (measured 478.2B) is NOT 478.2B of independent tokens. It is ~339M source documents seen 4 times through 4 different prompts. Drawing 15B from each of the four formats means the SAME underlying documents appear up to 4 times in our mix, in 4 different surface forms. That is near-duplicate content that no digest-level dedup will catch, because the surface strings genuinely differ. Do NOT treat the four formats as independent sources when computing effective source diversity, and do not use `all` -- draw from the four named configs so the composition is explicit.",
+    "phase0c_quantification_of_the_hazard": "Now sizable. 15B/format needs 10.1% (faq), 10.0% (tutorial), 15.8% (math), 16.7% (table) of each config's documents. If those four draws were INDEPENDENT random samples of the shared 339M parent, the expected number of source documents appearing in 2+ formats is large but the expected 4x-repeat rate is only ~0.03% of the parent -- so at 15B/format the cross-format duplication is real but modest, PROVIDED the four draws are independent. THE MITIGATION IS THEREFORE FREE AND MUST BE TAKEN: partition the parent document `id` space into four disjoint slices by hash and give each format its own slice. Then cross-format repetition is exactly ZERO by construction, at no cost in available tokens (each format needs only ~17% of its rows and a hash-quarter gives it 25%). Drawing all four from the same file ranges -- the obvious implementation -- would instead maximize the overlap. The per-row `id` column is present in every config and is FineWeb-Edu's own document id, so it is the natural join key."
+  },
+
+  "category_total_measured": 478151446922,
+  "category_total_card": 486300000000,
+  "category_card_divergence": -0.0168,
+  "category_total_note": "478.15B measured vs 486.3B card, -1.68%. The two configs that came in low (math -3.7%, table -5.9%) are explained by dolma2 counting math/table text at 0.965-0.972 tokens per SmolLM2 completion token; faq and tutorial, where the tokenizers agree to 0.25%, land within 0.35% of their card figures. The card is honest; it is just counted with a different tokenizer, which is exactly the §3.1 problem this task exists to fix. NOTE this is NOT 478.15B of independent tokens -- see all_config_verdict.",
+  "meets_3x_peak_demand": true,
+  "meets_3x_peak_demand_note": "Peak plausible demand 6B (30% of a 20B run); 3x floor = 18B. The smallest config, table, measures 86.95B -- 4.8x the floor on its own. The category total is 26.6x the floor. Verdict is not close.",
+  "fifteen_B_per_format_available": true,
+  "fifteen_B_per_format_note": "YES for all four, MEASURED not inferred, with 5.8x-9.9x headroom each (faq 148.5B, tutorial 147.9B, math 94.7B, table 87.0B). In documents: 15B needs 34.3M (faq, 10.1% of config), 33.8M (tutorial, 10.0%), 53.4M (math, 15.8%), 56.6M (table, 16.7%). Phase 0's open worry -- that if the true mean were the head sample's 41 tokens/doc then 15B would need MORE documents than a config contains -- is now closed: the real means are 265-444 tokens/doc, so every format needs only a sixth of its rows or less. Quality filtering at >=50 tokens costs at most 1.3% of tokens and does not change this. The binding constraint on this category is NOT availability, it is the cross-format duplication in all_config_verdict.",
+
+  "overlaps": [
+    "CRITICAL, FLAGGED PER THE BRIEF: FinePhrase is a rephrasing of HuggingFaceFW/fineweb-edu (config sample-350BT, split train) -- stated on the card and confirmed by the per-row `dataset` field reading 'HuggingFaceFW/fineweb-edu'. It therefore OVERLAPS every FineWeb-lineage real-token source in the reservoir at the DOCUMENT level: FineWeb-Edu itself, FineWeb-Edu-score-2, FineWeb, and (per README.md item 2's lineage chain) Zyda-2 and anything else containing FineWeb-Edu-score-2. Do not sum synthetic FinePhrase tokens against FineWeb-lineage real tokens as if they were disjoint pools.",
+    "PHASE 0c QUANTIFIES IT: §3.2 sources edu-web from fineweb-edu AND finepdfs-edu. The fineweb-edu half is a DIRECT document-level collision with 100% of our synthetic pool -- every synthetic document we draw has its unrephrased original eligible for the edu-web pool. FineWeb-Edu sample-350BT is ~350B tokens and its documents' dolma2 mean is ~1,010 tokens/doc over the same 339M ids, so the two pools are drawn from ONE 339M-document universe. The finepdfs-edu half is a different corpus and does not collide this way. MITIGATION, and it composes with the cross-format slicing above: exclude from the edu-web draw any FineWeb-Edu `id` that entered the synthetic draw. Same join key, one pass.",
+    "The overlap is not merely lineage bookkeeping: every FinePhrase document's ORIGINAL text is physically present in the corpus as the `text` column. If any part of the pipeline ever reads the wrong column, we ingest FineWeb-Edu twice -- once as real, once as 'synthetic'. Phase 0c adds that the footer path is ALSO vulnerable, because `md.schema.names` contains 'text' twice and `.index('text')` returns the original; only path_in_schema matching is safe.",
+    "Rephrasing defeats n-gram decontamination (see project memory: rephrased synthetic hides contamination). FineWeb-Edu does zero decontam and this pipeline has none either, so FinePhrase inherits and then CONCEALS whatever eval contamination FineWeb-Edu carries. Phase 0c adds a mechanism note: the measured rewrite/original token ratio is 0.345, i.e. rephrasing is aggressive rewriting rather than light paraphrase, which makes n-gram overlap with the source (and hence with any eval set the source contaminates) even weaker -- worse for detection, not better.",
+    "Internal overlap: the four formats are 4 views of one 339M-document set -- see all_config_verdict. Cross-format near-duplication is structural, not incidental, and the fix is a hash partition of the id space."
+  ],
+
+  "needs_streaming_count": [],
+  "needs_streaming_count_note": "EMPTY -- all four of Phase 0's entries are resolved. faq, math, table and tutorial are all measured at high confidence from parquet footers, with no datasets-server dependency and no Batch job. The `all` config needs no count: it is a declared superset of the other four and must not be drawn from. The random-offset short-rewrite re-sample Phase 0 asked for is done at n=160,000 across 160 files.",
+
+  "open_items": [
+    "The rewrite is length-biased against long source documents (median per-doc ratio 0.31-0.71 vs pooled 0.24-0.44, because max_tokens=2048 truncates the tail). If the reservoir cares about long-document structure, the synthetic pool under-supplies it. Not a blocker; a known distortion to record in the dataset README.",
+    "Cross-format id-disjoint slicing and synthetic-vs-edu-web id exclusion both need the `id` column carried through ingestion. If the ingestion path drops `id`, both mitigations become impossible after the fact -- and per project memory, labels inside manifest_sha256 are unbackfillable. Decide before the first publish."
+  ],
+
+  "files_written": {
+    "artifacts/recount/synthetic.json": "this file",
+    "artifacts/recount/_fp_footer_leaf.py": "Phase 0c measurement tool. Nested-LEAF footer reader: matches column chunks on path_in_schema == 'rollout_results.list.element.text' (never on md.schema.names.index('text'), which returns the ORIGINAL because 'text' appears twice in the flat leaf list). Scales sampled-file leaf bytes by the exact per-config parquet byte total from the Hub tree API; validates that scaling against the independently-known row counts. Calibrates the footer's nested-leaf rep/def-level overhead by comparing footer bytes against sum(len(text.encode('utf8'))) on the row groups it actually reads. Tokenizes rewrite AND original from the same rows for a paired ratio. Threaded footer scan; no datasets-server dependency.",
+    "artifacts/recount/_fp_cluster_var.py": "Cluster-variance sampler for the short-rewrite distribution. Reads one random row group from each of N random files and reports the PER-ROW-GROUP statistic distribution, so the SE accounts for the fact that a row group is 1000 content-clustered consecutive rows. Exists because Phase 0's n=34 head sample was one such cluster and was wrong by 10x.",
+    "artifacts/recount/_fp_leaf_raw.json": "raw per-config output of both tools (footer totals, calibration, percentiles, per-group summary stats), 30 KB.",
+    "artifacts/recount/recount_finephrase.py": "Phase 0's datasets-server-based tool. SUPERSEDED for counting and its HTTP path remains unvalidated -- do not use it: /size, /rows and /info all return HTTP 500 for config faq, and the /rows quota is per-IP. Its `rewrite_of()` schema path and its card-anchored estimator logic are correct and were both independently confirmed by Phase 0c."
+  }
+}

@@ -1,7 +1,7 @@
 # eduLLM datasets — the 2-minute version
 
 For someone brand new to the data pipeline. The full spec is
-[`../../docs/dataset-creation/DATASET-STANDARD.md`](../../docs/dataset-creation/DATASET-STANDARD.md);
+[`dataset-creation/DATASET-STANDARD.md`](dataset-creation/DATASET-STANDARD.md);
 this is just the shape and the rules.
 
 ```

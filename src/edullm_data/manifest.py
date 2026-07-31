@@ -46,6 +46,18 @@ __all__ = [
     "parse_shard_name",
     "is_cas_name",
     "check_shard_naming",
+    "SAFE_SEGMENT_RE",
+    "SEGMENT_SLUG_OVERRIDES",
+    "SEGMENT_SEPARATORS",
+    "SEGMENT_SEMANTIC_CHARS",
+    "DNS_SUFFIXES",
+    "MAX_SEGMENT_CHARS",
+    "DEFAULT_DOMAIN_KEEP",
+    "OTHER_SEGMENT",
+    "SlugError",
+    "slug_path_segment",
+    "DomainSlugMap",
+    "build_domain_slug_map",
 ]
 
 import re
@@ -713,6 +725,482 @@ def labels_from_path(rel_path: str, *, keys: Sequence[str] = PATH_LABEL_KEYS) ->
             f"is wrong today cannot be fixed without republishing the payload."
         )
     return {key: seg for key, seg in zip(keys, middle)}
+
+
+# --------------------------------------------------------------------------------------
+# §5 — turning an INHERITED upstream value into a path segment
+# --------------------------------------------------------------------------------------
+#
+# This lives next to `labels_from_path` on purpose: it is the inverse half of the same
+# one-way door. `labels_from_path` reads a segment back OUT of a key; this decides what goes
+# IN. Both sit inside `manifest_sha256`, so a mistake in either costs a republish and a full
+# re-copy of the payload — and the round-trip check below calls `labels_from_path` directly,
+# which it can only do from here without an import cycle. A reviewer sees both halves of the
+# path<->labels contract on one screen. The module stays pure (no AWS, no I/O), as its own
+# docstring promises.
+#
+# The concrete driver: a source whose upstream metadata already names a subdomain
+# (`metadata.gha_language`, `metadata.site`, an FDC subject) can have that value INHERITED
+# into the key as `tokens/<source>/<domain>/…`. An inherited value is better evidence than a
+# classified one — it is the upstream publisher's own statement of fact rather than a model's
+# guess about it. But the raw value is not a path segment, and the gap is dangerous rather
+# than cosmetic.
+
+
+class SlugError(ValueError):
+    """A value cannot become a path segment safely, or a slug map is ambiguous.
+
+    A ``ValueError`` subclass so `publish`'s existing handling around `labels_from_path` keeps
+    working: this is the same class of failure — a key that cannot be labelled honestly —
+    caught one step earlier, before any byte is copied.
+    """
+
+
+#: The only shape a derived segment may take: lowercase alphanumerics joined by single
+#: dashes, no leading/trailing dash. Deliberately NARROWER than what S3 or `labels_from_path`
+#: accept, because both accept far too much. All four verified by execution:
+#:
+#:   * ``tokens/stackv2-edu/C#/train-00000.u32le.bin`` — `urlparse` of the ``s3://`` URI puts
+#:     everything from the ``#`` onward into ``fragment``, so ``path`` ends at ``…/C`` and THE
+#:     SHARD NAME IS GONE FROM THE PATH. `labels_from_path` returns
+#:     ``{'source': 'stackv2-edu', 'domain': 'C#'}`` happily and `fnmatch` matches
+#:     ``tokens/stackv2-edu/*/train-*.u32le.bin`` — so nothing in this pipeline catches it. It
+#:     breaks later, in a consumer, on data that is by then frozen.
+#:   * ``Jupyter Notebook`` (space) and ``C++`` (plus) survive `urlparse` but need escaping in
+#:     every URL, shell line and CLI argument that ever touches the key.
+#:   * ``a[b]`` is not even fnmatch-inert: ``fnmatch(key, key)`` is FALSE, so a literal glob
+#:     built from the key fails to match the key it was built from.
+SAFE_SEGMENT_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+
+#: Characters whose removal does not change WHICH THING the value names — pure punctuation
+#: and word separators. These collapse to a dash. A character outside this set and outside
+#: :data:`SEGMENT_SEMANTIC_CHARS` is REFUSED, never dropped; see :func:`slug_path_segment`.
+SEGMENT_SEPARATORS = " \t\n_-./()[]{}&,'\"“”‘’:;!?"
+
+#: Characters that CARRY MEANING and are therefore spelled out, never dropped. This is the
+#: heart of the problem: generic character-stripping maps both ``C#`` and ``C++`` to ``c`` —
+#: the SAME value — silently merging two languages into one permanent directory.
+SEGMENT_SEMANTIC_CHARS: dict[str, str] = {"#": "sharp", "+": "plus"}
+
+#: Explicitly verified upstream names, consulted BEFORE any generic rule. Two jobs:
+#:
+#: 1. It is the authority for the names that actually appear in the data, so the mapping a
+#:    teammate reads in the README is reviewable rather than inferred from code.
+#: 2. It PINS the answers that matter. The generic expansion of
+#:    :data:`SEGMENT_SEMANTIC_CHARS` already produces ``c-sharp`` and ``c-plus-plus``, and
+#:    these entries mean a later edit to that expansion cannot silently move them — which
+#:    would move `manifest_sha256` and every ``depends_on`` pin written against it.
+#:
+#: Keys match case-insensitively against the stripped raw value.
+SEGMENT_SLUG_OVERRIDES: dict[str, str] = {
+    # gha_language values whose identity IS punctuation (all present in stackv2-edu)
+    "c#": "c-sharp",
+    "c++": "c-plus-plus",
+    "f#": "f-sharp",
+    "f*": "f-star",
+    "q#": "q-sharp",
+    "objective-c": "objective-c",
+    "objective-c++": "objective-c-plus-plus",
+    "jupyter notebook": "jupyter-notebook",
+}
+
+#: DNS suffixes stripped before slugging, longest first, so a StackExchange site becomes the
+#: site NAME rather than a hostname: ``3dprinting.stackexchange.com`` -> ``3dprinting``,
+#: ``mathoverflow.stackexchange.com`` -> ``mathoverflow``. Without this, ~180 segments would
+#: each end in the same ``-stackexchange-com`` — 19 characters of identical noise in every
+#: key, inside the hash chain, forever.
+DNS_SUFFIXES: tuple[str, ...] = (
+    ".stackexchange.com",
+    ".stackoverflow.com",
+    ".wikipedia.org",
+    ".com",
+    ".org",
+    ".net",
+    ".io",
+    ".edu",
+    ".gov",
+)
+
+#: Hard cap on a derived segment. 63 is the DNS label limit — the most widely implemented
+#: "one path segment" bound there is, and comfortably inside S3's 1024-byte whole-key budget
+#: even with a long ``<family>/<name>/<version>/`` prefix plus two label levels. A longer
+#: value is REFUSED, never truncated: truncation is exactly how two distinct values silently
+#: become one directory.
+MAX_SEGMENT_CHARS = 63
+
+#: How many distinct domain values keep their own segment; the rest fold into
+#: :data:`OTHER_SEGMENT`. **20**, because cardinality is permanent:
+#:
+#:   * Every distinct value is a directory that exists inside `manifest_sha256` forever. The
+#:     verified tails are 73 ``gha_language`` values in ONE stackv2-edu shard and ~180
+#:     StackExchange sites, so keeping everything commits ~250 permanent directories; keeping
+#:     the top 20 of each commits ~60.
+#:   * A domain is worth naming only if it is a usable SLICE, and a slice's usefulness is set
+#:     by how many shards it holds. On a Zipf-ish vocabulary the head holds hundreds of shards
+#:     per value while the 20th holds a handful and the 50th holds one or two. A domain with
+#:     three shards in it cannot be re-weighted toward a target ratio with any precision, so
+#:     it buys a permanent commitment and returns nothing.
+#:   * 20 is a default, not a law. :func:`build_domain_slug_map` reports
+#:     :attr:`DomainSlugMap.folded_fraction` so an operator can see what the choice cost and
+#:     raise ``keep`` — before the publish, which is the only moment it is still free.
+DEFAULT_DOMAIN_KEEP = 20
+
+#: Where the folded tail lands. A real value that slugs to this is an error, not a merge —
+#: see :func:`build_domain_slug_map`.
+OTHER_SEGMENT = "other"
+
+_DASH_RUN_RE = re.compile(r"-{2,}")
+
+#: A probe key shaped exactly like a real one, for checking a candidate segment against the
+#: three consumers that actually matter instead of trusting the regex. CONTRIBUTING's golden
+#: rule in miniature: recompute, do not assert.
+_PROBE_PREFIX = "pretrain/slug-probe/v1"
+_PROBE_GROUP = "tokens"
+_PROBE_SOURCE = "probe-source"
+_PROBE_BASENAME = "train-00000.u32le.bin"
+
+
+def _verify_segment_survives_its_consumers(segment: str) -> list[str]:
+    """Run a candidate segment through `urlparse`, `fnmatch` and `labels_from_path`.
+
+    Those three are the entire consumer surface of a path segment in this package: the reader
+    hands out ``s3://`` URIs, partitions resolve by `fnmatch` glob, and Gate A recomputes
+    labels off the key. The regex above is the cheap gate; this is the one that would have
+    caught ``C#``, because ``C#`` passes every metadata check in the pipeline and fails HERE.
+
+    Returns problem strings; empty means the segment round-trips.
+    """
+    import fnmatch as _fnmatch
+    from urllib.parse import urlparse as _urlparse
+
+    problems: list[str] = []
+    rel = f"{_PROBE_GROUP}/{_PROBE_SOURCE}/{segment}/{_PROBE_BASENAME}"
+    key = f"{_PROBE_PREFIX}/{rel}"
+    parsed = _urlparse(f"s3://edullm-data/{key}")
+
+    if parsed.fragment or parsed.query:
+        problems.append(
+            f"urlparse of the s3:// URI SPLITS the key: path ends at {parsed.path!r} with "
+            f"fragment={parsed.fragment!r} query={parsed.query!r} — the shard name is no "
+            f"longer part of the path"
+        )
+    if parsed.path != f"/{key}":
+        problems.append(
+            f"urlparse of the s3:// URI does not round-trip: path is {parsed.path!r}, "
+            f"expected {'/' + key!r}"
+        )
+    if not _fnmatch.fnmatch(rel, rel):
+        problems.append(
+            "the key does not match ITSELF as an fnmatch pattern — a glob metacharacter in "
+            "the segment makes a literal partition glob built from this key fail to match it"
+        )
+    if not _fnmatch.fnmatch(rel, f"{_PROBE_GROUP}/*/*/train-*.u32le.bin"):
+        problems.append("the key is not matched by the standard two-level partition glob")
+    try:
+        labels = labels_from_path(rel)
+    except ValueError as exc:  # pragma: no cover — a one-segment probe cannot nest too deep
+        problems.append(f"labels_from_path refuses the key: {exc}")
+    else:
+        if labels.get("domain") != segment:
+            problems.append(
+                f"labels_from_path reads the domain back as {labels.get('domain')!r}, "
+                f"not {segment!r}"
+            )
+    return problems
+
+
+def slug_path_segment(
+    value: str,
+    *,
+    overrides: Mapping[str, str] | None = None,
+    verify: bool = True,
+) -> str:
+    """One inherited upstream value -> one safe path segment. Deterministic and pure.
+
+    ``"C#"`` -> ``"c-sharp"``, ``"C++"`` -> ``"c-plus-plus"``,
+    ``"Jupyter Notebook"`` -> ``"jupyter-notebook"``,
+    ``"3dprinting.stackexchange.com"`` -> ``"3dprinting"``.
+
+    **This function refuses more than it rewrites, and that is the design.** A segment lives
+    inside `manifest_sha256`; a wrong one cannot be corrected without republishing and
+    re-copying every byte. So every case where the honest answer is unknowable raises
+    :class:`SlugError` naming the offending value rather than emitting a guess:
+
+    * a character that is neither punctuation (:data:`SEGMENT_SEPARATORS`) nor a spelled-out
+      semantic character (:data:`SEGMENT_SEMANTIC_CHARS`) — dropping such a character is what
+      turns ``C#`` and ``C++`` into the same ``c``;
+    * a value that slugs to nothing, or to more than :data:`MAX_SEGMENT_CHARS` (refused, never
+      truncated);
+    * a candidate that fails the round-trip through `urlparse`, `fnmatch` and
+      `labels_from_path`. ``verify=False`` skips only that last stage, and only for a caller
+      that wants to inspect a raw candidate.
+
+    A collision between two DIFFERENT values is not detectable here — this sees one value at a
+    time. That check lives in :func:`build_domain_slug_map`, which is the only sanctioned way
+    to derive segments for a real corpus: running this over an upstream vocabulary yourself
+    skips the one check that matters most.
+    """
+    if not isinstance(value, str):
+        raise SlugError(f"cannot slug {value!r}: a domain value must be a string")
+    raw = value.strip()
+    if not raw:
+        raise SlugError("cannot slug an empty (or whitespace-only) domain value")
+
+    extra = {str(k).strip().lower(): str(v) for k, v in (overrides or {}).items()}
+    pinned = {**SEGMENT_SLUG_OVERRIDES, **extra}.get(raw.lower())
+    if pinned is not None:
+        candidate = pinned
+    else:
+        import unicodedata
+
+        work = raw.lower()
+        for suffix in sorted(DNS_SUFFIXES, key=len, reverse=True):
+            if work.endswith(suffix) and len(work) > len(suffix):
+                work = work[: -len(suffix)]
+                break
+        # Spell the semantic characters BEFORE anything can strip them, and with surrounding
+        # dashes so `c++` becomes `c-plus-plus` rather than `cplusplus`.
+        for char, word in SEGMENT_SEMANTIC_CHARS.items():
+            work = work.replace(char, f"-{word}-")
+        # NFKD -> ASCII so `Café` becomes `cafe` instead of raising: an accent is a rendering
+        # of a letter, not a different letter, so losing it does not change what is named.
+        work = unicodedata.normalize("NFKD", work).encode("ascii", "ignore").decode("ascii")
+
+        unknown = sorted(
+            {
+                ch
+                for ch in work
+                if not (ch.isalnum() and ch.isascii()) and ch not in SEGMENT_SEPARATORS
+            }
+        )
+        if unknown:
+            raise SlugError(
+                f"cannot slug {value!r}: character(s) {unknown!r} are neither punctuation nor a "
+                f"known semantic character, so this function cannot tell whether dropping them "
+                f"changes what the value NAMES. Dropping them quietly is exactly how 'C#' and "
+                f"'C++' both become 'c' and two languages merge into one permanent directory. "
+                f"Either add an explicit entry to SEGMENT_SLUG_OVERRIDES (or pass overrides=) "
+                f"spelling out the intended segment, or add the character to "
+                f"SEGMENT_SEMANTIC_CHARS with the word it stands for."
+            )
+        candidate = "".join(ch if ch.isalnum() else "-" for ch in work)
+
+    candidate = _DASH_RUN_RE.sub("-", candidate).strip("-")
+
+    if not candidate:
+        raise SlugError(
+            f"cannot slug {value!r}: nothing survives as a segment. An empty segment would "
+            f"collapse the key by one level, so `labels_from_path` would read the SHARD NAME "
+            f"as the domain."
+        )
+    if len(candidate) > MAX_SEGMENT_CHARS:
+        raise SlugError(
+            f"cannot slug {value!r}: the segment {candidate!r} is {len(candidate)} chars, over "
+            f"the {MAX_SEGMENT_CHARS}-char limit. Refused rather than truncated — truncation "
+            f"is how two distinct values silently become one directory. Give it an explicit "
+            f"short name via overrides=."
+        )
+    if not SAFE_SEGMENT_RE.match(candidate):
+        raise SlugError(
+            f"cannot slug {value!r}: the candidate {candidate!r} is still not a safe segment "
+            f"(must match {SAFE_SEGMENT_RE.pattern!r}). This is reachable from an override "
+            f"that is itself unsafe — the one path the generic rules cannot clean up."
+        )
+    if verify:
+        problems = _verify_segment_survives_its_consumers(candidate)
+        if problems:
+            raise SlugError(
+                f"the segment {candidate!r} derived from {value!r} does not survive its own "
+                f"consumers:\n  " + "\n  ".join(problems)
+            )
+    return candidate
+
+
+@dataclass(frozen=True)
+class DomainSlugMap:
+    """The published, reversible record of how upstream values became path segments.
+
+    Returned by :func:`build_domain_slug_map` rather than left implicit, because the segment
+    is inside `manifest_sha256` and the raw value is stored nowhere else in the dataset.
+    Without this table ``c-sharp`` is unreadable — nobody can show it means ``C#`` rather than
+    ``CSharp``, and nobody can tell whether ``other`` swallowed 0.4% of the tokens or 40%.
+    :meth:`readme_table` is what goes in the generated README, which is a control file outside
+    the hash chain and therefore still revisable on a frozen dataset.
+    """
+
+    #: EVERY input value -> the segment it publishes under, folded values included.
+    slug_of: dict[str, str]
+    #: Values that kept their own segment, highest-ranked first.
+    kept: tuple[str, ...]
+    #: Values folded into :attr:`other_segment`, highest-ranked first.
+    folded: tuple[str, ...]
+    #: The distinct segments that will exist as directories, sorted. This is the permanent
+    #: commitment, and the number to look at before publishing.
+    segments: tuple[str, ...]
+    #: The counts used to rank, echoed back so the ranking is auditable rather than asserted.
+    weight_of: dict[str, int]
+    other_segment: str
+    keep: int
+    #: What the counts counted — ``"tokens"``, ``"documents"``, … Recorded because ranking by
+    #: documents and ranking by tokens give different answers, and a reader of the README
+    #: cannot otherwise tell which one produced the table.
+    unit: str | None = None
+
+    @property
+    def kept_weight(self) -> int:
+        return sum(self.weight_of[v] for v in self.kept)
+
+    @property
+    def folded_weight(self) -> int:
+        return sum(self.weight_of[v] for v in self.folded)
+
+    @property
+    def folded_fraction(self) -> float:
+        """Share of the ranking weight that lands in ``other`` — the number that says whether
+        ``keep`` was set well, and the only moment it can still be changed for free is before
+        the publish."""
+        total = self.kept_weight + self.folded_weight
+        return (self.folded_weight / total) if total else 0.0
+
+    def apply(self, value: str) -> str:
+        """The segment for one value. Raises on a value the map has never seen.
+
+        Deliberately not ``.get(value, other)``: a value absent from the ranking table means
+        the counts the map was built from and the data being published DISAGREE, and filing
+        the surprise under ``other`` would hide that while writing a permanent directory.
+        """
+        try:
+            return self.slug_of[value]
+        except KeyError:
+            raise SlugError(
+                f"{value!r} is not in this slug map, which covers {len(self.slug_of)} value(s). "
+                f"A value the map has not seen means the counts it was built from do not cover "
+                f"the data being published; folding it into {self.other_segment!r} silently "
+                f"would write a permanent directory to hide that disagreement. Rebuild the map "
+                f"from counts that cover the whole corpus."
+            ) from None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "keep": self.keep,
+            "unit": self.unit,
+            "other_segment": self.other_segment,
+            "segments": list(self.segments),
+            "kept": list(self.kept),
+            "folded": list(self.folded),
+            "slug_of": {k: self.slug_of[k] for k in sorted(self.slug_of)},
+            "weight_of": {k: self.weight_of[k] for k in sorted(self.weight_of)},
+            "folded_fraction": round(self.folded_fraction, 6),
+        }
+
+    def readme_table(self, *, title: str = "Domain slug map") -> str:
+        """Markdown for the generated README, so ``c-sharp`` -> ``C#`` stays recoverable."""
+        unit = self.unit or "weight"
+        lines = [
+            f"### {title}",
+            "",
+            f"`domain` segments are slugged from the upstream value, keeping the top "
+            f"{self.keep} by {unit} and folding the rest into `{self.other_segment}`. "
+            f"{len(self.segments)} segment(s) exist; the folded tail is "
+            f"{self.folded_fraction * 100:.2f}% of {unit}.",
+            "",
+            f"| `domain` segment | upstream value | {unit} |",
+            "|---|---|---|",
+        ]
+        for value in self.kept:
+            lines.append(f"| `{self.slug_of[value]}` | `{value}` | {self.weight_of[value]:,} |")
+        if self.folded:
+            folded = ", ".join(f"`{v}`" for v in self.folded)
+            lines.append(f"| `{self.other_segment}` | {folded} | {self.folded_weight:,} |")
+        lines.append("")
+        return "\n".join(lines)
+
+
+def build_domain_slug_map(
+    weights: Mapping[str, Any],
+    *,
+    keep: int = DEFAULT_DOMAIN_KEEP,
+    other_segment: str = OTHER_SEGMENT,
+    overrides: Mapping[str, str] | None = None,
+    unit: str | None = None,
+) -> DomainSlugMap:
+    """Slug + fold an inherited domain vocabulary into a deterministic, publishable mapping.
+
+    ``weights`` is value -> count (tokens, or documents — say which via ``unit``). The top
+    ``keep`` values by count keep their own segment; the rest fold into ``other_segment``. The
+    same input always yields the same map: ties break on the raw value, so nothing depends on
+    dict insertion order or on which shard happened to be read first.
+
+    **A COLLISION RAISES.** Two distinct upstream values slugging to one segment is the
+    failure this whole function exists to prevent: ``C#`` and ``C++`` both stripping to ``c``
+    would merge two languages into one directory, inside `manifest_sha256`, permanently, with
+    every token count still adding up and nothing anywhere to notice. So a collision is
+    refused with both raw values named and the fix stated. The fold into ``other`` is the ONE
+    sanctioned many-to-one, and it is recorded value-by-value in
+    :attr:`DomainSlugMap.folded` — a listed merge, not a silent one.
+
+    A tail of exactly ONE value is kept rather than folded: ``other`` holding a single value
+    costs the same one directory while destroying that value's name for nothing.
+    """
+    if not isinstance(weights, Mapping) or not weights:
+        raise SlugError("build_domain_slug_map needs a non-empty {value: count} mapping")
+    if isinstance(keep, bool) or not isinstance(keep, int) or keep < 1:
+        raise SlugError(f"keep must be an int >= 1; got {keep!r}")
+
+    cleaned: dict[str, int] = {}
+    for value, count in weights.items():
+        if not isinstance(value, str) or not value.strip():
+            raise SlugError(f"domain value {value!r} is not a non-empty string")
+        if isinstance(count, bool) or not isinstance(count, (int, float)):
+            raise SlugError(f"count for {value!r} must be a number; got {count!r}")
+        if count < 0:
+            raise SlugError(f"count for {value!r} must be >= 0; got {count!r}")
+        cleaned[value] = int(count)
+
+    # A TOTAL order: weight descending, then the value itself. Without the tiebreak the map is
+    # a function of dict order, and a map that is not deterministic cannot be published —
+    # re-running the build would silently move segments that are already in the hash chain.
+    ranked = sorted(cleaned, key=lambda v: (-cleaned[v], v))
+    kept = ranked[:keep]
+    tail = ranked[keep:]
+    if len(tail) == 1:
+        kept, tail = ranked, []
+
+    slug_of: dict[str, str] = {}
+    owner: dict[str, str] = {}
+    for value in kept:
+        segment = slug_path_segment(value, overrides=overrides)
+        if segment == other_segment:
+            raise SlugError(
+                f"{value!r} slugs to {segment!r}, which is the fold-target segment — it would "
+                f"be indistinguishable from the folded tail, one directory meaning two "
+                f"different things. Give it an explicit name via overrides=, or pass a "
+                f"different other_segment=."
+            )
+        clash = owner.get(segment)
+        if clash is not None:
+            raise SlugError(
+                f"COLLISION: {clash!r} and {value!r} both slug to {segment!r}. Publishing this "
+                f"would merge two distinct upstream values into one permanent directory inside "
+                f"manifest_sha256, with every token count still adding up and nothing "
+                f"downstream able to tell them apart. Add an explicit entry for at least one of "
+                f"them to SEGMENT_SLUG_OVERRIDES, or pass overrides={{…}}."
+            )
+        owner[segment] = value
+        slug_of[value] = segment
+    for value in tail:
+        slug_of[value] = other_segment
+
+    return DomainSlugMap(
+        slug_of=slug_of,
+        kept=tuple(kept),
+        folded=tuple(tail),
+        segments=tuple(sorted(set(slug_of.values()))),
+        weight_of=cleaned,
+        other_segment=other_segment,
+        keep=keep,
+        unit=unit,
+    )
 
 
 def is_cas_name(path: str) -> bool:

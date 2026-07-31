@@ -1,6 +1,6 @@
 # Deploying the eduLLM airlock
 
-Implements **Step 2** of [`DATASET-STANDARD.md`](../../docs/dataset-creation/DATASET-STANDARD.md) §13,
+Implements **Step 2** of [`DATASET-STANDARD.md`](../docs/dataset-creation/DATASET-STANDARD.md) §13,
 plus the event wiring from step 9.
 
 ## How to run these commands
@@ -253,11 +253,37 @@ mcp__sb-aws__aws(account="sbsandbox", command=[
 ])
 ```
 
-### Deploying the split Delete Deny (policy v2 — PENDING)
+### Deploying the split Delete Deny (policy v2 — ✅ DEPLOYED 2026-07-31)
 
-`02-bucket-policy.json` in this repo is now **v2** (`Id: edullm-data-airlock-v2`, three
-statements). The live bucket still carries v1. Applying it is the ordinary
-`put-bucket-policy` call below — but understand what changes before you run it.
+`02-bucket-policy.json` in this repo is **v2** (`Id: edullm-data-airlock-v2`, three statements),
+and **the live bucket now carries it.** Verified by all four probes, which is the bar — a
+`put-bucket-policy` returning 200 proves only that the JSON parsed:
+
+```
+intern PutObject    -> edullm-data     AccessDenied, "explicit deny in a resource-based policy"
+intern DeleteObject -> edullm-data     AccessDenied, explicit deny          <- NEW in v2
+intern PutObject    -> edullm-landing  200 OK        <- both directions; a Deny that also broke
+intern GetObject    -> edullm-data     200 OK           landing is a broken pipeline, not security
+```
+
+Both exemption ARNs were checked byte-for-byte against `iam:get-role` before applying, because a
+typo there silently breaks every promotion. Delete could not be probed *as* the validator: its
+trust policy names only `ecs-tasks.amazonaws.com`, so no human session can assume it — which is
+the invariant working, not a gap in the test.
+
+Also checked first: the 31B corpus was republished on 2026-07-30 with val splits (131 objects), so
+no pending deletion is blocked by the new Deny.
+
+⚠️ **A third role now exists that v2 deliberately does NOT exempt.**
+`edullm-prm800k-validator` holds `s3:PutObject` on `edullm-data/vendor/openai-prm800k/v1/*` via its
+identity policy. Under v2 those writes fail with an explicit deny, and that is **intended** —
+confirmed with the owner 2026-07-31. `docs/PRM800K-INGEST.md` states the rule that role appeared to
+contradict: "never write `edullm-data` directly: the validator promotes only a passing artifact via
+server-side copy." Do not add it to the exemption list to make an ingest job work; route the
+artifact through the standard validator instead.
+
+The reasoning below is kept because it is what should stop a future v3 from re-merging the two
+statements.
 
 **What v1 got wrong.** One Deny covered `PutObject` *and* `DeleteObject`/`DeleteObjectVersion`,
 and exempted `<BATCH_JOB_ROLE>` + `<INFRA_DEPLOYER_ROLE>` from **all five actions**. So the
