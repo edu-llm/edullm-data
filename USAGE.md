@@ -1,7 +1,7 @@
 # Using eduLLM Datasets
 
 For people (and agents) who create or consume datasets. The authoritative spec is
-[`../docs/dataset-creation/DATASET-STANDARD.md`](../docs/dataset-creation/DATASET-STANDARD.md);
+[`docs/dataset-creation/DATASET-STANDARD.md`](docs/dataset-creation/DATASET-STANDARD.md);
 this is the practical how-to.
 
 > **Haven't generated the data yet?** Read

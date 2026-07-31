@@ -1,6 +1,6 @@
 # Deploying the eduLLM airlock
 
-Implements **Step 2** of [`DATASET-STANDARD.md`](../../docs/dataset-creation/DATASET-STANDARD.md) §13,
+Implements **Step 2** of [`DATASET-STANDARD.md`](../docs/dataset-creation/DATASET-STANDARD.md) §13,
 plus the event wiring from step 9.
 
 ## How to run these commands

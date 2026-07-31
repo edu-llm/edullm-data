@@ -183,8 +183,8 @@ datasets** for the eduLLM project. The end state: an engineer or agent runs `pub
 a validated dataset appears in the official bucket automatically, with no human in the loop and
 no way to write bad or unvalidated data into the read path.
 
-Motivating audit: `../docs/dataset-creation/s3-dataset-audit-2026-07-28.md` (23 buckets,
-~2.53 TB, sprawl + broken metadata). Full spec: `../docs/dataset-creation/DATASET-STANDARD.md`
+Motivating audit: `docs/dataset-creation/s3-dataset-audit-2026-07-28.md` (23 buckets,
+~2.53 TB, sprawl + broken metadata). Full spec: `docs/dataset-creation/DATASET-STANDARD.md`
 + `...-DIAGRAMS.md`.
 
 **Where that goal stands: the produce → validate → publish → read loop is CLOSED.** A 157.5B-token

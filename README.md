@@ -2,7 +2,7 @@
 
 Publisher, validator, and reader for the eduLLM dataset standard. The standard itself — naming,
 manifest shape, the airlock, profiles, validation gates — lives at
-[`../docs/dataset-creation/DATASET-STANDARD.md`](../docs/dataset-creation/DATASET-STANDARD.md). This
+[`docs/dataset-creation/DATASET-STANDARD.md`](docs/dataset-creation/DATASET-STANDARD.md). This
 package is code that implements that document; it is not a second source of truth. If the two disagree,
 the standard wins and this package has a bug.
 
