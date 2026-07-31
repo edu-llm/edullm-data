@@ -171,6 +171,56 @@ teacher (won't fit).
 
 ---
 
+## ⚠️ MY OWN PROMPT BUG INVALIDATED THE FIRST GATE RUN — read this before trusting any score
+
+The first full run scored **49.1% pooled** and FAILED all four sources. That number was an artifact
+of *my prompt*, not a property of the candidate model. The whole failure traces to four missing
+words.
+
+**What I wrote**, copying the essential-web card's abbreviation verbatim:
+
+```
+0 = General works
+```
+
+**What Dewey class 0 actually is** — and FDC mirrors Dewey:
+
+```
+0 = Computer science, information & general works
+```
+
+**Computing lives at `005.x`, which is inside class 0, not class 6.** So the candidate model, trained
+on this taxonomy, correctly emitted `005.1` → Level 1 = `0` for programming documents. The judges,
+told only "General works," had nowhere sensible to put programming and sent it to `6` (Technology).
+Every one of those documents scored as wrong.
+
+Measured, on the same 2,000 documents, remapping only D's `00x` codes to 6:
+
+| source | as run | with the collision corrected |
+|---|---|---|
+| **qa-forum** | **3.3%** | **95.7%** |
+| finemath | 69.0% | 86.1% |
+| reference | 81.6% | 83.2% |
+| academic | 56.4% | 58.6% |
+| **POOLED** | **49.1%** | **81.4%** |
+
+**92% of D's `0` labels were this single collision** (528 of 571 documents had both judges saying 6
+while D said 0), and 507 documents carried an FDC code starting `005`.
+
+**How it was caught, and the lesson.** Not by the score being low — a low score is exactly what a
+failing candidate looks like, and I could have reported "D FAILS at 49.1%" and been believed. It was
+caught by reading the model's *raw output*, where `label=0 <- '005.1,skip'` is visibly a programming
+document filed under a category I had labelled "General works." **A gate that only reports aggregates
+cannot distinguish a bad candidate from a bad prompt.** The raw field (`raw_all`) is what made the
+difference, which is why `classify_d.py` keeps all ten emitted fields rather than just the parsed
+digit.
+
+The fix widens every label to its real scope (`judge.py:FDC_L1`), not just class 0 — the same
+under-specification would bite class 6 ("Technology" vs Dewey's applied sciences including medicine
+and agriculture) and class 5 ("Science" vs natural sciences *and mathematics*). The run was then
+redone from scratch; the discarded labels are kept at `judges-v1-bad-prompt.jsonl` rather than
+deleted, so the comparison stays auditable.
+
 ## ⚠️ Read J together with the label distribution — one source's J is near-degenerate
 
 Measured judge agreement, with the distribution that produced it:

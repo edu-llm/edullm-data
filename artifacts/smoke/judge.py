@@ -67,20 +67,34 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-# Free Decimal Correspondence, Level 1 -- verbatim from the essential-web-v1.0 card:
-# "0=General works, 1=Philosophy, 2=Religion, 3=Social Sciences, 4=Language, 5=Science,
-#  6=Technology, 7=Arts, 8=Literature, 9=History/Geography"
+# Free Decimal Correspondence, Level 1.
+#
+# ⚠️ CLASS 0 IS NOT JUST "GENERAL WORKS" -- READ THIS BEFORE EDITING.
+#
+# The essential-web-v1.0 card abbreviates class 0 as "General works". That abbreviation is
+# incomplete, and taking it literally invalidates the whole measurement. In Dewey (which FDC
+# mirrors), class 0 is "Computer science, information & general works", and **computing lives at
+# 005.x -- inside class 0, not class 6**.
+#
+# Measured cost of the omission, on a real 2,000-document run: the judges, told only "General
+# works", sent every programming document to 6 (Technology), while the candidate model correctly
+# emitted 005.x -> 0. On qa-forum (StackOverflow-heavy) that alone drove the score from 95.7% to
+# **3.3%**, and the pooled score from 81.4% to 49.1% -- a total artifact of the prompt, with the
+# model behaving correctly throughout.
+#
+# So each label below carries enough scope to disambiguate. This is not embellishment; it is what
+# the taxonomy actually means, and the judges cannot agree with the candidate without it.
 FDC_L1 = {
-    0: "General works",
-    1: "Philosophy",
+    0: "Computer science, information, programming, software, data, and general reference works",
+    1: "Philosophy and psychology",
     2: "Religion",
-    3: "Social Sciences",
-    4: "Language",
-    5: "Science",
-    6: "Technology",
-    7: "Arts",
+    3: "Social sciences, economics, law, education, politics",
+    4: "Language and linguistics",
+    5: "Natural sciences and mathematics",
+    6: "Technology and applied sciences (engineering, medicine, agriculture, business practice)",
+    7: "Arts and recreation",
     8: "Literature",
-    9: "History/Geography",
+    9: "History and geography",
 }
 
 # Path-segment form for the eventual `domain` label (§1.2), pinned here so the smoke test and the

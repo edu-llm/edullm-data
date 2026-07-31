@@ -42,6 +42,17 @@ bucket-policy deployment during Phase 0).
 bootstrap **`0.5.1`**, and the family was at revision **6**, not 2. `HANDOFF.md:54` is current;
 `CLAUDE.md` is stale.
 
+**3. Airlock re-verified** — the standing project rule after anything touching infra. Probed live as
+the intern role:
+
+```
+PutObject -> s3://edullm-data/      AccessDenied  ✅ (explicit deny, airlock intact)
+PutObject -> s3://edullm-landing/   OK            ✅ (producer path still works)
+```
+
+Both directions matter: a Deny that also blocked landing would be a broken pipeline, not a secure one.
+The landing probe object was deleted afterwards.
+
 ---
 
 ## Task B — license metadata: DONE

@@ -1,0 +1,198 @@
+{
+  "task": "Phase 0 task E -- dual-judge smoke test",
+  "taxonomy": "Free Decimal Correspondence Level 1 (10 categories) -- see SUBSTRATE.md; the plan's '24-topic taxonomy' does not exist",
+  "judge_a": "Qwen/Qwen3-235B-A22B-Instruct-2507 (independent)",
+  "judge_b": "Qwen/Qwen2.5-72B-Instruct (PROXY for the real teacher Qwen2.5-32B-Instruct, which has no enabled provider and does not fit the available A10G)",
+  "candidate_d": "EssentialAI/EAI-Distill-0.5b (self-hosted; no inference provider)",
+  "gate": 0.85,
+  "scoring": "score = accuracy(D) on {A == B}; J = agreement(A,B) is the CEILING",
+  "per_source": {
+    "academic": {
+      "n_judged": 500,
+      "n_both_judges_parsed": 500,
+      "n_unparsed": 0,
+      "J_judge_agreement": 0.826,
+      "n_consensus": 413,
+      "n_scored": 413,
+      "n_correct": 233,
+      "score": 0.5642,
+      "score_ci95": [
+        0.516,
+        0.6112
+      ],
+      "verdict": "FAIL",
+      "gate": 0.85,
+      "n_judges_disagree": 87,
+      "n_excluded_all_differ": 15,
+      "inherited_error_n": 19,
+      "inherited_error_rate": 0.2184,
+      "d_sided_with_independent_judge_n": 53,
+      "n_d_label_missing": 0,
+      "judge_a_label_dist": {
+        "1": 2,
+        "2": 1,
+        "3": 81,
+        "4": 4,
+        "5": 250,
+        "6": 161,
+        "9": 1
+      },
+      "judge_b_label_dist": {
+        "1": 2,
+        "2": 1,
+        "3": 92,
+        "4": 4,
+        "5": 292,
+        "6": 105,
+        "7": 1,
+        "9": 3
+      }
+    },
+    "finemath": {
+      "n_judged": 500,
+      "n_both_judges_parsed": 500,
+      "n_unparsed": 0,
+      "J_judge_agreement": 0.748,
+      "n_consensus": 374,
+      "n_scored": 374,
+      "n_correct": 258,
+      "score": 0.6898,
+      "score_ci95": [
+        0.6412,
+        0.7346
+      ],
+      "verdict": "FAIL",
+      "gate": 0.85,
+      "n_judges_disagree": 126,
+      "n_excluded_all_differ": 31,
+      "inherited_error_n": 24,
+      "inherited_error_rate": 0.1905,
+      "d_sided_with_independent_judge_n": 71,
+      "n_d_label_missing": 0,
+      "judge_a_label_dist": {
+        "2": 3,
+        "3": 30,
+        "4": 2,
+        "5": 302,
+        "6": 157,
+        "7": 3,
+        "8": 2,
+        "9": 1
+      },
+      "judge_b_label_dist": {
+        "0": 1,
+        "1": 3,
+        "2": 1,
+        "3": 40,
+        "4": 19,
+        "5": 236,
+        "6": 174,
+        "7": 17,
+        "8": 7,
+        "9": 2
+      }
+    },
+    "qa-forum": {
+      "n_judged": 500,
+      "n_both_judges_parsed": 500,
+      "n_unparsed": 0,
+      "J_judge_agreement": 0.972,
+      "n_consensus": 486,
+      "n_scored": 486,
+      "n_correct": 16,
+      "score": 0.0329,
+      "score_ci95": [
+        0.0204,
+        0.0528
+      ],
+      "verdict": "FAIL",
+      "gate": 0.85,
+      "n_judges_disagree": 14,
+      "n_excluded_all_differ": 13,
+      "inherited_error_n": 0,
+      "inherited_error_rate": 0.0,
+      "d_sided_with_independent_judge_n": 1,
+      "n_d_label_missing": 0,
+      "judge_a_label_dist": {
+        "3": 1,
+        "4": 12,
+        "5": 6,
+        "6": 481
+      },
+      "judge_b_label_dist": {
+        "3": 2,
+        "4": 16,
+        "5": 5,
+        "6": 473,
+        "7": 3,
+        "8": 1
+      }
+    },
+    "reference": {
+      "n_judged": 500,
+      "n_both_judges_parsed": 500,
+      "n_unparsed": 0,
+      "J_judge_agreement": 0.728,
+      "n_consensus": 364,
+      "n_scored": 364,
+      "n_correct": 297,
+      "score": 0.8159,
+      "score_ci95": [
+        0.7729,
+        0.8524
+      ],
+      "verdict": "FAIL",
+      "gate": 0.85,
+      "n_judges_disagree": 136,
+      "n_excluded_all_differ": 22,
+      "inherited_error_n": 53,
+      "inherited_error_rate": 0.3897,
+      "d_sided_with_independent_judge_n": 61,
+      "n_d_label_missing": 0,
+      "judge_a_label_dist": {
+        "1": 1,
+        "2": 18,
+        "3": 94,
+        "4": 4,
+        "5": 45,
+        "6": 77,
+        "7": 141,
+        "8": 11,
+        "9": 109
+      },
+      "judge_b_label_dist": {
+        "2": 15,
+        "3": 67,
+        "4": 2,
+        "5": 39,
+        "6": 43,
+        "7": 160,
+        "8": 18,
+        "9": 156
+      }
+    }
+  },
+  "overall_pooled": {
+    "n_judged": 2000,
+    "n_both_judges_parsed": 2000,
+    "n_unparsed": 0,
+    "J_judge_agreement": 0.8185,
+    "n_consensus": 1637,
+    "n_scored": 1637,
+    "n_correct": 804,
+    "score": 0.4911,
+    "score_ci95": [
+      0.467,
+      0.5154
+    ],
+    "verdict": "FAIL",
+    "gate": 0.85,
+    "n_judges_disagree": 363,
+    "n_excluded_all_differ": 81,
+    "inherited_error_n": 96,
+    "inherited_error_rate": 0.2645,
+    "d_sided_with_independent_judge_n": 186,
+    "n_d_label_missing": 0
+  },
+  "any_source_below_gate": true
+}
