@@ -26,7 +26,18 @@ classifiers = [
 ]
 dependencies = [
   "boto3",
-  "numpy",
+  # An unpinned `numpy` resolves at RUN TIME inside a Batch container, so the version that runs
+  # in production is whatever PyPI served that morning — on 2026-07-31 that was numpy 2.5.1
+  # against pyarrow 25.0.0, a pairing this suite has never tested. Pinning makes the deployed
+  # environment reproducible, which is worth doing on its own.
+  #
+  # ⚠️ IT DOES NOT FIX THE INGEST SEGFAULT. Pinning to 2.4.6 was tried against the live array
+  # job (`PYARROW=25.0.0 NUMPY=2.4.6`, interop preflight green) and the crash was IDENTICAL —
+  # same config, same point. So numpy/pyarrow ABI skew is REFUTED as the cause, and this bound
+  # is hygiene, not a cure. See artifacts/reservoir/SEGFAULT-INVESTIGATION.md before assuming
+  # otherwise; four hypotheses have now been tested and refuted, and quoting one of them as
+  # settled is how the next person loses an afternoon.
+  "numpy<2.5",
 ]
 
 [project.optional-dependencies]
