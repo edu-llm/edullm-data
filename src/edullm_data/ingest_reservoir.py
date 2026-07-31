@@ -43,6 +43,7 @@ import io
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -181,14 +182,84 @@ def _hf_headers() -> dict:
     return h
 
 
+#: Retry budget for one Range read. Five was not enough: at 3*(n+1) seconds it gives up after 30 s,
+#: and the Hub's 429 window outlasts that comfortably — measured, see `_RateGate`.
+_MAX_ATTEMPTS = 8
+
+#: Ceiling on a single backoff sleep. Exponential from 4 s reaches 256 s by attempt 7; capping at
+#: 120 s keeps a stuck worker from idling for half the job's timeout.
+_BACKOFF_CAP_S = 120.0
+
+
+def _backoff_delay(attempt: int, retry_after: str | None = None) -> float:
+    """Seconds to wait before retry `attempt` (0-indexed), honouring `Retry-After` when present.
+
+    Exponential, not linear. `PLAN-CORRECTIONS.md` §6 recorded the same bug in `recount.py` — "a
+    3 s linear retry that could never outlast the limit" — and this module reintroduced it, which
+    is why the note is repeated here at the point of the mistake rather than only in an artifact.
+
+    `Retry-After` may be seconds or an HTTP date; only the numeric form is honoured, because a date
+    parse that silently fails would give the *wrong* delay rather than an obviously absent one.
+    """
+    if retry_after:
+        try:
+            return min(_BACKOFF_CAP_S, max(1.0, float(retry_after)))
+        except ValueError:
+            pass
+    return min(_BACKOFF_CAP_S, 4.0 * (2**attempt))
+
+
+class _RateGate:
+    """A process-wide brake shared by every worker thread.
+
+    WHY A PER-WORKER RETRY IS NOT ENOUGH, and this is the whole point. The Hugging Face rate limit
+    is **per IP, not per account** — established in Phase 0 (`PLAN-CORRECTIONS.md` §6, where eight
+    parallel agents starved each other and the failures looked exactly like broken corpora). Every
+    thread in this process shares one IP, so a worker that backs off privately while fifteen others
+    keep hammering has changed nothing: the limit is a property of the *fleet*, not the thread.
+
+    So a 429 anywhere pauses everywhere. `penalise()` sets a shared deadline; `wait()` blocks any
+    thread about to start new work until that deadline passes. The effect is that the whole scan
+    slows down together and then recovers, instead of collapsing into a retry storm.
+
+    This is also why the array-job plan changed: sharding across N machines multiplies the request
+    rate against a limit that does not care how many machines you have, so more children make the
+    429s *worse*. Shards must be run in small waves, not all at once.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._until = 0.0
+        self.total_penalties = 0
+
+    def penalise(self, seconds: float) -> None:
+        with self._lock:
+            self._until = max(self._until, time.monotonic() + seconds)
+            self.total_penalties += 1
+
+    def wait(self) -> None:
+        while True:
+            with self._lock:
+                remaining = self._until - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(remaining, 5.0))
+
+
+#: Module-level so every worker in the process shares it. Not a parameter: a per-call gate would be
+#: a gate per thread, which is exactly the thing that does not work.
+_RATE_GATE = _RateGate()
+
+
 class _RangeFile(io.RawIOBase):
     """Seekable read-only file over HTTP Range, so pyarrow fetches footers and chosen column
-    chunks and nothing else. Retries with backoff: a single 5xx mid-scan should not lose a job."""
+    chunks and nothing else. Retries with exponential backoff behind a shared rate gate."""
 
     def __init__(self, url: str, size: int, headers: dict):
         self.url, self.size, self._h = url, size, headers
         self.pos = 0
         self.bytes_fetched = 0
+        self.n_429 = 0
 
     def seekable(self) -> bool:
         return True
@@ -213,16 +284,30 @@ class _RangeFile(io.RawIOBase):
             self.url, headers={**self._h, "Range": f"bytes={self.pos}-{self.pos + n - 1}"}
         )
         last: Exception | None = None
-        for attempt in range(5):
+        for attempt in range(_MAX_ATTEMPTS):
             try:
                 with urllib.request.urlopen(req, timeout=300) as r:
                     data = r.read()
                 break
+            except urllib.error.HTTPError as exc:
+                last = exc
+                if exc.code != 429 or attempt == _MAX_ATTEMPTS - 1:
+                    raise IngestError(
+                        f"range read failed after {attempt + 1} attempts: {self.url}: {exc}"
+                    ) from last
+                self.n_429 += 1
+                # Honour Retry-After when the server sends one; it knows better than we do.
+                retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                delay = _backoff_delay(attempt, retry_after)
+                _RATE_GATE.penalise(delay)
+                time.sleep(delay)
             except Exception as exc:  # noqa: BLE001 - transport retry, re-raised below
                 last = exc
-                if attempt == 4:
-                    raise IngestError(f"range read failed after 5 attempts: {self.url}: {exc}") from last
-                time.sleep(3 * (attempt + 1))
+                if attempt == _MAX_ATTEMPTS - 1:
+                    raise IngestError(
+                        f"range read failed after {_MAX_ATTEMPTS} attempts: {self.url}: {exc}"
+                    ) from last
+                time.sleep(min(_BACKOFF_CAP_S, 3 * (attempt + 1)))
         self.pos += len(data)
         self.bytes_fetched += len(data)
         return data
@@ -400,6 +485,7 @@ class FileResult:
     rows_read: int = 0
     rows_kept: int = 0
     bytes_fetched: int = 0
+    n_429: int = 0
     digests: object = None  # numpy.ndarray[uint64]
     sample_ids: list = field(default_factory=list)
     error: str | None = None
@@ -428,6 +514,9 @@ def _scan_ids(
 
     res = FileResult(path=entry["path"])
     try:
+        # Block here, before opening a new file, if any worker has recently been 429'd. The limit
+        # is per-IP so it belongs to the whole process, not to this thread.
+        _RATE_GATE.wait()
         rf = _RangeFile(_resolve_url(repo, entry["path"]), entry["size"], headers)
         pf = pq.ParquetFile(rf)
         md = pf.metadata
@@ -444,6 +533,7 @@ def _scan_ids(
         res.rows_read = md.num_rows
         res.rows_kept = int(res.digests.shape[0])
         res.bytes_fetched = rf.bytes_fetched
+        res.n_429 = rf.n_429
     except Exception as exc:  # noqa: BLE001 - recorded per file, surfaced in the run index
         res.error = f"{type(exc).__name__}: {exc}"[:300]
     return res
@@ -474,6 +564,24 @@ def _partition_report(config: str, ids: list[str]) -> dict:
 #: Per-format token requirement from §3.3 / §9.7 item 4: 15 B each against the Phase 0c measured
 #: totals. The fraction each format must retain is what the partition has to clear.
 _REQUIRED_FRACTION_PCT = {"faq": 10.1, "tutorial": 10.1, "math": 15.8, "table": 17.3}
+
+
+def _shard_slice(items: list, shard: int, of: int) -> list:
+    """`items` interleaved by shard, NOT cut into contiguous blocks.
+
+    Contiguous blocks would be the obvious choice and are wrong here: FinePhrase's files are
+    ordered by name, sizes vary by an order of magnitude, and the big ones cluster. A contiguous
+    split hands one child a slice of mostly-large files, so the array's wall clock is set by the
+    unluckiest child while others idle. Striding (`items[shard::of]`) spreads any size ordering
+    evenly across children by construction.
+
+    Every item lands in exactly one shard, so the union across `of` shards is the whole list —
+    asserted in the tests, because an off-by-one here silently drops files from the anti-join set
+    and a smaller-than-expected id set does not look like an error.
+    """
+    if not 0 <= shard < of:
+        raise IngestError(f"shard {shard} out of range for --of {of}")
+    return items[shard::of]
 
 
 def _cmd_plan(args) -> int:
@@ -540,9 +648,13 @@ def _cmd_plan(args) -> int:
 
 
 def _cmd_ids(args) -> int:
-    """Scan every FinePhrase config's id column and upload the anti-join set.
+    """Scan FinePhrase id columns and upload the anti-join set (or this shard's part of it).
 
-    Writes `<prefix>/_ids/finephrase-<config>.u64` plus `_ids/_index.json`. Never `manifest.json`.
+    Unsharded (`--of 1`, the default) writes `<prefix>/_ids/finephrase-<config>.u64` and
+    `_ids/_index.json`, which is what a small run wants.
+
+    Sharded (`--of N`) writes `<prefix>/_ids/parts/finephrase-<config>.<shard>-of-<N>.u64` and a
+    per-shard `_index.<shard>-of-<N>.json`, then `merge` combines them. Never `manifest.json`.
     """
     _require_batch(allow_local=args.allow_local)
     import boto3
@@ -552,11 +664,25 @@ def _cmd_ids(args) -> int:
     if args.require_lifecycle:
         _assert_lifecycle_covers(s3, args.bucket, prefix + "/")
     headers = _hf_headers()
-    index: dict = {"run_id": args.run_id, "repo": FINEPHRASE_REPO, "configs": {}}
+    sharded = args.of > 1
+    index: dict = {
+        "run_id": args.run_id,
+        "repo": FINEPHRASE_REPO,
+        "shard": args.shard,
+        "of": args.of,
+        "configs": {},
+    }
     for config in FINEPHRASE_FORMATS:
         tree = sorted(hf_tree(FINEPHRASE_REPO, config, headers=headers), key=lambda e: e["path"])
         if args.limit_files:
             tree = tree[: args.limit_files]
+        n_all = len(tree)
+        tree = _shard_slice(tree, args.shard, args.of)
+        if sharded:
+            print(
+                f"{config}: shard {args.shard}/{args.of} -> {len(tree):,} of {n_all:,} files",
+                flush=True,
+            )
         # Digest chunks, NOT id strings: 2.71 GB vs 32.5 GB per config. `audit_ids` keeps a bounded
         # sample of the strings so the partition can still be audited on real ids.
         chunks: list = []
@@ -565,9 +691,11 @@ def _cmd_ids(args) -> int:
         fetched = 0
         rows = 0
         done = 0
+        n_429 = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
             for res in pool.map(lambda e: _scan_ids(FINEPHRASE_REPO, e, headers), tree):
                 done += 1
+                n_429 += res.n_429
                 if res.error:
                     errors.append(f"{res.path}: {res.error}")
                     continue
@@ -577,30 +705,43 @@ def _cmd_ids(args) -> int:
                 if len(audit_ids) < args.audit_sample:
                     audit_ids.extend(res.sample_ids[: args.audit_sample - len(audit_ids)])
                 if done % 250 == 0:
-                    print(f"  {config}: {done}/{len(tree)} files, {rows:,} ids", flush=True)
+                    print(
+                        f"  {config}: {done}/{len(tree)} files, {rows:,} ids, {n_429} 429s",
+                        flush=True,
+                    )
         if errors and not args.tolerate_errors:
             raise IngestError(
                 f"{len(errors)} of {len(tree)} {config} files failed and --tolerate-errors was "
                 f"not set. An incomplete id set makes the anti-join silently incomplete, which is "
-                f"worse than a failed job. First: {errors[0]}"
+                f"worse than a failed job. {n_429} requests were rate-limited — if that number is "
+                f"large, LOWER --workers rather than raising it; the HF limit is per-IP, so more "
+                f"parallelism makes this worse. First error: {errors[0]}"
             )
         id_set = IdSet.from_digest_chunks(chunks)
         del chunks
-        key = _assert_safe_key(f"{prefix}/_ids/finephrase-{config}.u64")
+        if sharded:
+            key = _assert_safe_key(
+                f"{prefix}/_ids/parts/finephrase-{config}.{args.shard:05d}-of-{args.of:05d}.u64"
+            )
+        else:
+            key = _assert_safe_key(f"{prefix}/_ids/finephrase-{config}.u64")
         s3.put_object(Bucket=args.bucket, Key=key, Body=id_set.to_bytes())
         index["configs"][config] = {
-            "n_files": len(tree),
+            "n_files_in_config": n_all,
+            "n_files_this_shard": len(tree),
             "ids_read": rows,
             "ids_distinct": len(id_set),
-            "duplicate_ids_within_config": rows - len(id_set),
+            "duplicate_ids_within_shard": rows - len(id_set),
             "bytes_fetched": fetched,
+            "n_429": n_429,
             "key": key,
             "errors": errors[:10],
             "n_errors": len(errors),
             **_partition_report(config, audit_ids),
         }
         print(f"{config}: {len(id_set):,} distinct ids -> s3://{args.bucket}/{key}", flush=True)
-    ikey = _assert_safe_key(f"{prefix}/_ids/_index.json")
+    suffix = f".{args.shard:05d}-of-{args.of:05d}" if sharded else ""
+    ikey = _assert_safe_key(f"{prefix}/_ids/_index{suffix}.json")
     s3.put_object(
         Bucket=args.bucket,
         Key=ikey,
@@ -608,6 +749,86 @@ def _cmd_ids(args) -> int:
         ContentType="application/json",
     )
     print(f"wrote s3://{args.bucket}/{ikey}")
+    if _RATE_GATE.total_penalties:
+        print(
+            f"NOTE: {_RATE_GATE.total_penalties} rate-limit pauses. The HF limit is per-IP, so if "
+            f"this run was slow, use FEWER concurrent shards — not more.",
+            flush=True,
+        )
+    return 0
+
+
+def _cmd_merge(args) -> int:
+    """Combine shard parts into the per-config id sets, refusing to merge an incomplete set.
+
+    The refusal is the point. A missing part yields a *smaller* anti-join set, which is not an
+    error anyone would notice: the ingest succeeds, the counts look plausible, and edu-web silently
+    keeps documents that should have been removed. So this verifies that every expected
+    `<shard>-of-<N>` part is present before it writes anything.
+    """
+    _require_batch(allow_local=args.allow_local)
+    import boto3
+    import numpy as np
+
+    s3 = boto3.client("s3")
+    prefix = args.prefix.strip("/")
+    parts_prefix = f"{prefix}/_ids/parts/"
+    listed: list[str] = []
+    token: str | None = None
+    while True:
+        kw = {"Bucket": args.bucket, "Prefix": parts_prefix}
+        if token:
+            kw["ContinuationToken"] = token
+        page = s3.list_objects_v2(**kw)
+        listed += [o["Key"] for o in page.get("Contents", [])]
+        token = page.get("NextContinuationToken")
+        if not page.get("IsTruncated"):
+            break
+
+    summary: dict = {"run_id": args.run_id, "of": args.of, "configs": {}}
+    for config in FINEPHRASE_FORMATS:
+        expected = [
+            f"{parts_prefix}finephrase-{config}.{i:05d}-of-{args.of:05d}.u64" for i in range(args.of)
+        ]
+        missing = [k for k in expected if k not in listed]
+        if missing:
+            raise IngestError(
+                f"{config}: {len(missing)} of {args.of} shard parts are missing, e.g. "
+                f"{missing[0]}. Merging now would produce a SMALLER anti-join set that looks "
+                f"entirely healthy — re-run the failed array children first. "
+                f"(Array child i writes shard i; check the job's failed indices.)"
+            )
+        arrays = []
+        total_rows = 0
+        for key in expected:
+            raw = s3.get_object(Bucket=args.bucket, Key=key)["Body"].read()
+            part = IdSet.from_bytes(raw)
+            total_rows += len(part)
+            arrays.append(part.values)
+        merged = IdSet(values=np.unique(np.concatenate(arrays))) if arrays else IdSet.from_ids([])
+        del arrays
+        out_key = _assert_safe_key(f"{prefix}/_ids/finephrase-{config}.u64")
+        s3.put_object(Bucket=args.bucket, Key=out_key, Body=merged.to_bytes())
+        summary["configs"][config] = {
+            "parts": args.of,
+            "ids_across_parts": total_rows,
+            "ids_distinct": len(merged),
+            "cross_shard_duplicates": total_rows - len(merged),
+            "key": out_key,
+        }
+        print(
+            f"{config}: {args.of} parts, {total_rows:,} ids -> {len(merged):,} distinct "
+            f"-> s3://{args.bucket}/{out_key}",
+            flush=True,
+        )
+    skey = _assert_safe_key(f"{prefix}/_ids/_merge-summary.json")
+    s3.put_object(
+        Bucket=args.bucket,
+        Key=skey,
+        Body=json.dumps(summary, indent=1).encode(),
+        ContentType="application/json",
+    )
+    print(f"wrote s3://{args.bucket}/{skey}")
     return 0
 
 
@@ -629,7 +850,19 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--bucket", default="edullm-landing")
     p.add_argument("--prefix", default="_ingest/reservoir-dolma2")
     p.add_argument("--run-id", required=True)
-    p.add_argument("--workers", type=int, default=16)
+    p.add_argument("--workers", type=int, default=8)
+    p.add_argument(
+        "--shard",
+        type=int,
+        default=0,
+        help="this shard's index; set from AWS_BATCH_JOB_ARRAY_INDEX in an array job",
+    )
+    p.add_argument(
+        "--of",
+        type=int,
+        default=1,
+        help="total shards. >1 writes _ids/parts/ and requires a later `merge`",
+    )
     p.add_argument("--limit-files", type=int, default=0, help="0 = all")
     p.add_argument("--audit-sample", type=int, default=200_000)
     p.add_argument("--tolerate-errors", action="store_true")
@@ -641,6 +874,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="accept an unexpiring destination prefix (see module docstring landmine 2)",
     )
     p.set_defaults(func=_cmd_ids, require_lifecycle=True)
+
+    p = sub.add_parser("merge", help="combine shard parts written by `ids --of N`")
+    p.add_argument("--bucket", default="edullm-landing")
+    p.add_argument("--prefix", default="_ingest/reservoir-dolma2")
+    p.add_argument("--run-id", required=True)
+    p.add_argument("--of", type=int, required=True, help="the same --of the shards used")
+    p.add_argument("--allow-local", action="store_true")
+    p.set_defaults(func=_cmd_merge)
     return ap
 
 

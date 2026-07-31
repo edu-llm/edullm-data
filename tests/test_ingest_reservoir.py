@@ -329,6 +329,276 @@ def test_tree_refuses_entries_without_size(monkeypatch):
 # --------------------------------------------------------------------------------------
 
 
+# --------------------------------------------------------------------------------------
+# Sharding — an array job's file split
+# --------------------------------------------------------------------------------------
+
+
+def test_shards_partition_the_file_list_exactly():
+    """Union of all shards == the whole list, with no item in two shards.
+
+    An off-by-one here silently drops files from the anti-join set, and a smaller-than-expected
+    id set does not look like an error — the ingest succeeds and edu-web quietly keeps documents
+    that should have been removed.
+    """
+    from edullm_data.ingest_reservoir import _shard_slice
+
+    for n in (1, 2, 3, 7, 20, 64):
+        items = list(range(1_000))
+        shards = [_shard_slice(items, i, n) for i in range(n)]
+        flat = [x for s in shards for x in s]
+        assert sorted(flat) == items
+        assert len(flat) == len(set(flat))
+
+
+def test_shards_are_striped_not_contiguous():
+    """Contiguous blocks are the obvious split and the wrong one: FinePhrase files are name-ordered
+    with sizes varying by an order of magnitude, so a contiguous slice can be all-large and the
+    array's wall clock becomes the unluckiest child's."""
+    from edullm_data.ingest_reservoir import _shard_slice
+
+    assert _shard_slice(list(range(10)), 0, 3) == [0, 3, 6, 9]
+    assert _shard_slice(list(range(10)), 1, 3) == [1, 4, 7]
+
+
+def test_shards_are_balanced_within_one_item():
+    from edullm_data.ingest_reservoir import _shard_slice
+
+    sizes = [len(_shard_slice(list(range(1_000)), i, 7)) for i in range(7)]
+    assert max(sizes) - min(sizes) <= 1
+
+
+def test_out_of_range_shard_is_refused():
+    from edullm_data.ingest_reservoir import _shard_slice
+
+    for bad in (-1, 4, 99):
+        with pytest.raises(IngestError, match="out of range"):
+            _shard_slice([1, 2, 3], bad, 4)
+
+
+def test_unsharded_is_the_identity():
+    """`--of 1` must behave exactly as before sharding existed."""
+    from edullm_data.ingest_reservoir import _shard_slice
+
+    items = list(range(50))
+    assert _shard_slice(items, 0, 1) == items
+
+
+# --------------------------------------------------------------------------------------
+# Rate limiting — the failure that actually happened
+# --------------------------------------------------------------------------------------
+
+
+def test_backoff_is_exponential_not_linear():
+    """A 3*(n+1) linear retry gives up after 30 s and cannot outlast the Hub's 429 window.
+
+    `PLAN-CORRECTIONS.md` §6 recorded exactly this bug in `recount.py` during Phase 0, and this
+    module reintroduced it — the first real ingest job died with 8 of 20 files at HTTP 429.
+    """
+    from edullm_data.ingest_reservoir import _backoff_delay
+
+    delays = [_backoff_delay(i) for i in range(6)]
+    assert delays == [4.0, 8.0, 16.0, 32.0, 64.0, 120.0]  # doubling, then capped
+    assert sum(delays) > 30.0, "must outlast the linear retry that already failed"
+
+
+def test_backoff_honours_retry_after_when_the_server_sends_one():
+    from edullm_data.ingest_reservoir import _backoff_delay
+
+    assert _backoff_delay(0, "45") == 45.0
+    assert _backoff_delay(5, "7") == 7.0  # server's answer wins over our schedule
+
+
+def test_backoff_ignores_an_unparseable_retry_after():
+    """`Retry-After` may be an HTTP date. Rather than mis-parse it into a wrong delay, fall back to
+    the exponential schedule."""
+    from edullm_data.ingest_reservoir import _backoff_delay
+
+    assert _backoff_delay(2, "Wed, 21 Oct 2026 07:28:00 GMT") == 16.0
+
+
+def test_backoff_is_capped():
+    from edullm_data.ingest_reservoir import _BACKOFF_CAP_S, _backoff_delay
+
+    assert _backoff_delay(30) == _BACKOFF_CAP_S
+
+
+def test_rate_gate_pauses_every_thread_not_just_the_one_that_was_limited():
+    """THE point of the gate. The HF limit is per-IP, so a worker backing off privately while
+    fifteen others keep hammering has changed nothing — the limit belongs to the fleet."""
+    import time as _t
+
+    from edullm_data.ingest_reservoir import _RateGate
+
+    gate = _RateGate()
+    gate.penalise(0.3)
+    t0 = _t.monotonic()
+    gate.wait()  # a DIFFERENT caller than the one that was penalised
+    assert _t.monotonic() - t0 >= 0.25
+    assert gate.total_penalties == 1
+
+
+def test_rate_gate_does_not_block_when_nothing_is_penalised():
+    import time as _t
+
+    from edullm_data.ingest_reservoir import _RateGate
+
+    t0 = _t.monotonic()
+    _RateGate().wait()
+    assert _t.monotonic() - t0 < 0.1
+
+
+def test_rate_gate_keeps_the_latest_deadline():
+    """Two 429s should not shorten the pause to the second one's."""
+    from edullm_data.ingest_reservoir import _RateGate
+
+    gate = _RateGate()
+    gate.penalise(60.0)
+    gate.penalise(0.01)
+    assert gate._until > 0 and gate.total_penalties == 2
+
+
+# --------------------------------------------------------------------------------------
+# CLI
+# --------------------------------------------------------------------------------------
+
+
+def test_merge_requires_of(capsys):
+    with pytest.raises(SystemExit):
+        main(["merge", "--run-id", "x"])
+
+
+# --------------------------------------------------------------------------------------
+# Merge — the refusal matters more than the concatenation
+# --------------------------------------------------------------------------------------
+
+
+class _MergeS3:
+    """Minimal S3 double holding shard parts in memory."""
+
+    def __init__(self, parts: dict):
+        self.parts = dict(parts)
+        self.written: dict = {}
+
+    def list_objects_v2(self, **kw):
+        keys = [k for k in self.parts if k.startswith(kw["Prefix"])]
+        return {"Contents": [{"Key": k} for k in keys], "IsTruncated": False}
+
+    def get_object(self, Bucket, Key):  # noqa: N803
+        import io as _io
+
+        return {"Body": _io.BytesIO(self.parts[Key])}
+
+    def put_object(self, Bucket, Key, Body, **kw):  # noqa: N803
+        self.written[Key] = Body
+
+
+def _mk_parts(of: int, per_shard: int = 100, overlap: int = 0) -> dict:
+    """Build `of` shard parts per config; `overlap` ids are repeated across every shard."""
+    from edullm_data.ingest_reservoir import FINEPHRASE_FORMATS, IdSet
+
+    out = {}
+    for cfg in FINEPHRASE_FORMATS:
+        for i in range(of):
+            ids = [f"<urn:uuid:{cfg}-{i}-{j}>" for j in range(per_shard)]
+            ids += [f"<urn:uuid:{cfg}-shared-{j}>" for j in range(overlap)]
+            key = f"_ingest/reservoir-dolma2/_ids/parts/finephrase-{cfg}.{i:05d}-of-{of:05d}.u64"
+            out[key] = IdSet.from_ids(ids).to_bytes()
+    return out
+
+
+def _merge_args(of: int):
+    import argparse
+
+    return argparse.Namespace(
+        bucket="edullm-landing",
+        prefix="_ingest/reservoir-dolma2",
+        run_id="test",
+        of=of,
+        allow_local=True,
+    )
+
+
+def test_merge_refuses_an_incomplete_part_set(monkeypatch):
+    """THE reason merge exists as a separate step with a check.
+
+    A missing part yields a SMALLER anti-join set, and nothing about that looks like an error: the
+    merge succeeds, the counts are plausible, and edu-web silently keeps documents that should
+    have been dropped. Missing parts must be loud.
+    """
+    import edullm_data.ingest_reservoir as mod
+
+    parts = _mk_parts(of=4)
+    dropped = next(k for k in parts if "faq" in k and "00002-of" in k)
+    del parts[dropped]
+    fake = _MergeS3(parts)
+    monkeypatch.setattr(mod, "_require_batch", lambda **_: None)
+    monkeypatch.setitem(__import__("sys").modules, "boto3", type("B", (), {"client": staticmethod(lambda *_a, **_k: fake)}))
+
+    with pytest.raises(IngestError, match="shard parts are missing"):
+        mod._cmd_merge(_merge_args(4))
+    assert not fake.written, "nothing may be written when the set is incomplete"
+
+
+def test_merge_combines_and_deduplicates_across_shards(monkeypatch):
+    import edullm_data.ingest_reservoir as mod
+    from edullm_data.ingest_reservoir import FINEPHRASE_FORMATS, IdSet
+
+    fake = _MergeS3(_mk_parts(of=4, per_shard=100, overlap=10))
+    monkeypatch.setattr(mod, "_require_batch", lambda **_: None)
+    monkeypatch.setitem(__import__("sys").modules, "boto3", type("B", (), {"client": staticmethod(lambda *_a, **_k: fake)}))
+
+    assert mod._cmd_merge(_merge_args(4)) == 0
+    for cfg in FINEPHRASE_FORMATS:
+        key = f"_ingest/reservoir-dolma2/_ids/finephrase-{cfg}.u64"
+        merged = IdSet.from_bytes(fake.written[key])
+        # 4 shards x 100 unique + 10 shared (counted once) = 410
+        assert len(merged) == 410, cfg
+
+
+def test_merge_output_is_sorted_so_membership_works(monkeypatch):
+    """`contains` uses searchsorted; an unsorted merge silently returns wrong answers."""
+    import edullm_data.ingest_reservoir as mod
+    from edullm_data.ingest_reservoir import IdSet
+
+    fake = _MergeS3(_mk_parts(of=3))
+    monkeypatch.setattr(mod, "_require_batch", lambda **_: None)
+    monkeypatch.setitem(__import__("sys").modules, "boto3", type("B", (), {"client": staticmethod(lambda *_a, **_k: fake)}))
+    mod._cmd_merge(_merge_args(3))
+
+    raw = fake.written["_ingest/reservoir-dolma2/_ids/finephrase-faq.u64"]
+    IdSet.from_bytes(raw)  # raises if unsorted
+    ids = IdSet.from_bytes(raw)
+    assert ids.contains("<urn:uuid:faq-2-7>")
+    assert not ids.contains("<urn:uuid:faq-99-99>")
+
+
+def test_merge_writes_a_summary_not_a_manifest(monkeypatch):
+    """`_merge-summary.json`, never `manifest.json` — the EventBridge suffix rule."""
+    import edullm_data.ingest_reservoir as mod
+
+    fake = _MergeS3(_mk_parts(of=2))
+    monkeypatch.setattr(mod, "_require_batch", lambda **_: None)
+    monkeypatch.setitem(__import__("sys").modules, "boto3", type("B", (), {"client": staticmethod(lambda *_a, **_k: fake)}))
+    mod._cmd_merge(_merge_args(2))
+
+    assert "_ingest/reservoir-dolma2/_ids/_merge-summary.json" in fake.written
+    assert not any(k.endswith("manifest.json") for k in fake.written)
+
+
+def test_default_workers_is_conservative():
+    """The limit is per-IP: the default must not encourage a retry storm. 16 produced 8/20 failures
+    on the first real run."""
+    import argparse
+
+    from edullm_data.ingest_reservoir import _build_parser
+
+    ap: argparse.ArgumentParser = _build_parser()
+    ns = ap.parse_args(["ids", "--run-id", "x"])
+    assert ns.workers <= 8
+    assert ns.of == 1 and ns.shard == 0
+
+
 def test_errors_exit_nonzero_rather_than_raising(monkeypatch, capsys):
     """A Batch job must fail with a status, not a traceback that logs as a crash."""
     monkeypatch.delenv("AWS_BATCH_JOB_ID", raising=False)
