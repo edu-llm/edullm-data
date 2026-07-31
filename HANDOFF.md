@@ -172,7 +172,10 @@ on `main`):
 - `skill/SKILL.md` — copy of the agent skill (canonical copy at `../.claude/skills/edullm-datasets/`).
   Both copies now instruct writing a generated README for EVERY dataset, incl. already-promoted ones.
 - `USAGE.md` — human how-to. Install line (all docs): `uv add "edullm-data @
-  git+https://github.com/edu-llm/edullm-data@v0.1.0"` (public repo, no auth).
+  git+https://github.com/edu-llm/edullm-data@38bf831a6c3f445e394784018441fd59288b876c"` (public repo,
+  no auth). An exact commit, not a tag: this line said `@v0.1.0` while every other doc said `@v0.2.0`,
+  and both tags predate schema v2 and the `labels=` / `build_mixture()` reader. No `v0.5.0` tag
+  exists yet — cut one and move all seven pins to it.
 - `docs/ONBOARDING.md` — 2-minute, paste-friendly intro to the pipeline for a teammate who
   has never worked on it (the airlock, bucket layout, the address shape, what the validator forces).
   Its integrity bullet was corrected this session — it no longer implies Gate A re-hashes payload.

@@ -38,7 +38,8 @@ the publisher produces).
 
 ```bash
 python3 -c "import edullm_data" 2>/dev/null && echo "present" || \
-  uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.2.0"
+  uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@38bf831a6c3f445e394784018441fd59288b876c"
+# An exact commit, not a tag: v0.2.0 predates schema v2 and has no `labels=` / `build_mixture()`.
 # local dev:  python3 -m pip install -e /path/to/edullm-data
 ```
 

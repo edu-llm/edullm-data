@@ -23,8 +23,10 @@ this is the practical how-to.
 Install the package:
 
 ```bash
-# pinned git install (production) — pin a tag so the publisher and validator agree
-uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.2.0"
+# pinned git install (production) — an exact commit, not a tag, so the publisher and validator
+# agree: v0.2.0 predates schema v2 and has no `labels=` / `build_mixture()`. Move this to
+# v0.5.0 once that tag is cut. See README "Install".
+uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@38bf831a6c3f445e394784018441fd59288b876c"
 
 # editable (local dev)
 python3 -m pip install -e /path/to/edullm-data
