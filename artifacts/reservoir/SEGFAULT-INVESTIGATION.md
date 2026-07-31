@@ -22,8 +22,12 @@ that forces `pre_buffer=False`. Job def `edullm-reservoir-shim`, 2026-07-31:
 
 | job | patch | outcome |
 |---|---|---|
-| `resshim-J-noop` | none (unpatched control) | **exit 139**, `Segmentation fault (core dumped)` |
-| `resshim-K-prebuf` | `pre_buffer=False` only | **exit 0** |
+| `resshim-J-noop` | none (unpatched control) | **3 of 3 decided children exit 139**, `Segmentation fault (core dumped)` |
+| `resshim-K-prebuf` | `pre_buffer=False` only | **exit 0** — all four configs in 95 s, no crash |
+
+Zero crossover: no `noop` child survived to a verdict, and no `prebuf` child crashed. (Some
+children of each arm were still grinding through 429 backoff when this was written; every child
+that reached a verdict agreed with its arm.)
 
 The `noop` arm matters: it runs the same wrapper script with **no patch applied**, which rules out
 "the wrapper masked it." Unpatched-in-a-wrapper still crashes; patched does not.
