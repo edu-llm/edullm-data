@@ -1,7 +1,35 @@
 # HANDOFF — eduLLM Dataset Standard
 
-Last updated: **2026-07-30** — the 150B corpus is PUBLISHED and READABLE, and the reader can now
-slice and mix it. Read this header, then "WHAT IS ACTUALLY LEFT".
+Last updated: **2026-07-31** — a DESIGN-ONLY session. The 150B corpus is still published and readable
+(unchanged); this session produced a complete, decision-closed build plan for a **second, much more
+capable dataset**: a 260B-token *reservoir*. Read this header, then "THE RESERVOIR DESIGN SESSION",
+then "WHAT IS ACTUALLY LEFT".
+
+> ## 🚨 FIRST ACTION FOR THE NEXT AGENT: COMMIT `DATASET-DESIGN-reservoir.md`
+>
+> **It is UNTRACKED.** 60 KB / ~935 lines, the entire output of a six-researcher sweep plus ~30
+> verification steps against live code, the HF API, and arXiv. `git status` shows `?? ` and nothing
+> else. This machine has died mid-run before (it is why `CLAUDE.md` says "persist to disk
+> continuously"). **Branch + commit + push it before doing anything else.** Losing it costs a full
+> day of research that cannot be cheaply reproduced.
+>
+> ```
+> git checkout -b docs/reservoir-design
+> git add DATASET-DESIGN-reservoir.md && git commit && git push -u origin HEAD
+> ```
+>
+> Nothing else in the repo changed this session: **no source edits, no tests run, no AWS mutations,
+> no bytes written.** `HEAD` is `38bf831`, tree otherwise clean.
+
+## THIS SESSION IN ONE PARAGRAPH
+
+The user asked whether the legacy `edullm-datasets` bucket held anything better than the published
+150B corpus, which grew into: audit the legacy bucket → discover the published corpus **is** AI2's
+`dolma3_mix-150B-1025` → research the 2026 state of corpus curation with six parallel subagents →
+design a **260B reservoir** (200B real + 60B synthetic) that every 20B training run draws a weighted,
+seeded subset from. **Every open decision is now closed** and the plan ends at a deliberate Phase-0
+hard stop for human sign-off. Deliverable: `DATASET-DESIGN-reservoir.md` §9 is a self-contained
+runbook a fresh compacted session can execute.
 
 > **You are on `main` at `0f463ea`, pushed, `main == origin/main`. 626 tests passing, 0 ruff
 > errors.** Everything from this session is merged; no work is stranded on a branch.
@@ -62,6 +90,89 @@ slice and mix it. Read this header, then "WHAT IS ACTUALLY LEFT".
 >
 > `edullm-data` held only `tokenizer/dolma2-bpe/v1` (11 objects) before this publish. The 31B
 > corpus was deleted 2026-07-29 — see "THE 31B DELETION".
+
+---
+
+## THE RESERVOIR DESIGN SESSION (2026-07-31) — design only, nothing built
+
+**Deliverable: `DATASET-DESIGN-reservoir.md`** (untracked — commit it first). Target dataset
+`pretrain/reservoir-260b-dolma2`: **200B real + 60B synthetic**, 25M-token shards, ~10,400 objects,
+0.95 TiB, **~$1,006 one-time + $24/month**. A 20B training run draws a weighted seeded subset, so a run
+is described by `(dataset, version, sources, ratios, total, seed)` instead of 10,400 URIs.
+
+### Findings that changed the plan (all verified, not taken from a summary)
+
+1. **The published 150B IS `allenai/dolma3_mix-150B-1025`.** All six components match AI2's card within
+   **0.22 pp**; `OLMo-mix-0625-150Bsample.txt` has 6,926 lines with labels like
+   `all-dressed-snazzy2_adult_content`. So its 76.9%-one-source shape is AI2's deliberate
+   (topic, vigintile) quality upsampling behind triple global dedup — **not** a defect. This retracts
+   the session's own earlier "worst mix in the bucket" claim.
+2. **`s2pdf-redacted` is olmOCR science PDFs**, not web text — the corpus already carries the PDF
+   register. And **`olmo100b` is 95% DCLM-baseline**, so it is not an independent corpus.
+3. **The legacy bucket has 12 prefixes / 2.1 TB**, only two ever documented. `olmo100b`'s 730 source
+   *document* shards (215.5 GiB) are all still present — a rebuild would need no HF re-download.
+4. **`entry.labels` CANNOT carry extra keys.** `validate.py:770-793` requires
+   `declared == labels_from_path(path)` exactly. Adding a `cluster` key → `labels-contradict-path` →
+   **Gate A rejects**. Proved by execution. The draft plan had cluster IDs living there; caught before
+   handoff, not after a 1.4 h validation run.
+5. **Whole-shard mixture selection is DELIBERATE, not a limitation.** `read.py:694-714`'s docstring:
+   partial takes read "the first 10% of every shard and never touched a tail; any ordering inside a
+   shard (crawl batch, date, repo) became a systematic skew." I had recommended adding partial-file
+   budgets — **withdrawn.** Shard size absorbs the precision requirement instead.
+6. **FinePhrase is real** — `HuggingFaceFW/finephrase`, 486.4B tokens, `odc-by`, ungated,
+   arXiv:2604.13977. Ablated at **1.2B params / 21B tokens** (≈ our setup) at **+3.41 macro over
+   DCLM**. Two traps, both verified by querying the dataset: **the rewrite is in
+   `rollout_results[0].text`, NOT `text`** (which holds the *source* — ingesting it would build
+   unrephrased FineWeb-Edu labelled "synthetic", uncatchable by any checksum), and there is **no
+   post-generation quality control** (a sampled row's whole rewrite is 12 tokens).
+7. **Nemotron-CC is EXCLUDED on license.** Gate accepted on the user's HF account, binding
+   `LICENSE.md` read: **§2.1** data is for "internal training" only; **§2.2.2** may not "…distribute…
+   or otherwise make available to others"; **§2.2.3** nor cause it to become "subject to an
+   open-source license." A shared reservoir does exactly that. Non-commercial use does not help.
+   **Use `nvidia/Nemotron-Pretraining-Specialized-v1` (CC-BY-4.0, ungated)** instead.
+8. **Cross-corpus dedup removal is deferrable; measurement is not.** At 5% sampling a doc needs
+   **~2,000 copies** to reach Hernandez's damage threshold — ~1,000× margin. And global dedup is
+   *affirmatively harmful*: FineWeb trained on kept-vs-removed halves and **the removed data scored
+   better**. Hence Bloom **deletes**, MinHash **annotates only**.
+9. **Rephrased synthetic can hide benchmark leakage.** FineWeb-Edu does zero decontamination →
+   FinePhrase is FineWeb-Edu rephrased → arXiv:2311.04850 (verified): paraphrase "easily bypass[es]"
+   n-gram decontamination. Our pipeline has **zero** decontamination (grep-verified). Hence the
+   two-tier decision.
+10. **Small-model mixes are web-heavy.** RegMix's optimum puts Wikipedia at **1.6%**, GitHub 0.02%;
+    SlimPajama-DC found 100% RefinedWeb *beat* a balanced 7-domain mix. AutoScale's contrary
+    curated-heavy result is a **loss-averaging artifact** — it minimized average loss *across* domains,
+    so it must spend tokens on arXiv. Different objective, not different scale.
+11. **`EssentialAI/EAI-Distill-0.5b` is public** (Apache-2.0, ungated, 284k downloads) — the 0.5B model
+    that built Essential-Web's 24-topic taxonomy. Domain classification is running theirs, not building
+    one.
+
+### The 12 closed decisions
+
+Full table in the design doc header. Load-bearing ones: `synthetic-` path prefix · classify domains
+into Essential-Web's 24 topics gated at **≥85%** · cluster IDs in a **`_dedup/clusters.parquet` control
+file** · Bloom deletes / MinHash annotates · **25,001,984-token shards** · curated pools
+over-provisioned (15% of default, not the evidence's 2%) · **equal 15B** from each FinePhrase format ·
+n-gram decon over all 260B **+ LLM-based over the synthetic 60B** · proxy sweep **deferred** · domain
+failure = **hard stop, no escalation**.
+
+### The user's two best corrections to my analysis
+
+- **"The point of a reservoir is we don't need to calculate ratios to a tee right now."** Correct, and
+  it became the doc's governing principle: **ratios are read-time config (free to change); pools are
+  permanent (a small pool forecloses an experiment forever).** I had sized curated pools from
+  benchmark evidence down to 2%; they are now 15%, because being wrong that way costs $5/month and
+  being wrong the other way costs a re-publish.
+- **"Wouldn't partial-file budgets get rid of document borders?"** This sent me back to the docstring
+  and overturned finding #5 above. The real problem is positional bias, not document borders — but the
+  question found a wrong recommendation I had already written down twice.
+
+### Where it stops
+
+`DATASET-DESIGN-reservoir.md` **§9 is a self-contained Phase-0 runbook** for a fresh compacted session:
+a 3-wave subagent task graph (8 parallel token re-counters + license + infra, then sample harvest, then
+the dual-judge smoke test), a delegation rule ("large input, small output"), and a **boxed hard stop**
+after the smoke test — explicitly *"passing is not consent"* — before the ~$595 classification, which is
+59% of the build cost and permanently bakes labels into `manifest_sha256`.
 
 ---
 
@@ -982,17 +1093,22 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 > the reasoning it records. Several entries describe work already finished; each is struck through
 > where that is the case. The one-line version of the current list:
 >
+> 0. **COMMIT `DATASET-DESIGN-reservoir.md`** — untracked, 60 KB, a full day of research. See the
+>    banner at the top of this file. Do this first, before reading further.
 > 1. **Hand `docs/PLATFORM-INTEGRATION.md` to whoever owns `edu-llm/platform`** — the four
 >    blockers to a training run all live there, and its banner is now re-audited against live
 >    state. Not this repo's to fix, and the long pole.
 > 2. **Deploy bucket-policy v2** (`infra/DEPLOY.md:256+`) — the live policy is still
 >    `airlock-v1`, one Deny covering Put *and* Delete with the validator exempt from both. That
->    was a small risk over 11 objects; it now guards 587 GiB.
+>    was a small risk over 11 objects; it now guards 587 GiB, and the reservoir would take it past 1.5 TB.
 > 3. **Set a timeout on the `edullm-validator` job def** — it has none, so a wedged auto-promote
->    holds the queue forever.
+>    holds the queue forever. 7200 s. **This is also a Phase-0 task in the reservoir runbook**
+>    (`DATASET-DESIGN-reservoir.md` §9.3 task C), so it gets done either way.
 > 4. **`sft_conversations_v1` still substring-matches split names** instead of using
 >    `contracts.is_trainable`.
 > 5. **Write the adapter** once #1 unblocks — 15 lines, executed and proven against real bytes.
+> 6. **Execute reservoir Phase 0** when the user is ready — `DATASET-DESIGN-reservoir.md` §9 is
+>    self-contained and ends at a hard stop. Independent of #1–#5.
 >
 > Also queued, small: reship the `_dist` wheel if anything ever runs the READER on Batch
 > (`labels=`/`build_mixture` postdate the deployed 0.5.0; validate/publish don't use them, so it
