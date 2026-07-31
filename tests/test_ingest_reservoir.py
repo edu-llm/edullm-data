@@ -701,3 +701,48 @@ def test_errors_exit_nonzero_rather_than_raising(monkeypatch, capsys):
     rc = main(["ids", "--run-id", "test", "--bucket", "edullm-landing"])
     assert rc == 2
     assert "not a Batch job" in capsys.readouterr().err
+
+
+def test_scan_ids_disables_pyarrow_pre_buffer():
+    """`pre_buffer=False` is the array-SIGSEGV fix and nothing else asserts it.
+
+    pyarrow defaults `pre_buffer=True`, which dispatches a Python file object's range reads to
+    Arrow's NATIVE IO thread pool. Every array child that ran with the default died on exit 139;
+    the same code with `pre_buffer=False` exits 0 (A/B on Batch, `resshim-J-noop` vs
+    `resshim-K-prebuf`, 2026-07-31). The default is also invisible — it is not written at the call
+    site — so a future edit that drops the keyword reintroduces the crash silently and only in
+    production, under an array, after the first config. Hence a source-level assertion.
+    """
+    import inspect
+
+    from edullm_data.ingest_reservoir import _scan_ids
+
+    src = inspect.getsource(_scan_ids)
+    assert "pre_buffer=False" in src, (
+        "pq.ParquetFile(...) in _scan_ids must pass pre_buffer=False. pyarrow's default (True) "
+        "hands range reads to Arrow's native IO threads and SIGSEGVs every array child."
+    )
+
+
+def test_range_file_read_returns_exactly_n_bytes():
+    """The short-read loop, recomputed against a transport that deliberately returns short.
+
+    Complements the `pre_buffer` guard: that one keeps Arrow off native threads, this one keeps a
+    truncated 206 body from reaching Arrow at all. Both failure modes present as exit 139.
+    """
+    from edullm_data.ingest_reservoir import _RangeFile
+
+    payload = bytes(range(256)) * 40  # 10,240 bytes
+    rf = _RangeFile("https://example.invalid/x", len(payload), {})
+    calls = []
+
+    def _short(n, start):
+        calls.append((n, start))
+        return payload[start : start + max(1, n // 3)]  # always short
+
+    rf._read_once = _short
+    got = rf.read(9_000)
+    assert len(got) == 9_000, "read() must satisfy the full request, not return short"
+    assert got == payload[:9_000], "the loop must reassemble contiguous bytes in order"
+    assert len(calls) > 1, "a short transport should have forced more than one request"
+    assert rf.pos == 9_000 and rf.bytes_fetched == 9_000

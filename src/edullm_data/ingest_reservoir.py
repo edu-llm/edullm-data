@@ -543,6 +543,31 @@ def _scan_ids(
     Payload columns are never requested — the Range reader fetches the footer plus the `id` column
     chunks and nothing else. Ids are digested to `uint64` per row group and the strings dropped
     immediately; keeping them would cost 12x the memory for information nothing downstream reads.
+
+    ⚠️ **`pre_buffer=False` IS LOAD-BEARING. IT IS THE ARRAY SEGFAULT FIX. DO NOT REMOVE IT.**
+
+    pyarrow's default is `pre_buffer=True`, which hands this file's coalesced range reads to
+    **Arrow's own IO thread pool** — native C++ threads that call `seek()`/`read()` back into
+    `_RangeFile`. Measured on pyarrow 25.0.0: with `True`, 30 of 32 reads arrive on threads this
+    module never created; with `False`, 100% stay on the calling worker thread.
+
+    Those native threads are the crash. Arrow sizes its IO pool from the **host** CPU count, not
+    the cgroup: inside a 2-vCPU container on a `c7i.8xlarge` it reports `io_threads=8,
+    cpu_threads=32` (logged live). Each one runs a full `urlopen` — TLS handshake, redirect
+    chain, socket read — inside a C++ thread-pool callback, and under the array's per-IP 429
+    storm those callbacks block for many seconds each. That is the configuration that dies.
+
+    A/B on Batch, 4-child array, everything else byte-identical (`resshim-J-noop` vs
+    `resshim-K-prebuf`, 2026-07-31):
+
+        pre_buffer=True  (default) -> exit 139, "Segmentation fault (core dumped)"
+        pre_buffer=False (this)    -> exit 0
+
+    Do NOT "fix" this by adding a lock to `_RangeFile` instead. That hypothesis was tested and
+    refuted: instrumented runs measured max concurrency **1** per object and **0** interleavings
+    (`DIAG2_WORST_CONCURRENCY=0`), and a per-object `RLock` did not change the outcome. Arrow
+    serialises calls into one Python file object; the problem is the native callback context
+    itself, not a data race on `self.pos`.
     """
     import numpy as np
     import pyarrow.parquet as pq
@@ -553,7 +578,7 @@ def _scan_ids(
         # is per-IP so it belongs to the whole process, not to this thread.
         _RATE_GATE.wait()
         rf = _RangeFile(_resolve_url(repo, entry["path"]), entry["size"], headers)
-        pf = pq.ParquetFile(rf)
+        pf = pq.ParquetFile(rf, pre_buffer=False)
         md = pf.metadata
         _leaf_index(md, id_column)  # fail loudly if the schema moved
         chunks: list = []
