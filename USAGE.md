@@ -193,6 +193,19 @@ r = dataset_paths(ds_id, version, labels={"source": "stack-edu", "domain": "Pyth
 r.rows   # recomputed for what you SELECTED, not the whole partition
 ```
 
+**A `domain=` filter can silently drop most of a corpus.** Label depth is per-entry: a `domain`
+segment exists only where the upstream source shipped one, so a `domain=` predicate matches the
+nested sources and skips every flat one — the key is *absent*, not unequal. Both `dataset_paths`
+and `build_mixture` emit `read.PartialLabelCoverage` naming which sources went and how many
+tokens that removed. Pass `warn_partial_labels=False` when the narrowing is intended, select by
+`source` (which every entry carries) to reach all of them, or make it fatal:
+
+```python
+import warnings
+from edullm_data.read import PartialLabelCoverage
+warnings.simplefilter("error", PartialLabelCoverage)
+```
+
 ### A weighted mixture
 
 ```python
