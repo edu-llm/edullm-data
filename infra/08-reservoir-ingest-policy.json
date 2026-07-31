@@ -32,7 +32,15 @@
     "",
     "Then SMOKE-TEST the deny, do not simulate it: iam:simulate-principal-policy is documented in",
     "CLAUDE.md as returning false denials for this account (11 known). Submit a job that attempts a",
-    "PutObject to edullm-data and read the error."
+    "PutObject to edullm-data and read the error.",
+    "",
+    "s3:GetLifecycleConfiguration IS REQUIRED, and its absence cost the first live run. The job's",
+    "own start-up guard reads the bucket's lifecycle rules to refuse staging terabytes under a",
+    "prefix nothing will expire. Least privilege means granting what the code actually calls, and a",
+    "read of a bucket's expiry rules leaks nothing. It is bucket-scoped, not `*`.",
+    "",
+    "The general lesson: a guard is code, and code needs permissions. Writing a safety check and",
+    "then not granting it is how a safety check becomes an outage."
   ],
   "Version": "2012-10-17",
   "Statement": [
@@ -70,6 +78,12 @@
           ]
         }
       }
+    },
+    {
+      "Sid": "ReadLifecycleToVerifyItsOwnStagingExpires",
+      "Effect": "Allow",
+      "Action": "s3:GetLifecycleConfiguration",
+      "Resource": "arn:aws:s3:::edullm-landing"
     },
     {
       "Sid": "ReadTheBootstrapWheel",

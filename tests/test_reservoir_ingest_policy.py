@@ -168,6 +168,52 @@ def test_the_writable_prefix_is_covered_by_the_shipped_lifecycle_rule():
     assert _assert_lifecycle_covers(_S3(), "edullm-landing", "_ingest/reservoir-dolma2/") is None
 
 
+def test_every_s3_api_the_code_calls_is_granted(policy):
+    """A guard is code, and code needs permissions.
+
+    THIS TEST EXISTS BECAUSE ITS ABSENCE COST A LIVE RUN. `_assert_lifecycle_covers` — the check
+    that refuses to stage terabytes under a prefix nothing expires — calls
+    `get_bucket_lifecycle_configuration`, and the first deployed policy did not grant
+    `s3:GetLifecycleConfiguration`. The job reached `INGEST_START`, printed `PARTITION_OK=1`, and
+    died on AccessDenied inside its own safety check.
+
+    Every other test here asserts what the policy must NOT allow, which is the interesting half —
+    but it means a policy that allows too LITTLE passes them all. This is the other direction:
+    map each boto3 call in the module to the IAM action it requires.
+    """
+    import re
+
+    from edullm_data import ingest_reservoir as mod
+
+    src = Path(mod.__file__).read_text(encoding="utf-8")
+    boto3_call_to_iam = {
+        "get_bucket_lifecycle_configuration": "s3:GetLifecycleConfiguration",
+        "put_object": "s3:PutObject",
+        "get_object": "s3:GetObject",
+        "list_objects_v2": "s3:ListBucket",
+        "head_object": "s3:GetObject",
+        "copy_object": "s3:PutObject",
+        "delete_object": "s3:DeleteObject",
+    }
+    granted = {a for st in _statements(policy, "Allow") for a in _as_list(st["Action"])}
+    # Match ANY receiver, not just `s3.` — the guard's client is named `s3_client`, and an
+    # `\bs3\.` pattern silently skipped the one call this test was written to catch. A regex that
+    # misses the motivating case is decoration, so it is asserted below that at least one call was
+    # actually found.
+    found: list[str] = []
+    for call, action in boto3_call_to_iam.items():
+        if re.search(rf"[\w.]+\.{call}\(", src):
+            found.append(call)
+            assert action in granted, (
+                f"the module calls .{call}() but the policy does not grant {action} — "
+                f"this is exactly how the first calibration run died inside its own guard"
+            )
+    assert "get_bucket_lifecycle_configuration" in found, (
+        "the lifecycle guard's call was not detected — the regex is broken, not the policy"
+    )
+    assert "put_object" in found
+
+
 def test_list_is_scoped_by_prefix_condition(policy):
     """`s3:ListBucket` takes the BUCKET as its resource, so without a prefix condition it lists
     everything in landing — a common way least-privilege policies leak more than intended."""
