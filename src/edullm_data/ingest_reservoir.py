@@ -275,13 +275,48 @@ class _RangeFile(io.RawIOBase):
         return self.pos
 
     def read(self, n: int = -1) -> bytes:
+        """Return EXACTLY `n` bytes (or fewer only at true end-of-object).
+
+        ⚠️ THE LOOP IS LOad-BEARING AND ITS ABSENCE SEGFAULTED THREE OF FOUR ARRAY CHILDREN.
+        `RawIOBase.read` is *permitted* to return short, and a single `urlopen(...).read()` does
+        exactly that when a 206 body arrives truncated — common under the rate limiting this
+        module already fights, since a throttled connection can be cut mid-body.
+
+        pyarrow does not re-request the remainder. It takes the short buffer, reads a page header
+        at an offset that now lands inside the wrong bytes, and dereferences a garbage length:
+        `Segmentation fault (core dumped)`, exit 139. Not exit 137 — this is a CRASH IN C++, not
+        the container's memory cap, and that distinction is what separates "give it more RAM"
+        (wrong, and I nearly did it) from "the buffer is short" (right).
+
+        Deterministic rather than flaky: it hit whichever config followed the first successful
+        one, on every child that ran long enough to be throttled. Shard 0 finished only because
+        it happened not to be cut.
+
+        So: loop until the request is satisfied. A read that returns 0 bytes before `n` is a real
+        truncation and raises, because silently returning short is the whole failure mode.
+        """
         if n is None or n < 0:
             n = self.size - self.pos
         n = min(n, self.size - self.pos)
         if n <= 0:
             return b""
+        out = bytearray()
+        while len(out) < n:
+            chunk = self._read_once(n - len(out), self.pos + len(out))
+            if not chunk:
+                raise IngestError(
+                    f"short read: got {len(out)} of {n} bytes at offset {self.pos} in {self.url}. "
+                    f"Returning a short buffer here is what pyarrow turns into a SIGSEGV."
+                )
+            out += chunk
+        self.pos += len(out)
+        self.bytes_fetched += len(out)
+        return bytes(out)
+
+    def _read_once(self, n: int, start: int) -> bytes:
+        """One ranged GET of at most `n` bytes from `start`, with 429-aware backoff."""
         req = urllib.request.Request(
-            self.url, headers={**self._h, "Range": f"bytes={self.pos}-{self.pos + n - 1}"}
+            self.url, headers={**self._h, "Range": f"bytes={start}-{start + n - 1}"}
         )
         last: Exception | None = None
         for attempt in range(_MAX_ATTEMPTS):
@@ -308,8 +343,8 @@ class _RangeFile(io.RawIOBase):
                         f"range read failed after {_MAX_ATTEMPTS} attempts: {self.url}: {exc}"
                     ) from last
                 time.sleep(min(_BACKOFF_CAP_S, 3 * (attempt + 1)))
-        self.pos += len(data)
-        self.bytes_fetched += len(data)
+        # `pos`/`bytes_fetched` are advanced by the CALLER once the full request is satisfied —
+        # advancing here as well would double-count and desynchronise the next Range header.
         return data
 
 

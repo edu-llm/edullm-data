@@ -469,6 +469,102 @@ def test_merge_requires_of(capsys):
 
 
 # --------------------------------------------------------------------------------------
+# Short reads — the bug that SIGSEGV'd three of four array children
+# --------------------------------------------------------------------------------------
+
+
+class _ChunkedHTTP:
+    """A server that answers every Range request with at most `chunk` bytes.
+
+    That is legal HTTP and legal `RawIOBase`, and it is what a throttled connection does when the
+    body is cut mid-transfer. It is also what pyarrow cannot survive.
+    """
+
+    def __init__(self, body: bytes, chunk: int):
+        self.body, self.chunk = body, chunk
+        self.n_requests = 0
+
+    def __call__(self, req, timeout=None):
+        rng = req.headers["Range"].split("=")[1]
+        start, end = (int(x) for x in rng.split("-"))
+        self.n_requests += 1
+        data = self.body[start : min(end + 1, start + self.chunk)]
+
+        class _R:
+            def read(self_inner):
+                return data
+
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, *a):
+                return False
+
+        return _R()
+
+
+def _range_file(monkeypatch, body: bytes, chunk: int):
+    import edullm_data.ingest_reservoir as mod
+
+    server = _ChunkedHTTP(body, chunk)
+    monkeypatch.setattr(mod.urllib.request, "urlopen", server)
+    return mod._RangeFile("https://example/x.parquet", len(body), {}), server
+
+
+def test_read_returns_exactly_what_was_asked_for_despite_short_responses(monkeypatch):
+    """THE regression test for exit 139.
+
+    A single `urlopen(...).read()` may return fewer bytes than the Range asked for. pyarrow does
+    not re-request the remainder — it parses a page header at an offset inside the wrong bytes and
+    dereferences a garbage length, which is a SIGSEGV in C++, not a Python exception. Three of four
+    array children died this way, deterministically, on the config after the first successful one.
+    """
+    body = bytes(range(256)) * 40  # 10,240 bytes
+    rf, server = _range_file(monkeypatch, body, chunk=100)
+    got = rf.read(5_000)
+    assert got == body[:5_000]
+    assert len(got) == 5_000
+    assert server.n_requests >= 50, "must have looped rather than returned short"
+
+
+def test_sequential_reads_stay_aligned_after_short_responses(monkeypatch):
+    """The offset must not drift: `_read_once` no longer advances `pos`, the caller does. Getting
+    that wrong double-counts and every subsequent Range header is wrong."""
+    body = bytes(range(256)) * 20
+    rf, _ = _range_file(monkeypatch, body, chunk=64)
+    a = rf.read(1_000)
+    b = rf.read(1_000)
+    assert a == body[:1_000]
+    assert b == body[1_000:2_000]
+    assert rf.tell() == 2_000
+    assert rf.bytes_fetched == 2_000
+
+
+def test_a_read_that_stalls_raises_rather_than_returning_short(monkeypatch):
+    """If the server yields nothing before `n`, that is a real truncation. Returning the partial
+    buffer is precisely the failure mode, so it must raise."""
+    body = b"x" * 1_000
+    rf, _ = _range_file(monkeypatch, body, chunk=0)
+    with pytest.raises(IngestError, match="short read"):
+        rf.read(500)
+
+
+def test_read_past_end_returns_empty_not_an_error(monkeypatch):
+    body = b"abcdef"
+    rf, _ = _range_file(monkeypatch, body, chunk=16)
+    rf.seek(6)
+    assert rf.read(10) == b""
+
+
+def test_read_clamps_to_object_size(monkeypatch):
+    """Asking for more than remains must return the remainder, not raise."""
+    body = b"abcdefghij"
+    rf, _ = _range_file(monkeypatch, body, chunk=3)
+    rf.seek(8)
+    assert rf.read(100) == b"ij"
+
+
+# --------------------------------------------------------------------------------------
 # Merge — the refusal matters more than the concatenation
 # --------------------------------------------------------------------------------------
 
