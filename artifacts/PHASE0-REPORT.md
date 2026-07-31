@@ -234,34 +234,91 @@ independently of any rate limiting).
 
 ---
 
-## §9.5 REPORT — to be completed
+## §9.5 REPORT — Phase 0 complete, awaiting the decision
 
     DUAL-JUDGE SMOKE TEST
-    | source    | J (A↔B) | score (D on A==B) | inherited err | n scored | n excluded | verdict |
-    | dclm      |       … |                 … |             … |        … |          … | … |
-    | finemath  |       … |                 … |             … |        … |          … | … |
-    | academic  |       … |                 … |             … |        … |          … | … |
-    | reference |       … |                 … |             … |        … |          … | … |
-    | qa-forum  |       … |                 … |             … |        … |          … | … |
+    taxonomy: FDC Level 1, 10 categories (NOT the plan's "24 topics" — that never existed)
+    A = qwen.qwen3-next-80b-a3b   B = qwen.qwen3-32b-v1:0   (Bedrock; HF is out of credits)
+    D = EssentialAI/EAI-Distill-0.5b, self-hosted on Batch GPU
 
-    Human spot-check (50 docs where A≠B): <pending>
+    | source    | J (A↔B) | score (D on A==B) | 95% CI         | inherited err | n scored | n excl | verdict |
+    | qa-forum  |   92.0% |             97.4% | [95.5%, 98.5%] |         22.5% |      460 |     14 | PASS    |
+    | academic  |   75.4% |             84.9% | [80.9%, 88.1%] |         35.0% |      377 |     13 | FAIL*   |
+    | finemath  |   73.6% |             84.8% | [80.8%, 88.1%] |         22.0% |      368 |     23 | FAIL*   |
+    | reference |   70.0% |             80.3% | [75.8%, 84.1%] |         21.3% |      350 |     20 | FAIL    |
+    | POOLED    |   77.8% |             87.5% | [85.8%, 89.1%] |         25.4% |     1555 |     70 | PASS    |
+    | dclm      |     n/a |               n/a |            n/a |           n/a |        0 |      0 | NO DATA |
+
+    * academic and finemath miss by 0.1-0.2 points and their CIs SPAN the 85% bar. They are
+      statistically indistinguishable from a pass. Only `reference` is clearly below (CI tops
+      out at 84.1%). Only `qa-forum` and the pool are clearly above.
+
+    4,000 Bedrock calls, 100% parse rate, 0 call failures. D: 2,000 labels, 0 abstains,
+    0 unparseable.
+
+    Human spot-check (50 docs where A≠B): AMBIGUITY IS REAL, NEITHER JUDGE IS BROKEN.
+    The disagreements cluster on genuine taxonomic boundaries, not errors:
+      NatSci/Math vs Tech/Applied   13   (is a biofilm proteomics paper science or medicine?)
+      Computing   vs Tech/Applied    9   (Dewey splits computing from engineering)
+      SocSci      vs Tech/Applied    5
+      Arts        vs Literature      4   (an album article)
+      SocSci      vs Hist/Geo        4   (a 1556-in-France article)
+    Each sampled document is one a careful human would also hesitate on. This is the
+    signal §9.4 asked for: the ceiling J≈70-78% reflects the taxonomy, not the instruments.
 
     TOKEN RE-COUNT VS PLAN
-    <partial — see Task A above; streaming count required on Batch>
+    | category  | plan  | measured   | verdict                                    |
+    | edu-web   |  48B  | 261.3B     | MET 7.0x                                   |
+    | web       |  30B  | 114.69B    | MET 5.5x (but via dclm_100BT, not baseline) |
+    | math      |  36B  | 34.69B     | 3x met (4.96x); pool short 3.6%            |
+    | reference |  14B  | 8.87B      | NOT MET — 1.5% below even the 3x floor     |
+    | academic  |  20B  | unmeasured | likely met (182.6 GB of UTF-8 in peS2o)    |
+    | code      |  40B  | unmeasured | likely met (61-80B desk floor)             |
+    | QA/forum  |  12B  | unmeasured | likely met (~23.9B card)                   |
+    | synthetic |  60B  | unmeasured | >=6x headroom on the tightest format       |
+    Detail and the recommended fixes: artifacts/sizing-revised.md
 
     INFRA
-    - validator job-def timeout: SET to 7200s (rev 7)
+    - validator job-def timeout: SET to 7200s (edullm-validator:7)
     - bucket-policy v2 deployed: NO (reported only, as instructed)
+    - airlock re-verified: intern PutObject to edullm-data -> AccessDenied (explicit);
+      edullm-landing still writable
 
     COST SO FAR
-    <a few dollars of Bedrock + Batch; well under the <$1 smoke-test figure for judging itself>
+    Under $10. ~4,000 Bedrock calls at 256-token prompts, plus ~6 minutes of one g5.xlarge
+    (two GPU jobs, the first of which failed on IAM before loading the model).
+
+    ⚠️ COST OF WHAT COMES NEXT — THE PLAN'S ~$595 DOES NOT SURVIVE MEASUREMENT.
+    Measured 10.8 doc/s on one A10G => 112M docs = 3,080 GPU-hours = ~$920 spot /
+    ~$3,100 on-demand. And that is an optimistic FLOOR: the smoke test ran 256-token
+    prefixes while the real run processes full documents, which average 11,010 chars —
+    a 10.8x input-length factor. Untuned, plausibly $3k-10k. See artifacts/COST-RECHECK.md,
+    which also questions where "112M documents" comes from (DCLM-baseline alone is ~3.0B docs)
+    and notes that two sources already ship usable labels and could drop out entirely.
 
     ARTIFACTS
-    artifacts/PLAN-CORRECTIONS.md          two plan defects + one new irreversible decision
-    artifacts/smoke/SUBSTRATE.md           taxonomy + model substrate corrections
-    artifacts/smoke/{harvest,harvest_parquet,judge,classify_d,score,submit_classify_d}.py
-    artifacts/recount/{README.md,recount.py,*.json}
-    artifacts/licenses/{openstax-books.json,libretexts-distribution.json,SCHEMA.md}
+    artifacts/PHASE0-REPORT.md      this file
+    artifacts/COST-RECHECK.md       the $595 -> $920-$10k analysis  <-- read this first
+    artifacts/PLAN-CORRECTIONS.md   10 verified plan defects
+    artifacts/sizing-revised.md     §2.1 pools vs measured counts
+    artifacts/RESUME.md             how to resume if the session died
+    artifacts/smoke/SUBSTRATE.md    taxonomy + substrate + my prompt bug
+    artifacts/smoke/*.py            harvest / judge / classify / score / submit
+    artifacts/smoke/results.json    the gate numbers as JSON
+    artifacts/recount/*.json        per-category token counts
+    artifacts/licenses/*            OpenStax 129 books + LibreTexts distribution
 
     DECISION NEEDED
-    Proceed with the ~$595 full domain classification (112M docs, EAI-Distill-0.5b)?
+    Proceed with the full domain classification (EAI-Distill-0.5b over every unlabelled
+    document)? The plan budgets ~$595; measurement says $920 at best and plausibly several
+    times that.
+
+    Per §9.1 this stop applies whether the gate passed or failed — passing is not consent.
+    The pooled score passes at 87.5%; two of four sources land within noise of the bar and
+    one (`reference`) is clearly below it.
+
+    If you want the per-source bar met before spending, the cheapest lever is NOT a bigger
+    model — it is the prompt. A four-word omission in my first attempt cost 38 points
+    (49.1% -> 87.5% pooled), and the remaining errors cluster on the same kind of
+    boundary the spot-check exposes (computing vs engineering, science vs medicine).
+    Sharpening the category descriptions is hours of work and no new spend.
