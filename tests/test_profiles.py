@@ -725,6 +725,45 @@ def test_text_corpus_invalid_max_identical_fraction():
     assert "invalid-max-identical-fraction" in _codes(text_corpus_v1.check_group_config(ctx))
 
 
+@pytest.mark.parametrize("fraction", [False, True, 0.0, "0.5"])
+def test_text_corpus_rejects_boolean_and_zero_identical_fraction(fraction):
+    body = _jsonl([_doc("hello")])
+    entry = _text_entry("text/train-00000.jsonl", body)
+    ctx = _seed_and_ctx(
+        prefix="",
+        group=_text_group(max_identical_fraction=fraction),
+        entries=[entry],
+        bodies={"text/train-00000.jsonl": body},
+    )
+    assert "invalid-max-identical-fraction" in _codes(text_corpus_v1.check_group_config(ctx))
+
+
+def test_text_corpus_caps_per_row_violations():
+    body = _jsonl([{"id": str(i)} for i in range(150)])
+    entry = _text_entry("text/train-00000.jsonl", body)
+    ctx = _seed_and_ctx(
+        prefix="",
+        group=_text_group(),
+        entries=[entry],
+        bodies={"text/train-00000.jsonl": body},
+    )
+    violations = text_corpus_v1.check_documents(ctx)
+    missing = [v for v in violations if v.code == "missing-text-field"]
+    assert len(missing) == text_corpus_v1._MAX_ROW_VIOLATIONS_PER_SHARD
+    assert "text-row-violations-truncated" in _codes(violations)
+
+
+def test_text_corpus_heavy_hitter_candidates_are_bounded():
+    candidates: dict[bytes, int] = {}
+    for i in range(10_000):
+        text_corpus_v1._add_heavy_hitter(
+            candidates,
+            text_corpus_v1._text_fingerprint(f"unique document {i}"),
+            slots=8,
+        )
+    assert len(candidates) <= 8
+
+
 def test_profiles_expose_the_module_contract():
     for mod in (
         pretrain_tokens_v1,

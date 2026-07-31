@@ -1066,6 +1066,9 @@ def _register_parent_shas(s3, data_bucket, group, ds_depends, all_shas, v, gname
         v.append(Violation("depends-on-no-data-bucket", f"group {gname!r} has depends_on but no data_bucket to resolve it", path=gname))
         return
     for dep in ds_depends:
+        if not isinstance(dep, Mapping):
+            v.append(Violation("invalid-depends-on", f"group {gname!r} has a non-object depends_on entry", path=gname))
+            continue
         did = dep.get("dataset_id")
         dver = dep.get("version")
         dprefix = f"{did}/{dver}"
@@ -1074,11 +1077,59 @@ def _register_parent_shas(s3, data_bucket, group, ds_depends, all_shas, v, gname
         except NotFound:
             v.append(Violation("dangling-parent", f"depends_on parent {dprefix!r} not found in data bucket", path=gname))
             continue
-        for pg in pds.get("groups", []):
+        pinned = dep.get("manifest_sha256")
+        if not isinstance(pinned, str) or not pinned:
+            v.append(
+                Violation(
+                    "parent-manifest-pin-missing",
+                    f"depends_on parent {dprefix!r} must pin manifest_sha256",
+                    path=gname,
+                )
+            )
+            continue
+        declared_parent_hashes = [
+            pg.get("manifest_sha256")
+            for pg in pds.get("groups", [])
+            if isinstance(pg.get("manifest_sha256"), str)
+        ]
+        parent_groups = [pg for pg in pds.get("groups", []) if pg.get("manifest_sha256") == pinned]
+        if not parent_groups:
+            if declared_parent_hashes:
+                v.append(
+                    Violation(
+                        "parent-manifest-pin-mismatch",
+                        f"depends_on parent {dprefix!r} does not declare pinned "
+                        f"manifest_sha256={pinned!r}",
+                        path=gname,
+                    )
+                )
+                continue
+            # Compatibility for old parent dataset.json documents that lack the redundant
+            # group-level digest: compare the pin against each live manifest below.
+            parent_groups = list(pds.get("groups", []))
+        for pg in parent_groups:
             pmanifest_rel = pg.get("manifest") or "manifest.json"
             try:
                 pman = _load_json(s3, data_bucket, f"{dprefix}/{pmanifest_rel}")
             except NotFound:
+                v.append(
+                    Violation(
+                        "parent-manifest-missing",
+                        f"depends_on parent manifest {dprefix}/{pmanifest_rel!r} not found",
+                        path=gname,
+                    )
+                )
+                continue
+            actual = manifest_sha256(pman)
+            if actual != pinned:
+                v.append(
+                    Violation(
+                        "parent-manifest-hash-mismatch",
+                        f"depends_on parent {dprefix!r} pin {pinned!r} does not match "
+                        f"its live manifest {actual!r}",
+                        path=gname,
+                    )
+                )
                 continue
             for e in pman.get("entries", []):
                 sha = e.get("sha256")
@@ -1114,12 +1165,51 @@ def _resolve_tokenizer(s3, data_bucket, group, v, gname) -> dict[str, Any] | Non
     except NotFound:
         v.append(Violation("tokenizer-parent-missing", f"tokenizer dependency {dprefix!r} not found in data bucket", path=gname))
         return None
-    for pg in pds.get("groups", []):
+    pinned = tok_dep.get("manifest_sha256")
+    if not isinstance(pinned, str) or not pinned:
+        v.append(
+            Violation(
+                "tokenizer-manifest-pin-missing",
+                f"tokenizer dependency {dprefix!r} must pin manifest_sha256",
+                path=gname,
+            )
+        )
+        return None
+    declared_parent_hashes = [
+        pg.get("manifest_sha256")
+        for pg in pds.get("groups", [])
+        if isinstance(pg.get("manifest_sha256"), str)
+    ]
+    parent_groups = [pg for pg in pds.get("groups", []) if pg.get("manifest_sha256") == pinned]
+    if not parent_groups:
+        if declared_parent_hashes:
+            v.append(
+                Violation(
+                    "tokenizer-manifest-pin-mismatch",
+                    f"tokenizer dependency {dprefix!r} does not declare pinned "
+                    f"manifest_sha256={pinned!r}",
+                    path=gname,
+                )
+            )
+            return None
+        parent_groups = list(pds.get("groups", []))
+    for pg in parent_groups:
         pman_rel = pg.get("manifest") or "manifest.json"
         try:
             pman = _load_json(s3, data_bucket, f"{dprefix}/{pman_rel}")
         except NotFound:
             continue
+        actual = manifest_sha256(pman)
+        if actual != pinned:
+            v.append(
+                Violation(
+                    "tokenizer-manifest-hash-mismatch",
+                    f"tokenizer dependency {dprefix!r} pin {pinned!r} does not match "
+                    f"its live manifest {actual!r}",
+                    path=gname,
+                )
+            )
+            return None
         for e in pman.get("entries", []):
             path = e.get("path", "")
             if path.rsplit("/", 1)[-1] == "tokenizer.json":

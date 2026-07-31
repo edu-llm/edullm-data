@@ -20,6 +20,10 @@ from typing import Any
 from .s3 import S3
 
 _CHUNK = 8 * 1024 * 1024
+# A record must fit in memory because json.loads consumes a complete JSON value. This is
+# deliberately a generous document limit, while ensuring an attacker cannot turn a missing
+# newline into unbounded publisher / Gate A memory use.
+MAX_JSONL_RECORD_BYTES = 16 * 1024 * 1024
 
 
 class _ChunkReader(io.RawIOBase):
@@ -30,15 +34,13 @@ class _ChunkReader(io.RawIOBase):
     ``NotImplementedError``.
     """
 
-    def __init__(self, s3: S3, bucket: str, key: str, *, chunk_size: int = _CHUNK) -> None:
+    def __init__(self, s3: S3, bucket: str, key: str) -> None:
         super().__init__()
         self._s3 = s3
         self._bucket = bucket
         self._key = key
-        self._chunk_size = chunk_size
         self._size = int(s3.head(bucket, key)["size"])
         self._pos = 0
-        self._buf = b""
 
     def readable(self) -> bool:
         return True
@@ -47,49 +49,67 @@ class _ChunkReader(io.RawIOBase):
         view = memoryview(b).cast("B")
         if not view:
             return 0
-        data = self.read(len(view))
+        if self._pos >= self._size:
+            return 0
+        data = self._s3.get_range(
+            self._bucket,
+            self._key,
+            self._pos,
+            min(len(view), self._size - self._pos),
+        )
         n = len(data)
         view[:n] = data
+        self._pos += n
         return n
 
     def read(self, size: int = -1) -> bytes:  # noqa: A003 - io API
-        if size == 0:
-            return b""
-        if size is None or size < 0:
-            parts = [self._buf]
-            self._buf = b""
-            while self._pos < self._size:
-                n = min(self._chunk_size, self._size - self._pos)
-                parts.append(self._s3.get_range(self._bucket, self._key, self._pos, n))
-                self._pos += n
-            return b"".join(parts)
-        while len(self._buf) < size and self._pos < self._size:
-            n = min(self._chunk_size, self._size - self._pos)
-            self._buf += self._s3.get_range(self._bucket, self._key, self._pos, n)
-            self._pos += n
-        out, self._buf = self._buf[:size], self._buf[size:]
-        return out
+        # RawIOBase.read() routes through readinto(), so this does not keep and slice a
+        # retained tail. An explicit unbounded read remains the caller's opt-in API choice.
+        return super().read(size)
 
 
-def _line_iter_from_binary(stream: io.BufferedIOBase) -> Iterator[tuple[int, bytes]]:
-    """Yield ``(1-based line_no, raw_line_without_newline)`` from a binary stream."""
+def _line_iter_from_binary(
+    stream: io.BufferedIOBase, *, max_record_bytes: int = MAX_JSONL_RECORD_BYTES
+) -> Iterator[tuple[int, bytes]]:
+    """Yield ``(1-based line_no, raw_line_without_newline)`` in linear time.
+
+    ``cursor`` advances through the bytearray without copying its unconsumed suffix per
+    record. The only tail copy happens once per incoming chunk, after all complete records
+    in that chunk were yielded.
+    """
     line_no = 0
-    buf = b""
+    buf = bytearray()
+    cursor = 0
     while True:
         chunk = stream.read(_CHUNK)
         if not chunk:
             break
-        buf += chunk
+        buf.extend(chunk)
         while True:
-            i = buf.find(b"\n")
+            i = buf.find(b"\n", cursor)
             if i < 0:
                 break
+            record_bytes = i - cursor
+            if record_bytes > max_record_bytes:
+                raise ValueError(
+                    f"line {line_no + 1}: JSONL record exceeds "
+                    f"{max_record_bytes} byte limit"
+                )
             line_no += 1
-            yield line_no, buf[:i]
-            buf = buf[i + 1 :]
+            yield line_no, bytes(buf[cursor:i])
+            cursor = i + 1
+        # Do not retain a consumed prefix. This is one copy per chunk, rather than one
+        # immutable-buffer slice per short JSONL document.
+        if cursor:
+            del buf[:cursor]
+            cursor = 0
+        if len(buf) > max_record_bytes:
+            raise ValueError(
+                f"line {line_no + 1}: JSONL record exceeds {max_record_bytes} byte limit"
+            )
     if buf:
         line_no += 1
-        yield line_no, buf
+        yield line_no, bytes(buf)
 
 
 def iter_jsonl_objects_from_stream(stream: io.BufferedIOBase) -> Iterator[dict[str, Any]]:

@@ -9,12 +9,13 @@ Rows come from ``.jsonl`` / ``.jsonl.gz`` per manifest entry (Dolma-style). Ever
 document object must carry a non-empty string at the group's text field (default
 ``text``). Row counts are **recomputed by streaming-parsing the payload** with the same
 helper ``publish()`` uses (:mod:`edullm_data.jsonl`), never trusted from the manifest
-alone (§0.4). Each shard is fetched/parsed **once** for count + text + optional
-identical-text checks.
+alone (§0.4). Each shard is fetched/parsed **once** for count + mandatory text checks;
+the bounded optional identical-text heuristic makes one verification pass.
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
 from typing import Any, Mapping
 
@@ -31,13 +32,18 @@ REQUIRED_FIELDS: Mapping[str, Any] = {
     # Optional (validated explicitly — invalid values are violations, not silent defaults):
     #   text_field (nonempty str, default "text")
     #   min_text_chars (int >= 1, default 1)
-    #   max_identical_fraction (finite float in [0, 1], default 1.0 = disabled)
+    #   max_identical_fraction (finite float in (0, 1], default 1.0 = disabled)
 }
 
 _DEFAULT_TEXT_FIELD = "text"
 _DEFAULT_MIN_TEXT_CHARS = 1
 _DEFAULT_MAX_IDENTICAL = 1.0
 _MISSING = object()
+_MAX_ROW_VIOLATIONS_PER_SHARD = 100
+# Misra-Gries keeps at most this many SHA-256 fingerprints, independent of corpus size.
+# Fractions below 1 / (N + 1) cannot be detected with that bounded candidate set.
+_MAX_IDENTICAL_CANDIDATES = 1024
+_MIN_IDENTICAL_FRACTION = 1 / (_MAX_IDENTICAL_CANDIDATES + 1)
 
 
 # --------------------------------------------------------------------------------------
@@ -104,22 +110,27 @@ def _resolve_settings(ctx: GroupContext) -> tuple[str, int, float] | list[Violat
         )
 
     max_frac = _cfg_raw(ctx, "max_identical_fraction", _DEFAULT_MAX_IDENTICAL)
-    try:
-        max_frac_f = float(max_frac)
-    except (TypeError, ValueError):
+    if isinstance(max_frac, bool) or not isinstance(max_frac, (int, float)):
         out.append(
             Violation(
                 "invalid-max-identical-fraction",
-                f"max_identical_fraction must be a finite float in [0, 1]; got {max_frac!r}",
+                "max_identical_fraction must be a finite number in "
+                f"[{_MIN_IDENTICAL_FRACTION:.6f}, 1], not bool/string; got {max_frac!r}",
             )
         )
         max_frac_f = _DEFAULT_MAX_IDENTICAL
     else:
-        if not math.isfinite(max_frac_f) or max_frac_f < 0.0 or max_frac_f > 1.0:
+        max_frac_f = float(max_frac)
+        if (
+            not math.isfinite(max_frac_f)
+            or max_frac_f < _MIN_IDENTICAL_FRACTION
+            or max_frac_f > 1.0
+        ):
             out.append(
                 Violation(
                     "invalid-max-identical-fraction",
-                    f"max_identical_fraction must be a finite float in [0, 1]; got {max_frac!r}",
+                    "max_identical_fraction must be a finite number in "
+                    f"[{_MIN_IDENTICAL_FRACTION:.6f}, 1]; got {max_frac!r}",
                 )
             )
 
@@ -196,12 +207,52 @@ def check_entries_declare_row_counts(ctx: GroupContext) -> list[Violation]:
     return out
 
 
-def check_documents(ctx: GroupContext) -> list[Violation]:
-    """Single streaming pass per shard: row count, text field, optional identical-text.
+def _text_fingerprint(text: str) -> bytes:
+    """A fixed-size identity for bounded duplicate candidate tracking."""
+    return hashlib.sha256(text.encode("utf-8")).digest()
 
-    Each shard is opened once via :func:`edullm_data.jsonl.iter_jsonl_objects_s3`. The
-    identical-text heuristic is **per shard** (a 100% repeated shard is not diluted by
-    healthy siblings). ``max_identical_fraction`` of 1.0 disables that heuristic.
+
+def _add_heavy_hitter(candidates: dict[bytes, int], fingerprint: bytes, slots: int) -> None:
+    """One Misra-Gries update; the dict never grows beyond ``slots``."""
+    if fingerprint in candidates:
+        candidates[fingerprint] += 1
+    elif len(candidates) < slots:
+        candidates[fingerprint] = 1
+    else:
+        for candidate in list(candidates):
+            candidates[candidate] -= 1
+            if candidates[candidate] == 0:
+                del candidates[candidate]
+
+
+def _verify_heavy_hitters(
+    ctx: GroupContext,
+    *,
+    key: str,
+    gzipped: bool,
+    text_field: str,
+    min_chars: int,
+    candidates: Mapping[bytes, int],
+) -> dict[bytes, int]:
+    """Second streaming pass that exactly counts only bounded candidate fingerprints."""
+    counts = {fingerprint: 0 for fingerprint in candidates}
+    for row in jsonl_mod.iter_jsonl_objects_s3(ctx.s3, ctx.landing_bucket, key, gzipped=gzipped):
+        value = row.get(text_field)
+        if isinstance(value, str) and len(value.strip()) >= min_chars:
+            fingerprint = _text_fingerprint(value)
+            if fingerprint in counts:
+                counts[fingerprint] += 1
+    return counts
+
+
+def check_documents(ctx: GroupContext) -> list[Violation]:
+    """Stream each shard for mandatory checks; use a bounded optional duplicate heuristic.
+
+    Count and mandatory text checks run in one pass. With
+    ``max_identical_fraction < 1`` we retain only bounded SHA-256 candidate fingerprints
+    with Misra-Gries, then make one verification pass over those candidates. That detects
+    every text whose shard fraction exceeds the configured threshold without retaining all
+    distinct documents.
     """
     settings = _resolve_settings(ctx)
     if isinstance(settings, list):
@@ -228,7 +279,27 @@ def check_documents(ctx: GroupContext) -> list[Violation]:
 
         key = _object_key(ctx.prefix, entry.path)
         recomputed = 0
-        identical_counts: dict[str, int] = {}
+        candidate_slots = max(1, math.ceil(1 / max_frac) - 1) if max_frac < 1.0 else 0
+        candidates: dict[bytes, int] = {}
+        row_violation_count = 0
+        row_violations_truncated = False
+
+        def add_row_violation(code: str, message: str) -> None:
+            nonlocal row_violation_count, row_violations_truncated
+            if row_violation_count < _MAX_ROW_VIOLATIONS_PER_SHARD:
+                out.append(Violation(code, message, entry.path))
+                row_violation_count += 1
+            elif not row_violations_truncated:
+                out.append(
+                    Violation(
+                        "text-row-violations-truncated",
+                        f"stopped reporting per-row text violations after "
+                        f"{_MAX_ROW_VIOLATIONS_PER_SHARD}; the shard is malformed",
+                        entry.path,
+                    )
+                )
+                row_violations_truncated = True
+
         try:
             for idx, row in enumerate(
                 jsonl_mod.iter_jsonl_objects_s3(
@@ -238,34 +309,24 @@ def check_documents(ctx: GroupContext) -> list[Violation]:
                 recomputed += 1
                 val = row.get(text_field, _MISSING)
                 if val is _MISSING:
-                    out.append(
-                        Violation(
-                            "missing-text-field",
-                            f"row {idx}: document has no {text_field!r} field",
-                            entry.path,
-                        )
+                    add_row_violation(
+                        "missing-text-field",
+                        f"row {idx}: document has no {text_field!r} field",
                     )
                 elif not isinstance(val, str):
-                    out.append(
-                        Violation(
-                            "text-field-type",
-                            f"row {idx}: {text_field!r} must be a string, "
-                            f"got {type(val).__name__}",
-                            entry.path,
-                        )
+                    add_row_violation(
+                        "text-field-type",
+                        f"row {idx}: {text_field!r} must be a string, "
+                        f"got {type(val).__name__}",
                     )
                 elif len(val.strip()) < min_chars:
-                    out.append(
-                        Violation(
-                            "text-field-empty",
-                            f"row {idx}: {text_field!r} is empty/whitespace "
-                            f"(need >= {min_chars} non-whitespace chars)",
-                            entry.path,
-                        )
+                    add_row_violation(
+                        "text-field-empty",
+                        f"row {idx}: {text_field!r} is empty/whitespace "
+                        f"(need >= {min_chars} non-whitespace chars)",
                     )
-                else:
-                    if max_frac < 1.0:
-                        identical_counts[val] = identical_counts.get(val, 0) + 1
+                elif max_frac < 1.0:
+                    _add_heavy_hitter(candidates, _text_fingerprint(val), candidate_slots)
         except Exception as e:
             out.append(Violation("row-read-failed", f"could not read rows: {e}", entry.path))
             continue
@@ -290,7 +351,25 @@ def check_documents(ctx: GroupContext) -> list[Violation]:
                     entry.path,
                 )
             )
-        elif max_frac < 1.0 and recomputed >= 2 and identical_counts:
+        elif max_frac < 1.0 and recomputed >= 2 and candidates:
+            try:
+                identical_counts = _verify_heavy_hitters(
+                    ctx,
+                    key=key,
+                    gzipped=gzipped,
+                    text_field=text_field,
+                    min_chars=min_chars,
+                    candidates=candidates,
+                )
+            except Exception as e:
+                out.append(
+                    Violation(
+                        "row-read-failed",
+                        f"could not verify repeated text: {e}",
+                        entry.path,
+                    )
+                )
+                continue
             top = max(identical_counts.values())
             frac = top / recomputed
             if frac > max_frac:

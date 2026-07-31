@@ -129,6 +129,65 @@ def test_documented_multigroup_publish_attaches_tokenizer_to_tokens_not_text():
     assert r.ok, [str(v) for v in r.violations]
 
 
+def test_tokenizer_arg_rejects_competing_group_meta_pin():
+    s3 = FakeS3()
+    _publish_tokenizer(s3)
+    with pytest.raises(P.PublishError, match="competing tokenizer identities"):
+        P.publish(
+            _docs_example_tree(),
+            dataset_id="pretrain/tokenizer-conflict",
+            purpose=PURPOSE,
+            profile={"tokens": "pretrain-tokens/v1", "text": "text-corpus/v1"},
+            tokenizer="tokenizer/dolma2-bpe",
+            group_meta={
+                "tokens": {
+                    "depends_on": [
+                        {
+                            "role": "tokenizer",
+                            "dataset_id": "tokenizer/other",
+                            "version": "v1",
+                            "manifest_sha256": "a" * 64,
+                        }
+                    ]
+                },
+                "text": {"record_schema": {"text": "str", "id": "str"}},
+            },
+            s3=s3,
+            created_at=CREATED,
+            env=ENV,
+        )
+
+
+def test_validator_rejects_tampered_parent_manifest_pin():
+    s3 = FakeS3()
+    tok_version = _publish_tokenizer(s3)
+    src = _docs_example_tree()
+    plan = P.publish(
+        src,
+        dataset_id="pretrain/tokenizer-parent-pin",
+        purpose=PURPOSE,
+        profile={"tokens": "pretrain-tokens/v1", "text": "text-corpus/v1"},
+        tokenizer="tokenizer/dolma2-bpe",
+        group_meta={"text": {"record_schema": {"text": "str", "id": "str"}}},
+        s3=s3,
+        created_at=CREATED,
+        env=ENV,
+    )
+    # Keep parent dataset.json's pin unchanged, but substitute the manifest object after
+    # publication. Gate A must reject rather than deriving vocab bounds from substituted bytes.
+    parent_manifest_key = f"tokenizer/dolma2-bpe/{tok_version}/files/manifest.json"
+    parent_manifest = json.loads(s3.get("edullm-data", parent_manifest_key))
+    parent_manifest["entries"] = []
+    s3.seed("edullm-data", parent_manifest_key, json.dumps(parent_manifest).encode())
+
+    r = V.validate_dataset(
+        "edullm-landing", f"{plan.dataset_id}/{plan.version}", s3, data_bucket="edullm-data"
+    )
+    codes = {v.code for v in r.violations}
+    assert "parent-manifest-hash-mismatch" in codes
+    assert "tokenizer-manifest-hash-mismatch" in codes
+
+
 @pytest.mark.parametrize(
     "body_factory",
     [

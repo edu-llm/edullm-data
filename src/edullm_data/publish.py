@@ -112,7 +112,7 @@ def _format_for(path: str, family_defaults: Mapping[str, Any]) -> Format:
     the validator — publish() declaring it wrong is caught at Gate A, not hidden."""
     # longest-suffix match against the known extension→format table
     for ext in sorted(EXTENSION_FORMAT, key=len, reverse=True):
-        if path.endswith(ext):
+        if path.lower().endswith(ext):
             spec = EXTENSION_FORMAT[ext]
             return Format(
                 container=spec["container"],
@@ -274,6 +274,14 @@ def build_plan(
 
     for g in sorted(by_group):
         group_files = sorted(by_group[g], key=lambda t: t[0])
+        if tokenizer_depends_on is not None and profile_for(g).startswith("pretrain-tokens/"):
+            supplied_deps = group_meta.get(g, {}).get("depends_on", []) or []
+            if any(isinstance(dep, Mapping) and dep.get("role") == "tokenizer" for dep in supplied_deps):
+                raise PublishError(
+                    f"group_meta[{g!r}].depends_on declares a tokenizer while tokenizer= was "
+                    "also provided. Remove the group_meta tokenizer pin or omit tokenizer=; "
+                    "two competing tokenizer identities are unsafe."
+                )
 
         def _entry_for(item: tuple[str, int]) -> ManifestEntry:
             rel, _size = item
@@ -326,25 +334,6 @@ def build_plan(
             "manifest": f"{g}/manifest.json",
             "manifest_sha256": manifest_sha256(man),
         }
-        # merge profile-specific metadata.
-        # Tokenizer: attach a publish(tokenizer=…)-resolved depends_on to every group whose
-        # *resolved profile* is pretrain-tokens/* — never to whatever keys happen to appear
-        # in group_meta (a text-only group_meta would otherwise steal the tokenizer pin).
-        if profile_for(g).startswith("pretrain-tokens/"):
-            already = any(
-                d.get("role") == "tokenizer"
-                for d in (group_meta.get(g, {}).get("depends_on", []) or [])
-            ) or any(d.get("role") == "tokenizer" for d in (gm.get("depends_on", []) or []))
-            if tokenizer_depends_on is not None and not already:
-                existing = list(gm.get("depends_on", []) or [])
-                existing.append(dict(tokenizer_depends_on))
-                gm["depends_on"] = existing
-                already = True
-            fam_dep = defaults.get("tokenizer_dependency_optional")
-            if not already and isinstance(fam_dep, Mapping) and fam_dep.get("dataset_id"):
-                existing = list(gm.get("depends_on", []) or [])
-                existing.append({k: fam_dep[k] for k in ("role", "dataset_id", "version", "manifest_sha256") if fam_dep.get(k)})
-                gm["depends_on"] = existing
         if defaults.get("partitions") and "partitions" not in group_meta.get(g, {}):
             # The family default declares the partition SHAPE (name + by:path glob) but
             # cannot know rows — that count is only knowable once the shards exist. Fill it
@@ -377,13 +366,27 @@ def build_plan(
         if gm.get("partitions"):
             gm["partitions"] = _fill_missing_partition_rows(gm["partitions"], entries)
             gm.setdefault("coverage", defaults.get("coverage", "partition"))
-        # Re-apply tokenizer after gm.update so a caller group_meta cannot strip it from a
-        # pretrain-tokens group by omitting depends_on.
-        if profile_for(g).startswith("pretrain-tokens/") and tokenizer_depends_on is not None:
+        # A named tokenizer is authoritative for every pretrain-tokens group. Rejecting an
+        # overlapping group_meta pin above avoids silently selecting one of two identities.
+        if profile_for(g).startswith("pretrain-tokens/"):
             existing = list(gm.get("depends_on", []) or [])
-            if not any(d.get("role") == "tokenizer" for d in existing):
+            if tokenizer_depends_on is not None:
                 existing.append(dict(tokenizer_depends_on))
                 gm["depends_on"] = existing
+            elif not any(
+                isinstance(dep, Mapping) and dep.get("role") == "tokenizer"
+                for dep in existing
+            ):
+                fam_dep = defaults.get("tokenizer_dependency_optional")
+                if isinstance(fam_dep, Mapping) and fam_dep.get("dataset_id"):
+                    existing.append(
+                        {
+                            k: fam_dep[k]
+                            for k in ("role", "dataset_id", "version", "manifest_sha256")
+                            if fam_dep.get(k)
+                        }
+                    )
+                    gm["depends_on"] = existing
         groups_meta.append(gm)
 
     dataset_json = {

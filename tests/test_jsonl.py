@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import gzip
+import io
 import json
 
+import pytest
+
 from edullm_data import jsonl as J
+from edullm_data import publish as P
 from edullm_data.s3 import FakeS3
 
 
@@ -47,3 +51,27 @@ def test_stream_gzip_via_fakes3():
     assert J.count_jsonl_objects_s3(s3, "b", "shard.jsonl.gz", gzipped=True) == 3
     objs = list(J.iter_jsonl_objects_s3(s3, "b", "shard.jsonl.gz", gzipped=True))
     assert [o["id"] for o in objs] == ["d0", "d1", "d2"]
+
+
+def test_chunked_many_short_records_parse_without_tail_slicing():
+    """Short rows spanning many chunks retain only each chunk's unfinished tail."""
+    body = b"".join(json.dumps(_obj(i)).encode() + b"\n" for i in range(10_000))
+
+    class SmallChunkReader(io.BytesIO):
+        def read(self, size: int = -1) -> bytes:
+            return super().read(min(size, 127))
+
+    assert sum(1 for _ in J.iter_jsonl_objects_from_stream(SmallChunkReader(body))) == 10_000
+
+
+def test_record_size_limit_rejects_newline_free_input():
+    with pytest.raises(ValueError, match="record exceeds"):
+        list(J._line_iter_from_binary(io.BytesIO(b"x" * 33), max_record_bytes=32))
+
+
+def test_uppercase_jsonl_uses_the_jsonl_format_not_family_raw_fallback():
+    fmt = P._format_for(  # noqa: SLF001 - regression for publish's extension inference
+        "text/train-00000.JSONL",
+        {"format": {"container": "raw", "dtype": "uint32", "byte_order": "little"}},
+    )
+    assert fmt.container == "jsonl"
