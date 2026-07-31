@@ -56,12 +56,21 @@ Alternatives considered and rejected, both `validate_dataset_id`-clean (verified
 it found, and the resume state are in `artifacts/` — start with `artifacts/PHASE0-REPORT.md`, then
 `artifacts/PLAN-CORRECTIONS.md`. §9's hard stop has been reached and **resolved by the owner**: the
 domain classification it gated is **cancelled** (§1.2), so §9.4's dual-judge gate is now historical
-record rather than pending work. **§9.7's gate is now CLEAR — all three items closed on 2026-07-31:**
-item 1 (`CONTROL_PREFIXES`, both modules) landed in `4d6768e`; item 2 (slug + fold, plus the
-partial-label reader warning) landed in `934dd75`; item 3 (the per-document key) was **DECIDED —
-SKIP**. Suite at **692 passing**. **Phase 1 (§5.6) is the next unstarted phase and is unblocked** —
-though see §5.6 phase 0b for the token re-count that is *advisable* before assembly rather than
-blocking, and §2.1/`artifacts/sizing-revised.md` for the one pool (`reference`) measured as NOT met.
+record rather than pending work.
+
+**§9.7's pre-publish gate: 3 of 4 items closed.** Item 1 (`CONTROL_PREFIXES`, both modules) → `4d6768e`.
+Item 2 (slug + fold, plus the partial-label reader warning) → `934dd75`. Item 3 (the per-document key) →
+**DECIDED — SKIP**. Suite at **734 passing**.
+
+🛑 **THE ONE THING OWED BEFORE PHASE 1: §9.7 item 4** — partition the synthetic `id` space and anti-join
+it against edu-web. Found during the Phase 0c measurements, after the gate was first declared clear.
+`id` is not in `manifest_sha256`, so this is not irreversible in the usual sense — but it has a
+**build-time deadline**, because after tokenization the document→id mapping no longer exists and fixing
+it means re-tokenizing the synthetic half. Read §9.7 item 4 before starting §5.6 phase 1.
+
+**Phase 0c (the token re-count) is DONE**, cost effectively zero: all 8 pools are measured and all 8
+clear their 3× floor (`artifacts/sizing-revised.md`). Two were settled by owner decision rather than by
+measurement — `reference` resized 14 B → 9 B, and `math` accepted at 3.6% under its nominal pool.
 
 **All open decisions are CLOSED as of 2026-07-31.** In review order:
 
@@ -74,7 +83,8 @@ blocking, and §2.1/`artifacts/sizing-revised.md` for the one pool (`reference`)
 | dedup actions | Bloom **deletes**, MinHash **annotates only** | 1.3, 4.1 |
 | shard size | **25,001,984 tokens** (~100 MB) → ~10,400 objects | 2.2 |
 | curated-source pools | over-provisioned (15% of default) rather than tuned to the evidence's 2% | 2.1 |
-| synthetic split | **equal 15B** from each of faq/tutorial/math/table | 3.3 |
+| synthetic split | **equal 15B** from each of faq/tutorial/math/table — ⚠️ but the four formats are ~91–93% the SAME documents, so this needs §9.7 item 4's `id` partition to be 60B of distinct content | 3.3 |
+| **synthetic `id` partition** | **DECIDED 2026-07-31 — hash-partition the id space 4 ways AND anti-join against edu-web. OWED before Phase 1; build-time deadline** | **9.7 item 4** |
 | decontamination | n-gram over all 255B **+ LLM-based over the synthetic 60B** | 4.2 |
 | proxy sweep | **deferred** until after the reservoir exists; no escalation path | 5.2 |
 | **share-alike** | **keep SA sources SEPARABLE (precautionary only); do NOT drop them** | **1.5** |
@@ -635,15 +645,27 @@ scored **17.18 macro vs DCLM's 13.77 (+3.41)**. Largest same-scale effect in the
 sources:
 
 ```
-tokens/synthetic-finephrase-faq/…       15B   (of 148.1B available)
-tokens/synthetic-finephrase-tutorial/…  15B   (of 147.4B)
-tokens/synthetic-finephrase-math/…      15B   (of  98.4B)
-tokens/synthetic-finephrase-table/…     15B   (of  92.4B)
+tokens/synthetic-finephrase-faq/…       15B   (of 148.54B MEASURED, needs 10.1%)
+tokens/synthetic-finephrase-tutorial/…  15B   (of 147.92B, needs 10.1%)
+tokens/synthetic-finephrase-math/…      15B   (of  94.74B, needs 15.8%)
+tokens/synthetic-finephrase-table/…     15B   (of  86.95B, needs 17.3%)  <- worst case
 ```
 
-Uses only ~16% of the smallest config. Keeping the formats separate matters because they measurably
-differ (table 17.18 vs tutorial 15.88 macro), so a teammate can A/B them — a single blended
-`synthetic` source would destroy that permanently. Reasons to ingest rather than generate:
+Availability confirmed by exact nested-leaf footer measurement (Phase 0c), not card figures: 478.15B
+total, 5.8–9.9× headroom per format.
+
+🛑 **BUT THE FOUR FORMATS ARE ~91–93% THE SAME DOCUMENTS, so this table does NOT give you 60B of
+distinct content — it gives ~15B wearing four hats.** Measured at the same shard position in each
+config: faq∩math 91.0%, faq∩table 92.6%, faq∩tutorial 92.9%. **§9.7 item 4 is the fix and it must run
+before tokenization**: hash-partition the `id` space so format *f* takes `sha256(id) % 4 == f`. A
+disjoint quarter yields 25.0% against that 17.3% worst case, so every format still reaches its 15B —
+and after it, the formats share zero source documents. Read §9.7 item 4 before building this.
+
+Keeping the formats separate as four `source` values still matters — they measurably differ (table 17.18
+vs tutorial 15.88 macro), so a teammate can A/B them, and a single blended `synthetic` source would
+destroy that permanently. ⚠️ What the partition *does* cost: under it you compare **format
+distributions**, not the same document rendered four ways. Disjoint 25% samples support the former fine
+(it is what the published ablation measures), but paired-document comparison is gone for `v1`. Reasons to ingest rather than generate:
 
 - The paper states **scaling the generator past ~1B params yields no additional benefit** — generator
   *family* mattered more than size (SmolLM2 16.55 > Falcon3 15.54 > Qwen3 14.49). A bigger generator
@@ -705,6 +727,13 @@ dumps, then trained on the ~31B *kept* vs 171B *removed* tokens — **the remove
 (arXiv:2406.17557 §3.4). Pythia found dedup gave "no clear benefit" at 70M–12B equi-token.
 
 **Pipeline (≈$150–450 one-time):**
+0. **Synthetic `id` partition + edu-web anti-join** (§9.7 item 4) — **destructive, and it must run FIRST**,
+   because it is the only step whose input (`id`) ceases to exist after tokenization. Assign FinePhrase
+   format *f* the ids where `sha256(id) % 4 == f`, then drop every FinePhrase id from the FineWeb-Edu
+   draw. Without it the four formats are ~91–93% the same documents and synthetic collides 100% with
+   edu-web at the document level — neither of which a digest or MinHash can see, because four
+   rephrasings are four different strings. Free: the anti-join is a second membership test against the
+   Bloom filter step 2 builds anyway.
 1. URL-key dedup (Dolma's URL stage alone removes ~53% of docs) — **destructive**
 2. Exact document-hash dedup, within and across sources — **destructive**, **~$3**, and DCLM measured
    Bloom-filter-alone at **+1.6 CORE**, equal to the full Exact+MinHash+SuffixArray stack. Highest
@@ -1011,7 +1040,7 @@ The deferral in §5.2 only makes sense as an ordering, so here it is explicitly.
 | **0. Pre-flight** ✅ **DONE 2026-07-31** | Re-counted 6 sources under dolma2; per-book licenses for OpenStax (129 books) + LibreTexts (40,049 rows); validator timeout set to 7200 s; airlock re-verified. Found 10 plan defects. | Token counts from cards are not comparable — most name no tokenizer, and every Common Pile "token" figure is `Size(GB) × 0.25`, pure arithmetic. |
 | **0b. Pre-publish gate** ✅ **CLEAR** | All three §9.7 items closed 2026-07-31. Item 1 (`CONTROL_PREFIXES`, both the validator and producer halves) → `4d6768e`. Item 2 (`slug_path_segment` / `build_domain_slug_map` + the `PartialLabelCoverage` reader warning) → `934dd75`. Item 3 (per-document key) → **DECIDED — SKIP**. Suite 626 → **692**. | Each was irreversible-if-wrong and cheap-if-done-first: the `domain` slugs sit inside `manifest_sha256`, and so would the doc-index key — which is why skipping it had to be a deliberate decision rather than an omission. |
 | **0c. Token re-count** ⬅ **IN PROGRESS 2026-07-31** | Measuring the 4 categories that came back **0.00B** — academic, code, qa-forum, synthetic — by parquet footers, the one method Phase 0 proved quota-immune. ✅ The `reference` pool is **DECIDED: 9B** (owner, §2.1 ‡), max share 15% → 12%. | Sizing is a pool question, not a layout one, so it may trail the irreversible work — but entering assembly with half the pools unverified would be a choice, not an oversight. The footer method is why this is now cheap: exact whole-split bytes off the CDN, no datasets-server quota. |
-| **1. Assemble** | Bloom-dedup (delete) → decontaminate → MinHash (annotate) → carve val from documents per source → tokenize → **attach inherited `domain` where the source ships one (§1.2), flat otherwise** → shard at 25,001,984 tokens. | §4.1 order. Val carve precedes tokenization (§1.4). The `domain` attach is now a metadata join, not a classification pass. |
+| **1. Assemble** | **Partition the synthetic `id` space + anti-join against edu-web FIRST (§9.7 item 4)** → Bloom-dedup (delete) → decontaminate → MinHash (annotate) → carve val from documents per source → tokenize → **attach inherited `domain` where the source ships one (§1.2), flat otherwise** → shard at 25,001,984 tokens. | §4.1 order. Val carve precedes tokenization (§1.4). The `domain` attach is a metadata join, not a classification pass. **The id partition goes first because it is the only step whose input disappears** — after tokenization there is no document→id mapping, so it cannot be retrofitted. Its anti-join reuses the Bloom filter §4.1 step 2 already builds. |
 | **2. Publish** | `publish()` on Batch, in-region, `hash_workers`/`copy_workers=16`, `--timeout 7200`. Gate A ≈1.4 h. | §8. |
 | **2b. Backfill the sidecars** ⬅ **NEW, and the order is not optional** | AFTER promotion, write `_dedup/clusters.parquet` (cluster × source counts) and `_licenses/sources.parquet` (+ optionally `_licenses/works.parquet`) **in place under the published prefix**. Do NOT stage them to landing. | See below — staging them loses them silently. Both are **source-level** artifacts, per §9.7 item 3's SKIP; schema in `artifacts/licenses/SCHEMA.md`. |
 | **3. Verify** | `verify_seal`, read a shard back, confirm `dataset_paths(labels={...})` slices, confirm the airlock still denies intern writes, **and confirm both sidecars survived promotion**. | The airlock re-check is a standing project rule after anything touching permissions. |
@@ -1220,9 +1249,10 @@ plan past it.
 ║                                                                          ║
 ║  The gate below is HISTORICAL RECORD. Do not re-run it.                  ║
 ║                                                                          ║
-║  §9.7's pre-publish gate is now CLEAR TOO: item 1 landed (4d6768e),      ║
-║  item 2 landed (934dd75), item 3 was DECIDED - SKIP. 692 tests pass.    ║
-║  PHASE 1 IS UNBLOCKED.                                                   ║
+║  §9.7: items 1-3 closed (4d6768e, 934dd75, DECIDED-SKIP). 734 pass.     ║
+║  ⚠️ ITEM 4 IS OWED — partition the synthetic `id` space before Phase 1.  ║
+║     Not in manifest_sha256, but it has a BUILD-TIME deadline: after      ║
+║     tokenization the doc->id mapping is gone. See §9.7 item 4.           ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1418,13 +1448,19 @@ optional and `source` selection is unaffected.
   turn — a known failure mode in this project): kill it, re-spawn narrower, and record the artifact
   path it had reached.
 
-### 9.7 ✅ THE PRE-PUBLISH GATE — CLEAR. All three items closed 2026-07-31.
+### 9.7 🛑 THE PRE-PUBLISH GATE — 3 of 4 closed; **item 4 is owed before Phase 1**
 
 Phase 0 is done and the classification is cancelled. Three items were listed here, each
 irreversible-if-wrong and cheap-if-done-first, and **all three were found by executing Phase 0 rather
 than by reading the plan** — which is the argument for having run it at all. Every one is now closed:
 item 1 landed as code (`4d6768e`), item 2 landed as code (`934dd75`), item 3 was **decided and
-skipped**. Suite 626 → **692 passing**. **Nothing irreversible is owed before Phase 1.**
+skipped**. Suite 626 → **734 passing**.
+
+⚠️ **A FOURTH item was found afterwards, during the Phase 0c measurements, and it is still owed:**
+partitioning the synthetic `id` space (item 4 below). It is not in `manifest_sha256`, so it is not
+irreversible in this document's usual sense — but it has a **build-time deadline**: after tokenization
+the document→id mapping is gone, so fixing it later means re-tokenizing the synthetic half. **Do item 4
+before Phase 1 assembly.**
 
 Kept in full below, not collapsed to a checklist: each entry records a defect in this plan that a
 careful reading had already missed once, and the reasoning is what stops it recurring in a `v2`.
@@ -1511,7 +1547,78 @@ exists in the artifact. What is *not* lost: EOS boundaries remain recoverable fr
 (§2.3), so a consumer can still count and split documents inside a shard; it just cannot say which
 upstream document any of them was.
 
-**Also worth doing before Phase 1, but not blocking** (~$10, ~1 h, in-region): finish the token
-re-count for the four unverified categories via the footer-bytes method that worked in Phase 0. §2.1's
-pools are currently 5-of-8 verified, 1 verified-failing (`reference`, see `artifacts/sizing-revised.md`),
-and 2 unverified.
+---
+
+**4. 🛑 DECIDED 2026-07-31 — PARTITION THE SYNTHETIC `id` SPACE, AND ANTI-JOIN IT AGAINST EDU-WEB.
+This is the one item with a BUILD-TIME deadline, and it is the only §9.7 entry still owed.**
+
+The owner chose **option D** of four. It is not irreversible in the manifest sense — `id` never enters
+`manifest_sha256` — but it is irreversible in the *build* sense: **redoing it means re-tokenizing the
+synthetic half**, because after tokenization there is no document→id mapping left (§9.7 item 3).
+
+**The problem, measured not inferred.** FinePhrase's four formats are not four corpora. They are one
+corpus rephrased four ways over the same ~339 M source documents. Verified by reading ids at the same
+shard position in each config:
+
+```
+faq ∩ math      910/1000 = 91.0%
+faq ∩ table     926/1000 = 92.6%
+faq ∩ tutorial  929/1000 = 92.9%
+```
+
+So drawing 15 B from each format yields **~15 B of distinct documents wearing four hats, not 60 B**. No
+digest sees it (four different strings) and no MinHash sees it (four differently-worded texts) — the same
+mechanism §4.2 already documents as "rephrasing is exactly what defeats n-gram decontamination," turned
+inward on our own pool.
+
+**And a second, worse collision:** FinePhrase is rephrased **FineWeb-Edu**, which §3.2 also draws for
+edu-web — and the two share one id space. Verified: `<urn:uuid:e2300ad5-01dd-4e80-92b3-7ec88785cc9d>`
+appears in **both** `HuggingFaceFW/fineweb-edu` and FinePhrase's `math`. Untreated, a document can appear
+as real edu-web text *and* as its own rephrasing in the same 20 B run. That is the exact pairing the
+decontamination literature warns about, and it is arguably worse than the format duplication.
+
+**The fix, and why it is free.** Ids are stable UUIDs, so hash-partition them:
+
+```
+assign format f  ⟺  sha256(id) % 4 == f          (f = 0..3 over faq/math/table/tutorial)
+then drop every FinePhrase id from the FineWeb-Edu draw
+```
+
+The arithmetic has margin, computed from the Phase 0c measurements:
+
+| format | measured | fraction needed for 15 B |
+|---|---|---|
+| faq | 148.54 B | 10.1% |
+| tutorial | 147.92 B | 10.1% |
+| math | 94.74 B | 15.8% |
+| **table** | **86.95 B** | **17.3%** ← worst case |
+
+A disjoint quarter gives **25.0%** against a 17.3% worst case, and `sha256(uuid) % 4` is even to ±0.15%
+(checked over 200 k uuids). The anti-join costs one Bloom filter over ~339 M ids ≈ 400 MB — and **§4.1
+step 2 already builds a Bloom filter**, so this is a second membership test in a pass that exists.
+Edu-web has 261.3 B against a 48 B pool, so removing every synthetic-source id leaves it far above 3×.
+
+**Requirements, both cheap:** `id` must be read at *ingest* (it is a top-level column, no schema change),
+and it need not survive into the manifest. Nothing here revives §9.7 item 3's per-document key.
+
+**What this costs, stated because it is a real loss.** §3.3 kept the four formats separate so a teammate
+could A/B them — table scored 17.18 macro vs tutorial 15.88. Under the partition you can no longer
+compare *the same document* across formats, only the format distributions. That is what the published
+ablation measures anyway, and disjoint 25% samples support it fine; but paired-document comparison is
+gone for `v1`.
+
+**Options rejected, recorded so this is not relitigated:** ship as-is (free, but the pool is 4× smaller
+than it claims and unfixable later); carry `id` into a sidecar and decide afterwards (preserves
+everything, but it is §9.7 item 3's per-document key by another name, which was deliberately skipped);
+partition the formats without the anti-join (fixes the lesser collision and leaves the 100% edu-web one
+standing).
+
+---
+
+**Also worth doing before Phase 1, but not blocking** — ✅ **DONE 2026-07-31, cost effectively zero.**
+All four unverified categories were re-counted by the footer/ISIZE method (academic 64.12 B, code
+74.81 B, QA/forum 25.93 B, synthetic 478.15 B); `needs_streaming_count` is now empty across all eight
+artifacts, so no Batch streaming job is needed. **All 8 of §2.1's pools are now measured and all 8 clear
+their 3× floor** (`artifacts/sizing-revised.md`) — `reference` by owner resize to 9 B, `math` at 3.6%
+under its nominal pool but clearing the floor 4.96×, also accepted. Phase 0's four `0.00 B` readings were
+rate-limit artifacts, not scarcity.
