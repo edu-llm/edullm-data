@@ -1,0 +1,1370 @@
+{
+ "faq": {
+  "footer_leaf": {
+   "config": "faq",
+   "n_files_in_config": 6791,
+   "total_parquet_bytes_exact": 1370433016233,
+   "leaf_path": "rollout_results.list.element.text",
+   "seed": 7,
+   "status": "ok",
+   "n_files_scanned": 250,
+   "footer_mb_fetched": 126.7,
+   "footer_scan_seconds": 49.1,
+   "sample_parquet_bytes": 51001826885,
+   "sample_rows": 12617133,
+   "sample_rewrite_leaf_bytes_raw": 25701547981,
+   "sample_original_bytes_raw": 59978882919,
+   "sample_rollout_parent_bytes": 25964666785,
+   "naive_parent_overcount_fraction": 0.01024,
+   "rewrite_values": 12617133,
+   "length_prefix_overhead_bytes": 50468532,
+   "extrapolation_scale": 26.87027,
+   "rewrite_bytes_per_parquet_byte": 0.503934,
+   "rewrite_bytes_per_parquet_byte_cv": 0.01043,
+   "est_config_rows": 339025809,
+   "est_config_rewrite_bytes_raw": 690607612956,
+   "est_config_original_bytes_raw": 1611648963365,
+   "footer_rewrite_over_original_bytes": 0.42851,
+   "mean_rewrite_bytes_per_row_footer": 2033.04,
+   "mean_original_bytes_per_row_footer": 4749.76,
+   "errors": [],
+   "tokenization": {
+    "n_row_groups_read": 12,
+    "n_rewrites_tokenized": 12000,
+    "n_empty_rewrite": 0,
+    "payload_mb_fetched": 30.2,
+    "rollouts_per_row_min_max": [
+     1,
+     1
+    ],
+    "finish_reasons": {
+     "stop": 11878,
+     "length": 122
+    },
+    "tokens_per_byte": 0.215625,
+    "tokens_per_byte_cv_per_doc": 0.1481,
+    "tokens_per_char": 0.215975,
+    "mean_tokens_per_doc": 437.33,
+    "median_tokens_per_doc": 410.0,
+    "cv_tokens_per_doc": 0.6671,
+    "max_tokens_seen": 2156,
+    "mean_rewrite_bytes_per_doc_decoded": 2028.18,
+    "calibration": {
+     "decoded_utf8_bytes": 24338197,
+     "footer_bytes_minus_length_prefix": 24350530,
+     "footer_overhead_fraction": 0.000507,
+     "note": "footer total_uncompressed_size for a NESTED leaf, minus 4 bytes per value, vs sum(len(text.encode('utf8'))) on the SAME row groups. Residual = repetition/definition levels + page headers."
+    },
+    "percentiles": {
+     "1": 10.0,
+     "5": 43.0,
+     "10": 116.0,
+     "25": 267.0,
+     "50": 410.0,
+     "75": 551.0,
+     "90": 718.9,
+     "95": 889.0,
+     "99": 1846.95
+    },
+    "short_buckets": {
+     "under_16": {
+      "n": 240,
+      "frac": 0.02
+     },
+     "under_32": {
+      "n": 504,
+      "frac": 0.042
+     },
+     "under_50": {
+      "n": 657,
+      "frac": 0.05475
+     },
+     "under_100": {
+      "n": 1051,
+      "frac": 0.08758
+     },
+     "under_200": {
+      "n": 2126,
+      "frac": 0.17717
+     },
+     "under_500": {
+      "n": 8035,
+      "frac": 0.66958
+     }
+    },
+    "tokens_retained_if_filter_ge_50": 0.99728,
+    "tokens_retained_if_filter_ge_200": 0.96059,
+    "docs_retained_if_filter_ge_50": 0.94525,
+    "short_examples": [
+     {
+      "dolma2_tokens": 1,
+      "chars": 3,
+      "text": "FAQ"
+     },
+     {
+      "dolma2_tokens": 1,
+      "chars": 3,
+      "text": "Yes"
+     },
+     {
+      "dolma2_tokens": 9,
+      "chars": 42,
+      "text": "What are the nutritional benefits of teff?"
+     },
+     {
+      "dolma2_tokens": 17,
+      "chars": 117,
+      "text": "What resources are available for finding academic articles and reliable academic databases for my Psychology Project?"
+     },
+     {
+      "dolma2_tokens": 19,
+      "chars": 85,
+      "text": "What is the significance of Malcolm McLean's invention of the container ship in 1956?"
+     },
+     {
+      "dolma2_tokens": 22,
+      "chars": 127,
+      "text": "What are some answers to the main questions about stormwater pollution that were asked, along with their corresponding answers?"
+     },
+     {
+      "dolma2_tokens": 23,
+      "chars": 91,
+      "text": "Part 3: The forest\n\nQuestion: What makes Wytham Woods home to ecology research so uniquely?"
+     },
+     {
+      "dolma2_tokens": 26,
+      "chars": 68,
+      "text": "\u0e2a\u0e48\u0e27\u0e19\u0e2b\u0e19\u0e36\u0e48\u0e07 (noyanchan)\nWhat is the pronunciation of integral in Thai?"
+     },
+     {
+      "dolma2_tokens": 27,
+      "chars": 117,
+      "text": "Corruption Essay in English 200 words, Corruption Essay in English 1000 word, Corruption Essay in English 1000 words."
+     },
+     {
+      "dolma2_tokens": 30,
+      "chars": 145,
+      "text": "What are some common features you can expect to see in wind chimes, such as size, materials, materials\u2019 characteristics, and sounds they produce?"
+     },
+     {
+      "dolma2_tokens": 36,
+      "chars": 189,
+      "text": "What type of ransomware is primarily responsible for the multimillion-dollar ransoms demanded by criminals, and involves the encryption of data by malware befor"
+     },
+     {
+      "dolma2_tokens": 37,
+      "chars": 194,
+      "text": "What is the purpose of homeschool vs. traditional public schooling, why do unit studies seem to work better for homeschooling, and what are some examples of uni"
+     }
+    ],
+    "mean_completion_tokens_generator": 436.25,
+    "dolma2_per_completion_token": 1.00248,
+    "paired": {
+     "n_pairs": 4000,
+     "rewrite_over_original_tokens": 0.44469,
+     "rewrite_over_original_bytes": 0.44131,
+     "median_of_per_doc_token_ratios": 0.60774,
+     "original_mean_tokens_per_doc": 985.54,
+     "original_tokens_per_byte": 0.214037,
+     "dolma2_over_fineweb_edu_token_count": 0.9897
+    }
+   },
+   "est_config_rewrite_utf8_bytes": 688902419368,
+   "est_config_rewrite_tokens": 148544676788,
+   "est_via_rows_x_mean_tokens": 148265224728
+  },
+  "cluster_variance": {
+   "config": "faq",
+   "n_row_groups": 40,
+   "n_rewrites": 39969,
+   "pooled_mean_tokens": 438.47,
+   "pooled_median_tokens": 412,
+   "pooled_frac_under_50": 0.05304,
+   "pooled_frac_under_16": 0.02074,
+   "pooled_frac_under_100": 0.08627,
+   "pooled_frac_under_200": 0.17356,
+   "per_group_frac_under_50": [
+    0.033,
+    0.039,
+    0.0407,
+    0.043,
+    0.043,
+    0.044,
+    0.044,
+    0.0456,
+    0.046,
+    0.046,
+    0.046,
+    0.047,
+    0.047,
+    0.048,
+    0.049,
+    0.05,
+    0.051,
+    0.053,
+    0.053,
+    0.053,
+    0.055,
+    0.055,
+    0.056,
+    0.056,
+    0.056,
+    0.057,
+    0.057,
+    0.057,
+    0.058,
+    0.058,
+    0.059,
+    0.059,
+    0.061,
+    0.061,
+    0.063,
+    0.064,
+    0.066,
+    0.066,
+    0.067,
+    0.069
+   ],
+   "per_group_mean_tokens": [
+    415.2,
+    416.0,
+    418.0,
+    418.9,
+    421.5,
+    424.7,
+    427.2,
+    427.9,
+    428.4,
+    428.9,
+    429.5,
+    431.4,
+    433.1,
+    433.2,
+    433.3,
+    433.6,
+    433.7,
+    435.6,
+    435.7,
+    436.0,
+    436.5,
+    436.7,
+    437.8,
+    437.8,
+    438.6,
+    439.8,
+    440.2,
+    441.4,
+    441.5,
+    443.7,
+    443.8,
+    446.5,
+    447.2,
+    449.2,
+    450.4,
+    450.6,
+    452.1,
+    465.1,
+    483.9,
+    495.3
+   ],
+   "between_group_sd_frac_under_50": 0.00844,
+   "between_group_sd_mean_tokens": 15.9,
+   "cluster_se_frac_under_50": 0.00134,
+   "naive_binomial_se_frac_under_50": 0.00112,
+   "cluster_se_mean_tokens": 2.51,
+   "finish_reasons": {
+    "stop": 39526,
+    "length": 443
+   },
+   "degenerate_strings_le_5_tokens": [
+    [
+     "Yes",
+     13
+    ],
+    [
+     "FAQ",
+     9
+    ],
+    [
+     "Answer:",
+     8
+    ],
+    [
+     "Document:",
+     6
+    ],
+    [
+     "No",
+     4
+    ],
+    [
+     "FAQ:",
+     3
+    ],
+    [
+     "No.",
+     2
+    ],
+    [
+     "True",
+     2
+    ],
+    [
+     "Question:",
+     2
+    ],
+    [
+     "<none>",
+     2
+    ],
+    [
+     "No content",
+     2
+    ],
+    [
+     "Q:",
+     2
+    ],
+    [
+     "Kidnap",
+     1
+    ],
+    [
+     "To be determined",
+     1
+    ],
+    [
+     "No FAQ was provided.",
+     1
+    ]
+   ],
+   "errors": []
+  }
+ },
+ "math": {
+  "footer_leaf": {
+   "config": "math",
+   "n_files_in_config": 6787,
+   "total_parquet_bytes_exact": 1209997108195,
+   "leaf_path": "rollout_results.list.element.text",
+   "seed": 7,
+   "status": "ok",
+   "n_files_scanned": 250,
+   "footer_mb_fetched": 109.4,
+   "footer_scan_seconds": 47.9,
+   "sample_parquet_bytes": 45274767804,
+   "sample_rows": 12678518,
+   "sample_rewrite_leaf_bytes_raw": 15239332011,
+   "sample_original_bytes_raw": 60260494963,
+   "sample_rollout_parent_bytes": 15495687814,
+   "naive_parent_overcount_fraction": 0.01682,
+   "rewrite_values": 12678518,
+   "length_prefix_overhead_bytes": 50714072,
+   "extrapolation_scale": 26.72564,
+   "rewrite_bytes_per_parquet_byte": 0.336597,
+   "rewrite_bytes_per_parquet_byte_cv": 0.01202,
+   "est_config_rows": 338841497,
+   "est_config_rewrite_bytes_raw": 407280888638,
+   "est_config_original_bytes_raw": 1610500245065,
+   "footer_rewrite_over_original_bytes": 0.25289,
+   "mean_rewrite_bytes_per_row_footer": 1197.98,
+   "mean_original_bytes_per_row_footer": 4748.96,
+   "errors": [],
+   "tokenization": {
+    "n_row_groups_read": 12,
+    "n_rewrites_tokenized": 11999,
+    "n_empty_rewrite": 1,
+    "payload_mb_fetched": 24.9,
+    "rollouts_per_row_min_max": [
+     1,
+     1
+    ],
+    "finish_reasons": {
+     "stop": 11917,
+     "length": 83
+    },
+    "tokens_per_byte": 0.233647,
+    "tokens_per_byte_cv_per_doc": 0.1949,
+    "tokens_per_char": 0.234033,
+    "mean_tokens_per_doc": 280.86,
+    "median_tokens_per_doc": 231,
+    "cv_tokens_per_doc": 0.9229,
+    "max_tokens_seen": 2158,
+    "mean_rewrite_bytes_per_doc_decoded": 1202.07,
+    "calibration": {
+     "decoded_utf8_bytes": 14423640,
+     "footer_bytes_minus_length_prefix": 14439837,
+     "footer_overhead_fraction": 0.001123,
+     "note": "footer total_uncompressed_size for a NESTED leaf, minus 4 bytes per value, vs sum(len(text.encode('utf8'))) on the SAME row groups. Residual = repetition/definition levels + page headers."
+    },
+    "percentiles": {
+     "1": 10.0,
+     "5": 24.0,
+     "10": 39.0,
+     "25": 115.0,
+     "50": 231.0,
+     "75": 372.0,
+     "90": 540.0,
+     "95": 677.0,
+     "99": 1372.0
+    },
+    "short_buckets": {
+     "under_16": {
+      "n": 249,
+      "frac": 0.02075
+     },
+     "under_32": {
+      "n": 916,
+      "frac": 0.07634
+     },
+     "under_50": {
+      "n": 1517,
+      "frac": 0.12643
+     },
+     "under_100": {
+      "n": 2657,
+      "frac": 0.22144
+     },
+     "under_200": {
+      "n": 5224,
+      "frac": 0.43537
+     },
+     "under_500": {
+      "n": 10526,
+      "frac": 0.87724
+     }
+    },
+    "tokens_retained_if_filter_ge_50": 0.98748,
+    "tokens_retained_if_filter_ge_200": 0.84741,
+    "docs_retained_if_filter_ge_50": 0.87357,
+    "short_examples": [
+     {
+      "dolma2_tokens": 12,
+      "chars": 54,
+      "text": "How many crickets caught a baseball in Firefly Hollow?"
+     },
+     {
+      "dolma2_tokens": 17,
+      "chars": 79,
+      "text": "Fear: How much does your boss scare you off from becoming part of this company?"
+     },
+     {
+      "dolma2_tokens": 19,
+      "chars": 51,
+      "text": "What is the value of x in the equation 3x + 5 = 21?"
+     },
+     {
+      "dolma2_tokens": 20,
+      "chars": 121,
+      "text": "Question: Why should pregnant women receive vaccines during pregnancy and what are the benefits of maternal immunization?"
+     },
+     {
+      "dolma2_tokens": 22,
+      "chars": 102,
+      "text": "Question: How to remove a magneto flywheel without damaging the magnets and coils on the stator plate?"
+     },
+     {
+      "dolma2_tokens": 27,
+      "chars": 121,
+      "text": "How many men did Colonel Denis Bourbaki and his followers lose in the Battle of Kamatero, and what were their casualties?"
+     },
+     {
+      "dolma2_tokens": 29,
+      "chars": 116,
+      "text": "Question: In what year was Lord Curzon, the ex-Viceroy and Governor-General of the British India, born and educated?"
+     },
+     {
+      "dolma2_tokens": 34,
+      "chars": 156,
+      "text": "Question: In the context of the 1920s and 1930s, what were the main political complexities involved in Transjordan and Palestine after gaining independence?"
+     },
+     {
+      "dolma2_tokens": 36,
+      "chars": 167,
+      "text": "Question: Who was the first person to be appointed to the chair of Anatomy and Surgery in Malta and what was the school he established at the Order's Sacra Infe"
+     },
+     {
+      "dolma2_tokens": 37,
+      "chars": 151,
+      "text": "What are Richard E. Zeebe (University of Hawai\u2019i at Manoa) and Lucas J. Lourens (Utrecht University) researching in the context of scientific research?"
+     },
+     {
+      "dolma2_tokens": 38,
+      "chars": 181,
+      "text": "Question: Find Tordesillas in Spain, 20 minutes from Valladolid and less than two hours from Madrid, and understand its historical significance by signing the T"
+     },
+     {
+      "dolma2_tokens": 42,
+      "chars": 221,
+      "text": "Question: How would your calculation change if you were tasked with finding the number of pedestrians in a hypothetical accident scenario, if the total number o"
+     }
+    ],
+    "mean_completion_tokens_generator": 291.02,
+    "dolma2_per_completion_token": 0.965,
+    "paired": {
+     "n_pairs": 3999,
+     "rewrite_over_original_tokens": 0.25749,
+     "rewrite_over_original_bytes": 0.23813,
+     "median_of_per_doc_token_ratios": 0.31294,
+     "original_mean_tokens_per_doc": 1063.56,
+     "original_tokens_per_byte": 0.214659,
+     "dolma2_over_fineweb_edu_token_count": 0.99115
+    }
+   },
+   "est_config_rewrite_utf8_bytes": 405470200594,
+   "est_config_rewrite_tokens": 94737086692,
+   "est_via_rows_x_mean_tokens": 95167244807
+  },
+  "cluster_variance": {
+   "config": "math",
+   "n_row_groups": 40,
+   "n_rewrites": 40000,
+   "pooled_mean_tokens": 282.3,
+   "pooled_median_tokens": 234.0,
+   "pooled_frac_under_50": 0.12557,
+   "pooled_frac_under_16": 0.0212,
+   "pooled_frac_under_100": 0.22268,
+   "pooled_frac_under_200": 0.43115,
+   "per_group_frac_under_50": [
+    0.091,
+    0.102,
+    0.104,
+    0.108,
+    0.11,
+    0.11,
+    0.113,
+    0.113,
+    0.113,
+    0.116,
+    0.116,
+    0.117,
+    0.121,
+    0.122,
+    0.123,
+    0.124,
+    0.125,
+    0.125,
+    0.126,
+    0.126,
+    0.127,
+    0.128,
+    0.128,
+    0.129,
+    0.129,
+    0.13,
+    0.131,
+    0.132,
+    0.133,
+    0.135,
+    0.135,
+    0.138,
+    0.138,
+    0.139,
+    0.139,
+    0.141,
+    0.143,
+    0.143,
+    0.145,
+    0.155
+   ],
+   "per_group_mean_tokens": [
+    268.1,
+    269.8,
+    271.8,
+    273.9,
+    274.3,
+    274.6,
+    274.9,
+    275.0,
+    275.6,
+    276.1,
+    276.2,
+    276.9,
+    277.0,
+    277.6,
+    278.1,
+    278.1,
+    279.6,
+    279.7,
+    280.5,
+    280.6,
+    282.5,
+    282.9,
+    283.5,
+    284.3,
+    284.4,
+    284.9,
+    285.6,
+    285.6,
+    285.9,
+    285.9,
+    286.7,
+    288.4,
+    289.1,
+    289.6,
+    292.3,
+    292.3,
+    293.1,
+    294.3,
+    296.9,
+    305.3
+   ],
+   "between_group_sd_frac_under_50": 0.0133,
+   "between_group_sd_mean_tokens": 7.92,
+   "cluster_se_frac_under_50": 0.0021,
+   "naive_binomial_se_frac_under_50": 0.00166,
+   "cluster_se_mean_tokens": 1.25,
+   "finish_reasons": {
+    "stop": 39739,
+    "length": 261
+   },
+   "degenerate_strings_le_5_tokens": [
+    [
+     "Problem:",
+     9
+    ],
+    [
+     "Question:",
+     2
+    ],
+    [
+     "None",
+     2
+    ],
+    [
+     "Question and Solution:",
+     2
+    ],
+    [
+     "1954.",
+     1
+    ],
+    [
+     "What is the question?",
+     1
+    ],
+    [
+     "Reims Cathedral",
+     1
+    ],
+    [
+     "A friend you know.",
+     1
+    ],
+    [
+     "Essay on Jimmy Carter",
+     1
+    ],
+    [
+     "#MathProblem##",
+     1
+    ],
+    [
+     "A.",
+     1
+    ],
+    [
+     "Problem",
+     1
+    ],
+    [
+     "(N/A)",
+     1
+    ],
+    [
+     "Solution, no solution",
+     1
+    ],
+    [
+     "3",
+     1
+    ]
+   ],
+   "errors": []
+  }
+ },
+ "table": {
+  "footer_leaf": {
+   "config": "table",
+   "n_files_in_config": 6772,
+   "total_parquet_bytes_exact": 1203156753005,
+   "leaf_path": "rollout_results.list.element.text",
+   "seed": 7,
+   "status": "ok",
+   "n_files_scanned": 250,
+   "footer_mb_fetched": 111.7,
+   "footer_scan_seconds": 46.2,
+   "sample_parquet_bytes": 45395019919,
+   "sample_rows": 12769105,
+   "sample_rewrite_leaf_bytes_raw": 16385145853,
+   "sample_original_bytes_raw": 60747006712,
+   "sample_rollout_parent_bytes": 16635696602,
+   "naive_parent_overcount_fraction": 0.01529,
+   "rewrite_values": 12769105,
+   "length_prefix_overhead_bytes": 51076420,
+   "extrapolation_scale": 26.50416,
+   "rewrite_bytes_per_parquet_byte": 0.360946,
+   "rewrite_bytes_per_parquet_byte_cv": 0.01677,
+   "est_config_rows": 338434368,
+   "est_config_rewrite_bytes_raw": 434274484672,
+   "est_config_original_bytes_raw": 1610048227334,
+   "footer_rewrite_over_original_bytes": 0.26973,
+   "mean_rewrite_bytes_per_row_footer": 1279.19,
+   "mean_original_bytes_per_row_footer": 4753.34,
+   "errors": [],
+   "tokenization": {
+    "n_row_groups_read": 12,
+    "n_rewrites_tokenized": 12000,
+    "n_empty_rewrite": 0,
+    "payload_mb_fetched": 24.3,
+    "rollouts_per_row_min_max": [
+     1,
+     1
+    ],
+    "finish_reasons": {
+     "stop": 11887,
+     "length": 113
+    },
+    "tokens_per_byte": 0.201033,
+    "tokens_per_byte_cv_per_doc": 0.2504,
+    "tokens_per_char": 0.201576,
+    "mean_tokens_per_doc": 265.25,
+    "median_tokens_per_doc": 207.0,
+    "cv_tokens_per_doc": 0.9528,
+    "max_tokens_seen": 2626,
+    "mean_rewrite_bytes_per_doc_decoded": 1319.41,
+    "calibration": {
+     "decoded_utf8_bytes": 15832942,
+     "footer_bytes_minus_length_prefix": 15847736,
+     "footer_overhead_fraction": 0.000934,
+     "note": "footer total_uncompressed_size for a NESTED leaf, minus 4 bytes per value, vs sum(len(text.encode('utf8'))) on the SAME row groups. Residual = repetition/definition levels + page headers."
+    },
+    "percentiles": {
+     "1": 11.0,
+     "5": 63.0,
+     "10": 93.0,
+     "25": 143.0,
+     "50": 207.0,
+     "75": 297.0,
+     "90": 445.9,
+     "95": 635.0,
+     "99": 1632.83
+    },
+    "short_buckets": {
+     "under_16": {
+      "n": 158,
+      "frac": 0.01317
+     },
+     "under_32": {
+      "n": 255,
+      "frac": 0.02125
+     },
+     "under_50": {
+      "n": 405,
+      "frac": 0.03375
+     },
+     "under_100": {
+      "n": 1401,
+      "frac": 0.11675
+     },
+     "under_200": {
+      "n": 5657,
+      "frac": 0.47142
+     },
+     "under_500": {
+      "n": 11051,
+      "frac": 0.92092
+     }
+    },
+    "tokens_retained_if_filter_ge_50": 0.99692,
+    "tokens_retained_if_filter_ge_200": 0.76801,
+    "docs_retained_if_filter_ge_50": 0.96625,
+    "short_examples": [
+     {
+      "dolma2_tokens": 4,
+      "chars": 21,
+      "text": "None in this response"
+     },
+     {
+      "dolma2_tokens": 23,
+      "chars": 78,
+      "text": "bacteriophage p1\n\nOther definitions for bacteriophage p1\n\nWhat does this mean?"
+     },
+     {
+      "dolma2_tokens": 26,
+      "chars": 102,
+      "text": "| Year        | Contact Address |\n|-------------|------------------|\n| 2008        | Webpage URL     |"
+     },
+     {
+      "dolma2_tokens": 34,
+      "chars": 117,
+      "text": "| Day | Topic |\n|------|------|\n| **Monday** | **Climate Change And Large-Scale Adoption Of Big Data Hydroponics.** |"
+     },
+     {
+      "dolma2_tokens": 53,
+      "chars": 200,
+      "text": "![Table](#)\n# Questions:\nIs 'sloppy joes' actually named after Joe's food, or what's the real origin?\nAnswer: Sloppy Joes is associated with Joe who had an inte"
+     },
+     {
+      "dolma2_tokens": 60,
+      "chars": 331,
+      "text": "RiskWithinReason is an informative resource for parents and kids to learn about risky behaviour and ways to reduce it. The website features articles on topics l"
+     },
+     {
+      "dolma2_tokens": 63,
+      "chars": 336,
+      "text": "Title: The Heritage Classical Curriculum Question: What are the benefits of using the reading program found in The Heritage Classical Curriculum, featuring \"liv"
+     },
+     {
+      "dolma2_tokens": 72,
+      "chars": 253,
+      "text": "| Year of Selection | Institution | Type of Support | Amount |\n|:------------------:|:------------:|:--------------:|:-------:|\n| 2008               | CNRS - Un"
+     },
+     {
+      "dolma2_tokens": 83,
+      "chars": 367,
+      "text": "Table - \n\n| Category | Description |\n|----------|-------------|\n| A Person | A person whose opinions are not extreme. |\n| Political Moderate | Not extreme, part"
+     },
+     {
+      "dolma2_tokens": 91,
+      "chars": 402,
+      "text": "\nThe data points in the table are: \"An 11 percentile increase in test scores for middle-class children in Tulsa's pre-K program\", \"The estimated earnings benefi"
+     },
+     {
+      "dolma2_tokens": 102,
+      "chars": 393,
+      "text": "| Name | Description |\n| ---- | ----------- |\n| Goliath | Giant Philistine warrior that challenged King Saul's army |\n| David | Young, brave warrior who defeate"
+     },
+     {
+      "dolma2_tokens": 113,
+      "chars": 1048,
+      "text": "| Category  | Description                                                                                                                                       "
+     }
+    ],
+    "mean_completion_tokens_generator": 273.01,
+    "dolma2_per_completion_token": 0.97156,
+    "paired": {
+     "n_pairs": 4000,
+     "rewrite_over_original_tokens": 0.26108,
+     "rewrite_over_original_bytes": 0.26518,
+     "median_of_per_doc_token_ratios": 0.35425,
+     "original_mean_tokens_per_doc": 1008.33,
+     "original_tokens_per_byte": 0.215078,
+     "dolma2_over_fineweb_edu_token_count": 0.99309
+    }
+   },
+   "est_config_rewrite_utf8_bytes": 432516611768,
+   "est_config_rewrite_tokens": 86950007412,
+   "est_via_rows_x_mean_tokens": 89768023940
+  },
+  "cluster_variance": {
+   "config": "table",
+   "n_row_groups": 40,
+   "n_rewrites": 39992,
+   "pooled_mean_tokens": 265.25,
+   "pooled_median_tokens": 210.0,
+   "pooled_frac_under_50": 0.03111,
+   "pooled_frac_under_16": 0.01083,
+   "pooled_frac_under_100": 0.11585,
+   "pooled_frac_under_200": 0.46264,
+   "per_group_frac_under_50": [
+    0.021,
+    0.022,
+    0.023,
+    0.024,
+    0.025,
+    0.026,
+    0.027,
+    0.028,
+    0.028,
+    0.028,
+    0.028,
+    0.028,
+    0.029,
+    0.029,
+    0.029,
+    0.029,
+    0.029,
+    0.03,
+    0.03,
+    0.031,
+    0.031,
+    0.031,
+    0.032,
+    0.032,
+    0.032,
+    0.0321,
+    0.033,
+    0.033,
+    0.033,
+    0.033,
+    0.033,
+    0.034,
+    0.035,
+    0.035,
+    0.036,
+    0.037,
+    0.037,
+    0.04,
+    0.043,
+    0.048
+   ],
+   "per_group_mean_tokens": [
+    246.5,
+    250.5,
+    251.5,
+    255.9,
+    256.0,
+    256.4,
+    256.6,
+    258.7,
+    259.6,
+    260.2,
+    261.0,
+    261.2,
+    261.7,
+    262.0,
+    263.6,
+    264.0,
+    264.7,
+    264.9,
+    265.8,
+    266.6,
+    266.6,
+    267.1,
+    267.1,
+    268.2,
+    268.4,
+    269.3,
+    270.2,
+    270.2,
+    270.2,
+    271.4,
+    271.4,
+    271.4,
+    271.5,
+    271.6,
+    271.6,
+    272.5,
+    272.9,
+    273.2,
+    274.9,
+    282.7
+   ],
+   "between_group_sd_frac_under_50": 0.00534,
+   "between_group_sd_mean_tokens": 7.46,
+   "cluster_se_frac_under_50": 0.00084,
+   "naive_binomial_se_frac_under_50": 0.00087,
+   "cluster_se_mean_tokens": 1.18,
+   "finish_reasons": {
+    "stop": 39635,
+    "length": 365
+   },
+   "degenerate_strings_le_5_tokens": [
+    [
+     "No",
+     12
+    ],
+    [
+     "---",
+     11
+    ],
+    [
+     "None",
+     6
+    ],
+    [
+     "*",
+     4
+    ],
+    [
+     "No table is provided.",
+     4
+    ],
+    [
+     "No data found.",
+     3
+    ],
+    [
+     "**Table:**",
+     3
+    ],
+    [
+     "No table",
+     3
+    ],
+    [
+     "No output",
+     3
+    ],
+    [
+     "No.",
+     3
+    ],
+    [
+     "1.",
+     3
+    ],
+    [
+     "No Table",
+     3
+    ],
+    [
+     "-",
+     2
+    ],
+    [
+     "No table required.",
+     2
+    ],
+    [
+     "Table:",
+     2
+    ]
+   ],
+   "errors": []
+  }
+ },
+ "tutorial": {
+  "footer_leaf": {
+   "config": "tutorial",
+   "n_files_in_config": 6754,
+   "total_parquet_bytes_exact": 1378061639549,
+   "leaf_path": "rollout_results.list.element.text",
+   "seed": 7,
+   "status": "ok",
+   "n_files_scanned": 250,
+   "footer_mb_fetched": 129.4,
+   "footer_scan_seconds": 48.2,
+   "sample_parquet_bytes": 51508716465,
+   "sample_rows": 12631550,
+   "sample_rewrite_leaf_bytes_raw": 25148413641,
+   "sample_original_bytes_raw": 60011565372,
+   "sample_rollout_parent_bytes": 25409380356,
+   "naive_parent_overcount_fraction": 0.01038,
+   "rewrite_values": 12631550,
+   "length_prefix_overhead_bytes": 50526200,
+   "extrapolation_scale": 26.75395,
+   "rewrite_bytes_per_parquet_byte": 0.488236,
+   "rewrite_bytes_per_parquet_byte_cv": 0.01054,
+   "est_config_rows": 337943860,
+   "est_config_rewrite_bytes_raw": 672819408298,
+   "est_config_original_bytes_raw": 1605546436487,
+   "footer_rewrite_over_original_bytes": 0.41906,
+   "mean_rewrite_bytes_per_row_footer": 1986.92,
+   "mean_original_bytes_per_row_footer": 4746.93,
+   "errors": [],
+   "tokenization": {
+    "n_row_groups_read": 12,
+    "n_rewrites_tokenized": 11988,
+    "n_empty_rewrite": 1,
+    "payload_mb_fetched": 31.6,
+    "rollouts_per_row_min_max": [
+     1,
+     1
+    ],
+    "finish_reasons": {
+     "stop": 11825,
+     "length": 164
+    },
+    "tokens_per_byte": 0.220412,
+    "tokens_per_byte_cv_per_doc": 0.1483,
+    "tokens_per_char": 0.220833,
+    "mean_tokens_per_doc": 444.2,
+    "median_tokens_per_doc": 415.0,
+    "cv_tokens_per_doc": 0.6597,
+    "max_tokens_seen": 2511,
+    "mean_rewrite_bytes_per_doc_decoded": 2015.32,
+    "calibration": {
+     "decoded_utf8_bytes": 24159682,
+     "footer_bytes_minus_length_prefix": 24172151,
+     "footer_overhead_fraction": 0.000516,
+     "note": "footer total_uncompressed_size for a NESTED leaf, minus 4 bytes per value, vs sum(len(text.encode('utf8'))) on the SAME row groups. Residual = repetition/definition levels + page headers."
+    },
+    "percentiles": {
+     "1": 11.0,
+     "5": 65.0,
+     "10": 141.0,
+     "25": 287.0,
+     "50": 415.0,
+     "75": 538.0,
+     "90": 693.0,
+     "95": 869.0,
+     "99": 1948.22
+    },
+    "short_buckets": {
+     "under_16": {
+      "n": 202,
+      "frac": 0.01685
+     },
+     "under_32": {
+      "n": 364,
+      "frac": 0.03036
+     },
+     "under_50": {
+      "n": 488,
+      "frac": 0.04071
+     },
+     "under_100": {
+      "n": 844,
+      "frac": 0.0704
+     },
+     "under_200": {
+      "n": 1755,
+      "frac": 0.1464
+     },
+     "under_500": {
+      "n": 8253,
+      "frac": 0.68844
+     }
+    },
+    "tokens_retained_if_filter_ge_50": 0.998,
+    "tokens_retained_if_filter_ge_200": 0.96714,
+    "docs_retained_if_filter_ge_50": 0.95929,
+    "short_examples": [
+     {
+      "dolma2_tokens": 4,
+      "chars": 25,
+      "text": "Benefits of Electric Cars"
+     },
+     {
+      "dolma2_tokens": 6,
+      "chars": 30,
+      "text": "Cold Harbor: The Early Actions"
+     },
+     {
+      "dolma2_tokens": 6,
+      "chars": 41,
+      "text": "Download the pdf transcription worksheet."
+     },
+     {
+      "dolma2_tokens": 7,
+      "chars": 43,
+      "text": "Document Republished as Instructional Guide"
+     },
+     {
+      "dolma2_tokens": 8,
+      "chars": 29,
+      "text": "Are Mosquitoes a Health Risk?"
+     },
+     {
+      "dolma2_tokens": 9,
+      "chars": 45,
+      "text": "Zero-Based Budgeting vs Performance Budgeting"
+     },
+     {
+      "dolma2_tokens": 10,
+      "chars": 40,
+      "text": "What is Hedon? Add your definition here."
+     },
+     {
+      "dolma2_tokens": 12,
+      "chars": 78,
+      "text": "How to Review Literacy Intervention Programs from a Social Justice Perspective"
+     },
+     {
+      "dolma2_tokens": 13,
+      "chars": 55,
+      "text": "Vitek MS: Rapidly Identify Microorganisms and Save Time"
+     },
+     {
+      "dolma2_tokens": 13,
+      "chars": 66,
+      "text": "### OXI Day: A Special Day of Greek Orthodox Christian Celebration"
+     },
+     {
+      "dolma2_tokens": 16,
+      "chars": 55,
+      "text": "Non-Infectious Meningitis:\nTreating Meningitis Symptoms"
+     },
+     {
+      "dolma2_tokens": 17,
+      "chars": 82,
+      "text": "New Research Reveals One of the Largest Impact Craters in the Solar System on Mars"
+     }
+    ],
+    "mean_completion_tokens_generator": 443.95,
+    "dolma2_per_completion_token": 1.00049,
+    "paired": {
+     "n_pairs": 4000,
+     "rewrite_over_original_tokens": 0.42299,
+     "rewrite_over_original_bytes": 0.41698,
+     "median_of_per_doc_token_ratios": 0.71001,
+     "original_mean_tokens_per_doc": 1038.84,
+     "original_tokens_per_byte": 0.217703,
+     "dolma2_over_fineweb_edu_token_count": 0.99905
+    }
+   },
+   "est_config_rewrite_utf8_bytes": 671121261961,
+   "est_config_rewrite_tokens": 147922850999,
+   "est_via_rows_x_mean_tokens": 150114730268
+  },
+  "cluster_variance": {
+   "config": "tutorial",
+   "n_row_groups": 40,
+   "n_rewrites": 40000,
+   "pooled_mean_tokens": 436.26,
+   "pooled_median_tokens": 409.0,
+   "pooled_frac_under_50": 0.03925,
+   "pooled_frac_under_16": 0.0154,
+   "pooled_frac_under_100": 0.07228,
+   "pooled_frac_under_200": 0.15632,
+   "per_group_frac_under_50": [
+    0.027,
+    0.029,
+    0.029,
+    0.03,
+    0.031,
+    0.033,
+    0.034,
+    0.034,
+    0.034,
+    0.035,
+    0.036,
+    0.036,
+    0.036,
+    0.037,
+    0.037,
+    0.037,
+    0.037,
+    0.038,
+    0.038,
+    0.038,
+    0.038,
+    0.04,
+    0.04,
+    0.04,
+    0.04,
+    0.041,
+    0.041,
+    0.042,
+    0.042,
+    0.042,
+    0.043,
+    0.044,
+    0.045,
+    0.045,
+    0.045,
+    0.045,
+    0.048,
+    0.052,
+    0.055,
+    0.056
+   ],
+   "per_group_mean_tokens": [
+    393.6,
+    404.2,
+    408.4,
+    408.8,
+    413.6,
+    416.3,
+    417.7,
+    423.9,
+    427.8,
+    428.3,
+    428.4,
+    431.3,
+    432.2,
+    433.1,
+    433.3,
+    434.4,
+    434.8,
+    435.2,
+    436.3,
+    436.7,
+    437.3,
+    438.4,
+    440.2,
+    440.3,
+    440.5,
+    443.0,
+    443.7,
+    444.0,
+    444.2,
+    444.7,
+    445.5,
+    445.7,
+    446.4,
+    450.3,
+    452.6,
+    454.4,
+    457.3,
+    461.9,
+    467.5,
+    474.5
+   ],
+   "between_group_sd_frac_under_50": 0.00656,
+   "between_group_sd_mean_tokens": 16.8,
+   "cluster_se_frac_under_50": 0.00104,
+   "naive_binomial_se_frac_under_50": 0.00097,
+   "cluster_se_mean_tokens": 2.66,
+   "finish_reasons": {
+    "stop": 39504,
+    "length": 496
+   },
+   "degenerate_strings_le_5_tokens": [
+    [
+     "---",
+     5
+    ],
+    [
+     "<no text provided>",
+     3
+    ],
+    [
+     "Document:",
+     3
+    ],
+    [
+     "Summary:",
+     2
+    ],
+    [
+     "1. School Counselor",
+     1
+    ],
+    [
+     "Writing Narrative",
+     1
+    ],
+    [
+     "Breed American Mustang.",
+     1
+    ],
+    [
+     "Unity",
+     1
+    ],
+    [
+     "<no output>",
+     1
+    ],
+    [
+     "How to Tune a Guitar",
+     1
+    ],
+    [
+     "Paraphrasing in apa",
+     1
+    ],
+    [
+     "Submit Your Suggestion",
+     1
+    ],
+    [
+     "No information provided.",
+     1
+    ],
+    [
+     "First Year College Physics",
+     1
+    ],
+    [
+     "Relaxation Training Tutorial",
+     1
+    ]
+   ],
+   "errors": []
+  }
+ }
+}

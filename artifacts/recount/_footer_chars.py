@@ -116,12 +116,59 @@ def scan(dataset: str, config: str, text_column: str = "text", limit: int | None
     done = 0
     errs: list[str] = []
 
+    def _resolve_leaf(md, want: str, url: str) -> int:
+        """Index of the leaf column chunk for `want`, refusing to guess when it is ambiguous.
+
+        ⚠️ THIS REPLACED `md.schema.names.index(want)`, WHICH SILENTLY READ THE WRONG COLUMN.
+        `md.schema.names` is a FLAT list of leaf names, so a nested schema can contain the same
+        bare name twice and `.index()` returns the FIRST. Measured on
+        `HuggingFaceFW/finephrase`: 17 leaves with `'text'` at BOTH index 0 and index 12 —
+
+            col  0: text                                (the ORIGINAL FineWeb-Edu document)
+            col 12: rollout_results.list.element.text   (the synthetic rewrite we want)
+
+        so `.index('text')` returned 0 and would have measured the original corpus while
+        reporting it as synthetic. That is §3.3's documented trap reached through the *footer*
+        path, which nobody had considered — the trap was only ever described for row reads.
+
+        Checked before fixing: the three corpora whose committed numbers came from this tool
+        (`finepdfs-edu`, `fineweb-edu`, `finewiki/en`) each contain `text` exactly once, so no
+        published figure was wrong. The bug was latent, not active. Fixed anyway, because the
+        next nested corpus would have hit it and the failure is silent.
+
+        Matches a FULL `path_in_schema` first (pass `rollout_results.list.element.text` to be
+        unambiguous), then falls back to a bare leaf name — but only if it is UNIQUE. Ambiguity
+        raises rather than picking one, because picking one is exactly what caused this.
+
+        ⚠️ WHAT THIS DOES *NOT* PROTECT YOU FROM, stated because it is the residual trap. On
+        FinePhrase, `text` is a real top-level column, so an exact-path match wins and
+        `_resolve_leaf(md, "text")` returns the ORIGINAL document — correctly, because that is
+        what you asked for. This function fixes *ambiguity*, not a wrong request. The rewrite
+        must be named in full. §3.3's trap is ultimately a caller-intent problem and no schema
+        check can close it: both columns are legitimately `text`, and only the caller knows which
+        corpus they mean to measure.
+        """
+        rg0 = md.row_group(0)
+        paths = [rg0.column(c).path_in_schema for c in range(rg0.num_columns)]
+        if want in paths:
+            return paths.index(want)
+        hits = [i for i, p in enumerate(paths) if p.rsplit(".", 1)[-1] == want]
+        if len(hits) == 1:
+            return hits[0]
+        if not hits:
+            raise KeyError(f"no leaf column named {want!r}; leaves are {paths}")
+        raise KeyError(
+            f"{want!r} is AMBIGUOUS in {url.rsplit('/', 1)[-1]} — it matches "
+            f"{[paths[i] for i in hits]}. Pass the full path_in_schema. Guessing here is how a "
+            f"synthetic-rewrite count silently becomes an original-document count."
+        )
+
     for f in files:
         try:
             rf = RangeFile(f["url"], f["size"])
             pf = pq.ParquetFile(rf)
             md = pf.metadata
-            idx = md.schema.names.index(text_column)
+            idx = _resolve_leaf(md, text_column, f["url"])
             for rg in range(md.num_row_groups):
                 cc = md.row_group(rg).column(idx)
                 total_bytes += cc.total_uncompressed_size
