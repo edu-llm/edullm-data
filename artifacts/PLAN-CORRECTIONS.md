@@ -116,6 +116,64 @@ family was at revision **6**, not 2. Verified by `describe-job-definitions`. `HA
 the current figure. No action needed for Phase 0 — recorded because the stale line would mislead
 anyone re-registering a job def.
 
+## 7. Share-alike is LOAD-BEARING across three categories, not a footnote
+
+**Plan says** (§7 item 4): "FineWiki and StackExchange are CC-BY-SA. Private S3 triggers nothing
+(CC obligations attach on *public* Share), but keep them separable in case of publication."
+
+**Actually the exposure is structural.** Three independent category agents found SA where the plan
+did not expect it:
+
+| category | SA source | share |
+|---|---|---|
+| QA/forum | `stackexchange_filtered` | **the entire category** — CC-BY-SA-4.0, verified in the row's `metadata.all_licenses`, *not* in `cardData` |
+| reference | `finewiki` | the whole named source |
+| textbooks | `libretexts_filtered` | 32% of rows (12,141 CC BY-SA 4.0 + 692 3.0 + 3 2.5 of 40,049) |
+| academic | `peS2o_filtered` | ~2% per the Common Pile paper's Table 3 — invisible from metadata |
+
+**The consequence the plan does not state: if SA ever has to be dropped, QA/forum collapses from
+~23.9 B to ~1.4 B** (only `ubuntu_irc_filtered` is public-domain), which fails the 3× peak-demand
+bar. There is no permissive 10 B-scale substitute in Common Pile. So "keep them separable" is not a
+tidiness preference — it decides whether a category survives.
+
+**And separability needs a decision before the first publish.** A `share_alike` selector would have
+to live in the path (§1.2's two levels are already spent on `source`/`domain`) or in the source name
+itself, e.g. `stackexchange-sa`. `entry.labels` cannot carry it (§1.3's wall), and the label is inside
+`manifest_sha256`, so retrofitting costs a full re-copy. **This belongs on §1's irreversible list.**
+
+*Licensing notes are research findings, not legal advice.*
+
+## 8. Common Pile's published token counts are bytes ÷ 4, not tokenizer output
+
+**Plan says** (§3.2) academic pools of "peS2o 43.3B, pubmed 36.6B, arxiv 6.0B", with §3.1 warning
+that "peS2o's 47.37B is *whitespace words*."
+
+**It is worse than whitespace words — it is arithmetic on file size.** Verified by execution against
+the Common Pile paper's Table 7:
+
+```
+182.6 GB x 0.25 = 45.6500   vs published 45.65   EXACT
+147.1 GB x 0.25 = 36.7750   vs published 36.77   EXACT
+ 19.5 GB x 0.25 =  4.8750   vs published  4.88   EXACT
+```
+
+Every "Tokens" figure in that table is `Size(GB) × 0.25`. No tokenizer was involved, so the numbers
+carry no information about any tokenizer — and **every Common Pile row in §3.2 inherits this**:
+peS2o, pubmed, arxiv_papers, stackexchange, github_archive, stackv2_edu, libretexts. That is 4 of the
+8 categories.
+
+The error direction is at least favourable: at a measured ~0.27 dolma2 tokens/byte, real counts run
+*above* the published figures, so pools are understated rather than overstated. But no §2.1 pool
+resting on a Common Pile figure is verified, and none should be entered in §3.2 as measured.
+
+## 9. `github_archive_filtered` is in the wrong category
+
+§3.2 lists `common-pile/github_archive_filtered` as a **code** source. Its rows are GitHub
+issue/PR/comment **prose** (`source` = `gharchive/issue`), not source code. It belongs in QA/forum.
+Two agents reached this independently, and both flagged that it is currently claimed by *both*
+categories in the plan — so it needs arbitration, and whichever way it goes, one category's total
+drops.
+
 ## 6. My own bug, for the record: anonymous API calls got rate-limited
 
 Not a plan error. `recount.py` initially called datasets-server anonymously, and with 9 agents plus

@@ -171,6 +171,31 @@ teacher (won't fit).
 
 ---
 
+## ⚠️ Read J together with the label distribution — one source's J is near-degenerate
+
+Measured judge agreement, with the distribution that produced it:
+
+| source | J (A↔B) | distinct labels | modal label | modal share |
+|---|---|---|---|---|
+| qa-forum | **97.6%** | 4 | Technology | **96%** |
+| academic | 82.6% | 7 | Science | 50% |
+| finemath | 74.8% | 8 | Science | 60% |
+| reference | 72.8% | 9 | Arts | 28% |
+
+**qa-forum's 97.6% is not a hard-won agreement — it is an easy one.** 96% of its documents get the
+same label, because `stackexchange_filtered` is StackOverflow-dominated and FDC Level 1 maps nearly
+all of it to `6 = Technology`. Two judges agreeing on a near-constant is close to no information: a
+classifier that emitted `6` unconditionally would score ~96% there. So **a PASS on qa-forum is weak
+evidence that D works**, and the gate's per-source verdicts must be read with that in mind.
+
+The inverse holds for **reference**: J = 72.8% across 9 labels with a 28% mode is the *hardest*
+measurement in the set, and also the most informative — an encyclopedia genuinely spans subjects, so
+disagreement there reflects real taxonomic ambiguity rather than a broken judge. Expect D's score to
+be lowest on reference, and treat that as the honest signal.
+
+This is exactly what §9.4's human spot-check of 50 A≠B documents is for: distinguishing "the taxonomy
+is fuzzy here" from "one judge is broken." `score.py` writes those to `spot-check-50.jsonl`.
+
 ## Cost, and why the smoke test stays under $1
 
 Judges run over ~500 docs/source × 5 sources = 2,500 documents, at 256-token prefixes (§9.3 task D).
