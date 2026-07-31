@@ -833,13 +833,32 @@ The deferral in §5.2 only makes sense as an ordering, so here it is explicitly.
 | **0b. Pre-publish gate** ⬅ **NEXT** | The three items in **§9.7**: two `CONTROL_PREFIXES` entries, slug+fold the inherited `domain` values, decide on `(shard_path, doc_index)`. Optionally finish the 4 unverified token counts (~$10). | Each is irreversible if wrong and cheap if done first. `domain` slugs and the doc-index key are both inside `manifest_sha256`. |
 | **1. Assemble** | Bloom-dedup (delete) → decontaminate → MinHash (annotate) → carve val from documents per source → tokenize → **attach inherited `domain` where the source ships one (§1.2), flat otherwise** → shard at 25,001,984 tokens. | §4.1 order. Val carve precedes tokenization (§1.4). The `domain` attach is now a metadata join, not a classification pass. |
 | **2. Publish** | `publish()` on Batch, in-region, `hash_workers`/`copy_workers=16`, `--timeout 7200`. Gate A ≈1.4 h. | §8. |
-| **3. Verify** | `verify_seal`, read a shard back, confirm `dataset_paths(labels={...})` slices, confirm the airlock still denies intern writes. | The airlock re-check is a standing project rule after anything touching permissions. |
+| **2b. Backfill the sidecars** ⬅ **NEW, and the order is not optional** | AFTER promotion, write `_dedup/clusters.parquet` and `_licenses/licenses.parquet` **in place under the published prefix**. Do NOT stage them to landing. | See below — staging them loses them silently. |
+| **3. Verify** | `verify_seal`, read a shard back, confirm `dataset_paths(labels={...})` slices, confirm the airlock still denies intern writes, **and confirm both sidecars survived promotion**. | The airlock re-check is a standing project rule after anything touching permissions. |
 | **4. First run** | Train once on the §2.1 default **plus a web-only baseline**. | Calibration, not a result. The baseline is what tells you whether any later tuning helped. |
 | **5. Sweep** | Now run the proxy search (§5.2.1) against the real reservoir. | It needs the reservoir to exist. |
 | **6. Publish findings** | Revise `notes` in the README with your measured mix (§5.5). | `notes` is outside the hash chain — backfillable on the frozen dataset, no re-publish. |
 
 Phases 0–3 are the build. Phases 4–6 are the loop your team repeats; only phase 6 writes back to the
 dataset, and it writes text, not payload.
+
+**Why 2b comes AFTER promotion, and what happens if you get it wrong.** Verified by reading
+`validate.promote` (`validate.py:1185+`): its copy loop builds an explicit key list — `dataset.json`,
+each group's manifest, and **every manifest entry** — then server-side-copies exactly those. Nothing
+else crosses from landing to `edullm-data`.
+
+So a sidecar staged to landing would **pass Gate A, then be silently dropped**, and expire with
+landing's 14-day lifecycle. No error at any step; you would discover it weeks later when a reader
+looked for the cluster table and found nothing. Under the fix landed in `4d6768e`, `publish()` now
+skips control prefixes entirely rather than staging them, which makes that outcome impossible instead
+of merely unlikely.
+
+**The generated `README.md` is the precedent, not an analogy.** `promote()` renders it from
+`dataset.json` and writes it **straight to the published prefix** (`validate.py:1288-1302`) — it never
+travels through landing either. The sidecars are the same class of object: derived, mutable, outside
+the hash chain, written in place. That is also what makes §1.3's "recompute the cluster table as
+sources are added" safe — an in-place descriptive write does not touch `manifest_sha256`, so the
+dataset's identity does not move when the table does.
 
 ### 5.7 WHERE COMPUTE RUNS — no bytes on a laptop, ever
 
