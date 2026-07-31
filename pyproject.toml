@@ -48,6 +48,11 @@ test = ["pytest>=7.0"]
 # ENTRYPOINT actually invoke) is unaffected — these are an addition, not a replacement.
 edullm-data-validate = "edullm_data.validate:main"
 wu-fsck = "edullm_data.fsck:main"
+# Build driver for pretrain/reservoir-dolma2 (§5.6 phase 0 + §9.7 item 4). Declared for the same
+# reason as the two above — it announces this prog= in its own --help. Note it is a BUILD tool,
+# not part of the publishing library: it writes no manifest, and its IAM role cannot write
+# edullm-data.
+edullm-ingest-reservoir = "edullm_data.ingest_reservoir:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/edullm_data"]
