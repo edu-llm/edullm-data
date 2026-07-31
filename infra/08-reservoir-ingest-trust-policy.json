@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "Trust policy for edullm-reservoir-ingest — WHO may become this role.",
+    "",
+    "`ecs-tasks.amazonaws.com` and nothing else. AWS Batch runs its containers as ECS tasks, so",
+    "that service principal is what a running job needs; no human session, no other role, and no",
+    "EC2 instance can assume it. Same shape as the validator and the prm800k roles, verified live",
+    "against both on 2026-07-31.",
+    "",
+    "WHY THIS MATTERS BEYOND TIDINESS. The intern role in this account carries",
+    "AdministratorAccess, so IAM is not what keeps a human out of the pipeline's identities — this",
+    "trust policy is. It is also why the airlock's delete Deny could not be probed AS the validator",
+    "during the v2 deployment: no session can assume that role, which is the invariant working.",
+    "",
+    "Deliberately NO `Condition` block. A SourceArn condition scoping this to one job queue looks",
+    "stronger and is a footgun: Batch does not populate `aws:SourceArn` on the ECS task-assume call",
+    "the way one would expect, so the condition would evaluate false and every job would fail to",
+    "start with an unhelpful credential error. The blast radius is already bounded by the",
+    "permission policy (08-reservoir-ingest-policy.json), which grants no write to edullm-data."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcsTasksOnly",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}

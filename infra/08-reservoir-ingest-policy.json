@@ -1,0 +1,93 @@
+{
+  "_comment": [
+    "Permission policy for edullm-reservoir-ingest — WHAT this role may touch.",
+    "",
+    "Least privilege for §5.6 phase 0 (HF ingest) + §9.7 item 4 (the synthetic id partition). The",
+    "job reads upstream documents from Hugging Face over HTTPS and writes derived artifacts to one",
+    "landing prefix. It is a BUILD role, not a publishing role.",
+    "",
+    "THE POINT OF A SEPARATE ROLE. The validator role is the only principal that can write",
+    "s3://edullm-data — that is the airlock. Running a 5 TB bulk-download job under it would put a",
+    "program doing wide-open network fetches in possession of the one key to the published bucket,",
+    "so a bug in ingest becomes a bug that can write published data. This role simply is not",
+    "granted that, and since 2026-07-31 the bucket policy (edullm-data-airlock-v2) also denies it",
+    "explicitly, so an accidental widening of THIS file still cannot reach the published bucket.",
+    "",
+    "NO s3:DeleteObject ANYWHERE, including its own staging prefix. A failed attempt uses a fresh",
+    "run id and the `expire-ingest-30d` lifecycle rule reclaims the partial prefix. Same reasoning",
+    "as the prm800k role: a retry that can delete is a retry that can destroy a different run's",
+    "evidence while you are trying to work out what went wrong.",
+    "",
+    "NO s3:PutObject on any *manifest.json*. `edullm-landing-manifest-created` matches that key",
+    "SUFFIX with no prefix constraint, so writing one anywhere in landing fires the validator",
+    "against a build artifact. `ingest_reservoir._assert_safe_key` already refuses the name in",
+    "code; this is the same rule enforced where code cannot be edited around. Belt and braces on",
+    "purpose — the code guard protects against a typo, the IAM guard against a different program.",
+    "",
+    "Deploy with the infra-deployer role:",
+    "  aws iam create-role --role-name edullm-reservoir-ingest \\",
+    "      --assume-role-policy-document file://infra/08-reservoir-ingest-trust-policy.json",
+    "  aws iam put-role-policy --role-name edullm-reservoir-ingest \\",
+    "      --policy-name reservoir-ingest --policy-document file://infra/08-reservoir-ingest-policy.json",
+    "",
+    "Then SMOKE-TEST the deny, do not simulate it: iam:simulate-principal-policy is documented in",
+    "CLAUDE.md as returning false denials for this account (11 known). Submit a job that attempts a",
+    "PutObject to edullm-data and read the error."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "WriteOnlyReservoirIngestPrefix",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:GetObjectAttributes",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": "arn:aws:s3:::edullm-landing/_ingest/reservoir-dolma2/*"
+    },
+    {
+      "Sid": "NeverWriteValidatorTriggeringOrTerminalNames",
+      "Effect": "Deny",
+      "Action": "s3:PutObject",
+      "Resource": [
+        "arn:aws:s3:::edullm-landing/*manifest.json",
+        "arn:aws:s3:::edullm-landing/*_VALIDATED.json",
+        "arn:aws:s3:::edullm-landing/*_REJECTED.json",
+        "arn:aws:s3:::edullm-landing/*dataset.json"
+      ]
+    },
+    {
+      "Sid": "ListOnlyReservoirIngestPrefix",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::edullm-landing",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "_ingest/reservoir-dolma2/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadTheBootstrapWheel",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::edullm-landing/_dist/*"
+    },
+    {
+      "Sid": "ReadPublishedStateForPlanning",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectAttributes"
+      ],
+      "Resource": [
+        "arn:aws:s3:::edullm-data/_catalog/*",
+        "arn:aws:s3:::edullm-data/tokenizer/dolma2-bpe/*"
+      ]
+    }
+  ]
+}
