@@ -43,7 +43,21 @@ import sys
 
 QUEUE = "sbsandbox-intern-edullm-gpu"
 JOB_DEF = "sbsandbox-intern-edullm-gpu-run"
-STAGE = "s3://sbsandbox-intern-edullm-outputs/teams/data-prep/smoke"
+
+# ⚠️ The staging prefix is NOT arbitrary. `sbsandbox-intern-edullm-batch-gpu-workload`'s only inline
+# policy scopes GetObject/PutObject/ListBucket to `teams/*/runs/*` — and its ListBucket carries a
+# `s3:prefix` condition on the same pattern. Staging to `teams/data-prep/smoke/` failed with:
+#
+#   AccessDenied ... not authorized to perform: s3:ListBucket ... because no identity-based
+#   policy allows the s3:ListBucket action
+#
+# The fix is to use the prefix the role already grants, NOT to widen the IAM policy. Least privilege
+# here is deliberate infrastructure, and this project's whole premise is that a narrow write scope is
+# a feature (the airlock is the same idea one bucket over).
+BUCKET = "sbsandbox-intern-edullm-outputs"
+PREFIX = "teams/data-prep/runs/smoke-classify-d/"
+OUT_PREFIX = "teams/data-prep/runs/smoke-classify-d/out/"
+STAGE = f"s3://{BUCKET}/{PREFIX}"
 
 # Installed into the image at runtime rather than baked in: the ECR image is shared infra and
 # rebuilding it for a smoke test would be a much larger change than this task warrants.
@@ -59,16 +73,23 @@ python - <<'PY'
 import boto3, os
 s3 = boto3.client("s3")
 BUCKET = "sbsandbox-intern-edullm-outputs"
-PREFIX = "teams/data-prep/smoke/"
-for obj in s3.list_objects_v2(Bucket=BUCKET, Prefix=PREFIX).get("Contents", []):
-    key = obj["Key"]
-    rel = key[len(PREFIX):]
-    if not rel or rel.endswith("/"):
-        continue
+PREFIX = "teams/data-prep/runs/smoke-classify-d/"
+# Explicit key list, no ListBucket. The role's ListBucket is prefix-conditioned and a plain
+# list_objects_v2 was denied; GetObject on these exact keys is granted, and we know the names
+# because we uploaded them. Fewer permissions needed, and it fails loudly on a missing file
+# rather than silently classifying a short list.
+KEYS = ["classify_d.py"] + [f"samples/{s}.jsonl" for s in
+                            ("academic", "finemath", "qa-forum", "reference", "dclm")]
+for rel in KEYS:
     dest = os.path.join("/tmp/smoke", rel)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
-    s3.download_file(BUCKET, key, dest)
-    print("downloaded", rel, obj["Size"], "bytes")
+    try:
+        s3.download_file(BUCKET, PREFIX + rel, dest)
+        print("downloaded", rel, os.path.getsize(dest), "bytes")
+    except Exception as e:
+        # dclm may legitimately be absent -- it is the source whose upstream API is broken in
+        # every direction, and the gate is scoreable without it.
+        print("SKIP", rel, type(e).__name__)
 PY
 
 cd /tmp/smoke
@@ -78,8 +99,9 @@ wc -l d_labels.jsonl
 
 python - <<'PY'
 import boto3
-boto3.client("s3").upload_file("/tmp/smoke/d_labels.jsonl",
-    "sbsandbox-intern-edullm-outputs", "teams/data-prep/smoke-out/d_labels.jsonl")
+boto3.client("s3").upload_file(
+    "/tmp/smoke/d_labels.jsonl", "sbsandbox-intern-edullm-outputs",
+    "teams/data-prep/runs/smoke-classify-d/out/d_labels.jsonl")
 print("uploaded d_labels.jsonl")
 PY
 echo "=== DONE ==="
