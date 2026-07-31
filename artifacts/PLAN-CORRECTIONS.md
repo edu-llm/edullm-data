@@ -116,6 +116,35 @@ family was at revision **6**, not 2. Verified by `describe-job-definitions`. `HA
 the current figure. No action needed for Phase 0 — recorded because the stale line would mislead
 anyone re-registering a job def.
 
+## 10. DCLM-baseline is inaccessible on every path tried, and the gate proceeds without it
+
+The plan's §2.1 gives `web (diverse)` a 30 B pool sourced from
+`mlfoundations/dclm-baseline-1.0` — "the diversity counterweight to edu filtering." Every route to
+its documents failed, and the failures are independent of each other and of the rate limit:
+
+| route | result |
+|---|---|
+| `/statistics` | **HTTP 501** "Job manager crashed while running this job (missing heartbeats)" — permanent, re-confirmed after the quota cleared |
+| `/size` `num_rows` | **779,982** — the truncated conversion head, against `estimated_num_rows` 3,017,780,768 (correction §1 above) |
+| parquet mirror row-group read | **hangs >2 min** where FineMath takes 2.2 s, reproduced standalone. Footer and file metadata read fine (250–290 MB shards, 0.1 s), so it is the column read specifically |
+
+So DCLM contributes **no smoke-test samples**. Two consequences, both stated rather than papered over:
+
+**1. The gate table has four rows, not five.** `finemath`, `reference`, `academic`, `qa-forum` — 2,000
+documents, 4,000 judge calls. Four sources still span the taxonomy well (the four measured J values
+range 72.8%–97.6%, and the label distributions run from a 28% mode to a 96% mode), so the gate is
+decidable. **But D's accuracy on diverse web is unmeasured**, and diverse web is the category most
+unlike the other four — it is the one with no upstream quality filter. A PASS here does not license
+"D works on DCLM."
+
+**2. `web (diverse)`'s pool is met by a *different* corpus than the plan names.** The measured 114.69 B
+is `HuggingFaceFW/dclm_100BT`, whose conversion is complete (`partial: false`, exact 89,269,902 rows).
+That is the corpus the sizing rests on, and §3.2 should name it instead of DCLM-baseline.
+
+**If DCLM-baseline itself is wanted, it needs a shard stream in-region on Batch** — which §5.7 says is
+where this work belongs anyway. `tokens/char` is already pinned from the `dclm_100BT` sample
+(0.2337, CV 0.111), so the count is cheap once the bytes are reachable.
+
 ## 7. Share-alike is LOAD-BEARING across three categories, not a footnote
 
 **Plan says** (§7 item 4): "FineWiki and StackExchange are CC-BY-SA. Private S3 triggers nothing

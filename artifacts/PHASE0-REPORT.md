@@ -137,6 +137,40 @@ a digit inside the reasoning trace is not the answer.
 → FAIL, inherited 50.0%, excluded 1 — every figure matched the expected value, including the FAIL at
 83.3% against the 85% gate.
 
+### Judging complete: 2,000 labels, 4 sources, zero failures
+
+| source | n | J (A↔B) | distinct labels | modal label | modal share |
+|---|---|---|---|---|---|
+| qa-forum | 500 | **97.6%** | 4 | Technology | **96%** |
+| academic | 500 | 82.6% | 7 | Science | 50% |
+| finemath | 500 | 74.8% | 8 | Science | 60% |
+| reference | 500 | 72.8% | 9 | Arts | 28% |
+
+**4,000 Bedrock calls, 100% parse rate, 0 failures.** J is the *ceiling* the gate is measured
+against, so read it first.
+
+⚠️ **qa-forum's 97.6% is near-degenerate and is weak evidence.** 96% of its documents get one label,
+because `stackexchange_filtered` is StackOverflow-dominated and FDC Level 1 maps nearly all of it to
+Technology — a classifier emitting `6` unconditionally would score ~96% there. **reference is the
+inverse and the most informative row**: 9 labels with a 28% mode, so its disagreement is real
+taxonomic ambiguity rather than a broken judge. Expect D's lowest score there and treat it as the
+honest signal.
+
+**Statistical power is adequate.** At J ≈ 75% and n = 500, the consensus subset is ~375 documents and
+the 95% Wilson interval at p = 0.85 is [81.0%, 88.3%] — a ±3.6% halfwidth, so the 85% bar is
+genuinely decidable rather than noise-dominated.
+
+### DCLM contributes no samples — the gate has four rows, not five
+
+Every route to DCLM-baseline's documents failed, independently of the rate limit: `/statistics` HTTP
+501 (permanent), `/size num_rows` truncated 3,869×, and a parquet row-group read that **hangs >2 min**
+where FineMath takes 2.2 s (reproduced standalone; footers and file metadata read fine at 0.1 s).
+
+Four sources still span the taxonomy — J from 72.8% to 97.6%, modes from 28% to 96% — so the gate is
+decidable. **But D's accuracy on diverse, unfiltered web is unmeasured, and that is the category
+least like the other four.** A PASS does not license "D works on DCLM." Detail:
+`PLAN-CORRECTIONS.md` §10.
+
 ---
 
 ## Task A — token re-count: PARTIAL, and here is the honest reason
