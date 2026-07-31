@@ -19,6 +19,7 @@ value-domain additions §5 says are *also* needed, not a reimplementation of the
 from __future__ import annotations
 
 import hashlib
+import math
 from typing import Any, Mapping
 
 import numpy as np
@@ -108,6 +109,27 @@ _BOUND_LAXER_DIRECTION = {
 }
 
 
+def _is_valid_bound(key: str, value: Any) -> bool:
+    """Whether ``value`` is safe to use as the named decode-smoke bound.
+
+    Bound values originate in JSON metadata, so numeric-looking strings and booleans must not
+    be accepted merely because ``int()`` / ``float()`` can coerce them later.  Otherwise a
+    cross-type comparison skips the family clamp and turns the group metadata into a way to
+    disable the quality checks it is meant to tune.
+    """
+    if key in {"min_distinct_ids", "max_zero_run"}:
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+    if key == "max_eos_fraction":
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            return False
+        try:
+            numeric = float(value)
+        except (OverflowError, ValueError):
+            return False
+        return math.isfinite(numeric) and 0.0 <= numeric <= 1.0
+    return False
+
+
 def _bound(ctx: GroupContext, key: str, default: Any) -> Any:
     """Resolve a tunable bound: group override, else family default, else the profile constant.
 
@@ -120,21 +142,50 @@ def _bound(ctx: GroupContext, key: str, default: Any) -> Any:
     Loosening is still possible, but it must be a deliberate edit to the FAMILY file, where it
     applies to everyone and shows up as a change to the standard rather than to one dataset.
     """
-    fam = ctx.family_defaults.get(key)
+    # A bad family value is reported by ``check_decode_bound_configuration``.  Continue with
+    # the profile default here so every byte-level check still runs and this function never
+    # hands an unsafe value to the coercions in ``check_decode_smoke``.
+    fam = ctx.family_defaults.get(key, default)
+    if not _is_valid_bound(key, fam):
+        fam = default
     if key in ctx.group:
         val = ctx.group[key]
+        if not _is_valid_bound(key, val):
+            return fam
         direction = _BOUND_LAXER_DIRECTION.get(key)
-        if fam is not None and direction is not None:
-            try:
-                if direction == "smaller":
-                    return max(val, fam)  # a floor may be raised, never lowered
-                return min(val, fam)  # a ceiling may be lowered, never raised
-            except TypeError:
-                return val  # non-comparable; schema validation owns the type error
+        if direction is not None:
+            if direction == "smaller":
+                return max(val, fam)  # a floor may be raised, never lowered
+            return min(val, fam)  # a ceiling may be lowered, never raised
         return val
-    if fam is not None:
-        return fam
-    return default
+    return fam
+
+
+def check_decode_bound_configuration(ctx: GroupContext) -> list[Violation]:
+    """Reject malformed bound metadata before it can weaken a byte-level check.
+
+    Group overrides and family defaults both come from JSON.  Validating them here makes
+    malformed values visible to Gate A while :func:`_bound` falls back safely so the remaining
+    decode checks can still report problems in the shard bytes.
+    """
+    out: list[Violation] = []
+    for source, values in (("group", ctx.group), ("family default", ctx.family_defaults)):
+        for key in _BOUND_LAXER_DIRECTION:
+            if key not in values:
+                continue
+            value = values[key]
+            if _is_valid_bound(key, value):
+                continue
+            expected = "a positive integer" if key != "max_eos_fraction" else (
+                "a finite number between 0 and 1"
+            )
+            out.append(
+                Violation(
+                    "invalid-decode-bound",
+                    f"{source} {key} must be {expected}; got {value!r}",
+                )
+            )
+    return out
 
 
 def _tokenizer(ctx: GroupContext) -> Mapping[str, Any]:
@@ -424,6 +475,7 @@ def check_seq_len_alignment(ctx: GroupContext) -> list[Violation]:
 
 
 CHECKS = [
+    check_decode_bound_configuration,
     check_entries_declare_token_counts,
     check_decode_smoke,
     check_first_bytes_not_npy,

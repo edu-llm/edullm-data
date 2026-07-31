@@ -132,6 +132,55 @@ def test_pretrain_all_zeros_shard_fails_distinct_and_zero_run():
     assert "zero-run-in-shard" in codes
 
 
+def test_pretrain_string_bounds_are_rejected_and_cannot_weaken_decode_checks():
+    """Numeric-looking JSON strings used to skip the clamp and disable all-zero detection."""
+    body = np.zeros(200_000, dtype=np.uint32).tobytes()
+    entry = _tok_entry("tokens/train-00000.u32le.bin", body)
+    ctx = _seed_and_ctx(
+        prefix="tokens",
+        group=_tok_group(
+            min_distinct_ids="0",
+            max_eos_fraction="1.0",
+            max_zero_run="100000000",
+        ),
+        entries=[entry],
+        bodies={"tokens/train-00000.u32le.bin": body},
+    )
+
+    config = pretrain_tokens_v1.check_decode_bound_configuration(ctx)
+    assert len(config) == 3
+    assert _codes(config) == {"invalid-decode-bound"}
+
+    codes = _codes(pretrain_tokens_v1.check_decode_smoke(ctx))
+    assert {"distinct-too-few", "zero-run-in-shard"} <= codes
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("min_distinct_ids", True),
+        ("max_eos_fraction", float("nan")),
+        ("max_zero_run", 1.5),
+    ],
+)
+def test_pretrain_invalid_bound_values_are_rejected_without_weakening_checks(key, value):
+    body = np.zeros(200_000, dtype=np.uint32).tobytes()
+    entry = _tok_entry("tokens/train-00000.u32le.bin", body)
+    ctx = _seed_and_ctx(
+        prefix="tokens",
+        group=_tok_group(**{key: value}),
+        entries=[entry],
+        bodies={"tokens/train-00000.u32le.bin": body},
+    )
+
+    assert _codes(pretrain_tokens_v1.check_decode_bound_configuration(ctx)) == {
+        "invalid-decode-bound"
+    }
+    assert {"distinct-too-few", "zero-run-in-shard"} <= _codes(
+        pretrain_tokens_v1.check_decode_smoke(ctx)
+    )
+
+
 def test_pretrain_uint16_bytes_declared_uint32_fails_vocab_range():
     # Bytes are genuinely uint16 token ids (all valid < vocab as uint16), but the manifest
     # declares uint32 — decoding as uint32 packs pairs of uint16 into huge ids past vocab.
