@@ -24,39 +24,59 @@ The ~$595 spend is still gated and still requires a human.
 
 ## In flight when this was written
 
-**1. Candidate-D classification, AWS Batch GPU.**
-
-```
-job id    180e2ff7-4878-46b4-b016-83458749f9e3
-queue     sbsandbox-intern-edullm-gpu   (g5.xlarge, 1x A10G 24GB)
-writes    s3://sbsandbox-intern-edullm-outputs/teams/data-prep/smoke-out/d_labels.jsonl
-```
-
-Check it, then pull the result:
+**Re-judging all 2,000 documents with a corrected prompt.** The first run's score was invalid — see
+"the prompt bug" below. Check with:
 
 ```bash
-aws batch describe-jobs --jobs 180e2ff7-4878-46b4-b016-83458749f9e3 \
-    --query 'jobs[0].{s:status,r:statusReason}'
-aws s3 cp s3://sbsandbox-intern-edullm-outputs/teams/data-prep/smoke-out/d_labels.jsonl \
-    artifacts/smoke/d_labels.jsonl
+wc -l artifacts/smoke/judges.jsonl        # target 2000
+tail -2 /tmp/phase0/judge_v2.log
 ```
 
-If it failed, resubmit with `python3 artifacts/smoke/submit_classify_d.py --submit` (the script is
-idempotent and `classify_d.py` resumes from whatever is already in `d_labels.jsonl`). Its logs are in
-CloudWatch group `/aws/batch/sbsandbox-intern-edullm-gpu`.
-
-**2. The dclm harvest.** `mlfoundations/dclm-baseline-1.0-parquet` has 27,938 shards, so
-`list_repo_files` alone takes minutes. Re-run just that source:
+If it died partway, just re-run — `judge.py` resumes from whatever is already in `judges.jsonl` and
+only counts a row as done if at least one judge produced a label:
 
 ```bash
-python3 artifacts/smoke/harvest_parquet.py --n-docs 500 --only dclm \
-    --out-dir artifacts/smoke/samples
-python3 artifacts/smoke/judge.py --only dclm --workers 6
+python3 artifacts/smoke/judge.py --workers 8
 ```
 
-**dclm is not required to reach the gate.** Four sources give the gate table four rows; dclm adds a
-fifth. If it keeps failing, score without it and say so — it is the source whose datasets-server
-support is broken in every direction (`/statistics` HTTP 501, `partial` conversion).
+### Already finished
+
+**Candidate-D classification: DONE.** Job `07d5c64b-6b6d-4b5d-b7e8-1a6537248b7e` succeeded;
+`artifacts/smoke/d_labels.jsonl` holds all 2,000 labels, 100% parsed, 0 abstains. **Do not re-run
+it** — D's labels are unaffected by the prompt bug (the bug was in the *judges'* prompt), and the
+labels are already on disk. Source of truth in S3:
+`s3://sbsandbox-intern-edullm-outputs/teams/data-prep/runs/smoke-classify-d/out/d_labels.jsonl`.
+
+Measured throughput: **10.8 doc/s** on one A10G. That number drives `COST-RECHECK.md`, which is the
+most decision-relevant artifact in this directory.
+
+**dclm harvest: ABANDONED, deliberately.** Not slow — *hung*. A parquet row-group read blocks past 2
+minutes where FineMath takes 2.2 s, reproduced standalone (footers and file metadata read fine at
+0.1 s, so it is the column read specifically). Combined with `/statistics` HTTP 501 and a conversion
+truncated 3,869×, DCLM-baseline is inaccessible on every path tried.
+
+**The gate has four rows, not five, and that is fine** — but D's accuracy on diverse unfiltered web
+is unmeasured, and that is the category least like the other four. `PLAN-CORRECTIONS.md` §10.
+
+## ⚠️ The prompt bug — do not repeat it, and do not trust `judges-v1-bad-prompt.jsonl`
+
+The first full run scored **49.1% pooled and FAILED all four sources.** That was **my prompt's fault,
+not the model's.** I labelled FDC category 0 as "General works", copying the essential-web card's
+abbreviation. Dewey class 0 is "**Computer science, information** & general works" — and computing
+lives at `005.x`, *inside* class 0. So D correctly emitted `005.1` → 0 for programming documents while
+the judges, given no computing category, sent them to 6 (Technology).
+
+Remapping only D's `00x` codes to 6 moves qa-forum from **3.3% → 95.7%** and the pool from
+**49.1% → 81.4%**. 92% of D's `0` labels were this one collision.
+
+**The lesson, if you take one thing from this file:** it was not caught by the score looking low — a
+low score is exactly what a failing candidate looks like, and "D FAILS at 49.1%" would have been
+believed. It was caught by reading `raw_all`, where `label=0 <- '005.1,skip'` is visibly a programming
+document filed under a category I had mislabelled. **Read the raw model output before believing any
+aggregate.**
+
+`judge.py:FDC_L1` now spells out every category's real scope. The old labels are kept at
+`artifacts/smoke/judges-v1-bad-prompt.jsonl` for audit, not for use.
 
 ## The one command that produces the gate table
 
