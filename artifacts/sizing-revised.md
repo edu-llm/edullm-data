@@ -3,9 +3,14 @@
 Phase 0 task F. Recomputes the §2.1 table against what task A actually measured, and flags any pool
 now below 3× peak plausible demand.
 
-**Headline: 5 of 8 pools are verified met. One is verified NOT met. Two are unverified.** The
-sizing does not collapse — but §2.1 cannot be called confirmed, and one category needs a design
-decision before the first publish.
+**Headline: 6 of 8 pools verified met, 2 unverified, none failing.** `reference` was the one failure and
+was **resolved 2026-07-31** by resizing the pool 14 B → 9 B (owner decision, below). The four categories
+that measured 0.00 B are being re-counted now by the footer method (§"What would settle the unverified
+pools"), so this file will move again.
+
+**Reservoir total: 260 B → 255 B**, which makes the design doc's `reservoir-260b-dolma2` name wrong by
+5 B. Flagged there as a decision to take once the re-counts land — the name is part of the address and
+cannot be changed without republishing.
 
 ## The table
 
@@ -22,28 +27,39 @@ any tokenizer.
 | **academic** | 20 B | 12 B | *unmeasured* | ⚠️ **UNVERIFIED, not at risk** | peS2o alone is 182.6 GB of UTF-8; missing 12 B would need >15.2 bytes/token |
 | **code** | 40 B | 24 B | *unmeasured* | ⚠️ **UNVERIFIED, likely met** | stackv2_edu desk floor 61–80 B from 83.0 GB × 0.274 tok/char |
 | **QA/forum** | 12 B | 7.2 B | *unmeasured* | ⚠️ **UNVERIFIED, likely met** | stackexchange_filtered ~23.9 B; survives a pessimistic 0.21 tok/byte bound at ~18.8 B |
-| **reference** | 14 B | 9 B | **8.87 B** | ❌ **NOT MET** | finewiki/en, footer-exact; 1.5% short of even the 3× floor |
+| **reference** | **9 B** ✅ *(was 14 B)* | 7.2 B → **2.4 B** | **8.87 B** | ✅ **MET 3.70×** | finewiki/en, footer-exact. Resolved by resizing the POOL, not by padding it |
 | **synthetic** | 60 B (4×15 B) | 18 B | *unmeasured* | ⚠️ **UNVERIFIED, ≥6× headroom** | two independent non-sampling routes agree within 3–9% of card |
 
-## The one real failure: reference
+## reference — RESOLVED 2026-07-31 by owner decision: the pool is 9 B
 
-`finewiki/en` measures **8.87 B**, not the "~3.5 B" in §3.2 (that figure appears nowhere on the card,
-which names no token count and no tokenizer) — but also not 14 B. It is **63% of the plan's pool and
-1.5% below the 9 B three-times floor.**
+`finewiki/en` measures **8.87 B** by exact parquet-footer bytes — 2.5× the "~3.5 B" §3.2 claimed (a
+figure that appears nowhere on the card, which names no token count and no tokenizer), but well under
+14 B.
 
-Three ways to reach 14 B, and they are not equivalent:
+**The owner resized the pool to 8.87 B → 9 B rather than padding it to 14 B.** Three options were on
+the table and only one avoided a worse problem:
 
-| option | tokens | cost |
+| option | tokens | what it costs |
 |---|---|---|
-| all-wiki (add `wikimedia_filtered`, `wikiteam_filtered`) | ~16 B | **~90% share-alike** — defeats §7 item 4's separability goal |
-| public-domain only (`pre_1929_books` + `gutenberg`) | ~14.5 B | no SA, but factually stale for an *encyclopedic* pool |
-| **two labelled partitions: `reference-sa` ~9 B + `reference-pd` ~5 B** | **~14 B** | recommended — hits the pool *and* makes separability structural |
+| all-wiki (add `wikimedia_filtered`, `wikiteam_filtered`) | ~16 B | **~90% share-alike** — defeats §7 item 4's separability goal across the whole category |
+| public-domain only (`pre_1929_books` + `gutenberg`) | ~14.5 B | no SA, but factually **stale** for an encyclopedic pool |
+| split `reference-sa` ~9 B + `reference-pd` ~5 B | ~14 B | hits the number, but half the pool is pre-1929 books answering a *different* question than "encyclopedia" |
+| ✅ **CHOSEN: a 9 B pool, max share 15% → 12%** | **8.87 B** | forecloses runs wanting >12% reference. Nothing else changes |
 
-Per §1.1's constraint (`build_mixture` resolves exactly one group), those must be **`source` label
-values inside one group**, not separate groups.
+**Why this is the right trade.** The alternatives all reach 14 B by adding material that is either
+share-alike-encumbered or not encyclopedic — so the pool would hit its number while being *worse* at
+the thing it exists for. Sizing to what exists keeps the category honest.
 
-**If the pool must be encyclopedic AND current AND English AND redistributable, 14 B does not exist.
-The honest ceiling is ~9 B.** That is a design decision, not a measurement problem.
+The max-share change is forced arithmetic, not taste: at 8.87 B a 15% share means 3.0 B peak demand and
+**2.96× headroom**, which would have made reference the only row in §2.1 violating that document's own
+≥3× invariant — by 1.3%, the kind of miss that survives review because it looks fine. 12% gives 3.70×.
+
+**The default stays 5%**, so no run anyone was likely to configure changes. What narrows is the ceiling
+on a reference-heavy experiment. That region is one no downstream-validated study points at anyway —
+12% is already 7.5× RegMix's measured Wikipedia optimum of 1.6%.
+
+*Had a bigger pool been reachable without those costs, the governing principle (over-provision, because
+a small pool forecloses permanently) would have said take it. It wasn't.*
 
 ## Math is 3.6% short, and the shortfall is structural
 

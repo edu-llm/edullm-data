@@ -12,7 +12,29 @@ purpose:  A reservoir. One published pool that every 20B training run draws a we
 family:   pretrain
 profile:  pretrain-tokens/v1              [verified in registry]
 name:     pretrain/reservoir-260b-dolma2  [validate_dataset_id: PASS]
+          ⚠️ THE "260b" IS NOW WRONG — see below. Do not publish under this name.
 ```
+
+⚠️ **THE NAME NEEDS ONE DECISION BEFORE PUBLISH, AND IT IS IRREVERSIBLE.** The reference pool dropped
+14B → 9B (§2.1), so the real total is **255B**, and four categories are still being re-counted — the
+total may move again. The name is part of the address (`<family>/<name>/<version>/`) and cannot be
+changed without republishing.
+
+This project already has a scar from a name that disagreed with its bytes: the legacy `.npy` shards
+were headerless raw `uint32`, and `CLAUDE.md`'s rule — *"extension must match real bytes"* — exists
+because of it. A `260b` in the name of a 255B corpus is the same class of lie, smaller.
+
+Three options, all `validate_dataset_id`-clean (verified by execution):
+
+| name | trade-off |
+|---|---|
+| `pretrain/reservoir-255b-dolma2` | accurate today; wrong again if a re-count moves the total |
+| **`pretrain/reservoir-dolma2`** | **no number to go stale.** The size lives in `dataset.json` and the README, which are derived and always correct |
+| `pretrain/reservoir-250b-dolma2` | a deliberate floor — true as "at least", stable against small drift |
+
+**Recommendation: `pretrain/reservoir-dolma2`.** The number in a name is decoration that ages; the
+number in `dataset.json` is recomputed. Nothing reads the name for size. **Decide after the re-counts
+land** (§5.6 phase 0c) so it is set once.
 
 **⚠️ IMPLEMENTERS: PHASE 0 IS DONE (2026-07-31).** Do not re-run it. Its results, the ten plan defects
 it found, and the resume state are in `artifacts/` — start with `artifacts/PHASE0-REPORT.md`, then
@@ -37,7 +59,7 @@ blocking, and §2.1/`artifacts/sizing-revised.md` for the one pool (`reference`)
 | shard size | **25,001,984 tokens** (~100 MB) → ~10,400 objects | 2.2 |
 | curated-source pools | over-provisioned (15% of default) rather than tuned to the evidence's 2% | 2.1 |
 | synthetic split | **equal 15B** from each of faq/tutorial/math/table | 3.3 |
-| decontamination | n-gram over all 260B **+ LLM-based over the synthetic 60B** | 4.2 |
+| decontamination | n-gram over all 255B **+ LLM-based over the synthetic 60B** | 4.2 |
 | proxy sweep | **deferred** until after the reservoir exists; no escalation path | 5.2 |
 | **share-alike** | **keep SA sources SEPARABLE (precautionary only); do NOT drop them** | **1.5** |
 | mix guidance | shipped in the generated README (`notes`, outside the hash chain) | 5.5 |
@@ -397,15 +419,44 @@ to the largest ratio anyone will plausibly ask for, per category, times a headro
 | synthetic (rephrased) | **10%** | 2.0B | 30% † | **60B** |
 | math | **8%** | 1.6B | 35% | **36B** |
 | academic | **7%** | 1.4B | 20% | **20B** |
-| reference/wiki | **5%** | 1.0B | 15% | **14B** |
+| reference/wiki | **5%** | 1.0B | **12%** ‡ | **9B** ‡ |
 | QA/forum | **3%** | 0.6B | 12% | **12B** |
-| **total** | **100%** | 20.0B | | **260B** |
+| **total** | **100%** | 20.0B | | **255B** |
 
 † synthetic is capped by evidence (§3.3), not by pool size — 60B is 10× what a 30%-synthetic run needs.
 
+‡ **REVISED 2026-07-31 (owner decision): reference is 9B, not 14B, and its max share drops 15% → 12%.**
+Phase 0 measured `finewiki/en` at **8.87B** by exact parquet-footer bytes — 2.5× the "~3.5B" §3.2 had
+(a figure that appears nowhere on the card, which names no token count and no tokenizer), but well
+under 14B. Reaching 14B needed either **~90% share-alike** — defeating §7 item 4's separability — or a
+public-domain pool that is factually stale for an encyclopedia. The owner chose to size the pool to
+what exists rather than pad it with material nobody wants.
+
+**The max-share change is forced arithmetic, not a preference.** At 8.87B:
+
+| max share | peak demand @20B | headroom | verdict |
+|---|---|---|---|
+| 15% (old) | 3.0B | **2.96×** | ✗ misses the 3× rule |
+| **12% (new)** | **2.4B** | **3.70×** | ✓ |
+| 10% | 2.0B | 4.43× | ✓ |
+| 5% (default) | 1.0B | 8.87× | ✓ |
+
+15% would have been the *only* row in the table violating §2.1's own ≥3× invariant — by 1.3%, which is
+exactly the kind of miss that survives review because it looks fine. **The default stays 5%**, so no
+run anyone was likely to configure changes; what narrows is the ceiling on a reference-heavy
+experiment, from 15% to 12%.
+
+**What this forecloses, stated plainly:** a run wanting >12% reference is now impossible without a
+`v2`. Per this document's governing principle that is the wrong direction to err — a pool too small
+forecloses an experiment permanently. It is accepted here because the alternative was not "a bigger
+pool" but "a pool padded to 14B with ~90% share-alike content," which trades a foreclosed experiment
+for a licensing exposure across the *entire* category. Reference at 12% is also already 2.4× the
+evidence-based default and 7.5× RegMix's measured Wikipedia optimum of 1.6% (§5.5), so the foreclosed
+region is one no downstream-validated study points at.
+
 Every pool holds **≥3× its peak plausible demand**, verified arithmetically. Headroom absorbs MinHash
 losses, decontamination, tokenizer re-counting, and reshuffling without re-epoching. **200B real + 60B
-synthetic = 260B**, 0.95 TiB, **~$24/month**, and **13 distinct 20B runs before any token repeats**.
+synthetic = 255B**, 0.93 TiB, **~$23/month**, and **12 distinct 20B runs before any token repeats**.
 
 **Why curated sources are over-provisioned rather than tuned down.** An earlier draft of this table cut
 academic/reference/QA to 2% combined, because at ~1B params every downstream-validated study lands
@@ -464,7 +515,7 @@ Measured p90 component error (real `build_mixture` loop, ±35% shard-size jitter
 **25M is the pick**: the finest granularity that still fits the Batch job timeout with margin. 10M is
 not merely slower — it breaks the deployed validator, and it doubles the per-sample path scan (26,000
 vs 10,400 comparisons, in the training hot loop, since OLMo-core's `__getitem__` scans `self.offsets`
-linearly). Storage 0.95 TiB, ~$24/mo. Single-part copies throughout (100 MB ≪ 5 GiB).
+linearly). Storage 0.93 TiB, ~$23/mo. Single-part copies throughout (100 MB ≪ 5 GiB).
 
 **Shard tokens must be a multiple of `sequence_length`** — `file_size // (item_size * seq_len)` floors,
 so anything under 8192 tokens yields **zero** instances. Use **3052 × 8192 = 25,001,984**.
@@ -524,7 +575,7 @@ against 125B** (≈3.3 epochs) — *effective*, not unique tokens.
 | math | 36B | `HuggingFaceTB/finemath` 3plus 34B → `proof-pile-2/algebraic-stack` 11B (math *code*, uniquely non-overlapping) → `swallow-math-v2` 32B (Apache-2.0; a FineMath rewrite — dedupe or substitute) | ODC-BY / Apache-2.0 |
 | web (diverse) | 30B | `mlfoundations/dclm-baseline-1.0` — the diversity counterweight to edu filtering | CC-BY-4.0 |
 | academic | 20B | `common-pile/peS2o_filtered` 43.3B → `pubmed_filtered` 36.6B → `arxiv_papers_filtered` 6.0B | CC-BY/CC0 |
-| reference | 14B | `HuggingFaceFW/finewiki` en ~3.5B (Aug 2025, math+tables retained) | ⚠ CC-BY-SA 4.0 (share-alike) |
+| reference | **9B** ‡ | `HuggingFaceFW/finewiki` en — **measured 8.87B** by parquet footers, NOT the ~3.5B this row used to claim (a figure absent from the card, which names no token count and no tokenizer) | ⚠ CC-BY-SA 4.0 **+ GFDL** (share-alike; §1.5) |
 | QA/forum | 12B | `common-pile/stackexchange_filtered` 23.9B | ⚠ CC-BY-SA |
 
 **Avoid `stack-edu` and `the-stack-v2` directly** — they ship **SWHIDs only**, and bulk access
@@ -590,8 +641,8 @@ differ (table 17.18 vs tutorial 15.88 macro), so a teammate can A/B them — a s
    must be document-aware. And its source is FineWeb-Edu, so it overlaps any FineWeb-lineage real
    tokens.
 
-**Revised total: ~200B real + ~60B synthetic = 260B**, ~10,400 objects at 25M tokens each, ~1.4 h
-Gate A, 0.95 TiB, ~$24/mo, **13 distinct 20B runs before reuse**. If you want the full 400B, add real
+**Revised total: ~195B real + ~60B synthetic = 255B**, ~10,200 objects at 25M tokens each, ~1.4 h
+Gate A, 0.93 TiB, ~$23/mo, **12 distinct 20B runs before reuse**. If you want the full 400B, add real
 tokens rather than synthetic ones.
 
 ---
@@ -662,12 +713,12 @@ negligible — and GSM8K is one an eduLLM would report.
 
 | tier | scope | tool | cost |
 |---|---|---|---|
-| n-gram | **all 260B** | `allenai/decon` — `ngram_size 5`, `stride 10`, threshold 0.8, whole-doc removal | ~$10 |
+| n-gram | **all 255B** | `allenai/decon` — `ngram_size 5`, `stride 10`, threshold 0.8, whole-doc removal | ~$10 |
 | **LLM-based** | **the synthetic 60B only** | `lm-sys/llm-decontaminator` | ~$200 |
 
 The second tier is targeted exactly at the blind spot: n-gram cannot see paraphrased leakage, and the
 synthetic half *is* paraphrase. The 200B real half is already-filtered public corpora, so an LLM pass
-over all 260B (~$800+) would be mostly wasted. Run both against **your actual eval suite**, and record
+over all 255B (~$800+) would be mostly wasted. Run both against **your actual eval suite**, and record
 the outcome in `limitations` — including the null result if nothing is found, since "we checked" is
 itself the claim worth publishing.
 
@@ -929,7 +980,7 @@ The deferral in §5.2 only makes sense as an ordering, so here it is explicitly.
 |---|---|---|
 | **0. Pre-flight** ✅ **DONE 2026-07-31** | Re-counted 6 sources under dolma2; per-book licenses for OpenStax (129 books) + LibreTexts (40,049 rows); validator timeout set to 7200 s; airlock re-verified. Found 10 plan defects. | Token counts from cards are not comparable — most name no tokenizer, and every Common Pile "token" figure is `Size(GB) × 0.25`, pure arithmetic. |
 | **0b. Pre-publish gate** ✅ **CLEAR** | All three §9.7 items closed 2026-07-31. Item 1 (`CONTROL_PREFIXES`, both the validator and producer halves) → `4d6768e`. Item 2 (`slug_path_segment` / `build_domain_slug_map` + the `PartialLabelCoverage` reader warning) → `934dd75`. Item 3 (per-document key) → **DECIDED — SKIP**. Suite 626 → **692**. | Each was irreversible-if-wrong and cheap-if-done-first: the `domain` slugs sit inside `manifest_sha256`, and so would the doc-index key — which is why skipping it had to be a deliberate decision rather than an omission. |
-| **0c. Token re-count** ⬅ **NEXT, advisable not blocking** | Finish the 4 unverified categories via the footer-bytes method (~$10, ~1 h, in-region). Then decide the `reference` pool, which Phase 0 measured at **8.87 B against a 14 B target** — the one pool verified NOT met (`artifacts/sizing-revised.md`). | Sizing is a pool-size question, not a layout one, so it can trail the irreversible work — but going into assembly with 3 of 8 pools unverified and 1 known short is a choice, not an oversight. |
+| **0c. Token re-count** ⬅ **IN PROGRESS 2026-07-31** | Measuring the 4 categories that came back **0.00B** — academic, code, qa-forum, synthetic — by parquet footers, the one method Phase 0 proved quota-immune. ✅ The `reference` pool is **DECIDED: 9B** (owner, §2.1 ‡), max share 15% → 12%. | Sizing is a pool question, not a layout one, so it may trail the irreversible work — but entering assembly with half the pools unverified would be a choice, not an oversight. The footer method is why this is now cheap: exact whole-split bytes off the CDN, no datasets-server quota. |
 | **1. Assemble** | Bloom-dedup (delete) → decontaminate → MinHash (annotate) → carve val from documents per source → tokenize → **attach inherited `domain` where the source ships one (§1.2), flat otherwise** → shard at 25,001,984 tokens. | §4.1 order. Val carve precedes tokenization (§1.4). The `domain` attach is now a metadata join, not a classification pass. |
 | **2. Publish** | `publish()` on Batch, in-region, `hash_workers`/`copy_workers=16`, `--timeout 7200`. Gate A ≈1.4 h. | §8. |
 | **2b. Backfill the sidecars** ⬅ **NEW, and the order is not optional** | AFTER promotion, write `_dedup/clusters.parquet` (cluster × source counts) and `_licenses/sources.parquet` (+ optionally `_licenses/works.parquet`) **in place under the published prefix**. Do NOT stage them to landing. | See below — staging them loses them silently. Both are **source-level** artifacts, per §9.7 item 3's SKIP; schema in `artifacts/licenses/SCHEMA.md`. |
