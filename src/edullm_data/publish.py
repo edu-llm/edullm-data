@@ -26,13 +26,13 @@ Design rules this file exists to honor:
 
 from __future__ import annotations
 
-import gzip
 import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from . import jsonl as jsonl_mod
 from .contracts import (
     NamingError,
     SCHEMA_VERSION,
@@ -137,32 +137,20 @@ def _count_for(path: str, size: int, fmt: Format, s3: S3, bucket: str, key: str)
     * Fixed-width raw → tokens = size / dtype_size. Pure arithmetic on the object size;
       **zero bytes read.** This is the common (and largest) case — a 633 GB token shard
       gets its count for free.
-    * Line formats (.jsonl / .jsonl.gz) → rows, by streaming and counting newlines in
-      bounded memory. Only these actually read bytes, and jsonl datasets are small.
+    * Line formats (.jsonl / .jsonl.gz) → rows, by streaming-parsing JSON objects with
+      :mod:`edullm_data.jsonl` (same definition Gate A's text-corpus profile uses).
     * Everything else → omit (a tar part or sentinel has no honest count, §5).
     """
     if fmt.container == "raw" and fmt.dtype_size:
         return {"unit": "tokens", "value": size // fmt.dtype_size}
-    if path.endswith(".jsonl"):
-        return {"unit": "rows", "value": _stream_count_newlines(s3, bucket, key, gz=False)}
-    if path.endswith(".jsonl.gz"):
+    is_jsonl, gzipped = jsonl_mod.is_jsonl_path(path)
+    if is_jsonl:
         try:
-            return {"unit": "rows", "value": _stream_count_newlines(s3, bucket, key, gz=True)}
-        except OSError:
+            n = jsonl_mod.count_jsonl_objects_s3(s3, bucket, key, gzipped=gzipped)
+        except (OSError, ValueError, EOFError):
             return None
+        return {"unit": "rows", "value": n}
     return None
-
-
-def _stream_count_newlines(s3: S3, bucket: str, key: str, *, gz: bool) -> int:
-    """Count newlines by streaming, never holding the object whole. Uses the full-body
-    reader but processes it as a stream via the S3 layer; for the FakeS3 test path this is
-    in-memory, for Boto3S3 it streams. jsonl row-count is only needed for small text
-    datasets, so this never touches the TB-scale token path."""
-    body = s3.get(bucket, key)  # jsonl groups are small; token shards never reach here
-    if gz:
-        body = gzip.decompress(body)
-    return body.count(b"\n")
-
 
 # --------------------------------------------------------------------------------------
 # source enumeration
@@ -237,6 +225,7 @@ def build_plan(
     notes: str | None = None,
     limitations: Sequence[Mapping[str, Any]] | None = None,
     license: Mapping[str, Any] | None = None,
+    tokenizer_depends_on: Mapping[str, Any] | None = None,
 ) -> PublishPlan:
     """Turn (path, size) metadata + the staged S3 objects into the exact objects to write.
 
@@ -338,14 +327,19 @@ def build_plan(
             "manifest_sha256": manifest_sha256(man),
         }
         # merge profile-specific metadata.
-        # Tokenizer: the primary path is the per-dataset publish(tokenizer=…) arg, already
-        # threaded into group_meta as a depends_on above. Only if THIS group still has no
-        # tokenizer dependency do we fall back to an OPTIONAL family-wide default — set solely
-        # when a team truly standardizes on one tokenizer (see the family note; a wrong
-        # family default is dangerous because a mismatched tokenizer's ids usually still fall
-        # in range and pass silently).
+        # Tokenizer: attach a publish(tokenizer=…)-resolved depends_on to every group whose
+        # *resolved profile* is pretrain-tokens/* — never to whatever keys happen to appear
+        # in group_meta (a text-only group_meta would otherwise steal the tokenizer pin).
         if profile_for(g).startswith("pretrain-tokens/"):
-            already = any(d.get("role") == "tokenizer" for d in (group_meta.get(g, {}).get("depends_on", []) or []))
+            already = any(
+                d.get("role") == "tokenizer"
+                for d in (group_meta.get(g, {}).get("depends_on", []) or [])
+            ) or any(d.get("role") == "tokenizer" for d in (gm.get("depends_on", []) or []))
+            if tokenizer_depends_on is not None and not already:
+                existing = list(gm.get("depends_on", []) or [])
+                existing.append(dict(tokenizer_depends_on))
+                gm["depends_on"] = existing
+                already = True
             fam_dep = defaults.get("tokenizer_dependency_optional")
             if not already and isinstance(fam_dep, Mapping) and fam_dep.get("dataset_id"):
                 existing = list(gm.get("depends_on", []) or [])
@@ -357,8 +351,18 @@ def build_plan(
             # in now from the manifest we just built, so Gate A's "every partition declares
             # rows" holds. Path partitions with a glob matching no shard are dropped, not
             # shipped empty (a dataset may only carry a train split, not the family's full set).
-            gm["partitions"] = _resolve_path_partitions(defaults["partitions"], entries)
-            gm["coverage"] = defaults.get("coverage", "partition")
+            #
+            # When the family's globs are token-shaped (*.u32le.bin) but this group is JSONL
+            # text, fall back to split-name-compatible ``<name>-*.jsonl*`` templates so a
+            # companion text/ group still gets train/val partitions without hand-writing them.
+            resolved = _resolve_path_partitions(defaults["partitions"], entries)
+            if not resolved:
+                resolved = _resolve_path_partitions(
+                    _jsonl_partition_templates(defaults["partitions"]), entries
+                )
+            if resolved:
+                gm["partitions"] = resolved
+                gm["coverage"] = defaults.get("coverage", "partition")
         gm.update(group_meta.get(g, {}))
         # A CALLER-SUPPLIED partitions list used to bypass row-filling entirely: the branch
         # above is guarded on the caller NOT having supplied one, and this gm.update() copies
@@ -373,6 +377,13 @@ def build_plan(
         if gm.get("partitions"):
             gm["partitions"] = _fill_missing_partition_rows(gm["partitions"], entries)
             gm.setdefault("coverage", defaults.get("coverage", "partition"))
+        # Re-apply tokenizer after gm.update so a caller group_meta cannot strip it from a
+        # pretrain-tokens group by omitting depends_on.
+        if profile_for(g).startswith("pretrain-tokens/") and tokenizer_depends_on is not None:
+            existing = list(gm.get("depends_on", []) or [])
+            if not any(d.get("role") == "tokenizer" for d in existing):
+                existing.append(dict(tokenizer_depends_on))
+                gm["depends_on"] = existing
         groups_meta.append(gm)
 
     dataset_json = {
@@ -464,6 +475,25 @@ def _fill_missing_partition_rows(
             if rows is not None:
                 p["rows"] = rows
         out.append(p)
+    return out
+
+
+def _jsonl_partition_templates(
+    templates: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Rewrite family path-partition globs to JSONL-compatible ``<name>-*.jsonl*``.
+
+    Pretrain family defaults use ``train-*.u32le.bin``; a companion ``text/`` group of
+    ``.jsonl`` shards would otherwise get zero auto-partitions. Matching uses the
+    partition ``name`` so train/val/heldout keep their identities.
+    """
+    out: list[dict[str, Any]] = []
+    for tmpl in templates:
+        t = dict(tmpl)
+        if t.get("by") == "path":
+            name = str(t.get("name") or "train")
+            t["glob"] = f"{name}-*.jsonl*"
+        out.append(t)
     return out
 
 
@@ -639,21 +669,13 @@ def publish(
     family = _load_family(family_name)
     env = env if env is not None else dict(os.environ)
 
-    # Resolve the per-dataset tokenizer (if named) into a depends_on entry, threaded into
-    # group_meta for every pretrain-tokens group so the caller need not hand-build it.
+    # Resolve the per-dataset tokenizer (if named). Attachment to groups happens in
+    # build_plan by *resolved profile* (pretrain-tokens/*), not by group_meta keys —
+    # otherwise a multi-group publish with group_meta only for ``text`` would pin the
+    # tokenizer on the raw-text group and leave the token group without vocab bounds.
+    tokenizer_depends_on: Mapping[str, Any] | None = None
     if tokenizer is not None:
-        tok_dep = _resolve_tokenizer_dependency(tokenizer, s3, data_bucket)
-        gm_in = {k: dict(v) for k, v in (group_meta or {}).items()}
-        # attach to the token group(s); if the caller named groups, respect them, else the
-        # conventional "tokens" group.
-        target_groups = [g for g in gm_in] or ["tokens"]
-        for g in target_groups:
-            gm_in.setdefault(g, {})
-            existing = list(gm_in[g].get("depends_on", []) or [])
-            if not any(d.get("role") == "tokenizer" for d in existing):
-                existing.append(tok_dep)
-                gm_in[g]["depends_on"] = existing
-        group_meta = gm_in
+        tokenizer_depends_on = _resolve_tokenizer_dependency(tokenizer, s3, data_bucket)
     build_executor = build_executor or _build_executor_from_env(env)
 
     # Resolve the source to an (S3 bucket, prefix). A local dir is first STREAMED up to a
@@ -700,6 +722,7 @@ def publish(
             notes=notes,
             limitations=limitations,
             license=license,
+            tokenizer_depends_on=tokenizer_depends_on,
         )
         ds_prefix = f"{dataset_id}/{version}"
         # 1. reserve the version: create-only dataset.json FIRST (§6 order)

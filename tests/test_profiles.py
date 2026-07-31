@@ -543,14 +543,14 @@ def test_sft_gzip_rows_are_read():
 
 
 def _text_entry(path: str, body: bytes, *, rows: int | None = None) -> ManifestEntry:
+    from edullm_data import jsonl as jsonl_mod
+
     fmt = Format(
         container="jsonl",
         codec="gzip" if path.endswith(".gz") else "none",
     )
     if rows is None:
-        # Match publish(): count non-blank JSON lines after optional gunzip.
-        raw = gzip.decompress(body) if path.endswith(".gz") else body
-        rows = sum(1 for line in raw.splitlines() if line.strip())
+        rows = jsonl_mod.count_jsonl_objects_from_bytes(body, gzipped=path.endswith(".gz"))
     return ManifestEntry(
         path=path,
         sha256=_sha(body),
@@ -599,7 +599,7 @@ def test_text_corpus_empty_file_fails_row_count():
         entries=[entry],
         bodies={"text/train-00000.jsonl": body},
     )
-    codes = _codes(text_corpus_v1.check_row_count_recomputed(ctx))
+    codes = _codes(text_corpus_v1.check_documents(ctx))
     assert "row-count-mismatch" in codes
     assert "empty-shard" in codes
 
@@ -613,7 +613,7 @@ def test_text_corpus_missing_text_field_fails():
         entries=[entry],
         bodies={"text/train-00000.jsonl": body},
     )
-    assert "missing-text-field" in _codes(text_corpus_v1.check_text_field_wellformed(ctx))
+    assert "missing-text-field" in _codes(text_corpus_v1.check_documents(ctx))
 
 
 def test_text_corpus_empty_text_fails():
@@ -625,7 +625,7 @@ def test_text_corpus_empty_text_fails():
         entries=[entry],
         bodies={"text/train-00000.jsonl": body},
     )
-    assert "text-field-empty" in _codes(text_corpus_v1.check_text_field_wellformed(ctx))
+    assert "text-field-empty" in _codes(text_corpus_v1.check_documents(ctx))
 
 
 def test_text_corpus_schema_must_name_text():
@@ -637,7 +637,7 @@ def test_text_corpus_schema_must_name_text():
         entries=[entry],
         bodies={"text/train-00000.jsonl": body},
     )
-    assert "record-schema-missing-text" in _codes(text_corpus_v1.check_record_schema_names_text(ctx))
+    assert "record-schema-missing-text" in _codes(text_corpus_v1.check_group_config(ctx))
 
 
 def test_text_corpus_custom_text_field():
@@ -649,8 +649,8 @@ def test_text_corpus_custom_text_field():
         entries=[entry],
         bodies={"text/train-00000.jsonl": body},
     )
-    assert text_corpus_v1.check_record_schema_names_text(ctx) == []
-    assert text_corpus_v1.check_text_field_wellformed(ctx) == []
+    assert text_corpus_v1.check_group_config(ctx) == []
+    assert text_corpus_v1.check_documents(ctx) == []
 
 
 def test_text_corpus_gzip_is_read():
@@ -668,17 +668,61 @@ def test_text_corpus_gzip_is_read():
     assert out == [], f"gzip text-corpus should pass, got {[str(v) for v in out]}"
 
 
-def test_text_corpus_all_identical_when_enabled():
-    rows = [_doc("same", doc_id=f"d{i}") for i in range(10)]
-    body = _jsonl(rows)
-    entry = _text_entry("text/train-00000.jsonl", body)
+def test_text_corpus_identical_is_per_shard():
+    """A 100% repeated shard must fire even when siblings are healthy (group-wide dilution)."""
+    healthy = _jsonl([_doc(f"unique {i}", doc_id=f"h{i}") for i in range(10)])
+    stuck = _jsonl([_doc("same", doc_id=f"s{i}") for i in range(10)])
+    entries = [
+        _text_entry("text/train-00000.jsonl", healthy),
+        _text_entry("text/train-00001.jsonl", stuck),
+    ]
     ctx = _seed_and_ctx(
         prefix="",
         group=_text_group(max_identical_fraction=0.5),
+        entries=entries,
+        bodies={"text/train-00000.jsonl": healthy, "text/train-00001.jsonl": stuck},
+    )
+    viols = text_corpus_v1.check_documents(ctx)
+    codes = _codes(viols)
+    assert "text-all-identical" in codes
+    assert any(v.path == "text/train-00001.jsonl" for v in viols if v.code == "text-all-identical")
+    assert not any(v.path == "text/train-00000.jsonl" for v in viols if v.code == "text-all-identical")
+
+
+def test_text_corpus_invalid_min_text_chars():
+    body = _jsonl([_doc("hello")])
+    entry = _text_entry("text/train-00000.jsonl", body)
+    ctx = _seed_and_ctx(
+        prefix="",
+        group=_text_group(min_text_chars=0),
         entries=[entry],
         bodies={"text/train-00000.jsonl": body},
     )
-    assert "text-all-identical" in _codes(text_corpus_v1.check_text_not_all_identical(ctx))
+    assert "invalid-min-text-chars" in _codes(text_corpus_v1.check_group_config(ctx))
+
+
+def test_text_corpus_invalid_text_field():
+    body = _jsonl([_doc("hello")])
+    entry = _text_entry("text/train-00000.jsonl", body)
+    ctx = _seed_and_ctx(
+        prefix="",
+        group=_text_group(text_field=""),
+        entries=[entry],
+        bodies={"text/train-00000.jsonl": body},
+    )
+    assert "invalid-text-field" in _codes(text_corpus_v1.check_group_config(ctx))
+
+
+def test_text_corpus_invalid_max_identical_fraction():
+    body = _jsonl([_doc("hello")])
+    entry = _text_entry("text/train-00000.jsonl", body)
+    ctx = _seed_and_ctx(
+        prefix="",
+        group=_text_group(max_identical_fraction=float("nan")),
+        entries=[entry],
+        bodies={"text/train-00000.jsonl": body},
+    )
+    assert "invalid-max-identical-fraction" in _codes(text_corpus_v1.check_group_config(ctx))
 
 
 def test_profiles_expose_the_module_contract():

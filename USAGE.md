@@ -108,24 +108,28 @@ artifacts/public/
 ### Multi-group (tokens + raw text)
 
 A dataset can carry several groups; pass `profile` as a mapping from group name (first path
-segment) to profile id. Example: packed shards plus Dolma-style JSONL under `text/`:
+segment) to profile id. Example: packed shards plus Dolma-style JSONL under `text/` (include
+a held-out `val` split — the pretrain family requires one — and let the publisher derive
+JSONL-compatible train/val partitions for the text group from the family split names):
 
 ```
 artifacts/public/
 ├── tokens/<source>/train-00000.u32le.bin
-└── text/<source>/train-00000.jsonl
+├── tokens/<source>/val-00000.u32le.bin
+├── text/<source>/train-00000.jsonl
+└── text/<source>/val-00000.jsonl
 ```
 
 ```python
 publish(
     "artifacts/public/",
     dataset_id="pretrain/example-mix",
-    purpose="…",
+    purpose="Example mix with companion raw documents for 370M ladder runs",
     profile={
         "tokens": "pretrain-tokens/v1",
         "text": "text-corpus/v1",
     },
-    tokenizer="tokenizer/dolma2-bpe",
+    tokenizer="tokenizer/dolma2-bpe",  # attaches to the tokens group by profile, not group_meta keys
     group_meta={
         "text": {"record_schema": {"text": "str", "id": "str"}},
     },
@@ -134,7 +138,8 @@ publish(
 
 `text-corpus/v1` requires `.jsonl` / `.jsonl.gz` documents whose rows are JSON objects with a
 non-empty string at the declared text field (default `text`). Gate A recomputes row counts by
-parsing the payload and refuses empty / missing-text shards.
+streaming-parsing the payload (same helper as `publish()`) and refuses empty / missing-text
+shards. Optional `max_identical_fraction < 1.0` refuses a *per-shard* stuck writer.
 
 ### Naming rules (the user manually reviews names — get them right)
 

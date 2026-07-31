@@ -7,16 +7,18 @@ field — which would make a detokenize/compare or raw-document consumer silentl
 
 Rows come from ``.jsonl`` / ``.jsonl.gz`` per manifest entry (Dolma-style). Every
 document object must carry a non-empty string at the group's text field (default
-``text``). Row counts are **recomputed by parsing the payload**, never trusted from the
-manifest alone (§0.4).
+``text``). Row counts are **recomputed by streaming-parsing the payload** with the same
+helper ``publish()`` uses (:mod:`edullm_data.jsonl`), never trusted from the manifest
+alone (§0.4). Each shard is fetched/parsed **once** for count + text + optional
+identical-text checks.
 """
 
 from __future__ import annotations
 
-import gzip
-import json
+import math
 from typing import Any, Mapping
 
+from .. import jsonl as jsonl_mod
 from ..manifest import ManifestEntry
 from .base import GroupContext, Violation
 
@@ -26,16 +28,16 @@ REQUIRED_FIELDS: Mapping[str, Any] = {
     # Declares the document shape. Must name the text field (default key ``text``).
     # Presence is declarative; VALUES are enforced by CHECKS reading the bytes.
     "record_schema": {"type": "object"},
-    # Optional:
-    #   text_field (str, default "text"): which record key holds document text
-    #   rows_sample (int): cap on rows checked for well-formedness (default: all)
-    #   min_text_chars (int, default 1): minimum len(text) after strip
-    #   max_identical_fraction (float, default 1.0): if < 1.0, refuse when this fraction
-    #     of sampled texts are byte-identical (catches a stuck writer dumping one doc)
+    # Optional (validated explicitly — invalid values are violations, not silent defaults):
+    #   text_field (nonempty str, default "text")
+    #   min_text_chars (int >= 1, default 1)
+    #   max_identical_fraction (finite float in [0, 1], default 1.0 = disabled)
 }
 
 _DEFAULT_TEXT_FIELD = "text"
 _DEFAULT_MIN_TEXT_CHARS = 1
+_DEFAULT_MAX_IDENTICAL = 1.0
+_MISSING = object()
 
 
 # --------------------------------------------------------------------------------------
@@ -49,7 +51,7 @@ def _object_key(prefix: str, path: str) -> str:
     return prefix.rstrip("/") + "/" + path.lstrip("/")
 
 
-def _cfg(ctx: GroupContext, key: str, default: Any) -> Any:
+def _cfg_raw(ctx: GroupContext, key: str, default: Any) -> Any:
     if key in ctx.group:
         return ctx.group[key]
     if key in ctx.family_defaults:
@@ -66,50 +68,7 @@ def _entries(ctx: GroupContext):
             yield None, Violation("bad-manifest-entry", f"unparseable manifest entry: {e}", path)
 
 
-def _decompress(path: str, body: bytes) -> bytes:
-    if path.lower().endswith(".gz"):
-        return gzip.decompress(body)
-    return body
-
-
-def _read_rows(ctx: GroupContext, entry: ManifestEntry) -> list[dict[str, Any]]:
-    """Parse a jsonl(.gz) payload into document dicts. Blank lines are skipped.
-
-    Raises ``ValueError`` for an unsupported container so the caller surfaces a
-    Violation rather than silently passing an opaque blob as a text corpus.
-    """
-    key = _object_key(ctx.prefix, entry.path)
-    raw = _decompress(entry.path, ctx.s3.get(ctx.landing_bucket, key))
-    lower = entry.path.lower()
-    if not (lower.endswith(".jsonl") or lower.endswith(".jsonl.gz")):
-        raise ValueError(
-            f"text-corpus payload {entry.path!r} is not jsonl(.gz); "
-            f"cannot recompute document rows"
-        )
-    rows: list[dict[str, Any]] = []
-    for line_no, line in enumerate(raw.splitlines(), start=1):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"line {line_no}: invalid JSON ({e})") from e
-        if not isinstance(obj, dict):
-            raise ValueError(f"line {line_no}: document must be a JSON object, got {type(obj).__name__}")
-        rows.append(obj)
-    return rows
-
-
-def _text_field(ctx: GroupContext) -> str:
-    field = _cfg(ctx, "text_field", _DEFAULT_TEXT_FIELD)
-    if not isinstance(field, str) or not field:
-        return _DEFAULT_TEXT_FIELD
-    return field
-
-
 def _schema_names_text(schema: Mapping[str, Any], text_field: str) -> bool:
-    """True when ``record_schema`` mentions ``text_field`` as a key or in ``required``."""
     if text_field in schema:
         return True
     required = schema.get("required")
@@ -121,45 +80,94 @@ def _schema_names_text(schema: Mapping[str, Any], text_field: str) -> bool:
     return False
 
 
+def _resolve_settings(ctx: GroupContext) -> tuple[str, int, float] | list[Violation]:
+    """Return ``(text_field, min_text_chars, max_identical_fraction)`` or violations."""
+    out: list[Violation] = []
+
+    text_field = _cfg_raw(ctx, "text_field", _DEFAULT_TEXT_FIELD)
+    if not isinstance(text_field, str) or not text_field.strip():
+        out.append(
+            Violation(
+                "invalid-text-field",
+                f"text_field must be a nonempty string; got {text_field!r}",
+            )
+        )
+        text_field = _DEFAULT_TEXT_FIELD  # unused if we return violations
+
+    min_chars = _cfg_raw(ctx, "min_text_chars", _DEFAULT_MIN_TEXT_CHARS)
+    if not isinstance(min_chars, int) or isinstance(min_chars, bool) or min_chars < 1:
+        out.append(
+            Violation(
+                "invalid-min-text-chars",
+                f"min_text_chars must be an integer >= 1; got {min_chars!r}",
+            )
+        )
+
+    max_frac = _cfg_raw(ctx, "max_identical_fraction", _DEFAULT_MAX_IDENTICAL)
+    try:
+        max_frac_f = float(max_frac)
+    except (TypeError, ValueError):
+        out.append(
+            Violation(
+                "invalid-max-identical-fraction",
+                f"max_identical_fraction must be a finite float in [0, 1]; got {max_frac!r}",
+            )
+        )
+        max_frac_f = _DEFAULT_MAX_IDENTICAL
+    else:
+        if not math.isfinite(max_frac_f) or max_frac_f < 0.0 or max_frac_f > 1.0:
+            out.append(
+                Violation(
+                    "invalid-max-identical-fraction",
+                    f"max_identical_fraction must be a finite float in [0, 1]; got {max_frac!r}",
+                )
+            )
+
+    if out:
+        return out
+    assert isinstance(text_field, str)
+    assert isinstance(min_chars, int)
+    return text_field, min_chars, max_frac_f
+
+
 # --------------------------------------------------------------------------------------
 # checks
 # --------------------------------------------------------------------------------------
 
 
-def check_record_schema_names_text(ctx: GroupContext) -> list[Violation]:
-    """Refuse a group whose ``record_schema`` does not name the text field.
-
-    Schema presence alone is decoration (§0.4); this check only confirms the contract
-    points at a field the byte-level checks will actually read.
-    """
+def check_group_config(ctx: GroupContext) -> list[Violation]:
+    """Validate record_schema + tunable settings before any payload bytes are read."""
+    out: list[Violation] = []
     schema = ctx.group.get("record_schema")
     if not isinstance(schema, Mapping) or not schema:
-        return [
+        out.append(
             Violation(
                 "missing-record-schema",
                 "text-corpus/v1 requires group.record_schema naming the document text "
                 "field (default key 'text', or override via text_field)",
             )
-        ]
-    text_field = _text_field(ctx)
+        )
+        return out
+
+    settings = _resolve_settings(ctx)
+    if isinstance(settings, list):
+        return settings
+
+    text_field, _min_chars, _max_frac = settings
     if not _schema_names_text(schema, text_field):
-        return [
+        out.append(
             Violation(
                 "record-schema-missing-text",
                 f"record_schema does not name text field {text_field!r}; declare it as a "
                 f"key, under properties, or in required[] so consumers know which field "
                 f"holds document text",
             )
-        ]
-    return []
+        )
+    return out
 
 
 def check_entries_declare_row_counts(ctx: GroupContext) -> list[Violation]:
-    """Every shard must declare ``count{unit: "rows", value}``.
-
-    Precondition for a falsifiable row-count recompute — without a declared unit, a
-    size-only lie cannot be caught by comparing against parsed documents.
-    """
+    """Every shard must declare ``count{unit: "rows", value}``."""
     out: list[Violation] = []
     for entry, bad in _entries(ctx):
         if bad is not None:
@@ -188,24 +196,80 @@ def check_entries_declare_row_counts(ctx: GroupContext) -> list[Violation]:
     return out
 
 
-def check_row_count_recomputed(ctx: GroupContext) -> list[Violation]:
-    """Recompute document rows by parsing jsonl and assert equality with declared counts.
+def check_documents(ctx: GroupContext) -> list[Violation]:
+    """Single streaming pass per shard: row count, text field, optional identical-text.
 
-    Catches an empty or truncated file whose manifest still claims rows, and a writer that
-    stuffed non-JSON or blank padding to inflate ``count`` via newline arithmetic alone.
+    Each shard is opened once via :func:`edullm_data.jsonl.iter_jsonl_objects_s3`. The
+    identical-text heuristic is **per shard** (a 100% repeated shard is not diluted by
+    healthy siblings). ``max_identical_fraction`` of 1.0 disables that heuristic.
     """
+    settings = _resolve_settings(ctx)
+    if isinstance(settings, list):
+        return []  # check_group_config already reported
+
+    text_field, min_chars, max_frac = settings
     out: list[Violation] = []
     total = 0
+
     for entry, bad in _entries(ctx):
         if bad is not None:
             out.append(bad)
             continue
+        is_jsonl, gzipped = jsonl_mod.is_jsonl_path(entry.path)
+        if not is_jsonl:
+            out.append(
+                Violation(
+                    "row-read-failed",
+                    f"text-corpus payload {entry.path!r} is not jsonl(.gz)",
+                    entry.path,
+                )
+            )
+            continue
+
+        key = _object_key(ctx.prefix, entry.path)
+        recomputed = 0
+        identical_counts: dict[str, int] = {}
         try:
-            rows = _read_rows(ctx, entry)
+            for idx, row in enumerate(
+                jsonl_mod.iter_jsonl_objects_s3(
+                    ctx.s3, ctx.landing_bucket, key, gzipped=gzipped
+                )
+            ):
+                recomputed += 1
+                val = row.get(text_field, _MISSING)
+                if val is _MISSING:
+                    out.append(
+                        Violation(
+                            "missing-text-field",
+                            f"row {idx}: document has no {text_field!r} field",
+                            entry.path,
+                        )
+                    )
+                elif not isinstance(val, str):
+                    out.append(
+                        Violation(
+                            "text-field-type",
+                            f"row {idx}: {text_field!r} must be a string, "
+                            f"got {type(val).__name__}",
+                            entry.path,
+                        )
+                    )
+                elif len(val.strip()) < min_chars:
+                    out.append(
+                        Violation(
+                            "text-field-empty",
+                            f"row {idx}: {text_field!r} is empty/whitespace "
+                            f"(need >= {min_chars} non-whitespace chars)",
+                            entry.path,
+                        )
+                    )
+                else:
+                    if max_frac < 1.0:
+                        identical_counts[val] = identical_counts.get(val, 0) + 1
         except Exception as e:
             out.append(Violation("row-read-failed", f"could not read rows: {e}", entry.path))
             continue
-        recomputed = len(rows)
+
         total += recomputed
         declared = entry.count.get("value") if entry.count else None
         if isinstance(declared, int) and not isinstance(declared, bool) and declared != recomputed:
@@ -213,8 +277,8 @@ def check_row_count_recomputed(ctx: GroupContext) -> list[Violation]:
                 Violation(
                     "row-count-mismatch",
                     f"recomputed {recomputed} JSONL document(s) but manifest declares "
-                    f"count.value={declared}. Empty, truncated, or newline-padded files "
-                    f"fail here (§0.4)",
+                    f"count.value={declared}. Publisher and validator share "
+                    f"edullm_data.jsonl counting (§0.4)",
                     entry.path,
                 )
             )
@@ -226,130 +290,36 @@ def check_row_count_recomputed(ctx: GroupContext) -> list[Violation]:
                     entry.path,
                 )
             )
-    if total == 0 and not out:
-        out.append(
-            Violation(
-                "empty-group",
-                "text-corpus group has zero documents across all shards",
+        elif max_frac < 1.0 and recomputed >= 2 and identical_counts:
+            top = max(identical_counts.values())
+            frac = top / recomputed
+            if frac > max_frac:
+                out.append(
+                    Violation(
+                        "text-all-identical",
+                        f"{top}/{recomputed} documents ({frac:.3f}) in this shard share "
+                        f"identical {text_field!r} text, over max_identical_fraction="
+                        f"{max_frac:.3f} — signature of a stuck writer dumping one document",
+                        entry.path,
+                    )
+                )
+
+    if total == 0 and not any(v.code == "empty-shard" for v in out):
+        # No successful parses and no empty-shard yet (e.g. all read failures).
+        if not out:
+            out.append(
+                Violation(
+                    "empty-group",
+                    "text-corpus group has zero documents across all shards",
+                )
             )
-        )
-    return out
-
-
-def check_text_field_wellformed(ctx: GroupContext) -> list[Violation]:
-    """Recompute over rows that every document has a non-empty string at the text field.
-
-    This is the byte-level counterpart of ``record_schema``: a schema that claims ``text``
-    while every row omits it (or sets it to ``\"\"`` / null) is exactly the plausible
-    garbage schema-only validation would accept.
-    """
-    text_field = _text_field(ctx)
-    min_chars = int(_cfg(ctx, "min_text_chars", _DEFAULT_MIN_TEXT_CHARS))
-    cap = _cfg(ctx, "rows_sample", None)
-    out: list[Violation] = []
-    seen = 0
-    for entry, bad in _entries(ctx):
-        if bad is not None:
-            out.append(bad)
-            continue
-        try:
-            rows = _read_rows(ctx, entry)
-        except Exception as e:
-            out.append(Violation("row-read-failed", f"could not read rows: {e}", entry.path))
-            continue
-        for idx, row in enumerate(rows):
-            val = row.get(text_field, _MISSING)
-            if val is _MISSING:
-                out.append(
-                    Violation(
-                        "missing-text-field",
-                        f"row {idx}: document has no {text_field!r} field",
-                        entry.path,
-                    )
-                )
-            elif not isinstance(val, str):
-                out.append(
-                    Violation(
-                        "text-field-type",
-                        f"row {idx}: {text_field!r} must be a string, got {type(val).__name__}",
-                        entry.path,
-                    )
-                )
-            elif len(val.strip()) < min_chars:
-                out.append(
-                    Violation(
-                        "text-field-empty",
-                        f"row {idx}: {text_field!r} is empty/whitespace "
-                        f"(need >= {min_chars} non-whitespace chars)",
-                        entry.path,
-                    )
-                )
-            seen += 1
-            if isinstance(cap, int) and not isinstance(cap, bool) and seen >= cap:
-                return out
-    return out
-
-
-_MISSING = object()
-
-
-def check_text_not_all_identical(ctx: GroupContext) -> list[Violation]:
-    """Refuse when (almost) every sampled document text is byte-identical.
-
-    Catches a stuck writer that repeats one document across the shard. Off by default
-    (``max_identical_fraction`` defaults to 1.0 = disabled); set e.g. 0.99 to enable.
-    """
-    max_frac = _cfg(ctx, "max_identical_fraction", 1.0)
-    try:
-        max_frac_f = float(max_frac)
-    except (TypeError, ValueError):
-        return []
-    if max_frac_f >= 1.0:
-        return []  # disabled
-
-    text_field = _text_field(ctx)
-    texts: list[str] = []
-    out: list[Violation] = []
-    for entry, bad in _entries(ctx):
-        if bad is not None:
-            out.append(bad)
-            continue
-        try:
-            rows = _read_rows(ctx, entry)
-        except Exception as e:
-            out.append(Violation("row-read-failed", f"could not read rows: {e}", entry.path))
-            continue
-        for row in rows:
-            val = row.get(text_field)
-            if isinstance(val, str):
-                texts.append(val)
-    n = len(texts)
-    if n < 2:
-        return out
-    # Dominant text frequency.
-    counts: dict[str, int] = {}
-    for t in texts:
-        counts[t] = counts.get(t, 0) + 1
-    top = max(counts.values())
-    frac = top / n
-    if frac > max_frac_f:
-        out.append(
-            Violation(
-                "text-all-identical",
-                f"{top}/{n} documents ({frac:.3f}) share identical {text_field!r} text, "
-                f"over max_identical_fraction={max_frac_f:.3f} — signature of a stuck "
-                f"writer dumping one document",
-            )
-        )
     return out
 
 
 CHECKS = [
-    check_record_schema_names_text,
+    check_group_config,
     check_entries_declare_row_counts,
-    check_row_count_recomputed,
-    check_text_field_wellformed,
-    check_text_not_all_identical,
+    check_documents,
 ]
 
 
