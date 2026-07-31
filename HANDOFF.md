@@ -1,180 +1,137 @@
 # HANDOFF — eduLLM Dataset Standard
 
-Last updated: **2026-07-31** — a DESIGN-ONLY session. The 150B corpus is still published and readable
-(unchanged); this session produced a complete, decision-closed build plan for a **second, much more
-capable dataset**: a 260B-token *reservoir*. Read this header, then "THE RESERVOIR DESIGN SESSION",
-then "WHAT IS ACTUALLY LEFT".
+Last updated: **2026-07-31**, after an EXECUTION session. The 150B corpus is still published and
+readable (untouched). This session ran Phase 0 and Phase 0c of the reservoir plan, landed the two code
+blockers, and measured all eight source pools. **The reservoir is one step from assembly.**
 
-> ## 🚨 FIRST ACTION FOR THE NEXT AGENT: COMMIT `DATASET-DESIGN-reservoir.md`
+> ## ▶️ START HERE
 >
-> **It is UNTRACKED.** 60 KB / ~935 lines, the entire output of a six-researcher sweep plus ~30
-> verification steps against live code, the HF API, and arXiv. `git status` shows `?? ` and nothing
-> else. This machine has died mid-run before (it is why `CLAUDE.md` says "persist to disk
-> continuously"). **Branch + commit + push it before doing anything else.** Losing it costs a full
-> day of research that cannot be cheaply reproduced.
+> 1. **`DATASET-DESIGN-reservoir.md`** — the plan. Read its header banner, then **§9.7 item 4**, then
+>    §5.6 (build sequence). It is committed and current.
+> 2. **`artifacts/PHASE0-REPORT.md`** — what Phase 0 measured, including the gate that cancelled the
+>    domain classification.
+> 3. **`artifacts/sizing-revised.md`** — all 8 pools, measured.
+> 4. **`artifacts/PLAN-CORRECTIONS.md`** — 10 defects found in the plan by executing it.
 >
-> ```
-> git checkout -b docs/reservoir-design
-> git add DATASET-DESIGN-reservoir.md && git commit && git push -u origin HEAD
-> ```
+> ## 🛑 THE ONE THING OWED BEFORE PHASE 1: §9.7 item 4
 >
-> Nothing else in the repo changed this session: **no source edits, no tests run, no AWS mutations,
-> no bytes written.** `HEAD` is `38bf831`, tree otherwise clean.
+> **Partition the synthetic `id` space 4 ways, and anti-join it against edu-web.** FinePhrase's four
+> "formats" are **~91–93% the same documents** (measured: faq∩math 91.0%, faq∩table 92.6%,
+> faq∩tutorial 92.9%), and FinePhrase shares FineWeb-Edu's id space outright — so the plan's
+> "15B × 4 = 60B synthetic" is really **~15B wearing four hats**, colliding 100% with edu-web at the
+> document level. No digest or MinHash sees it, because four rephrasings are four different strings.
+>
+> `id` is **not** in `manifest_sha256`, so this is not irreversible in the usual sense — but it has a
+> **build-time deadline**: after tokenization the document→id mapping is gone, so retrofitting means
+> re-tokenizing the synthetic half. It is §4.1 **step 0** and the first action in §5.6 phase 1.
+>
+> Fix: `sha256(id) % 4 == f` assigns format *f*; worst case (`table`) needs 17.3%, a quarter gives
+> 25.0%. The anti-join reuses the Bloom filter §4.1 step 2 already builds.
+>
+> ## ⚠️ BRANCH STATE — read before committing anything
+>
+> `HEAD` is on **`feat/prm800k-vendor-ingest`**, not the `docs/reservoir-design` branch this session
+> started on. A **concurrent session** in this same working tree is implementing a `vendored/v1`
+> profile and a PRM800K ingester; it branched from the reservoir work and continued. Verified:
+> `git merge-base --is-ancestor bc76de3 HEAD` passes, so **every reservoir commit is an ancestor of
+> HEAD and nothing was lost**. `docs/reservoir-design` still exists at `b0b9b80`.
+>
+> The working tree carries that other session's uncommitted work (`src/edullm_data/s3.py`,
+> `publish.py`, `profiles/`, several new tests). **It is not mine and I left it alone throughout.**
+> Two things about it worth knowing:
+> - `tests/test_publish.py:517` contains the **real AWS account ID** inside a Batch ARN. This is a
+>   public repo; scrub it to `<ACCOUNT_ID>` before that file is committed.
+> - Suite is green at **734 passing** with its work in the tree.
 
 ## THIS SESSION IN ONE PARAGRAPH
 
-The user asked whether the legacy `edullm-datasets` bucket held anything better than the published
-150B corpus, which grew into: audit the legacy bucket → discover the published corpus **is** AI2's
-`dolma3_mix-150B-1025` → research the 2026 state of corpus curation with six parallel subagents →
-design a **260B reservoir** (200B real + 60B synthetic) that every 20B training run draws a weighted,
-seeded subset from. **Every open decision is now closed** and the plan ends at a deliberate Phase-0
-hard stop for human sign-off. Deliverable: `DATASET-DESIGN-reservoir.md` §9 is a self-contained
-runbook a fresh compacted session can execute.
+The user said: *"run the plan as written up to the first hard gate, I'm AFK."* So: ran Phase 0, hit the
+gate, reported it, and the owner **cancelled** the thing it gated. Then landed the two code blockers,
+measured all eight pools that Phase 0 had left unverified, and closed five owner decisions. 22 commits.
+Suite 626 → **734 passing**. **No dataset bytes were written and no corpus was downloaded** — the whole
+session ran on metadata-scale reads (parquet footers), Bedrock API calls, and one Batch GPU job.
 
-> **You are on `main` at `0f463ea`, pushed, `main == origin/main`. 626 tests passing, 0 ruff
-> errors.** Everything from this session is merged; no work is stranded on a branch.
->
-> **`edullm-data` HOLDS A TRAINABLE PRETRAIN CORPUS.** 6,927 objects / 586.6 GiB:
-> - **`pretrain/olmo-150b-dolma2/v1`** — 6,911 shards, **157,467,202,883 dolma2 tokens**
->   (6,851 `train` + 60 `val`), one `tokens/` group nested `<source>/<domain>/`, every entry
->   carrying `split` + `labels` derived from its own key and recomputed by Gate A.
->   **Seal verified CLEAN**: `dataset_sha256` present, per-group `manifest_sha256`, and 6,911
->   CRC64NVME references. `verify_seal` returns no problems.
-> - **`tokenizer/dolma2-bpe/v1`** — pinned by the corpus via `manifest_sha256`. Its seal is
->   still PRE-ROOT (no `dataset_sha256`), so `verify_seal` reports it *unverifiable* rather than
->   invalid. That only changes if it is republished.
->
-> **The reader can slice and mix it** (`0f463ea`):
-> `dataset_paths(..., labels={"source": "stack-edu", "domain": "Python"})` and
-> `build_mixture(..., sources=[MixtureSource({...}, ratio)], total=…, seed=…)`. Whole shards in a
-> seed-determined order, so `(dataset, version, sources, ratios, total, seed)` fully describes a
-> training set. Verified live: stack-edu → 961 shards, stack-edu/Python → 100; seed 42 reproduces
-> identically and seed 43 differs; a selected shard decodes as `<u4` with every id inside vocab.
->
-> **DEPLOYED NOW:** `_dist/edullm_data-0.5.0-py3-none-any.whl`; job defs **`edullm-validator:5`**
-> (4 vCPU / 8 GB, `--promote-workers 16`) and **`edullm-fsck:4`**. Each asserts its wheel version
-> at startup, and the validator also asserts `publish.FAMILIES_DIR == validate.FAMILIES_DIR` and
-> that `max_zero_run` resolves to 256 — it fails loudly on exactly the defects that burned runs
-> below rather than running a stale wheel. EventBridge targets both by **unversioned name**, so a
-> new revision goes live the moment it is registered; always smoke-test with a manual
-> `submit-job`. 0.1.0–0.4.0 remain in `_dist/`; nothing references them.
->
-> **The staged tree at `s3://edullm-landing/_migrate/olmo-150b-staged/` (6,911 objects) is still
-> there and is now redundant** — the corpus is promoted. Landing has a 14-day expiry on family
-> prefixes; `_migrate/` may or may not be covered, so delete it deliberately rather than assuming.
->
-> **Four failures already burned, do not repeat them.**
-> 1. **Ran the publish on the LAPTOP.** `publish()` GETs every byte to wherever it runs;
->    measured 0.8 MiB/s ⇒ a 9-day ETA. Killed, no partial state. It must run on Batch, in-region.
->    A server-side *copy* is fine locally (586.6 GiB in 498 s); *hashing* is not.
-> 2. **`no family.json for 'pretrain'`** on Batch, 2 minutes in — `publish.FAMILIES_DIR` was
->    still repo-root-relative while `validate` had been fixed. One resolver in `contracts` now,
->    plus `tests/test_families_dir_resolution.py`, which imports the package from a ROOTLESS
->    directory (a checkout always finds `families/`, so no ordinary test can see this).
-> 3. **Gate A REJECTED the corpus** — 4 of 6,913. Two were a validator defect
->    (`zero-fraction-out-of-bounds` on healthy prose: dolma2 maps id 0 to `!`, so a density test
->    measures punctuation; now a contiguous-RUN test). Two were genuinely degenerate and are
->    excluded. Full analysis in `artifacts/GATE-A-REJECTION-ANALYSIS.md`. **Nothing was promoted
->    — the airlock worked.**
-> 4. **Excluding a shard renumbers everything after it.** Gate A names the PUBLISHED key; the
->    exclusion list keys on the STAGED SOURCE name, and this migration renumbers globally, so
->    they differ. Map back through the plan (`[p for p in plan if p["dst"].endswith(reported)]`)
->    or you exclude the wrong shard. The plan generator's exact-drop-count assertion caught it.
->    Re-staging after an exclusion needs a diff-and-prune (`artifacts/olmo150_prune.py`), not an
->    additive copy — a stale key fails Gate A as `unlisted-object`, after the expensive publish.
->
-> The rejected first attempt was deleted from landing rather than left as a dead `v1`: it never
-> reached `edullm-data`, so nothing ever referenced it, and the audit trail lives in the job log,
-> the analysis doc, and the dataset's own `limitations`. The corrected corpus therefore publishes
-> as a clean **v1**.
->
-> `edullm-data` held only `tokenizer/dolma2-bpe/v1` (11 objects) before this publish. The 31B
-> corpus was deleted 2026-07-29 — see "THE 31B DELETION".
+## THE RESERVOIR EXECUTION SESSION (2026-07-31)
 
----
+### The gate ran, and its answer was to not spend the money
 
-## THE RESERVOIR DESIGN SESSION (2026-07-31) — design only, nothing built
+§9.4's dual-judge smoke test measured `EAI-Distill-0.5b` against two Qwen judges over FDC Level 1:
 
-**Deliverable: `DATASET-DESIGN-reservoir.md`** (untracked — commit it first). Target dataset
-`pretrain/reservoir-dolma2`: **~195B real + 60B synthetic**, 25M-token shards, ~10,200 objects,
-0.95 TiB, **~$1,006 one-time + $24/month**. A 20B training run draws a weighted seeded subset, so a run
-is described by `(dataset, version, sources, ratios, total, seed)` instead of 10,400 URIs.
+| source | J (A↔B) | score (D on A==B) | 95% CI | verdict |
+|---|---|---|---|---|
+| qa-forum | 92.0% | **97.4%** | [95.5, 98.5] | PASS |
+| academic | 75.4% | **84.9%** | [80.9, 88.1] | FAIL\* |
+| finemath | 73.6% | **84.8%** | [80.8, 88.1] | FAIL\* |
+| reference | 70.0% | **80.3%** | [75.8, 84.1] | FAIL |
+| **POOLED** | 77.8% | **87.5%** | [85.8, 89.1] | **PASS** |
 
-### Findings that changed the plan (all verified, not taken from a summary)
+\*Both miss by 0.1–0.2 points with CIs *spanning* the bar — statistically indistinguishable from a pass.
 
-1. **The published 150B IS `allenai/dolma3_mix-150B-1025`.** All six components match AI2's card within
-   **0.22 pp**; `OLMo-mix-0625-150Bsample.txt` has 6,926 lines with labels like
-   `all-dressed-snazzy2_adult_content`. So its 76.9%-one-source shape is AI2's deliberate
-   (topic, vigintile) quality upsampling behind triple global dedup — **not** a defect. This retracts
-   the session's own earlier "worst mix in the bucket" claim.
-2. **`s2pdf-redacted` is olmOCR science PDFs**, not web text — the corpus already carries the PDF
-   register. And **`olmo100b` is 95% DCLM-baseline**, so it is not an independent corpus.
-3. **The legacy bucket has 12 prefixes / 2.1 TB**, only two ever documented. `olmo100b`'s 730 source
-   *document* shards (215.5 GiB) are all still present — a rebuild would need no HF re-download.
-4. **`entry.labels` CANNOT carry extra keys.** `validate.py:770-793` requires
-   `declared == labels_from_path(path)` exactly. Adding a `cluster` key → `labels-contradict-path` →
-   **Gate A rejects**. Proved by execution. The draft plan had cluster IDs living there; caught before
-   handoff, not after a 1.4 h validation run.
-5. **Whole-shard mixture selection is DELIBERATE, not a limitation.** `read.py:694-714`'s docstring:
-   partial takes read "the first 10% of every shard and never touched a tail; any ordering inside a
-   shard (crawl batch, date, repo) became a systematic skew." I had recommended adding partial-file
-   budgets — **withdrawn.** Shard size absorbs the precision requirement instead.
-6. **FinePhrase is real** — `HuggingFaceFW/finephrase`, 486.4B tokens, `odc-by`, ungated,
-   arXiv:2604.13977. Ablated at **1.2B params / 21B tokens** (≈ our setup) at **+3.41 macro over
-   DCLM**. Two traps, both verified by querying the dataset: **the rewrite is in
-   `rollout_results[0].text`, NOT `text`** (which holds the *source* — ingesting it would build
-   unrephrased FineWeb-Edu labelled "synthetic", uncatchable by any checksum), and there is **no
-   post-generation quality control** (a sampled row's whole rewrite is 12 tokens).
-7. **Nemotron-CC is EXCLUDED on license.** Gate accepted on the user's HF account, binding
-   `LICENSE.md` read: **§2.1** data is for "internal training" only; **§2.2.2** may not "…distribute…
-   or otherwise make available to others"; **§2.2.3** nor cause it to become "subject to an
-   open-source license." A shared reservoir does exactly that. Non-commercial use does not help.
-   **Use `nvidia/Nemotron-Pretraining-Specialized-v1` (CC-BY-4.0, ungated)** instead.
-8. **Cross-corpus dedup removal is deferrable; measurement is not.** At 5% sampling a doc needs
-   **~2,000 copies** to reach Hernandez's damage threshold — ~1,000× margin. And global dedup is
-   *affirmatively harmful*: FineWeb trained on kept-vs-removed halves and **the removed data scored
-   better**. Hence Bloom **deletes**, MinHash **annotates only**.
-9. **Rephrased synthetic can hide benchmark leakage.** FineWeb-Edu does zero decontamination →
-   FinePhrase is FineWeb-Edu rephrased → arXiv:2311.04850 (verified): paraphrase "easily bypass[es]"
-   n-gram decontamination. Our pipeline has **zero** decontamination (grep-verified). Hence the
-   two-tier decision.
-10. **Small-model mixes are web-heavy.** RegMix's optimum puts Wikipedia at **1.6%**, GitHub 0.02%;
-    SlimPajama-DC found 100% RefinedWeb *beat* a balanced 7-domain mix. AutoScale's contrary
-    curated-heavy result is a **loss-averaging artifact** — it minimized average loss *across* domains,
-    so it must spend tokens on arXiv. Different objective, not different scale.
-11. **`EssentialAI/EAI-Distill-0.5b` is public** (Apache-2.0, ungated, 284k downloads) — the 0.5B model
-    that built Essential-Web's 24-topic taxonomy. Domain classification is running theirs, not building
-    one.
+**The owner cancelled the full classification anyway, and the numbers say why.** Measured throughput was
+**10.8 doc/s on one A10G**, putting 112M documents at 3,080 GPU-hours ≈ **$920 spot / $3,100 on-demand**
+against a planned **~$595** — and that is a floor, since the smoke test used 256-token prefixes while
+real documents average 11,010 chars. Paying five figures for an ~85%-accurate label against a ground
+truth only 70–78% self-consistent was poor value. `artifacts/COST-RECHECK.md`.
 
-### The 12 closed decisions
+**Replacement (§1.2): inherit `domain` from upstream, never classify it.** Verified by reading real
+schemas — `stackexchange` has `metadata.site`, `stackv2-edu` has `metadata.gha_language`,
+`essential-web` already carries `free_decimal_correspondence` (the *exact* field the cancelled run would
+have computed). Everything else publishes flat. An inherited label is a **fact**; a classified one is a
+guess. Budget ~$1,006 → **~$411**.
 
-Full table in the design doc header. Load-bearing ones: `synthetic-` path prefix · classify domains
-into Essential-Web's 24 topics gated at **≥85%** · cluster IDs in a **`_dedup/clusters.parquet` control
-file** · Bloom deletes / MinHash annotates · **25,001,984-token shards** · curated pools
-over-provisioned (15% of default, not the evidence's 2%) · **equal 15B** from each FinePhrase format ·
-n-gram decon over all 260B **+ LLM-based over the synthetic 60B** · proxy sweep **deferred** · domain
-failure = **hard stop, no escalation**.
+### All 8 pools measured — the method is the transferable part
 
-### The user's two best corrections to my analysis
+| category | pool | measured | verdict |
+|---|---|---|---|
+| edu-web | 48B | 261.3B | ✅ 7.0× |
+| web | 30B | 114.69B | ✅ 5.5× (via `dclm_100BT`, not DCLM-baseline) |
+| code | 40B | **74.81B** | ✅ 1.87× (`stackv2_edu` alone) |
+| academic | 20B | **64.12B** | ✅ 3.2× (after netting 49.7% PMC overlap) |
+| QA/forum | 12B | **25.93B** | ✅ 2.16× — but **92.8% share-alike** |
+| synthetic | 60B | **478.15B** | ✅ 8.0× |
+| reference | **9B** | 8.87B | ✅ 3.70× (pool resized, owner) |
+| math | 36B | 34.69B | ⚠️ floor 4.96×, pool 3.6% short — **accepted** |
 
-- **"The point of a reservoir is we don't need to calculate ratios to a tee right now."** Correct, and
-  it became the doc's governing principle: **ratios are read-time config (free to change); pools are
-  permanent (a small pool forecloses an experiment forever).** I had sized curated pools from
-  benchmark evidence down to 2%; they are now 15%, because being wrong that way costs $5/month and
-  being wrong the other way costs a re-publish.
-- **"Wouldn't partial-file budgets get rid of document borders?"** This sent me back to the docstring
-  and overturned finding #5 above. The real problem is positional bias, not document borders — but the
-  question found a wrong recommendation I had already written down twice.
+**Phase 0's four `0.00B` readings were rate-limit artifacts, not scarcity.** The fix that mattered:
+`datasets-server`'s quota is **per-IP, not per-account** (verified — authed and anon both 429 in 0.1s),
+so parallel agents starve each other and the failures look exactly like broken corpora. **Parquet
+footers / gzip ISIZE off the hub CDN are quota-free**, give *exact* whole-split column bytes, and moved
+1.6 GB against 365 GB of text. Cost effectively zero against the ~$10 budgeted; no Batch job needed.
 
-### Where it stops
+### Traps found by measuring, each of which produces a plausible WRONG number
 
-`DATASET-DESIGN-reservoir.md` **§9 is a self-contained Phase-0 runbook** for a fresh compacted session:
-a 3-wave subagent task graph (8 parallel token re-counters + license + infra, then sample harvest, then
-the dual-judge smoke test), a delegation rule ("large input, small output"), and a **boxed hard stop**
-after the smoke test — explicitly *"passing is not consent"* — before the ~$595 classification, which is
-59% of the build cost and permanently bakes labels into `manifest_sha256`.
+1. **`/size num_rows` ignores a sibling `partial` flag.** DCLM: 779,982 converted rows vs
+   `estimated_num_rows` 3,017,780,768 — a **3,869× understatement**, silent because both are plausible
+   integers. Three agents hit it independently.
+2. **`raw_v0.1_parquet` sweeps TWO document trees** for some sources — overstating `ubuntu_irc` 2.1× and
+   `github_archive` 4.5×. Reproduced: the `id` multiplicity histogram is `{1: 404034, 2: 329115}`, and
+   329,115 *is* the raw card's doc count. **Checked whether it corrupted the committed academic figures:
+   it did not** (peS2o 1.03×, pubmed 1.06× vs card; only ubuntu_irc shows 3.23×).
+3. **gzip `ISIZE` is mod 2³²** and pubmed's shards exceed 4 GiB, so they wrapped and reported
+   "uncompressed" *smaller than compressed*.
+4. **`md.schema.names.index("text")` is ambiguous on nested schemas.** FinePhrase has `text` at leaf 0
+   (the ORIGINAL FineWeb-Edu doc) and at leaf 12 (`rollout_results.list.element.text`, the rewrite).
+   `.index()` returned 0 — §3.3's documented trap reached through the *footer* path, which nobody had
+   considered. **Checked: no committed figure was wrong** (the three corpora measured with that tool each
+   contain `text` exactly once). Fixed to refuse ambiguity rather than guess.
+5. **Common Pile "token" figures are `Size(GB) × 0.25`** — verified exact on three rows of the paper's
+   Table 7. No tokenizer involved.
 
----
+### Two code blockers landed
+
+**`4d6768e` — one control-file allowlist, shared.** `_dedup/clusters.parquet` and `_licenses/` were
+rejected by Gate A *and*, worse, swept into `manifest_sha256` as payload by `publish.py`, which had a
+**separate** basename-only allowlist. Fixed at the root in `contracts.py` rather than patched twice —
+the two copies were byte-identical, which is exactly why the bug survived: a green suite could only ever
+prove they *agreed*, never that there was one definition. The `families/` half-fix shape `CLAUDE.md`
+warns about.
+
+**`934dd75` — slug/fold inherited domains + the partial-label reader warning.** `C#` in an object key
+**silently truncates any `s3://` URI at the `#`** (the shard name lands in the URI fragment), and nothing
+caught it — `labels_from_path` accepts it and `fnmatch` matches it. Worse, naive slugging sends
+`C#`/`C++`/`C`/`C--` **all to `c`**. Split across two functions so `build_domain_slug_map` — the one that
+decides *permanent directories* — **raises** on collision. And under mixed label depth a `domain=` query
+silently drops every flat source; the warning now names them and reports **"40.4% of the group's tokens"**.
 
 ## Goal
 
@@ -706,6 +663,14 @@ Do not relitigate these; they were decided. Do not act on them without re-asking
 
 ## WHAT IS ACTUALLY LEFT — verified against live state 2026-07-30, in priority order
 
+⚠️ **SUPERSEDED for the reservoir work by "Next Steps → THE CURRENT LIST" (2026-07-31).** This section is
+still correct about the *150B corpus and the deployed pipeline*, and items 1–2 below (the platform
+handoff, bucket-policy v2) are genuinely still open. But it predates the reservoir execution session, so
+it says nothing about §9.7 item 4 or Phase 1. Read the newer list first.
+
+One item here IS now done: the `edullm-validator` job-def timeout, set to **7200 s** as
+`edullm-validator:7` (revisions 1–6 all had `timeout: null`).
+
 Several older "not done" items below were fixed today. These are the ones that survive checking.
 
 ### 1. Hand `docs/PLATFORM-INTEGRATION.md` to whoever owns `edu-llm/platform`
@@ -821,6 +786,39 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## What Worked
 
+### From the reservoir execution session (2026-07-31)
+
+- **Parquet footers instead of the datasets-server API.** The single highest-leverage discovery. A
+  footer carries `total_uncompressed_size` per column chunk, so summing over every row group of every
+  file gives the **exact** whole-split byte total for one column, over ALL rows, reading a few hundred KB
+  per file. Quota-free, so parallel agents don't starve each other. It turned four categories from
+  "needs a Batch streaming job" into a laptop-scale measurement at effectively zero cost. **Reuse this
+  before considering any streaming count.**
+- **Factoring the token estimator.** `num_rows × sampled mean_tokens/doc` gave FineMath CV 9.0 and a
+  95% CI of **[26B, 204B]** — an 8× range. Factoring to
+  `num_rows × mean_chars (whole-split) × tokens/char (sampled, CV 0.27)` cut estimator divergence from
+  800% to 11.5%, because `tokens/char` is a property of script and domain rather than of document length.
+- **Reading raw model output, not just aggregates.** The first gate run scored 49.1% and failed
+  everything. That was a four-word prompt bug of mine, caught only because `label=0 <- '005.1,skip'` is
+  visibly a programming document filed under a category I'd mislabelled. **A low score is exactly what a
+  failing candidate looks like** — the aggregate could not have told me. `classify_d.py` keeps all ten
+  emitted fields for this reason.
+- **Two judges, not one.** Judge B exists to catch *inherited error* — a distilled model faithfully
+  reproducing a bad teacher label, which a single-judge design scores as a success. Scoring on the
+  `{A == B}` consensus subset (with `J` reported as the ceiling) is what makes an 85% bar meaningful.
+- **Independent cross-checks between agents.** Two agents measured `github_archive` without conferring
+  and agreed within **2.4%** (11.51B vs 11.23B) on the same verdict. That is worth more than either
+  number alone.
+- **Verifying every agent claim myself before relaying it.** Several were load-bearing and several
+  corrected *me*. The duplicate-tree histogram, the FinePhrase nested-leaf ambiguity, the card-direction
+  inversion — all reproduced locally before they went into a commit message.
+- **Worktrees, never `git stash`, to test against pre-fix code.** Stashing files a concurrent agent is
+  writing lost work twice in one session (once by me, once by an agent). A throwaway worktree touches
+  nothing.
+- **Committing each item separately after review**, staging explicit paths, never `git add -A` — with
+  three agents and another session writing the same tree, this was the only thing that kept commits
+  attributable.
+
 ### From the 150B publish session (2026-07-30)
 
 - **Building the copy plan as a self-checking artifact BEFORE moving bytes.**
@@ -881,6 +879,39 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
   reading `pyproject.toml` both said `families/` shipped. Installing proved it did not.
 
 ## What Didn't Work (and the fix)
+
+### From the reservoir execution session (2026-07-31)
+
+- **Fanning out 8 agents against one rate-limited API.** My orchestration error. `datasets-server`'s
+  quota is **per-IP, not per-account**, so eight concurrent agents exhausted it and every in-flight count
+  died at once with HTTP 429 — failures that read as *broken corpora* in the artifacts. The delegation
+  rule (§9.2) is right for context, but it needs a **concurrency budget per shared external resource**.
+  Fix: serialize, then switch transport to footers entirely.
+- **A four-word prompt error that invalidated a whole gate run.** I labelled FDC category 0 "General
+  works", copying the Essential-Web card's abbreviation. Dewey class 0 is "Computer science, information
+  & general works", and **computing lives at `005.x` inside it**. So the candidate correctly filed
+  StackOverflow under 0 while my judges, given no computing category, sent it to 6. On qa-forum that
+  alone was **3.3% vs 97.4%**; pooled, 49.1% vs 87.5%. Cost: one full re-run of 4,000 judge calls.
+- **`git stash --keep-index` on a file a concurrent agent was writing.** The `stash pop` discarded the
+  work instead of restoring it. Recovered from the dangling stash commit; then an agent did the same
+  thing to the same file with `git checkout --`. Between us we lost and recovered it twice.
+- **Asserting a direction from one data point.** I wrote that Common Pile's `Size(GB) × 0.25` figures
+  "run above the published figures, so pools are understated" — extrapolated from a single corpus's
+  tokens/byte. Measured, it errs **both** ways by up to ±23% (peS2o's card is 7% *high*). That framing
+  would have licensed treating card figures as conservative floors, which is the exact reasoning §3.1
+  exists to forbid, and I reproduced it *in the document that catalogues that mistake*.
+- **Overstating "SA maps onto whole sources".** True for `stackexchange` and `finewiki`; `libretexts` is
+  **32.05%** SA and peS2o ~1.9%. Exclusion by name is still safe but **over-broad** — dropping peS2o to
+  remove 1.9% SA removes 50% of the academic candidates.
+- **Citing `file:line` in a document meant to outlive a refactor.** `publish.py` shifted ~800 lines
+  during concurrent work, invalidating citations that were correct when written. Switched to symbol names.
+- **Staging the first GPU job to a prefix its IAM role didn't grant.** The role is scoped to
+  `teams/*/runs/*`; I used `teams/data-prep/smoke/`. Fixed by using the sanctioned prefix and an explicit
+  key list — **not** by widening the policy, since a narrow write scope is the same idea as the airlock.
+- **Declaring the pre-publish gate "clear" before it was.** I closed §9.7 at three items; Phase 0c then
+  surfaced a fourth (the synthetic `id` partition) with a build-time deadline. Had to reopen the banner —
+  a stale "CLEAR" is worse than an open item, because a fresh session would tokenize 60B of synthetic
+  that is really 15B.
 
 ### From the 150B publish session (2026-07-30) — four burned runs, each a real defect
 
@@ -1009,6 +1040,31 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## Key Decisions
 
+### From the reservoir execution session (2026-07-31) — all owner calls
+
+| decision | resolution | why it matters |
+|---|---|---|
+| **Domain classification** | **CANCELLED.** `domain` is inherited from upstream where a source ships one; every other source publishes flat | Measured cost was $920–$10k, not the planned ~$595, for a label ~85% accurate against a ground truth 70–78% self-consistent. Inherited metadata is a *fact* |
+| **Share-alike** | **Keep SA sources IN, keep them separable.** Precautionary only, nothing dropped or downsized | Separability is free because SA maps onto whole `source` values — exclusion is omitting names. ⚠️ over-broad for `libretexts`/`peS2o`, which are mixed |
+| **Per-document key `(shard_path, doc_index)`** | **SKIP.** Not emitted in `v1` | Licenses and MinHash clusters become source-level. Both questions it would have answered are answerable at source granularity |
+| **`reference` pool** | **9B, not 14B** — and max share 15% → 12% | Reaching 14B needed either ~90% share-alike or a stale PD pool. The max-share drop is forced arithmetic: 15% gives 2.96× headroom, violating the doc's own ≥3× rule by 1.3% |
+| **`math` pool** | **Accept 3.6% under nominal** (34.69B, floor cleared 4.96×) | Closing it needs `algebraic-stack`, whose license is *not a grant* |
+| **Dataset name** | **`pretrain/reservoir-dolma2`** — no size in the name | The total moved twice in a day and every §4.1 step moves it again. Also: the name is the *address* `dataset.json` is written to, not something it produces — so it cannot be "set afterwards" |
+| **Synthetic `id`** | **Option D: partition 4 ways + anti-join edu-web** (§9.7 item 4) | The four formats are ~91–93% the same documents; without it "60B synthetic" is ~15B wearing four hats, colliding 100% with edu-web |
+
+**Two structural facts worth carrying forward,** both verified by reading source:
+
+- **`dataset_id` is NOT in `manifest_sha256`.** `build_manifest` takes only `(entries, group_name)` and
+  returns `{schema_version, group, entries, objects, bytes}`. So a rename costs a ~1 TB server-side
+  re-copy, **not** a re-tokenization — expensive, recoverable, a middle tier. An earlier revision of the
+  plan lumped it with the truly irreversible decisions; corrected.
+- **`promote()` copies only `dataset.json`, group manifests, and manifest entries.** So a sidecar staged
+  to landing would **pass Gate A and then be silently dropped**, expiring with landing's 14-day
+  lifecycle. Sidecars are written **in place after promotion** (§5.6 phase 2b) — the generated README is
+  the precedent, not an analogy.
+
+
+
 ### 2026-07-30 — the 150B layout and the reader
 
 - **Nested `tokens/<source>/<domain>/` AND `entry.labels`, not one or the other** (user's call).
@@ -1088,13 +1144,53 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## Next Steps (priority order)
 
-> **START AT "WHAT IS ACTUALLY LEFT" (above).** It is the current, live-verified priority list.
-> Everything in *this* section from here down is a historical log of previous sessions, kept for
-> the reasoning it records. Several entries describe work already finished; each is struck through
-> where that is the case. The one-line version of the current list:
->
-> 0. **COMMIT `DATASET-DESIGN-reservoir.md`** — untracked, 60 KB, a full day of research. See the
->    banner at the top of this file. Do this first, before reading further.
+### THE CURRENT LIST — 2026-07-31, after the execution session
+
+**1. 🛑 §9.7 item 4 — partition the synthetic `id` space, anti-join edu-web.** The only thing owed
+before assembly, and the only one with a **build-time deadline** (after tokenization the document→id
+mapping is gone). Full spec in `DATASET-DESIGN-reservoir.md` §9.7 item 4; it is also §4.1 step 0 and the
+first action in §5.6 phase 1. `sha256(id) % 4 == f`; worst case needs 17.3%, a quarter gives 25.0%; the
+anti-join reuses the Bloom filter step 2 already builds.
+
+**2. Phase 1 assembly** (§5.6), in this order — the order is load-bearing:
+```
+id partition + anti-join  →  Bloom-dedup (delete)  →  decontaminate  →  MinHash (annotate)
+  →  carve val from documents per source  →  tokenize  →  attach inherited `domain`
+  →  shard at 25,001,984 tokens
+```
+Val carve **precedes** tokenization (§1.4). `domain` attach is a metadata join, not a classification pass.
+
+**3. Publish (§5.6 phase 2), on Batch, in-region — mandatory.** `publish()` GETs every byte to wherever
+it runs, because content addressing needs a real SHA-256 over the actual bytes. Measured **0.8 MiB/s**
+from a laptop ⇒ a **9-day** ETA for a corpus this size. Copies are server-side and fine from anywhere;
+it is specifically the *hashing* that must be near the data. `hash_workers`/`copy_workers=16`,
+`--timeout attemptDurationSeconds=7200`.
+
+**4. Backfill the two sidecars — AFTER promotion, in place (§5.6 phase 2b).** Do **not** stage them to
+landing: `promote()` copies only `dataset.json`, group manifests, and manifest entries, so a staged
+sidecar passes Gate A and is then silently dropped, expiring with landing's 14-day lifecycle.
+
+**5. Verify (§5.6 phase 3).** `verify_seal`, read a shard back, confirm `dataset_paths(labels={...})`
+slices, confirm **both sidecars survived promotion**, and re-verify the airlock (intern `PutObject` to
+`edullm-data` → `AccessDenied`; `edullm-landing` still writable — check both directions, since a Deny
+that also blocked landing is a broken pipeline, not a secure one).
+
+### Cheap, not blocking, do whenever
+- **Scrub `tests/test_publish.py:517`** — real AWS account ID in a Batch ARN, in the concurrent session's
+  uncommitted work. Public repo.
+- **Deploy bucket-policy v2** (`infra/DEPLOY.md:256+`). Still NOT deployed; the live policy is
+  `edullm-data-airlock-v1`, where one Deny covers Put *and* Delete and exempts the validator from all
+  five actions. Reported only, per Phase 0's instructions. This will soon protect ~1 TB rather than 11
+  objects.
+- **A `share_alike` selector** if surgical SA exclusion is ever wanted. Cannot live in `entry.labels`,
+  and the path's two levels are spent — so it would be a `source`-name convention (`stackexchange-sa`),
+  decided before publish.
+
+---
+
+> **Everything below is a historical log of previous sessions**, kept for the reasoning it records.
+> Several entries describe work already finished; each is struck through where that is the case.
+> ~~0. COMMIT `DATASET-DESIGN-reservoir.md`~~ — **DONE**, `84eef1c`.
 > 1. **Hand `docs/PLATFORM-INTEGRATION.md` to whoever owns `edu-llm/platform`** — the four
 >    blockers to a training run all live there, and its banner is now re-audited against live
 >    state. Not this repo's to fix, and the long pole.
