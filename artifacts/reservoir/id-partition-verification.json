@@ -1,0 +1,150 @@
+{
+ "repo": "HuggingFaceFW/finephrase",
+ "rewrite_leaf": "rollout_results.list.element.text",
+ "configs": [
+  {
+   "config": "faq",
+   "n_files": 6791,
+   "parquet_bytes": 1370433016233,
+   "files_sampled": 1,
+   "bytes_fetched": 3221729,
+   "required_keep_fraction_pct": 10.1,
+   "ids_sampled": 67000,
+   "ids_distinct": 67000,
+   "kept_by_this_format": 16659,
+   "keep_fraction_pct": 24.8642,
+   "global_partition_audit": {
+    "n_ids": 67000,
+    "n_partitions": 4,
+    "counts": {
+     "0": 16659,
+     "1": 16731,
+     "2": 16681,
+     "3": 16929
+    },
+    "shares_pct": {
+     "0": 24.8642,
+     "1": 24.9716,
+     "2": 24.897,
+     "3": 25.2672
+    },
+    "ideal_pct": 25.0,
+    "worst_deviation_pp": 0.2672,
+    "min_share_pct": 24.8642
+   }
+  },
+  {
+   "config": "math",
+   "n_files": 6787,
+   "parquet_bytes": 1209997108195,
+   "files_sampled": 1,
+   "bytes_fetched": 3511107,
+   "required_keep_fraction_pct": 15.8,
+   "ids_sampled": 76000,
+   "ids_distinct": 76000,
+   "kept_by_this_format": 19010,
+   "keep_fraction_pct": 25.0132,
+   "global_partition_audit": {
+    "n_ids": 76000,
+    "n_partitions": 4,
+    "counts": {
+     "0": 18942,
+     "1": 19010,
+     "2": 18920,
+     "3": 19128
+    },
+    "shares_pct": {
+     "0": 24.9237,
+     "1": 25.0132,
+     "2": 24.8947,
+     "3": 25.1684
+    },
+    "ideal_pct": 25.0,
+    "worst_deviation_pp": 0.1684,
+    "min_share_pct": 24.8947
+   }
+  },
+  {
+   "config": "table",
+   "n_files": 6772,
+   "parquet_bytes": 1203156753005,
+   "files_sampled": 1,
+   "bytes_fetched": 3575798,
+   "required_keep_fraction_pct": 17.3,
+   "ids_sampled": 77000,
+   "ids_distinct": 77000,
+   "kept_by_this_format": 19177,
+   "keep_fraction_pct": 24.9052,
+   "global_partition_audit": {
+    "n_ids": 77000,
+    "n_partitions": 4,
+    "counts": {
+     "0": 19178,
+     "1": 19252,
+     "2": 19177,
+     "3": 19393
+    },
+    "shares_pct": {
+     "0": 24.9065,
+     "1": 25.0026,
+     "2": 24.9052,
+     "3": 25.1857
+    },
+    "ideal_pct": 25.0,
+    "worst_deviation_pp": 0.1857,
+    "min_share_pct": 24.9052
+   }
+  },
+  {
+   "config": "tutorial",
+   "n_files": 6754,
+   "parquet_bytes": 1378061639549,
+   "files_sampled": 1,
+   "bytes_fetched": 3234784,
+   "required_keep_fraction_pct": 10.1,
+   "ids_sampled": 67000,
+   "ids_distinct": 67000,
+   "kept_by_this_format": 16921,
+   "keep_fraction_pct": 25.2552,
+   "global_partition_audit": {
+    "n_ids": 67000,
+    "n_partitions": 4,
+    "counts": {
+     "0": 16656,
+     "1": 16736,
+     "2": 16687,
+     "3": 16921
+    },
+    "shares_pct": {
+     "0": 24.8597,
+     "1": 24.9791,
+     "2": 24.906,
+     "3": 25.2552
+    },
+    "ideal_pct": 25.0,
+    "worst_deviation_pp": 0.2552,
+    "min_share_pct": 24.8597
+   }
+  }
+ ],
+ "combined_partition_audit": {
+  "n_ids": 77002,
+  "n_partitions": 4,
+  "counts": {
+   "0": 19178,
+   "1": 19253,
+   "2": 19177,
+   "3": 19394
+  },
+  "shares_pct": {
+   "0": 24.9058,
+   "1": 25.0032,
+   "2": 24.9045,
+   "3": 25.1864
+  },
+  "ideal_pct": 25.0,
+  "worst_deviation_pp": 0.1864,
+  "min_share_pct": 24.9045
+ },
+ "verdict": "OK"
+}

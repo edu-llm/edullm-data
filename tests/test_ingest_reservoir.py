@@ -226,6 +226,105 @@ def test_upstream_repo_is_pinned_to_the_measured_one():
 
 
 # --------------------------------------------------------------------------------------
+# The tree query — a performance defect that presents as a hang, so it needs a test
+# --------------------------------------------------------------------------------------
+
+
+def test_tree_query_does_not_use_expand(monkeypatch):
+    """`expand=1` caps pages at 50 instead of 1000 and takes 26 s per page — measured ~1 hour per
+    config vs 2.5 s. It is the obvious flag to add (the Phase 0c footer tool used it) and it
+    presents as a hang, not an error, so nothing else in this suite would catch a regression.
+
+    Asserts on the URL actually requested rather than on the source text.
+    """
+    seen: list[str] = []
+
+    class _Resp:
+        headers = {"Link": ""}
+
+        def read(self):
+            return json.dumps([{"path": "faq/000_0.parquet", "size": 123}]).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _fake_urlopen(req, timeout=None):
+        seen.append(req.full_url)
+        return _Resp()
+
+    import edullm_data.ingest_reservoir as mod
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", _fake_urlopen)
+    out = mod.hf_tree("HuggingFaceFW/finephrase", "faq", headers={})
+    assert out == [{"path": "faq/000_0.parquet", "size": 123}]
+    assert len(seen) == 1
+    assert "recursive=1" in seen[0]
+    assert "expand" not in seen[0], f"expand=1 is a 50x pessimisation here: {seen[0]}"
+
+
+def test_tree_follows_the_cursor_rather_than_trusting_one_page(monkeypatch):
+    """Each config holds ~6,800 files across 7 pages; stopping at page 1 would silently report a
+    corpus 7x smaller and every downstream fraction would still look self-consistent."""
+    pages = [
+        (json.dumps([{"path": f"faq/{i}.parquet", "size": 1} for i in range(1000)]).encode(),
+         '<https://x?cursor=AAA>; rel="next"'),
+        (json.dumps([{"path": "faq/last.parquet", "size": 1}]).encode(), ""),
+    ]
+    calls = {"n": 0}
+
+    class _Resp:
+        def __init__(self, body, link):
+            self._b, self.headers = body, {"Link": link}
+
+        def read(self):
+            return self._b
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def _fake_urlopen(req, timeout=None):
+        body, link = pages[calls["n"]]
+        calls["n"] += 1
+        return _Resp(body, link)
+
+    import edullm_data.ingest_reservoir as mod
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", _fake_urlopen)
+    out = mod.hf_tree("HuggingFaceFW/finephrase", "faq", headers={})
+    assert calls["n"] == 2
+    assert len(out) == 1001
+
+
+def test_tree_refuses_entries_without_size(monkeypatch):
+    """`size` drives the Range reads. If the compact form ever stops carrying it, the fix is a
+    HEAD per file — the guard exists so nobody reaches for expand=1 instead."""
+
+    class _Resp:
+        headers = {"Link": ""}
+
+        def read(self):
+            return json.dumps([{"path": "faq/a.parquet"}]).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    import edullm_data.ingest_reservoir as mod
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", lambda req, timeout=None: _Resp())
+    with pytest.raises(IngestError, match="NOT expand=1"):
+        mod.hf_tree("HuggingFaceFW/finephrase", "faq", headers={})
+
+
+# --------------------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------------------
 

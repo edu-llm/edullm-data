@@ -231,14 +231,27 @@ class _RangeFile(io.RawIOBase):
 def hf_tree(repo: str, path: str = "", *, headers: dict | None = None) -> list[dict]:
     """Every `.parquet` entry under `path` in `repo`, following the Link-header cursor.
 
-    Paginated deliberately rather than trusting one page: FinePhrase's configs are top-level
-    directories with hundreds of files each, and an unpaginated read silently returns the first
-    page — which would look like a small corpus rather than an error.
+    Paginated deliberately rather than trusting one page: each FinePhrase config holds ~6,800
+    files, and an unpaginated read silently returns the first page — which would look like a small
+    corpus rather than an error.
+
+    ⚠️ **DO NOT ADD `expand=1`.** It is the obvious flag to reach for (it is what the Phase 0c
+    footer tool used) and it is a 50x pessimisation here. Measured live 2026-07-31, per config:
+
+        recursive=1            ~6,790 files in 7 pages of 1000, ~2.5 s
+        recursive=1&expand=1   ~6,790 files in ~136 pages of 50, 26 s PER PAGE -> ~1 hour
+
+    `expand=1` caps a page at 50 entries and does a per-entry lookup server-side; without it the
+    page limit is 1000. The only reason to pay that would be a field the compact form omits, and
+    the field this driver needs — `size`, for the Range reads — is present in BOTH (verified:
+    `all_have_size=True` across all 27,104 files of all four configs). It also intermittently
+    returns HTTP 500 under the slow path, which is how this was found: two background jobs sat
+    silent for twenty minutes and looked like a slow network rather than a bad query string.
     """
     h = headers or _hf_headers()
     base = f"https://huggingface.co/api/datasets/{repo}/tree/main"
     url = f"{base}/{path}" if path else base
-    url += "?recursive=1&expand=1"
+    url += "?recursive=1"
     out: list[dict] = []
     cursor: str | None = None
     while True:
@@ -253,6 +266,13 @@ def hf_tree(repo: str, path: str = "", *, headers: dict | None = None) -> list[d
         if 'rel="next"' not in link:
             break
         cursor = link.split("cursor=")[1].split(">")[0].split("&")[0]
+    missing_size = [e["path"] for e in out if "size" not in e][:3]
+    if missing_size:
+        raise IngestError(
+            f"tree entries lack `size`, which the Range reader needs: {missing_size}. If the API "
+            f"stopped returning it in the compact form, the fix is a HEAD per file — NOT expand=1, "
+            f"which is 50x slower (see this function's docstring)."
+        )
     if not out:
         raise IngestError(
             f"no parquet files under {repo}/{path!r}. FinePhrase's configs are TOP-LEVEL "
@@ -315,6 +335,27 @@ class IdSet:
         arr = np.fromiter((cls._digest64(i) for i in ids), dtype=np.uint64)
         return cls(values=np.unique(arr))
 
+    @classmethod
+    def from_digest_chunks(cls, chunks) -> IdSet:
+        """Build from an iterable of already-digested `uint64` arrays.
+
+        THIS IS THE PATH THE FULL RUN MUST USE, and the reason is a factor of 12. Holding one
+        config's ids as Python strings costs `sys.getsizeof` 96 B each — at 339 M ids that is
+        **32.5 GB per config, 130 GB for all four**, against **2.71 GB / 10.85 GB** for the same
+        information as digests. The string list is pure overhead: nothing downstream needs the id
+        text, only membership.
+
+        So a worker digests each file's ids immediately and discards the strings, and this
+        concatenates the small arrays. `from_ids` is kept for tests and small samples, where the
+        difference is irrelevant and taking a list is more readable.
+        """
+        import numpy as np
+
+        parts = [c for c in chunks if c is not None and len(c)]
+        if not parts:
+            return cls(values=np.empty(0, dtype=np.uint64))
+        return cls(values=np.unique(np.concatenate(parts)))
+
     def __len__(self) -> int:
         return int(self.values.shape[0])
 
@@ -347,11 +388,20 @@ class IdSet:
 
 @dataclass
 class FileResult:
+    """One file's contribution.
+
+    `digests` is a `uint64` numpy array, NOT the id strings, and `sample_ids` keeps only a bounded
+    handful of the strings for the partition audit. That split is the difference between 2.71 GB
+    and 32.5 GB per config (see `IdSet.from_digest_chunks`) — the id text has no downstream
+    consumer, only membership does.
+    """
+
     path: str
     rows_read: int = 0
     rows_kept: int = 0
     bytes_fetched: int = 0
-    kept_ids: list = field(default_factory=list)
+    digests: object = None  # numpy.ndarray[uint64]
+    sample_ids: list = field(default_factory=list)
     error: str | None = None
 
     @property
@@ -359,8 +409,21 @@ class FileResult:
         return (self.rows_kept / self.rows_read) if self.rows_read else 0.0
 
 
-def _scan_ids(repo: str, entry: dict, headers: dict, *, id_column: str = "id") -> FileResult:
-    """Read ONLY the id column of one parquet file. Payload columns are never requested."""
+def _scan_ids(
+    repo: str,
+    entry: dict,
+    headers: dict,
+    *,
+    id_column: str = "id",
+    sample_per_file: int = 2_000,
+) -> FileResult:
+    """Read ONLY the id column of one parquet file, digesting as it goes.
+
+    Payload columns are never requested — the Range reader fetches the footer plus the `id` column
+    chunks and nothing else. Ids are digested to `uint64` per row group and the strings dropped
+    immediately; keeping them would cost 12x the memory for information nothing downstream reads.
+    """
+    import numpy as np
     import pyarrow.parquet as pq
 
     res = FileResult(path=entry["path"])
@@ -369,11 +432,17 @@ def _scan_ids(repo: str, entry: dict, headers: dict, *, id_column: str = "id") -
         pf = pq.ParquetFile(rf)
         md = pf.metadata
         _leaf_index(md, id_column)  # fail loudly if the schema moved
+        chunks: list = []
         for rg in range(md.num_row_groups):
             tbl = pf.read_row_group(rg, columns=[id_column])
-            res.kept_ids.extend(v.as_py() for v in tbl.column(id_column))
+            ids = tbl.column(id_column).to_pylist()
+            chunks.append(np.fromiter((IdSet._digest64(i) for i in ids), dtype=np.uint64, count=len(ids)))
+            if len(res.sample_ids) < sample_per_file:
+                res.sample_ids.extend(ids[: sample_per_file - len(res.sample_ids)])
+            del ids, tbl
+        res.digests = np.concatenate(chunks) if chunks else np.empty(0, dtype=np.uint64)
         res.rows_read = md.num_rows
-        res.rows_kept = len(res.kept_ids)
+        res.rows_kept = int(res.digests.shape[0])
         res.bytes_fetched = rf.bytes_fetched
     except Exception as exc:  # noqa: BLE001 - recorded per file, surfaced in the run index
         res.error = f"{type(exc).__name__}: {exc}"[:300]
@@ -420,19 +489,22 @@ def _cmd_plan(args) -> int:
         sample = tree[: args.sample_files]
         ids: list[str] = []
         fetched = 0
+        n_rows = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
             for res in pool.map(lambda e: _scan_ids(FINEPHRASE_REPO, e, headers), sample):
                 if res.error:
                     print(f"  ! {res.path}: {res.error}", file=sys.stderr)
                     continue
-                ids += res.kept_ids
+                ids += res.sample_ids
                 fetched += res.bytes_fetched
+                n_rows += res.rows_read
         all_ids += ids
         rec = {
             "config": config,
             "n_files": len(tree),
             "parquet_bytes": total_bytes,
             "files_sampled": len(sample),
+            "rows_in_sampled_files": n_rows,
             "bytes_fetched": fetched,
             "required_keep_fraction_pct": _REQUIRED_FRACTION_PCT.get(config),
             **_partition_report(config, ids),
@@ -485,9 +557,13 @@ def _cmd_ids(args) -> int:
         tree = sorted(hf_tree(FINEPHRASE_REPO, config, headers=headers), key=lambda e: e["path"])
         if args.limit_files:
             tree = tree[: args.limit_files]
-        ids: list[str] = []
+        # Digest chunks, NOT id strings: 2.71 GB vs 32.5 GB per config. `audit_ids` keeps a bounded
+        # sample of the strings so the partition can still be audited on real ids.
+        chunks: list = []
+        audit_ids: list[str] = []
         errors: list[str] = []
         fetched = 0
+        rows = 0
         done = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as pool:
             for res in pool.map(lambda e: _scan_ids(FINEPHRASE_REPO, e, headers), tree):
@@ -495,28 +571,33 @@ def _cmd_ids(args) -> int:
                 if res.error:
                     errors.append(f"{res.path}: {res.error}")
                     continue
-                ids += res.kept_ids
+                chunks.append(res.digests)
+                rows += res.rows_kept
                 fetched += res.bytes_fetched
-                if done % 25 == 0:
-                    print(f"  {config}: {done}/{len(tree)} files, {len(ids):,} ids", flush=True)
+                if len(audit_ids) < args.audit_sample:
+                    audit_ids.extend(res.sample_ids[: args.audit_sample - len(audit_ids)])
+                if done % 250 == 0:
+                    print(f"  {config}: {done}/{len(tree)} files, {rows:,} ids", flush=True)
         if errors and not args.tolerate_errors:
             raise IngestError(
                 f"{len(errors)} of {len(tree)} {config} files failed and --tolerate-errors was "
                 f"not set. An incomplete id set makes the anti-join silently incomplete, which is "
                 f"worse than a failed job. First: {errors[0]}"
             )
-        id_set = IdSet.from_ids(ids)
+        id_set = IdSet.from_digest_chunks(chunks)
+        del chunks
         key = _assert_safe_key(f"{prefix}/_ids/finephrase-{config}.u64")
         s3.put_object(Bucket=args.bucket, Key=key, Body=id_set.to_bytes())
         index["configs"][config] = {
             "n_files": len(tree),
-            "ids_read": len(ids),
+            "ids_read": rows,
             "ids_distinct": len(id_set),
+            "duplicate_ids_within_config": rows - len(id_set),
             "bytes_fetched": fetched,
             "key": key,
             "errors": errors[:10],
             "n_errors": len(errors),
-            **_partition_report(config, ids[: args.audit_sample]),
+            **_partition_report(config, audit_ids),
         }
         print(f"{config}: {len(id_set):,} distinct ids -> s3://{args.bucket}/{key}", flush=True)
     ikey = _assert_safe_key(f"{prefix}/_ids/_index.json")
