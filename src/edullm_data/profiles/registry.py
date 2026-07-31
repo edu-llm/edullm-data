@@ -13,7 +13,7 @@ time with::
         pass
 
 Look a profile up by ``NAME`` with :func:`get_profile`. Importing this module eagerly
-imports the four v1 profile modules so they register as a side effect — a caller that has
+imports the shipped v1 profile modules so they register as a side effect — a caller that has
 only imported ``registry`` still sees every shipped profile. The imports are guarded so a
 half-built tree (one profile missing) never makes the registry unimportable; a genuinely
 unknown ``NAME`` surfaces at :func:`get_profile` time as a clear error, which the
@@ -32,11 +32,12 @@ _REGISTRY: dict[str, ModuleType] = {}
 # scan) so what is loaded is explicit and reviewable — adding a profile is a one-line
 # edit here plus the module, matching CONTRIBUTING.md.
 _SHIPPED = (
-    "pretrain_tokens_v1",
-    "eval_results_v1",
-    "token_order_v1",
-    "sft_conversations_v1",
-    "tokenizer_v1",
+ "pretrain_tokens_v1",
+ "eval_results_v1",
+ "token_order_v1",
+ "sft_conversations_v1",
+ "tokenizer_v1",
+ "text_corpus_v1",
 )
 
 

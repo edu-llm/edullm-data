@@ -105,6 +105,37 @@ artifacts/public/
     └── train-00001.u32le.bin
 ```
 
+### Multi-group (tokens + raw text)
+
+A dataset can carry several groups; pass `profile` as a mapping from group name (first path
+segment) to profile id. Example: packed shards plus Dolma-style JSONL under `text/`:
+
+```
+artifacts/public/
+├── tokens/<source>/train-00000.u32le.bin
+└── text/<source>/train-00000.jsonl
+```
+
+```python
+publish(
+    "artifacts/public/",
+    dataset_id="pretrain/example-mix",
+    purpose="…",
+    profile={
+        "tokens": "pretrain-tokens/v1",
+        "text": "text-corpus/v1",
+    },
+    tokenizer="tokenizer/dolma2-bpe",
+    group_meta={
+        "text": {"record_schema": {"text": "str", "id": "str"}},
+    },
+)
+```
+
+`text-corpus/v1` requires `.jsonl` / `.jsonl.gz` documents whose rows are JSON objects with a
+non-empty string at the declared text field (default `text`). Gate A recomputes row counts by
+parsing the payload and refuses empty / missing-text shards.
+
 ### Naming rules (the user manually reviews names — get them right)
 
 `<family>/<name>` where family ∈ `pretrain curriculum sft eval probe vendor`, and name is

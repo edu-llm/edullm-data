@@ -1,9 +1,9 @@
-"""Tests for the four v1 dataset profiles (§4, §7).
+"""Tests for the shipped v1 dataset profiles (§4, §7).
 
 Each profile check must RECOMPUTE something against the bytes (§0.4), so every fixture here
 builds real byte payloads (numpy ``.tobytes()`` for token/order vectors, real jsonl/csv text
-for eval/sft) and seeds them into a :class:`~edullm_data.s3.FakeS3`. The passing fixture must
-be clean; the broken fixture must make exactly the target check fire.
+for eval/sft/text-corpus) and seeds them into a :class:`~edullm_data.s3.FakeS3`. The passing
+fixture must be clean; the broken fixture must make exactly the target check fire.
 
 Convention for the full object key: ``GroupContext.prefix`` is the group's landing prefix and
 a manifest ``entry.path`` is the group-relative key that already carries the group name (§5:
@@ -24,6 +24,7 @@ from edullm_data.profiles import (
     eval_results_v1,
     pretrain_tokens_v1,
     sft_conversations_v1,
+    text_corpus_v1,
     token_order_v1,
 )
 from edullm_data.profiles.base import GroupContext, Violation
@@ -537,12 +538,157 @@ def test_sft_gzip_rows_are_read():
 
 
 # ======================================================================================
-# registration contract (§ "registry.py may not exist yet")
+# text-corpus/v1
 # ======================================================================================
 
 
+def _text_entry(path: str, body: bytes, *, rows: int | None = None) -> ManifestEntry:
+    fmt = Format(
+        container="jsonl",
+        codec="gzip" if path.endswith(".gz") else "none",
+    )
+    if rows is None:
+        # Match publish(): count non-blank JSON lines after optional gunzip.
+        raw = gzip.decompress(body) if path.endswith(".gz") else body
+        rows = sum(1 for line in raw.splitlines() if line.strip())
+    return ManifestEntry(
+        path=path,
+        sha256=_sha(body),
+        bytes=len(body),
+        count={"unit": "rows", "value": rows},
+        format=fmt,
+    )
+
+
+def _text_group(**overrides) -> dict:
+    g = {
+        "profile": text_corpus_v1.NAME,
+        "record_schema": {"text": "str", "id": "str"},
+    }
+    g.update(overrides)
+    return g
+
+
+def _doc(text: str, *, doc_id: str = "d1") -> dict:
+    return {"id": doc_id, "text": text}
+
+
+def test_text_corpus_healthy_passes():
+    rows = [_doc(f"document {i} with enough prose", doc_id=f"d{i}") for i in range(5)]
+    body = _jsonl(rows)
+    entry = _text_entry("text/train-00000.jsonl", body)
+    ctx = _seed_and_ctx(
+        prefix="",
+        group=_text_group(),
+        entries=[entry],
+        bodies={"text/train-00000.jsonl": body},
+        group_name="text",
+    )
+    out: list[Violation] = []
+    for check in text_corpus_v1.CHECKS:
+        out += check(ctx)
+    assert out == [], f"healthy text-corpus should pass, got {[str(v) for v in out]}"
+
+
+def test_text_corpus_empty_file_fails_row_count():
+    body = b""
+    entry = _text_entry("text/train-00000.jsonl", body, rows=3)  # lie: claims 3 rows
+    ctx = _seed_and_ctx(
+        prefix="",
+        group=_text_group(),
+        entries=[entry],
+        bodies={"text/train-00000.jsonl": body},
+    )
+    codes = _codes(text_corpus_v1.check_row_count_recomputed(ctx))
+    assert "row-count-mismatch" in codes
+    assert "empty-shard" in codes
+
+
+def test_text_corpus_missing_text_field_fails():
+    body = _jsonl([{"id": "x", "body": "wrong key"}])
+    entry = _text_entry("text/train-00000.jsonl", body)
+    ctx = _seed_and_ctx(
+        prefix="",
+        group=_text_group(),
+        entries=[entry],
+        bodies={"text/train-00000.jsonl": body},
+    )
+    assert "missing-text-field" in _codes(text_corpus_v1.check_text_field_wellformed(ctx))
+
+
+def test_text_corpus_empty_text_fails():
+    body = _jsonl([{"id": "x", "text": "   "}])
+    entry = _text_entry("text/train-00000.jsonl", body)
+    ctx = _seed_and_ctx(
+        prefix="",
+        group=_text_group(),
+        entries=[entry],
+        bodies={"text/train-00000.jsonl": body},
+    )
+    assert "text-field-empty" in _codes(text_corpus_v1.check_text_field_wellformed(ctx))
+
+
+def test_text_corpus_schema_must_name_text():
+    body = _jsonl([_doc("hello world")])
+    entry = _text_entry("text/train-00000.jsonl", body)
+    ctx = _seed_and_ctx(
+        prefix="",
+        group=_text_group(record_schema={"id": "str"}),  # no text
+        entries=[entry],
+        bodies={"text/train-00000.jsonl": body},
+    )
+    assert "record-schema-missing-text" in _codes(text_corpus_v1.check_record_schema_names_text(ctx))
+
+
+def test_text_corpus_custom_text_field():
+    body = _jsonl([{"id": "x", "content": "alternate field name works"}])
+    entry = _text_entry("text/train-00000.jsonl", body)
+    ctx = _seed_and_ctx(
+        prefix="",
+        group=_text_group(text_field="content", record_schema={"content": "str"}),
+        entries=[entry],
+        bodies={"text/train-00000.jsonl": body},
+    )
+    assert text_corpus_v1.check_record_schema_names_text(ctx) == []
+    assert text_corpus_v1.check_text_field_wellformed(ctx) == []
+
+
+def test_text_corpus_gzip_is_read():
+    body = gzip.compress(_jsonl([_doc("gzipped document text")]))
+    entry = _text_entry("text/train-00000.jsonl.gz", body)
+    ctx = _seed_and_ctx(
+        prefix="",
+        group=_text_group(),
+        entries=[entry],
+        bodies={"text/train-00000.jsonl.gz": body},
+    )
+    out: list[Violation] = []
+    for check in text_corpus_v1.CHECKS:
+        out += check(ctx)
+    assert out == [], f"gzip text-corpus should pass, got {[str(v) for v in out]}"
+
+
+def test_text_corpus_all_identical_when_enabled():
+    rows = [_doc("same", doc_id=f"d{i}") for i in range(10)]
+    body = _jsonl(rows)
+    entry = _text_entry("text/train-00000.jsonl", body)
+    ctx = _seed_and_ctx(
+        prefix="",
+        group=_text_group(max_identical_fraction=0.5),
+        entries=[entry],
+        bodies={"text/train-00000.jsonl": body},
+    )
+    assert "text-all-identical" in _codes(text_corpus_v1.check_text_not_all_identical(ctx))
+
+
 def test_profiles_expose_the_module_contract():
-    for mod in (pretrain_tokens_v1, eval_results_v1, token_order_v1, sft_conversations_v1):
+    for mod in (
+        pretrain_tokens_v1,
+        eval_results_v1,
+        token_order_v1,
+        sft_conversations_v1,
+        text_corpus_v1,
+    ):
         assert isinstance(mod.NAME, str) and mod.NAME
         assert isinstance(mod.REQUIRED_FIELDS, dict)
         assert isinstance(mod.CHECKS, list) and mod.CHECKS
@@ -556,5 +702,17 @@ def test_profiles_self_register_if_registry_present():
         from edullm_data.profiles import registry
     except Exception:
         pytest.skip("registry.py not present yet — profiles import standalone (guarded)")
-    for mod in (pretrain_tokens_v1, eval_results_v1, token_order_v1, sft_conversations_v1):
+    for mod in (
+        pretrain_tokens_v1,
+        eval_results_v1,
+        token_order_v1,
+        sft_conversations_v1,
+        text_corpus_v1,
+    ):
         assert registry.get_profile(mod.NAME) is mod
+
+
+def test_text_corpus_registered_in_available():
+    from edullm_data.profiles import registry
+
+    assert "text-corpus/v1" in registry.available()
