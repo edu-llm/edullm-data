@@ -39,6 +39,7 @@ from .contracts import (
     validate_dataset_id,
     validate_purpose,
 )
+from .dependencies import is_tokenizer_dependency
 from .manifest import (
     DTYPE_SIZES,
     FIXED_WIDTH_CONTAINERS,
@@ -1150,11 +1151,23 @@ def _resolve_tokenizer(s3, data_bucket, group, v, gname) -> dict[str, Any] | Non
     from .profiles.tokenizer_v1 import derive_vocab
 
     deps = group.get("depends_on") or []
-    tok_dep = next((d for d in deps if str(d.get("role", "")) == "tokenizer"
-                    or str(d.get("dataset_id", "")).startswith(("tokenizer/", "vendor/"))
-                    and "tokenizer" in str(d.get("dataset_id", ""))), None)
-    if tok_dep is None:
+    tokenizer_deps = [dep for dep in deps if is_tokenizer_dependency(dep)]
+    if not tokenizer_deps:
+        # Legacy groups can still use the profile's explicitly-declared tokenizer block;
+        # when a dependency exists, however, it must be unique so it cannot be selected
+        # based on list order.
         return None
+    if len(tokenizer_deps) != 1:
+        v.append(
+            Violation(
+                "tokenizer-dependency-count",
+                f"group {gname!r} must declare exactly one tokenizer dependency; "
+                f"found {len(tokenizer_deps)}",
+                path=gname,
+            )
+        )
+        return None
+    tok_dep = tokenizer_deps[0]
     if data_bucket is None:
         v.append(Violation("tokenizer-no-data-bucket", f"group {gname!r} depends on a tokenizer but no data_bucket to resolve it", path=gname))
         return None

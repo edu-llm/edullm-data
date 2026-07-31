@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 import gzip
 import io
 import json
+import math
+import os
 
 import pytest
 
@@ -51,6 +54,35 @@ def test_stream_gzip_via_fakes3():
     assert J.count_jsonl_objects_s3(s3, "b", "shard.jsonl.gz", gzipped=True) == 3
     objs = list(J.iter_jsonl_objects_s3(s3, "b", "shard.jsonl.gz", gzipped=True))
     assert [o["id"] for o in objs] == ["d0", "d1", "d2"]
+
+
+def test_gzip_stream_coalesces_range_reads_to_parser_chunk(monkeypatch):
+    """gzip header reads must not degrade into default-BufferedReader 8 KiB range GETs."""
+    monkeypatch.setattr(J, "_CHUNK", 64 * 1024)
+
+    class CountingS3(FakeS3):
+        def __init__(self) -> None:
+            super().__init__()
+            self.range_lengths: list[int] = []
+
+        def get_range(self, bucket: str, key: str, start: int, length: int) -> bytes:
+            self.range_lengths.append(length)
+            return super().get_range(bucket, key, start, length)
+
+    # Incompressible enough that the compressed object spans multiple transfer blocks.
+    raw = b"".join(
+        json.dumps({"id": str(i), "text": base64.b64encode(os.urandom(128)).decode()}).encode() + b"\n"
+        for i in range(1024)
+    )
+    compressed = gzip.compress(raw)
+    s3 = CountingS3()
+    s3.seed("b", "shard.jsonl.gz", compressed)
+
+    assert J.count_jsonl_objects_s3(s3, "b", "shard.jsonl.gz", gzipped=True) == 1024
+    assert len(s3.range_lengths) <= math.ceil(len(compressed) / J._CHUNK) + 1
+    # BufferedReader may bypass its buffer for a large gzip read, which is still one
+    # coalesced request; only the final request may be shorter than a transfer block.
+    assert all(length >= J._CHUNK for length in s3.range_lengths[:-1]), s3.range_lengths
 
 
 def test_chunked_many_short_records_parse_without_tail_slicing():

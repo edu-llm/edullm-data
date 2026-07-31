@@ -129,7 +129,7 @@ def test_documented_multigroup_publish_attaches_tokenizer_to_tokens_not_text():
     assert r.ok, [str(v) for v in r.violations]
 
 
-def test_tokenizer_arg_rejects_competing_group_meta_pin():
+def test_tokenizer_arg_rejects_roleless_tokenizer_like_group_meta_pin():
     s3 = FakeS3()
     _publish_tokenizer(s3)
     with pytest.raises(P.PublishError, match="competing tokenizer identities"):
@@ -143,7 +143,6 @@ def test_tokenizer_arg_rejects_competing_group_meta_pin():
                 "tokens": {
                     "depends_on": [
                         {
-                            "role": "tokenizer",
                             "dataset_id": "tokenizer/other",
                             "version": "v1",
                             "manifest_sha256": "a" * 64,
@@ -156,6 +155,72 @@ def test_tokenizer_arg_rejects_competing_group_meta_pin():
             created_at=CREATED,
             env=ENV,
         )
+
+
+def test_publish_rejects_multiple_roleless_tokenizer_dependencies():
+    s3 = FakeS3()
+    with pytest.raises(P.PublishError, match="exactly one"):
+        P.publish(
+            _docs_example_tree(),
+            dataset_id="pretrain/tokenizer-many",
+            purpose=PURPOSE,
+            profile={"tokens": "pretrain-tokens/v1", "text": "text-corpus/v1"},
+            group_meta={
+                "tokens": {
+                    "depends_on": [
+                        {
+                            "dataset_id": "tokenizer/a",
+                            "version": "v1",
+                            "manifest_sha256": "a" * 64,
+                        },
+                        {
+                            "dataset_id": "tokenizer/b",
+                            "version": "v1",
+                            "manifest_sha256": "b" * 64,
+                        },
+                    ]
+                },
+                "text": {"record_schema": {"text": "str", "id": "str"}},
+            },
+            s3=s3,
+            created_at=CREATED,
+            env=ENV,
+        )
+
+
+def test_validator_rejects_multiple_tokenizer_dependencies():
+    s3 = FakeS3()
+    _publish_tokenizer(s3)
+    plan = P.publish(
+        _docs_example_tree(),
+        dataset_id="pretrain/tokenizer-multiple",
+        purpose=PURPOSE,
+        profile={"tokens": "pretrain-tokens/v1", "text": "text-corpus/v1"},
+        tokenizer="tokenizer/dolma2-bpe",
+        group_meta={"text": {"record_schema": {"text": "str", "id": "str"}}},
+        s3=s3,
+        created_at=CREATED,
+        env=ENV,
+    )
+    dataset_key = f"{plan.dataset_id}/{plan.version}/dataset.json"
+    dataset = json.loads(s3.get("edullm-landing", dataset_key))
+    tokens_group = next(group for group in dataset["groups"] if group["name"] == "tokens")
+    # A historical role-less dependency is still tokenizer-like and must not be selected
+    # ahead of the explicit pin.
+    tokens_group["depends_on"].insert(
+        0,
+        {
+            "dataset_id": "tokenizer/roleless",
+            "version": "v1",
+            "manifest_sha256": "b" * 64,
+        },
+    )
+    s3.seed("edullm-landing", dataset_key, json.dumps(dataset).encode())
+
+    result = V.validate_dataset(
+        "edullm-landing", f"{plan.dataset_id}/{plan.version}", s3, data_bucket="edullm-data"
+    )
+    assert "tokenizer-dependency-count" in {v.code for v in result.violations}
 
 
 def test_validator_rejects_tampered_parent_manifest_pin():

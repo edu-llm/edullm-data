@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from . import jsonl as jsonl_mod
+from .dependencies import is_tokenizer_dependency
 from .contracts import (
     NamingError,
     SCHEMA_VERSION,
@@ -274,13 +275,21 @@ def build_plan(
 
     for g in sorted(by_group):
         group_files = sorted(by_group[g], key=lambda t: t[0])
-        if tokenizer_depends_on is not None and profile_for(g).startswith("pretrain-tokens/"):
+        if profile_for(g).startswith("pretrain-tokens/"):
             supplied_deps = group_meta.get(g, {}).get("depends_on", []) or []
-            if any(isinstance(dep, Mapping) and dep.get("role") == "tokenizer" for dep in supplied_deps):
+            supplied_tokenizers = [
+                dep for dep in supplied_deps if is_tokenizer_dependency(dep)
+            ]
+            if tokenizer_depends_on is not None and supplied_tokenizers:
                 raise PublishError(
                     f"group_meta[{g!r}].depends_on declares a tokenizer while tokenizer= was "
                     "also provided. Remove the group_meta tokenizer pin or omit tokenizer=; "
                     "two competing tokenizer identities are unsafe."
+                )
+            if len(supplied_tokenizers) > 1:
+                raise PublishError(
+                    f"group_meta[{g!r}].depends_on declares {len(supplied_tokenizers)} "
+                    "tokenizer dependencies; a pretrain-tokens group must have exactly one."
                 )
 
         def _entry_for(item: tuple[str, int]) -> ManifestEntry:
@@ -374,7 +383,7 @@ def build_plan(
                 existing.append(dict(tokenizer_depends_on))
                 gm["depends_on"] = existing
             elif not any(
-                isinstance(dep, Mapping) and dep.get("role") == "tokenizer"
+                is_tokenizer_dependency(dep)
                 for dep in existing
             ):
                 fam_dep = defaults.get("tokenizer_dependency_optional")

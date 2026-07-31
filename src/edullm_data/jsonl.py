@@ -144,9 +144,14 @@ def open_jsonl_s3(s3: S3, bucket: str, key: str, *, gzipped: bool) -> io.Buffere
     """Return a binary stream of decompressed JSONL bytes for ``key``."""
     raw = _ChunkReader(s3, bucket, key)
     if gzipped:
-        # GzipFile needs a buffered file-like; wrap the raw chunk reader.
-        return gzip.GzipFile(fileobj=io.BufferedReader(raw), mode="rb")  # type: ignore[return-value]
-    return io.BufferedReader(raw)
+        # gzip.GzipFile asks for tiny header / trailer reads. Coalesce those onto the same
+        # 8 MiB transfer granularity as the JSONL parser; a default 8 KiB buffer would turn a
+        # GiB compressed corpus into roughly 100k S3 range GETs.
+        return gzip.GzipFile(  # type: ignore[return-value]
+            fileobj=io.BufferedReader(raw, buffer_size=_CHUNK),
+            mode="rb",
+        )
+    return io.BufferedReader(raw, buffer_size=_CHUNK)
 
 
 def iter_jsonl_objects_s3(s3: S3, bucket: str, key: str, *, gzipped: bool) -> Iterator[dict[str, Any]]:
