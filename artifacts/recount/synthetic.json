@@ -1,0 +1,158 @@
+{
+  "category": "synthetic (rephrased)",
+  "plan_pool_tokens": 60000000000,
+  "plan_shape": "equal 15B from each of four formats (faq, math, table, tutorial)",
+  "peak_plausible_demand_tokens": 6000000000,
+  "status": "SCHEMA ESTABLISHED AND VERIFIED; TOKEN COUNTS NOT MEASURED",
+  "why_counts_not_measured": "The orchestrator halted all datasets-server traffic mid-run (the 429 quota is per-IP and 13 agent processes were saturating it). The sampling run was killed after 1 config header and 0 completed configs. Per-config token figures below are therefore CARD values, cross-checked against cheap metadata endpoints already fetched, and are explicitly NOT marked measured.",
+
+  "schema_note": "CONFIRMED BY DIRECT QUERY, NOT ASSUMED. The rewrite is at `rollout_results[0].text`. Full shape: FinePhrase carries 12 columns = the 11 columns of its FineWeb-Edu parent plus `rollout_results`. `rollout_results` is a LIST of STRUCT{finish_reason: string, text: string, usage: STRUCT{completion_tokens: int64, prompt_tokens: int64, prompt_tokens_details: null, total_tokens: int64}} -- verified against /info `dataset_info.features` for configs math, table and tutorial (all three byte-identical schemas) and against /first-rows for faq and all. Exactly ONE rollout per document, always: /statistics reports column `rollout_results` with column_type=list and mean=median=min=max=1.0 over 842,000 rows, and all 34 faq rows sampled had len(rollout_results)==1. So element [0] is the entire payload and there is no multi-rollout aggregation to perform. THE TRAP IS REAL AND CONFIRMED: the top-level `text` column holds the ORIGINAL, UNREPHRASED FineWeb-Edu document -- its sibling `dataset` field reads the literal string 'HuggingFaceFW/fineweb-edu' in 34/34 rows sampled, and `token_count` is FineWeb-Edu's own count of `text` (measured dolma2/token_count ratio 1.0091 on the original, i.e. token_count describes the ORIGINAL, never the rewrite). Counting `text` would build a corpus of unrephrased real web data labelled synthetic, at 27x the true token volume, and neither a size check nor a hash check can detect it because both the bytes and the digest would be internally consistent.",
+
+  "recount_py_verdict": "CANNOT REACH IT -- empirically confirmed, not inferred. recount.py `measure()` does `text = row.get(chosen_col)` guarded by `if not isinstance(text, str)`; `--text-column` accepts a column NAME and cannot express a path into a list-of-structs. Ran `recount.py HuggingFaceFW/finephrase --config math --text-column rollout_results`: returned `status: FAILED` with empty tok_counts, because every row yields a list and every row increments n_empty_text. Worse, WITHOUT --text-column its `pick_text_column()` finds `text` via the TEXT_COLUMNS known-name path and returns chosen_by='known-name' -- the highest-confidence label the tool emits -- while silently measuring the original document. A replacement was written and its extractor unit-tested offline (see files_written); it has NOT been run against the API.",
+
+  "sources": [
+    {
+      "dataset": "HuggingFaceFW/finephrase",
+      "config": "faq",
+      "card_tokens": 148100000000,
+      "measured_tokens": null,
+      "estimator": null,
+      "confidence": "card-only",
+      "license": "odc-by",
+      "gated": false,
+      "rows": 339039447,
+      "rows_provenance": "DERIVED BY SUBTRACTION, not reported: /size and /rows and /info all return HTTP 500 for this config. card output_samples 1,354,044,711 minus /size dataset total 1,015,005,264 (= math+table+tutorial exactly, verified) = 339,039,447.",
+      "note": "The one config datasets-server cannot count at all. /size lists it under `failed` (kind=config-size), /rows 500s, /info 500s. Only /first-rows works. 1000+ parquet files exist under faq/ in the repo tree, so the data is present -- the server-side job is what fails. Needs a real streaming count or a direct parquet-metadata read."
+    },
+    {
+      "dataset": "HuggingFaceFW/finephrase",
+      "config": "tutorial",
+      "card_tokens": 147400000000,
+      "measured_tokens": null,
+      "estimator": null,
+      "confidence": "card-only",
+      "license": "odc-by",
+      "rows": 337711099,
+      "rows_provenance": "/size num_rows (exact)",
+      "parquet_bytes": 1378061639549,
+      "note": "Card figure independently corroborated to 0.7% by Arrow-byte arithmetic (see card_verification): 146.3B implied vs 147.4B advertised."
+    },
+    {
+      "dataset": "HuggingFaceFW/finephrase",
+      "config": "math",
+      "card_tokens": 98400000000,
+      "measured_tokens": null,
+      "estimator": null,
+      "confidence": "card-only",
+      "license": "odc-by",
+      "rows": 338747732,
+      "rows_provenance": "/size num_rows (exact)",
+      "parquet_bytes": 1209997108195,
+      "note": "Card figure corroborated to 8.9% by Arrow-byte arithmetic: 89.6B implied vs 98.4B advertised."
+    },
+    {
+      "dataset": "HuggingFaceFW/finephrase",
+      "config": "table",
+      "card_tokens": 92400000000,
+      "measured_tokens": null,
+      "estimator": null,
+      "confidence": "card-only",
+      "license": "odc-by",
+      "rows": 338546433,
+      "rows_provenance": "/size num_rows (exact)",
+      "parquet_bytes": 1203156753005,
+      "note": "Card figure corroborated to 3.4% by Arrow-byte arithmetic: 95.5B implied vs 92.4B advertised."
+    }
+  ],
+
+  "card_verification": {
+    "advertised_total_completion_tokens": 486367076933,
+    "per_config_sum": 486300000000,
+    "per_config_sum_vs_total_divergence": 0.00014,
+    "verdict": "The four per-config figures (148.1 + 147.4 + 98.4 + 92.4 = 486.3B) reconcile with the card's 486,367,076,933 grand total to 0.014%. They are internally consistent and almost certainly the real per-config split.",
+    "row_count_identity": "math + table + tutorial num_rows = 1,015,005,264, EXACTLY equal to /size's dataset-level num_rows -- proving /size silently omits the two configs it failed on rather than estimating them.",
+    "arrow_byte_cross_check": {
+      "method": "ZERO extra API calls. /size reports num_bytes_memory (Arrow, uncompressed) per config; /statistics for math gives whole-split mean chars for every non-nested string column (text 4677.09, url 72.69, file_path 129.95, id 47.0). The ORIGINAL columns are identical across the four configs (same 339M parent documents), so bytes/row minus those known columns isolates the REWRITE, converted at the measured rewrite rate of 0.21352 dolma2 tokens/char.",
+      "implied_tokens_per_doc": {"math": 264.6, "table": 282.0, "tutorial": 433.3},
+      "card_implied_tokens_per_doc": {"faq": 436.8, "tutorial": 436.5, "math": 290.5, "table": 272.9},
+      "implied_config_totals_B": {"math": 89.6, "table": 95.5, "tutorial": 146.3},
+      "verdict": "Two independent, non-sampled routes to tokens/doc agree within 3-9%. This is real corroboration of the card and it is what makes the 15B-per-format availability call safe despite having no sampled count."
+    }
+  },
+
+  "short_rewrite_stats": {
+    "n": 34,
+    "n_caveat": "n=34, ONE config (faq), and CRITICALLY these are the first 34 rows of the split (a /first-rows head), NOT random offsets. Parquet row order is content-clustered, so this is a biased head sample. Treat every number here as an UPPER BOUND on the corpus-wide short-rewrite rate, not an estimate of it.",
+    "sampling_method": "/first-rows, single call, offset 0",
+    "tokenizer": "allenai/dolma2-tokenizer",
+    "mean_tokens": 40.5,
+    "median_tokens": 33,
+    "min_tokens": 2,
+    "max_tokens": 109,
+    "cv": 0.746,
+    "under_16": {"n": 8, "frac": 0.235},
+    "under_50": {"n": 23, "frac": 0.676},
+    "under_100": {"n": 32, "frac": 0.941},
+    "under_200": {"n": 34, "frac": 1.0},
+    "under_500": {"n": 34, "frac": 1.0},
+    "all_values_sorted": [2, 2, 2, 9, 11, 11, 13, 13, 18, 18, 20, 21, 25, 25, 27, 33, 33, 34, 35, 37, 38, 42, 49, 51, 64, 65, 65, 73, 79, 79, 81, 87, 106, 109],
+    "degenerate_examples_verbatim": [
+      {"dolma2_tokens": 2, "text": "No answer"},
+      {"dolma2_tokens": 2, "text": "Document:"},
+      {"dolma2_tokens": 2, "text": "A:"},
+      {"dolma2_tokens": 9, "text": "What is the Q&A document about?"},
+      {"dolma2_tokens": 11, "text": "1\nWhat is a table dihedral style?"},
+      {"dolma2_tokens": 11, "text": "What are chemical inputs and outputs at subduction zones?"}
+    ],
+    "finish_reason_distribution": {"stop": 34},
+    "finish_reason_significance": "ALL 34 degenerate outputs have finish_reason='stop'. The generator terminated cleanly and believes it succeeded. `finish_reason` is therefore USELESS as a quality filter -- length is the only available signal.",
+    "tokens_retained_if_filter_ge_50": 0.6238,
+    "docs_retained_if_filter_ge_50": 0.324,
+    "design_doc_claim_status": "CONFIRMED AND EXCEEDED. The design doc reports one observed 12-token rewrite; the head sample contains three 2-token rewrites, one of which is the bare string 'No answer' -- a refusal, and 'Document:' is a prompt-echo artifact. These are not short documents, they are generation failures with no content at all.",
+    "quality_filtering_verdict": "LOAD-BEARING AND MANDATORY. Degenerate rewrites are frequent enough in at least one region of the corpus to matter, they carry a clean finish_reason, and the sibling `text` column means a naive pipeline would paper over them by counting the original instead. A minimum-token filter on rollout_results[0].text is required before publish; a refusal/prompt-echo string blocklist ('No answer', 'Document:', 'A:') is advisable on top. NOTE the tension: the head sample's ~437-vs-41 tokens/doc gap against both the card and the byte arithmetic means the head is anomalously degenerate -- so sizing the filter's yield from these numbers would be wrong. Re-sample at random offsets before choosing a threshold."
+  },
+
+  "all_config_verdict": {
+    "question": "Is `all` a union of 4 independent corpora or 4 correlated views of the same documents?",
+    "answer": "FOUR CORRELATED VIEWS OF THE SAME DOCUMENTS. Confirmed from the repo's own config declaration, not inferred.",
+    "evidence": [
+      "cardData declares config `all` as data_files path = ['faq/**/*.parquet','math/**/*.parquet','table/**/*.parquet','tutorial/**/*.parquet'] -- literally the concatenation of the other four configs. It is a SUPERSET by construction, and adds no data of its own.",
+      "Card: 'Source documents in input split: 339,347,842'; 'Output samples across all configs: 1,354,044,711'. 4 x 339,347,842 = 1,357,391,368, and 1,354,044,711 / 1,357,391,368 = 99.75% -- i.e. essentially every source document was rephrased once per format, with a 0.25% generation-failure shortfall.",
+      "Per-config row counts are near-identical (338.7M / 338.5M / 337.7M / 339.0M), as expected if each is one pass over the same parent set.",
+      "Source is FineWeb-Edu config sample-350BT, a single fixed sample -- the same 339M documents feed all four prompt families."
+    ],
+    "consequence": "The advertised 486.4B is NOT 486.4B of independent tokens. It is ~339M source documents seen 4 times through 4 different prompts. Drawing 15B from each of the four formats means the SAME underlying documents appear up to 4 times in our mix, in 4 different surface forms. That is near-duplicate content that no digest-level dedup will catch, because the surface strings genuinely differ. Do NOT treat the four formats as independent sources when computing effective source diversity, and do not use `all` -- draw from the four named configs so the composition is explicit."
+  },
+
+  "category_total_measured": null,
+  "category_total_card": 486300000000,
+  "meets_3x_peak_demand": true,
+  "meets_3x_peak_demand_note": "Peak plausible demand is 6B (30% of a 20B run); 3x = 18B. Even the SMALLEST config (table, 92.4B card / 95.5B byte-implied) exceeds 18B on its own by ~5x. The 15B-per-format plan needs 15B from each of four configs, and the smallest available is 92.4B -- a 6.2x margin on the tightest one. This verdict survives being wrong about the card by a wide factor and does not depend on the halted sampling run.",
+  "fifteen_B_per_format_available": true,
+  "fifteen_B_per_format_note": "YES for all four formats, with >=6x headroom each, on card figures corroborated to 3-9% by independent byte arithmetic. Caveat: 15B of REWRITE tokens. At the card-implied ~273-437 tokens/doc, 15B needs ~34-55M documents per format, i.e. 10-16% of each config -- comfortable. But if the true mean is nearer the head sample's 41 tokens/doc, 15B would need ~366M documents, MORE than the config contains. The byte arithmetic says the card is right and the head is anomalous, so this is very likely fine; a random-offset re-sample is what would close it.",
+
+  "overlaps": [
+    "CRITICAL, FLAGGED PER THE BRIEF: FinePhrase is a rephrasing of HuggingFaceFW/fineweb-edu (config sample-350BT, split train) -- stated on the card and confirmed by the per-row `dataset` field reading 'HuggingFaceFW/fineweb-edu'. It therefore OVERLAPS every FineWeb-lineage real-token source in the reservoir at the DOCUMENT level: FineWeb-Edu itself, FineWeb-Edu-score-2, FineWeb, and (per README.md item 2's lineage chain) Zyda-2 and anything else containing FineWeb-Edu-score-2. Do not sum synthetic FinePhrase tokens against FineWeb-lineage real tokens as if they were disjoint pools.",
+    "The overlap is not merely lineage bookkeeping: every FinePhrase document's ORIGINAL text is physically present in the corpus as the `text` column. If any part of the pipeline ever reads the wrong column, we ingest FineWeb-Edu twice -- once as real, once as 'synthetic'.",
+    "Rephrasing defeats n-gram decontamination (see project memory: rephrased synthetic hides contamination). FineWeb-Edu does zero decontam and this pipeline has none either, so FinePhrase inherits and then CONCEALS whatever eval contamination FineWeb-Edu carries.",
+    "Internal overlap: the four formats are 4 views of one 339M-document set -- see all_config_verdict. Cross-format near-duplication is structural, not incidental."
+  ],
+
+  "needs_streaming_count": [
+    "HuggingFaceFW/finephrase/faq -- datasets-server cannot serve it at all (/size job failed, /rows 500, /info 500; only /first-rows responds). Its 339,039,447 row count is derived by subtraction and its 148.1B is card-only. Needs a Batch streaming count or a parquet footer read.",
+    "HuggingFaceFW/finephrase/all -- same 500s. Lower priority: it is a declared superset of the other four and should not be published or drawn from directly.",
+    "HuggingFaceFW/finephrase/{math,table,tutorial} -- countable via /rows once the per-IP 429 quota is free; the tool to do it is written, offline-tested, and ready. Run `recount_finephrase.py --configs math,table,tutorial --n-sample 200`, serially, when no other agent is holding the quota.",
+    "ALL FOUR need a random-offset short-rewrite re-sample before a quality-filter threshold is chosen -- the n=34 head sample is demonstrably unrepresentative (41 vs ~437 tokens/doc against two independent non-sampled routes)."
+  ],
+
+  "constraints_honored": {
+    "no_dataset_downloads": "Honored. No load_dataset(), no hf_hub_download of any data file. Every figure comes from datasets-server metadata endpoints (/size, /splits, /info, /statistics, /rows, /first-rows), the HF repo API (config declaration, tree listing), and the raw README.md. Total traffic well under 10 MB against a 3.79 TB corpus.",
+    "disk": "Honored. Largest artifact written is a few KB of JSON; the 34 cached rows live in /tmp.",
+    "api_traffic_after_stop_order": "One (1) /first-rows call for config faq, which the orchestrator explicitly authorized as worth scarce quota. It was the only way to obtain any faq data (every other endpoint 500s for that config) and it doubled as the short-rewrite sample. Cached to /tmp/fp_faq_rows.json so it is never re-fetched. Zero calls since; all subsequent analysis is offline arithmetic on already-fetched metadata."
+  },
+
+  "files_written": {
+    "artifacts/recount/synthetic.json": "this file",
+    "artifacts/recount/recount_finephrase.py": "standalone nested-payload counter. Extracts rollout_results[0].text, tokenizes rewrite AND original from the same rows (so the ratio is paired), reuses recount.py's bootstrap_ci and load_tokenizer by import rather than copy, and uses a card-anchored estimator (exact whole-corpus completion_tokens x sampled dolma2/completion-token ratio) as an independent cross-check on the sample mean -- because /statistics publishes no char mean for a string nested in a list, so recount.py's stats-ratio factoring is unavailable here. Retries HTTP 429 with backoff and persists after every config. Its extractor is unit-tested offline against the 34 cached rows (34/34, never returns the original, handles 4 degenerate inputs); the HTTP path is UNVALIDATED -- the run was killed before any config completed."
+  }
+}

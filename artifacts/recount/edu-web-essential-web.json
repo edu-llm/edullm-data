@@ -1,0 +1,80 @@
+{
+  "dataset": "EssentialAI/essential-web-v1.0",
+  "config": "default",
+  "split": "train",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "status": "rate-limited-not-measured",
+  "measured_tokens": null,
+  "estimator": null,
+  "confidence": "none",
+
+  "why_not_measured": {
+    "primary_blocker": "STRUCTURAL, not the rate limit. datasets-server cannot serve this corpus at all: /size returns num_rows 0 and an EMPTY configs list with a failed job (kind=config-size), and /statistics returns 'Job manager crashed while running this job (missing heartbeats).' /is-valid reports {preview: true, viewer: false, search: false, filter: false, statistics: false}. num_rows is the EXACT factor the whole method rests on, so with /size broken NEITHER the stats-ratio nor the sample-mean estimator can be formed -- recount.py exits NO_SIZE regardless of quota. Confirmed by running it: it wrote dataset_total_rows 0 and configs [].",
+    "secondary_blocker": "The shared per-IP datasets-server 429 quota then blocked the /rows sampling that would at least have measured tokens_per_char, which is the one factor still recoverable for this corpus.",
+    "implication": "Waiting for the quota to drain will NOT make this countable through recount.py. It needs a different route (below)."
+  },
+
+  "card_claims_NOT_measured": {
+    "tokens": 24000000000000,
+    "docs": 23600000000,
+    "implied_tokens_per_doc": 1017,
+    "source": "card title '24-Trillion Token Dataset' + arXiv 2506.14111 'Essential-Web v1.0: 24T tokens of organized web data'",
+    "tokenizer_named_on_card": false,
+    "warning": "The card does not name its tokenizer, so 24T is not comparable to a dolma2 count. This is exactly the §3.1 problem this task exists to fix. Do NOT enter this figure in a sizing table as if it were measured."
+  },
+
+  "independent_scale_crosscheck": {
+    "note": "Metadata only -- HF repo API and anonymous S3 ListObjectsV2, NOT datasets-server, so unaffected by the 429 quota.",
+    "hf_used_storage_bytes": 75323026283042,
+    "hf_used_storage_readable": "75.3 TB",
+    "parquet_file_count": 99896,
+    "one_crawl_prefix_measured": "crawl=CC-MAIN-2013-20 holds 1,411 parquet files / 1.061 TB; x101 crawls = ~107 TB, same order as the 75.3 TB HF figure",
+    "implied_tokens": "at fineweb-edu's measured 0.35 dolma2 tokens per parquet byte, 75.3 TB implies ~26T tokens; the card's 24T implies 0.32 tok/byte",
+    "verdict": "The 24T ORDER OF MAGNITUDE is corroborated. But this is a byte-ratio extrapolated from a DIFFERENT corpus with different text density, not a count of this one. It is a plausibility check, not a measurement."
+  },
+
+  "license": "odc-by",
+  "license_detail": "ODC-By. cardData license: odc-by; card 'License' section reads 'Essential-Web-v1.0 contributions are made available under the ODC attribution license'. Users must also abide by CommonCrawl Terms of Use. 'We do not alter the license of any of the underlying data.' Not gated, not private, not disabled.",
+
+  "taxonomy": {
+    "field": "eai_taxonomy",
+    "subject_field": "eai_taxonomy.free_decimal_correspondence",
+    "name": "Free Decimal Correspondence (FDC) -- a Dewey-Decimal-inspired OPEN taxonomy, 3 hierarchical levels, 12 top-level categories",
+    "fdc_level_1_categories": "0=General works, 1=Philosophy, 2=Religion, 3=Social Sciences, 4=Language, 5=Science, 6=Technology, 7=Arts, 8=Literature, 9=History/Geography",
+    "all_dimensions": [
+      "free_decimal_correspondence",
+      "bloom_cognitive_process",
+      "bloom_knowledge_domain",
+      "document_type_v1",
+      "document_type_v2",
+      "extraction_artifacts",
+      "missing_content",
+      "reasoning_depth",
+      "technical_correctness",
+      "education_level"
+    ],
+    "shape": "Every dimension carries BOTH .primary and .secondary, each with .code and .label -- except free_decimal_correspondence, which uses .labels.level_1/.level_2/.level_3 instead of .label. Example paths: eai_taxonomy.free_decimal_correspondence.primary.labels.level_1, eai_taxonomy.education_level.primary.label.",
+    "codes_are_strings": true,
+    "abstain_sentinel": "code '-1' with label 'Abstain' is a REAL observed value and must not be read as a category. Seen live in document_type_v1.secondary and extraction_artifacts.secondary.",
+    "education_relevant_axes": "education_level and reasoning_depth are the two directly education-relevant dimensions; bloom_cognitive_process and bloom_knowledge_domain add an Anderson/Krathwohl-2001 framing.",
+    "verified_how": "Read live off the /first-rows schema and a real row, then cross-checked against the card's field-path tables -- not taken from the card alone.",
+    "labeller": "EAI-Taxonomy-0.5b, ~90,000 AMD MI300x GPU-hours to label every document"
+  },
+
+  "verified_schema_columns": ["id", "text", "metadata", "line_start_n_end_idx", "quality_signals", "eai_taxonomy", "pid"],
+  "text_column": "text",
+  "text_column_note": "Confirmed as a plain top-level string via /first-rows. Not a nested payload, so no FinePhrase-style trap here.",
+
+  "lineage": "89 resiliparse-extracted CommonCrawl snapshots taken from DCLM-Pool (CC-MAIN-2013-20..2022-49) plus 12 additional snapshots re-extracted with resiliparse (CC-MAIN-2023-06..2024-38) = 101 total. xxhash.xxh3_64 doc IDs, hash-based global dedup across all 101 snapshots, then per-snapshot MinHash LSH (Jaccard 0.7, 14 bands x 9 rows). Quality signals from a RedPajama-Data-V2 pipeline variant including the DCLM-baseline fastText classifier.",
+
+  "overlap_hazard": "Shares 89 of 101 snapshots with DCLM-Pool, which makes it overlap the design's SEPARATE 'web (diverse)' category (source: mlfoundations/dclm-baseline-1.0). It is also CC-HTML lineage like fineweb-edu, covering much of the same underlying pages via a different extractor. Do not sum it with either.",
+
+  "needs_streaming_count": true,
+  "recommended_route": {
+    "s3_mirror": "s3://essential-web-v1.0 in us-west-2 (arn:aws:s3:::essential-web-v1.0), AWS Open Data registry entry eai-essential-web-v1. VERIFIED anonymously readable during this task.",
+    "listing_gotcha": "Use the PATH-STYLE host https://s3.us-west-2.amazonaws.com/essential-web-v1.0/ -- the virtual-host form essential-web-v1-0.s3.us-west-2.amazonaws.com returns NoSuchBucket because the bucket name contains a dot.",
+    "layout": "crawl=CC-MAIN-YYYY-NN/ prefixes, 101 of them, ~1,411 parquet files and ~1.06 TB per crawl; 99,896 parquet files total.",
+    "cheapest_method": "The parquet-footer method built for finepdfs-edu in this task (artifacts/recount/_footer_chars.py) gives an EXACT whole-corpus text-byte total from footers alone -- ~100k files x ~1 MB of footer reads, no payload bytes. Combined with a sampled tokens/byte that yields a high-confidence count WITHOUT streaming 75 TB, and it needs no datasets-server call, so the 429 quota is irrelevant to it. Run it in us-west-2 to avoid egress.",
+    "priority": "LOW. The 48B edu-web pool is already met 5.4x over by the two measured sources without this corpus. Its value is topic-label coverage (the eai_taxonomy dimensions above), not volume."
+  }
+}

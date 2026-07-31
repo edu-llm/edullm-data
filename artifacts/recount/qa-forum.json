@@ -1,0 +1,153 @@
+{
+  "category": "qa-forum",
+  "plan_pool_tokens": 12000000000,
+  "peak_plausible_demand_tokens": 2400000000,
+  "peak_demand_basis": "12% of a 20B-token run (DATASET-DESIGN-reservoir.md §2.1 table row 'QA/forum': 3% default / 12% ceiling)",
+  "required_pool_at_3x": 7200000000,
+
+  "status": "NOT MEASURED — datasets-server rate-limited (per-IP HTTP 429, 13 concurrent recount.py processes). Every token figure below is a CARD-DERIVED estimate, not a dolma2 measurement.",
+
+  "sources": [
+    {
+      "dataset": "common-pile/stackexchange_filtered",
+      "config": "default",
+      "split": "train",
+      "role": "primary",
+      "status": "rate-limited-not-measured",
+      "card_tokens": 23900000000,
+      "measured_tokens": null,
+      "estimator": "card-bytes-anchored (NOT a recount.py estimator)",
+      "confidence": "low",
+      "confidence_note": "Two recount.py runs (300-sample, seed 0) returned status=FAILED with HTTP 429 on every sampled offset; n_sampled=0, so no tokens/char was measured. The figure here is the card's own 89.7 UTF-8 GB x 0.266 tok/byte, NOT a measurement.",
+      "card_documents": 30987814,
+      "card_utf8_gb": 89.7,
+      "license": "CC-BY-SA-4.0",
+      "share_alike": true,
+      "license_evidence": "Observed directly in row metadata: metadata.all_licenses == ['Creative Commons - Attribution Share-Alike - https://creativecommons.org/licenses/by-sa/4.0/'] (2 rows inspected at offset 700000). Card: 'Per-document license information is available in the license entry of the metadata field'. HfApi cardData carries NO license field — the SA fact is only visible per-row.",
+      "text_column": "text",
+      "text_column_chosen_by": "verified-by-inspection (not guessed): schema is {added, created, id, metadata:dict, source, text}; `text` is the only payload string column, the other 5 are metadata. No nested payload, so the FinePhrase §3.3 trap does not apply here.",
+      "qa_structure_note": "Question and answers are NOT in separate columns — the card states 'We use a question, its comments, its answers, and the comments on each answer as a single document', answers ordered by votes with the accepted answer first. Confirmed by inspection: one doc opens with the question title, then body, then comment/answer text concatenated as plain prose (PyMarkdown-flattened). So counting `text` counts the whole Q+A+comments thread exactly once; no cross-column handling was needed.",
+      "note": "Card figure 23.9B is reproduced exactly by 89.7 GB x 0.266 tok/byte, which is a consistency check on the CARD, not an independent measurement of the corpus."
+    },
+    {
+      "dataset": "common-pile/ubuntu_irc_filtered",
+      "role": "secondary — forum-like, and the only non-share-alike option in this category",
+      "status": "not-measured (metadata only, by instruction)",
+      "card_tokens": 1400000000,
+      "measured_tokens": null,
+      "estimator": "card-bytes-anchored",
+      "confidence": "low",
+      "card_documents": 234982,
+      "card_utf8_gb": 5.3,
+      "license": "Public Domain",
+      "share_alike": false,
+      "note": "IRC support logs — dialogue-shaped Q&A, one document per channel-day. Parquet conversion is COMPLETE (partial=false, 216,197 rows converted), so this one is cheap to measure properly later. Small: ~1.4B tokens is under 12% of the pool."
+    },
+    {
+      "dataset": "common-pile/stackexchange",
+      "role": "REJECTED — do not add",
+      "status": "not-measured",
+      "card_tokens": 27600000000,
+      "card_documents": 33415400,
+      "card_utf8_gb": 103.7,
+      "license": "CC-BY-SA-4.0",
+      "share_alike": true,
+      "note": "The unfiltered superset of stackexchange_filtered (33.4M vs 31.0M docs, same dumps). Use ONE of the two, never both. Prefer _filtered."
+    },
+    {
+      "dataset": "common-pile/github_archive_filtered",
+      "role": "REJECTED for this category — belongs to `code`",
+      "status": "not-measured",
+      "card_tokens": 10700000000,
+      "card_documents": 23358580,
+      "card_utf8_gb": 40.4,
+      "license": "Blue Oak Council-approved (permissive)",
+      "share_alike": false,
+      "note": "Issue/PR threads are genuinely forum-shaped and permissively licensed, which makes this the best share-alike-free QA/forum substitute available. BUT §3.2 already lists it as the third-priority source for the `code` pool (40B). Claiming it here would double-count against code. Flagging for the orchestrator to arbitrate; NOT counted in category_total."
+    },
+    {
+      "dataset": "common-pile/data_provenance_initiative_filtered",
+      "role": "REJECTED — FLAN-like instruction data, not pretrain forum text",
+      "status": "not-measured",
+      "card_tokens": 800000000,
+      "card_documents": 3508518,
+      "card_utf8_gb": 3.0,
+      "license": "mixed; audited-open only, per-document in metadata.license",
+      "share_alike": false,
+      "note": "This is the closest HF analogue to the internal datamix1 `flan` category. Only ~0.8B tokens — too small to move a 12B pool, and it is supervised/instruction data whose inclusion in a pretrain mixture is a separate design decision (§4 does not budget for instruction data in the real half)."
+    },
+    {
+      "dataset": "common-pile/cccc_filtered",
+      "role": "REJECTED — Common Crawl web, not QA/forum",
+      "status": "not-measured",
+      "card_tokens": 15400000000,
+      "card_utf8_gb": 58.0,
+      "license": "permissive / public domain",
+      "share_alike": false,
+      "note": "Enumerated and dismissed: 52 Common Crawl snapshots. Its own card warns of 'a higher level of duplication across this collection'. Belongs to web/edu-web, and overlaps DCLM-baseline."
+    }
+  ],
+
+  "collections_enumerated": {
+    "method": "HfApi().list_datasets(author='common-pile') — 63 repos, 31 raw/filtered pairs plus comma_v0.1_training_dataset and raw_v0.1_parquet",
+    "forum_or_qa_shaped": [
+      "stackexchange_filtered",
+      "stackexchange",
+      "ubuntu_irc_filtered",
+      "github_archive_filtered",
+      "data_provenance_initiative_filtered"
+    ],
+    "conclusion": "common-pile contains exactly ONE large true Q&A corpus (StackExchange). There is no second 10B-scale QA/forum source in the collection, so this category cannot be diversified away from share-alike within common-pile."
+  },
+
+  "category_total_measured": null,
+  "category_total_estimated": 25300000000,
+  "category_total_basis": "stackexchange_filtered ~23.9B + ubuntu_irc_filtered ~1.4B, both card-bytes-anchored at 0.266 tok/byte. Conservative bound at 0.21 tok/byte: ~19.9B.",
+
+  "meets_3x_peak_demand": null,
+  "meets_3x_peak_demand_note": "PROVISIONALLY YES, on card figures only. stackexchange_filtered alone (~23.9B) is 10x the 2.4B peak and 2x the 12B plan pool, and the margin survives the pessimistic 0.21 tok/byte bound (~18.8B, still 7.8x peak). The 3x test is not close enough to the line for the missing measurement to flip it — but the number is unverified and must not be recorded in §3.2 as measured.",
+
+  "overlaps": [
+    "common-pile/stackexchange (33.4M docs) is the UNFILTERED SUPERSET of common-pile/stackexchange_filtered (31.0M docs) — same Dec-2024 Internet Archive dumps plus the July-2024 official dumps. Never sum them; pick _filtered.",
+    "StackExchange dumps are the single most re-derived corpus in open pretraining: the same posts appear in The Pile (StackExchange component), RedPajama, SlimPajama, Dolma, and the datamix1 `stackexchange` category. Any of those entering the reservoir alongside this source double-counts. §2.1's QA/forum pool must be sourced from exactly one StackExchange derivative.",
+    "The published 150B corpus in s3://edullm-data is dolma3_mix-150B (see memory), and Dolma mixes carry a StackExchange component — so a reservoir built on stackexchange_filtered overlaps the corpus already published. Not checked (S3 out of scope for this task).",
+    "github_archive_filtered is claimed by the `code` pool in §3.2; counting it as QA/forum would double-count across categories.",
+    "cccc_filtered overlaps DCLM-baseline / the web pool (both are Common Crawl), and self-reports elevated internal duplication."
+  ],
+
+  "share_alike_finding": {
+    "flag": "SHARE-ALIKE, and structurally unavoidable in this category",
+    "detail": "The entire QA/forum pool rests on CC-BY-SA-4.0 content. Unlike `reference` (FineWiki), there is no permissive alternative at 10B scale inside common-pile — ubuntu_irc_filtered is public domain but only ~1.4B tokens, and the one permissive forum-shaped corpus of adequate size (github_archive_filtered, ~10.7B) is already spoken for by the `code` pool.",
+    "design_impact": "§7 item 4 wants FineWiki and StackExchange kept separable in case of publication. Combined with another agent's LibreTexts finding (32% share-alike rows), share-alike is a THIRD source and a larger slice of the reservoir than §7 item 4 assumed. Recommendation: make share-alike a first-class `label` on every entry (queryable at mixture-build time) rather than a per-source note — that is the only way a future 'strip SA and re-mix' request is a metadata query instead of a re-copy. Note this must be decided BEFORE first publish: entry.labels is inside manifest_sha256 and is therefore unbackfillable.",
+    "if_SA_must_be_dropped": "The QA/forum category collapses from ~25B to ~1.4B (ubuntu_irc only), which does NOT meet 3x of the 2.4B peak. This is the single largest license-driven sizing risk found in this category."
+  },
+
+  "needs_streaming_count": [
+    {
+      "dataset": "common-pile/stackexchange_filtered",
+      "why": "Rate-limited (HTTP 429, per-IP, 13 concurrent processes) — no tokens/char sample was obtained. Also blocked by the partial-conversion bug below even once the quota recovers.",
+      "cheap_retry_first": "A 300-sample recount.py run WITH the rows-scaling fix below should settle this in minutes once the quota is free; a Batch streaming count is only needed if /rows stays unavailable."
+    },
+    {
+      "dataset": "common-pile/ubuntu_irc_filtered",
+      "why": "Not attempted (metadata-only by instruction). Parquet conversion is COMPLETE, so recount.py needs no fix for this one — it is the cheapest real number in the category."
+    }
+  ],
+
+  "tool_bug_found": {
+    "severity": "HIGH — silently understates every partially-converted corpus by ~24x",
+    "where": "artifacts/recount/recount.py main(), `n = per_config[cfg]['num_rows']` (and the same field via /size in combine()'s caller)",
+    "problem": "For these corpora the datasets-server parquet conversion is PARTIAL (`/size` returns `partial: true`). `num_rows` is then only the CONVERTED head, not the split. For stackexchange_filtered: num_rows=1,282,779 converted, estimated_num_rows=27,497,605, card=30,987,814 documents. recount.py multiplies mean_chars x tokens/char by 1.28M and would have reported ~1.1B tokens for a ~24B corpus — a 24x undercount that looks like a clean high-confidence stats-ratio result, because /statistics is ALSO computed over the same partial head so the two estimators AGREE and estimator_divergence stays small.",
+    "why_it_passes_every_guard": "`stats_partial: true` is recorded and downgrades confidence to 'medium' at most — it flags the mean_chars factor as provisional but says nothing about num_rows being the wrong denominator. Nothing in the output reveals the 24x error.",
+    "affected_in_this_category": "stackexchange_filtered (partial, 24x), stackexchange (partial), github_archive_filtered (partial, 23.4M card vs 2.5M converted), cccc_filtered (partial, 6.9M vs 0.9M). NOT affected: ubuntu_irc_filtered, data_provenance_initiative_filtered (both partial=false).",
+    "fix": "Scale by `estimated_num_rows` when `/size` reports `partial: true`, falling back to `num_rows` only when the conversion is complete; record which was used. Note estimated_num_rows is itself ~13% below the card's document count for stackexchange_filtered (27.5M vs 31.0M), so it is an improvement, not ground truth — the card doc count is the better anchor where one exists.",
+    "affects_other_agents": "Any Phase-0 agent whose corpus is large enough to be partially converted has the same 24x exposure. This is worth broadcasting before the §3.2 table is rewritten."
+  },
+
+  "method_caveat_for_this_domain": {
+    "finding": "tokens/char is much LESS stable on Q&A than the README's premise assumes",
+    "evidence": "Tokenizing the two real stackexchange_filtered document prefixes obtained before the rate limit (dolma2, locally): a terminal/code-heavy Ubuntu answer ran 0.4524 tok/char, a mostly-prose answer 0.2101 tok/char — a 2.15x spread across two documents in the same corpus.",
+    "why_it_matters": "The README justifies the stats-ratio estimator on tokens/char having low CV (~0.27 on FineMath, ~0.1 for English prose). StackExchange documents interleave prose with code blocks, shell transcripts, tracebacks and markdown tables, so the per-document tok/char CV here should be expected to be substantially higher than on prose corpora. n=2 is anecdote, not a measurement — but whoever re-runs this should READ `tokens_per_char_cv` in the output rather than assume the prose prior, and consider raising --n-sample above 300 if it comes back high.",
+    "direction_of_error": "Unknown sign, but it widens the interval around any stats-ratio figure for this category specifically."
+  }
+}

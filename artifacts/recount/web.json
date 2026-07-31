@@ -1,0 +1,236 @@
+{
+  "category": "web (diverse, unfiltered)",
+  "role": "the diversity counterweight to edu filtering",
+  "plan_pool_tokens": 30000000000,
+  "peak_plausible_demand_tokens": 7000000000,
+  "peak_demand_note": "35% of a 20B-token run; pool must hold >= 3x that = 21B",
+  "tokenizer": "allenai/dolma2-tokenizer",
+
+  "row_count_investigation": {
+    "the_anomaly": "datasets-server /size reports num_rows=779,982 for mlfoundations/dclm-baseline-1.0, which is implausible for a corpus advertised at 4T tokens.",
+    "resolution": "779,982 is NOT the row count. It is the number of rows datasets-server managed to auto-convert to parquet before hitting its 5 GB viewer cap. The SAME /size response carries partial:true and estimated_num_rows:3,017,780,768, and the HF viewer header states it outright: 'default - ~3.02B rows (showing the first 780k)'.",
+    "true_document_count": 2949300000,
+    "true_document_count_range": [2949300000, 3017780768],
+    "established_by": [
+      "HF /size estimated_num_rows = 3,017,780,768 (partial:true)",
+      "HF dataset viewer header: '~3.02B rows (showing the first 780k)'",
+      "dataset card, verbatim: 'DCLM-baseline is a 4T token / 3B document pretraining dataset'",
+      "Zyphra/dclm-dedup card component table, an INDEPENDENT measurement: DCLM baseline = 2949.3M documents / 3854.9B gpt-neox tokens",
+      "these three agree to 2.32%, and all round to the card's '3B documents'"
+    ],
+    "shard_layout_from_list_repo_files": {
+      "api_used": "HfApi().list_repo_files(repo_type='dataset') - metadata only, a different API from datasets-server, no rate-limit contention",
+      "mlfoundations/dclm-baseline-1.0": "27,838 .jsonl.zst shards in 10 global-shard_NN_of_10 x 10 local-shard_N_of_10 = 100 (global,local) pairs; 179-280 files per pair, mean 278.4; 7.196 TB summed from LFS metadata, matching the viewer's stated 'Total file size: 7.2 TB'",
+      "mlfoundations/dclm-baseline-1.0-parquet": "27,938 .parquet shards, same 10x10 global/local layout, 7.420 TB",
+      "conclusion": "the corpus is fully present in the repo (all 100 shard pairs, 27,838 files, 7.2 TB). Only the datasets-server CONVERSION is partial. Nothing is missing from the dataset itself."
+    },
+    "documented_rather_than_served": true,
+    "documented_rather_than_served_note": "The true document count is documented (card + Zyphra table + viewer header) rather than served by /size, exactly as anticipated. /statistics for this repo is separately and permanently broken (HTTP 501 'Job manager crashed while running this job (missing heartbeats)') - that failure is independent of rate limiting and was re-confirmed."
+  },
+
+  "the_93x_gap_explained": {
+    "question": "web-dclm-baseline-parquet.json says 1.23B; web-dclm-100bt.json says 114.69B. Both are DCLM. Why 93x?",
+    "answer": "Neither number is wrong; they have different denominators. recount.py multiplies by whatever /size reports as num_rows. For the parquet mirror that is 965,502 - the partially-converted HEAD, 0.03% of the corpus - so 1.23B is the token count OF THAT HEAD, not of DCLM-baseline. For dclm_100BT, /size returns partial:false and an exact 89,269,902 rows, so its 114.69B is the whole subset.",
+    "arithmetic_check": "row ratio 89,269,902/965,502 = 92.5x; token ratio 114.69B/1.23B = 93.1x. The gap is purely the denominator - the per-document physics agree (tokens/char 0.2337 vs 0.22847, 2.2% apart).",
+    "which_is_a_defensible_pool_figure": "ONLY web-dclm-100bt.json (114.69B). web-dclm-baseline-parquet.json's est_total_tokens MUST NOT be used as a pool size; its value is the measured tokens/char (0.2337, CV 0.111) and mean_chars, which are what let the full corpus be rescaled."
+  },
+
+  "sources": [
+    {
+      "dataset": "HuggingFaceFW/dclm_100BT",
+      "config": "default",
+      "status": "measured",
+      "recommended_primary": true,
+      "card_tokens": 100000000000,
+      "measured_tokens": 114691544533,
+      "estimator": "stats-ratio",
+      "confidence": "medium",
+      "confidence_note": "/statistics mean is partial (895,229 of 89,269,902 rows) but num_rows is EXACT (/size partial:false); the two estimators diverge only 7.98%, and sample mean_chars 6110.9 vs stats 5623.4 bracket the answer",
+      "n_rows_exact": 89269902,
+      "n_rows_is_exact": true,
+      "n_sampled": 125,
+      "tokens_per_char": 0.22847,
+      "tokens_per_char_cv": 0.1111,
+      "sample_mean_est_tokens": 124635066376,
+      "estimator_divergence": 0.0798,
+      "text_column": "text",
+      "text_column_chosen_by": "known-name",
+      "license": "odc-by",
+      "parquet_bytes": 316008772992,
+      "artifact": "artifacts/recount/web-dclm-100bt.json",
+      "note": "A fixed-seed (42) random 1.05x-oversampled subset of DCLM-baseline-1.0-parquet, fully converted on datasets-server. Card says ~100B; measured 114.69B, so the card UNDERSTATES by 14.7%. This is the one fully-converted DCLM variant with an exact row count, and at 114.69B it alone is 3.8x the 30B plan pool."
+    },
+    {
+      "dataset": "mlfoundations/dclm-baseline-1.0",
+      "config": "default",
+      "status": "not-measurable-from-api",
+      "card_tokens": 4000000000000,
+      "card_tokens_note": "ADVERTISED '4T', NOT available tokens - see unique_vs_advertised below. Do not use.",
+      "measured_tokens": null,
+      "derived_tokens": 3764000000000,
+      "derived_method": "2,949,300,000 docs (Zyphra, independent) x 5461.0 mean_chars (/statistics on the parquet mirror's converted head) x 0.2337 dolma2 tokens/char (measured, CV 0.111)",
+      "derived_cross_check": "Zyphra independently measured 3854.9B gpt-neox tokens; our 3764.0B dolma2 agrees to 2.4%, giving dolma2/gpt-neox = 0.9764",
+      "derived_upper_variant": 4497200000000,
+      "derived_upper_variant_note": "using the random-offset sample mean_chars 6524.8 instead of the partial-head 5461.0; the head under-represents long documents, so the true value likely sits between 3764B and 4497B",
+      "estimator": "derived (doc-count x mean-chars x measured tokens/char)",
+      "confidence": "low",
+      "confidence_note": "/statistics returns HTTP 501 'Job manager crashed' PERMANENTLY for this repo - independent of rate limiting, re-confirmed. mean_chars therefore comes from the parquet mirror's partially-converted head, which is content-clustered by shard order. num_rows itself is an ESTIMATE (3.02B) and disagrees 2.3% with Zyphra's 2.95B. Not a measured figure.",
+      "license": "cc-by-4.0",
+      "license_verified": "cc-by-4.0 confirmed in both cardData.license and the license:cc-by-4.0 tag; card states 'License: CC-by-4.0'",
+      "common_crawl_terms_note": "The card carries NO Common Crawl terms-of-use notice. Common Crawl is referenced only descriptively ('a corpus of 240 trillion tokens derived from Common Crawl'). Separately the card restricts use: 'DCLM-Baseline is not intended for training production-ready models'; 'The dataset should only be used for research purposes in the context of the DCLM benchmark.' CC-BY-4.0 requires attribution; the underlying pages remain under their own rights and CC BY does not launder third-party web content, so retain provenance (the repo ships url + full WARC metadata per document).",
+      "repo_bytes": 7196105155016,
+      "n_shard_files": 27838,
+      "gated": false
+    },
+    {
+      "dataset": "mlfoundations/dclm-baseline-1.0-parquet",
+      "config": "default",
+      "status": "head-only-measured",
+      "card_tokens": 4000000000000,
+      "measured_tokens_of_converted_head": 1232206708,
+      "measured_tokens": null,
+      "measured_tokens_note": "DO NOT USE 1.23B AS A POOL FIGURE. It is num_rows=965,502 (the converted head, 0.03% of the corpus) x mean_chars x tokens/char. See the_93x_gap_explained.",
+      "estimator": "stats-ratio",
+      "confidence": "medium-for-the-head-only",
+      "n_rows_reported": 965502,
+      "n_rows_is_exact": false,
+      "n_rows_partial": true,
+      "estimated_num_rows": 2732074726,
+      "n_sampled": 115,
+      "tokens_per_char": 0.2337,
+      "tokens_per_char_cv": 0.1108,
+      "stats_mean_chars": 5461.0,
+      "stats_median_chars": 2947.0,
+      "estimator_divergence": 0.1631,
+      "text_column": "text",
+      "text_column_chosen_by": "known-name",
+      "license": "cc-by-4.0",
+      "parquet_bytes": 3341314536,
+      "repo_bytes": 7419668271828,
+      "n_shard_files": 27938,
+      "artifact": "artifacts/recount/web-dclm-baseline-parquet.json",
+      "note": "Card: 'this is an identical copy of mlfoundations/dclm-baseline-1.0, where all the files have been mapped to a parquet format.' Same 10x10 global/local shard layout, 27,938 files. Its VALUE to this task is that /statistics WORKS here (the original returns 501), supplying the mean_chars 5461.0 and tokens/char 0.2337 used to rescale the full corpus. 6 columns vs the original's 8 - it drops the WARC metadata struct and warcinfo, so provenance is THINNER here than in the original."
+    },
+    {
+      "dataset": "Zyphra/dclm-dedup",
+      "config": "default",
+      "status": "rate-limited-not-measured",
+      "card_tokens": 750300000000,
+      "card_tokens_tokenizer": "gpt-neox",
+      "measured_tokens": null,
+      "derived_tokens": 732592920000,
+      "derived_method": "card's 750.3B gpt-neox x the 0.9764 dolma2/gpt-neox ratio derived on DCLM-baseline",
+      "estimator": "card-figure-x-ratio",
+      "confidence": "low",
+      "confidence_note": "Two recount attempts (seeds 0 and 7) both FAILED with status:FAILED, all 5 errors HTTP 429 - shared per-IP datasets-server quota, not a property of the dataset. Halted per coordinator instruction. Its /statistics DOES work (text mean_chars 5181.59, partial) and /size returns partial:false, so this IS measurable once the quota clears - it needs ~200 sampled rows for tokens/char, nothing more.",
+      "n_rows_exact": 615197319,
+      "n_rows_is_exact": true,
+      "row_count_corroboration": "HF /size exact 615,197,319 vs card 615.2M -> 0.0004% agreement; partial:false. This is the strongest row-count evidence in the whole category and is what validates the Zyphra table's 2949.3M figure for DCLM-baseline.",
+      "stats_mean_chars": 5181.59361,
+      "license": "cc-by-4.0",
+      "license_verified": "card: 'We are releasing this dataset under the terms of cc-by-4, the same license as the original DCLM dataset.' HF tag reads the less specific 'license:cc'.",
+      "parquet_bytes": 2051714329957,
+      "artifact": "artifacts/recount/web-dclm-dedup.json (status FAILED, 429 only)",
+      "note": "THE MOST IMPORTANT SOURCE IN THIS CATEGORY for honest sizing. Zyphra minhash-LSH deduped DCLM (128-perm, 25-char-grams, 8 bands, ~85% Jaccard) and found DCLM-baseline 'appears to consist of approximately 80% duplicates'. 2949.3M -> 615.2M docs, 3854.9B -> 750.3B tokens. Independently corroborates the DCLM paper's own limitations section."
+    },
+    {
+      "dataset": "HuggingFaceTB/dclm-edu",
+      "config": "default",
+      "status": "recorded-only-not-my-category",
+      "belongs_to_category": "edu-web",
+      "card_tokens": null,
+      "measured_tokens": null,
+      "derived_tokens": 1403000000000,
+      "derived_method": "estimated_num_rows 1,000,856,429 x /statistics mean_chars 5997.57 x 0.2337 tokens/char BORROWED from the DCLM parquet mirror (not measured on this corpus)",
+      "estimator": "derived-with-borrowed-tokens-per-char",
+      "confidence": "low",
+      "confidence_note": "row count is an ESTIMATE (/size partial:true, exact-converted only 1,135,674); tokens/char was not measured here. Cheap record only, as instructed.",
+      "estimated_num_rows": 1000856429,
+      "stats_mean_chars": 5997.56917,
+      "stats_partial": true,
+      "license": "cc-by-4.0",
+      "license_verified": "card: 'Following DCLM-Baseline, this dataset is licensed under CC-BY-4.0.'",
+      "parquet_bytes": 4243928597,
+      "repo_bytes": 5125545685497,
+      "n_parquet_files": 1769,
+      "note": "DCLM re-filtered by the FineWeb-Edu classifier, keeping edu_score > 2 (mean edu_score 2.28, mean edu_int_score 2.37). Used for SmolLM2-135M/360M. Card notes edu_int_score>=3 performs better still. IS A SUBSET OF DCLM - see overlaps; must not be summed with anything in this category."
+    }
+  ],
+
+  "category_total_measured": 114691544533,
+  "category_total_measured_source": "HuggingFaceFW/dclm_100BT only - the single source with an exact row count AND a completed measurement",
+  "category_total_derived_unique": 732592920000,
+  "category_total_derived_unique_note": "DCLM-baseline after full global near-dedup, dolma2-adjusted. This is the honest ceiling for the category and is NOT summed with dclm_100BT (which is a subset of it).",
+
+  "meets_3x_peak_demand": true,
+  "meets_3x_peak_demand_basis": "MEASURED alone: dclm_100BT = 114.69B = 16.4x the 7B peak demand and 3.8x the 30B plan pool, clearing the >=3x bar (21B) by 5.5x. This verdict does NOT depend on any unmeasured figure or on the advertised 4T. Adding the derived unique ceiling (732.6B = 104.7x peak) only widens the margin.",
+
+  "unique_vs_advertised": {
+    "advertised_tokens": 4000000000000,
+    "advertised_label": "'4T token / 3B document' (card), gpt-neox tokenizer per the paper",
+    "why_not_available": "The DCLM paper's own limitations section states verbatim: 'DCLM-baseline contains approximately 2T tokens, and after removing all near-duplicates globally, about 1T tokens remain.' The card's 4T counts duplicates. DCLM used a per-shard Bloom filter, NOT global dedup, so duplicates survive across the 10 global shards.",
+    "unique_tokens_paper": 1000000000000,
+    "unique_tokens_measured_by_zyphra": 750300000000,
+    "duplicate_fraction_zyphra": 0.8,
+    "guidance": "Report ~750B (Zyphra, empirical, gpt-neox) or ~733B dolma2-adjusted as the unique pool - NOT 4T, and not the 3764B all-copies figure either. At a 30B pool this distinction is not binding (733B is still 24x), but it becomes binding for anyone sizing a multi-hundred-B draw. Duplicates also mean a naive 30B random draw from DCLM-baseline yields ~5 epochs of an effective 'core'; sample from Zyphra/dclm-dedup if epoch hygiene matters. Zyphra note that in their ablations this duplication did NOT hurt downstream scores."
+  },
+
+  "overlaps": [
+    "allenai/olmo-mix-1124 (olmo100b) IS 99.9% DCLM-baseline BY DOCUMENT COUNT - measured, not assumed: /size returns 3 configs and the dclm config alone is 3,033,948,632 of 3,035,925,377 estimated rows (algebraic-stack 667,145; arxiv 1,309,600). Anything drawn from olmo100b's dclm config is the SAME corpus as this category. Do not sum, and do not treat olmo100b as an independent web source.",
+    "HuggingFaceFW/dclm_100BT is a seed-42 random subset OF DCLM-baseline-1.0-parquet. Strict subset - never sum with the parent.",
+    "Zyphra/dclm-dedup is DCLM-baseline with 80% of documents removed. Strict subset - never sum with the parent.",
+    "HuggingFaceTB/dclm-edu is DCLM re-filtered at edu_score>2. Strict subset of DCLM-baseline. It sits in the edu-web category, so the web and edu-web pools ARE NOT INDEPENDENT - drawing 'diverse unfiltered web' from DCLM and 'edu web' from dclm-edu samples one corpus twice. Prefer FineWeb-Edu for edu-web, or draw the web counterweight from the DCLM documents that dclm-edu REJECTED (edu_score <= 2), which is the actual diversity counterweight.",
+    "EssentialAI/essential-web-v1.0 shares 89 of 101 Common Crawl snapshots with DCLM-Pool (per the task brief; NOT independently verified here - its /size returns 0 rows / 0 configs, so datasets-server has no conversion for it at all and the snapshot overlap cannot be checked from the API). Treat essential-web and DCLM as heavily overlapping until measured.",
+    "gair-prox/DCLM-pro (365,569,762 rows) and mlfoundations/dclm-pool-* are further DCLM derivatives - all subsets or reprocessings, none additive.",
+    "Zyda-2 contains both DCLM-baseline and FineWeb-Edu-score-2 (README lineage note) - a third path to the same double-count."
+  ],
+
+  "needs_streaming_count": [
+    {
+      "dataset": "mlfoundations/dclm-baseline-1.0",
+      "why": "PERMANENT server-side failure, not rate limiting: /statistics returns HTTP 501 'Job manager crashed while running this job (missing heartbeats)' and /size is partial:true with only 779,982 of ~3.02B rows converted. There is no API path to a real mean_chars or an exact row count for this repo.",
+      "what_is_missing": "an exact document count (currently a 2.95B-3.02B range from three documented sources) and a whole-corpus mean_chars (currently borrowed from the parquet mirror's content-clustered 965,502-row head)",
+      "what_a_batch_job_must_do": "stream the 27,838 .jsonl.zst shards in-region, counting documents and dolma2 tokens exactly. tokens/char is ALREADY pinned at 0.2337 (CV 0.111), so a ~1% shard sample would settle mean_chars and the doc count to well under 1% without a full pass.",
+      "blocking": false,
+      "blocking_note": "not blocking the 30B pool decision - dclm_100BT's measured 114.69B already clears it 3.8x"
+    },
+    {
+      "dataset": "mlfoundations/dclm-baseline-1.0-parquet",
+      "why": "/size is partial:true (965,502 exact of 2,732,074,726 estimated). The 1.23B in web-dclm-baseline-parquet.json is the converted head only and is NOT a corpus figure.",
+      "what_is_missing": "an exact row count for the full 27,938-shard mirror",
+      "what_a_batch_job_must_do": "read the 27,938 parquet footers only - row counts live in metadata, so this needs NO payload bytes and is very cheap in-region",
+      "blocking": false
+    },
+    {
+      "dataset": "Zyphra/dclm-dedup",
+      "why": "HTTP 429 on the shared per-IP datasets-server quota, twice (seeds 0 and 7); all 5 recorded errors were 429. NOT a dataset defect - /size is partial:false with an exact 615,197,319 rows and /statistics works (mean_chars 5181.59).",
+      "what_is_missing": "tokens/char measured on THIS corpus; the 732.6B figure currently rides on DCLM-baseline's 0.9764 ratio",
+      "what_a_batch_job_must_do": "nothing on Batch - just ~200 sampled rows via /rows once the per-IP quota clears. This is the cheapest outstanding item and it upgrades the category's honest ceiling from derived to measured.",
+      "blocking": false,
+      "retry_not_batch": true
+    },
+    {
+      "dataset": "HuggingFaceTB/dclm-edu",
+      "why": "/size partial:true (1,135,674 exact of 1,000,856,429 estimated); tokens/char never measured on this corpus. Recorded cheaply as instructed; belongs to the edu-web category.",
+      "what_is_missing": "exact row count and its own tokens/char",
+      "blocking": false,
+      "owner": "edu-web category, not web"
+    },
+    {
+      "dataset": "EssentialAI/essential-web-v1.0",
+      "why": "/size returns 0 rows and 0 configs - datasets-server has no conversion at all, so neither its size nor its 89/101-snapshot overlap with DCLM-Pool is checkable from the API.",
+      "what_is_missing": "everything; and specifically the snapshot-level overlap with DCLM that determines whether it can be used alongside this category",
+      "blocking": false,
+      "owner": "edu-web category; flagged here only for the overlap"
+    }
+  ],
+
+  "measurement_integrity_notes": [
+    "TRAP 1 (wrong text column) - cleared. Every DCLM variant exposes `text` as a flat top-level string and the tool chose it by known-name, not by guessing. Verified against /statistics column types: the only other string_text columns are `id` (mean 47.0 chars, a fixed-width hash) and `url` (mean ~73), both excluded as metadata. No nested payload like FinePhrase's rollout_results[0].text exists here.",
+    "TRAP 2 (lineage double-counting) - live and severe in this category. Every source examined is a subset or reprocessing of one corpus, DCLM-baseline. category_total_measured is therefore a SINGLE source, not a sum. See overlaps.",
+    "The dominant error source here is NOT tokenization: tokens/char measured 0.2337 and 0.22847 on two DCLM variants, CV 0.111 both, 2.2% apart. It is the DOCUMENT COUNT, which /size only estimates for 4 of the 5 repos.",
+    "recount.py multiplies by /size's num_rows WITHOUT checking the sibling `partial` flag, so on any partially-converted corpus its est_total_tokens silently measures the converted head instead of the corpus. That produced this category's 93x discrepancy and is a tool-level trap worth fixing (read `partial` / `estimated_num_rows` and refuse, or rescale).",
+    "All figures here come from datasets-server metadata endpoints (/size, /splits, /statistics, /rows, /parquet), HfApi metadata, and README.md files. NO data file was downloaded; the only files fetched were three ~7 KB dataset cards, since deleted. Repo byte totals came from LFS metadata via list_repo_tree, not from bytes on the wire.",
+    "7.196 TB summed from LFS metadata for mlfoundations/dclm-baseline-1.0 matches the HF viewer's independently stated 'Total file size: 7.2 TB', confirming the file listing is complete and no shards are missing."
+  ]
+}

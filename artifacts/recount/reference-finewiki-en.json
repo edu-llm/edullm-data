@@ -1,0 +1,52 @@
+{
+  "dataset": "HuggingFaceFW/finewiki",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "method": "num_rows (exact) x mean_chars (/statistics, whole-split) x tokens/char (sampled); falls back to num_rows x sampled mean_tokens/doc when /statistics is unavailable",
+  "dataset_total_rows": 61550610,
+  "configs": [
+    {
+      "config": "en",
+      "split": "train",
+      "status": "ok",
+      "text_column": "text",
+      "text_column_chosen_by": "known-name",
+      "n_rows": 6614655,
+      "n_sampled": 140,
+      "n_distinct_offsets": 60,
+      "mean_tokens_per_doc": 986.2,
+      "median_tokens_per_doc": 386.0,
+      "cv_tokens_per_doc": 2.031,
+      "mean_chars_per_doc_sampled": 4502.4,
+      "tokens_per_char": 0.21904,
+      "tokens_per_char_cv": 0.1657,
+      "tokens_per_byte": 0.21819,
+      "sample_mean_est_tokens": 6523372761,
+      "sample_mean_ci95": [
+        4550788144,
+        8844880428
+      ],
+      "sample_mean_rel_halfwidth": 0.3291,
+      "n_empty_text": 0,
+      "errors": [
+        "offset 3528010: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 3642097: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 3713581: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 3960620: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 3997985: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor"
+      ],
+      "stats_available": true,
+      "stats_column": "text",
+      "stats_num_examples": 421456,
+      "stats_partial": true,
+      "stats_mean_chars": 6614.8,
+      "stats_median_chars": 2072.0,
+      "stats_ratio_est_tokens": 9584066709,
+      "estimator_divergence": 0.3194,
+      "est_total_tokens": 9584066709,
+      "estimator": "stats-ratio",
+      "confidence": "low",
+      "confidence_note": "estimators disagree by 32% and the /statistics mean is PARTIAL (head of the split, may be content-clustered)",
+      "parquet_bytes": 37722458405
+    }
+  ]
+}

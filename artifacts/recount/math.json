@@ -1,0 +1,205 @@
+{
+  "category": "math",
+  "plan_pool_tokens": 36000000000,
+  "peak_plausible_demand_tokens": 7000000000,
+  "peak_demand_basis": "35% of a 20B-token run",
+  "required_pool_at_3x_peak": 21000000000,
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "run_status": "PARTIAL — the datasets-server 429 quota is per-IP and was saturated by ~13 concurrent recount.py processes across all Phase-0 agents. The orchestrator ordered all recount.py invocations stopped mid-run. Two sources carry real measured numbers, two do not.",
+
+  "sources": [
+    {
+      "dataset": "HuggingFaceTB/finemath",
+      "config": "finemath-3plus",
+      "status": "measured",
+      "card_tokens": 34000000000,
+      "measured_tokens": 34688782547,
+      "estimator": "stats-ratio",
+      "confidence": "medium",
+      "license": "odc-by",
+      "license_source": "cardData.license + tags license:odc-by; card body cites ODC-By v1.0 and notes use is ALSO subject to CommonCrawl Terms of Use",
+      "include_in_total": true,
+      "note": "Measured by the orchestrator, not re-run here. Card figure confirmed within 2%. 21,405,610 rows. This is the ROOT of the FineMath lineage — everything else in this category is either its subset or its derivative.",
+      "artifact": null
+    },
+    {
+      "dataset": "HuggingFaceTB/finemath",
+      "config": "finemath-4plus",
+      "status": "measured",
+      "card_tokens": 9600000000,
+      "measured_tokens": 10063028784,
+      "estimator": "stats-ratio",
+      "confidence": "medium",
+      "license": "odc-by",
+      "license_source": "same repo as finemath-3plus",
+      "include_in_total": false,
+      "exclusion_reason": "SUBSET of finemath-3plus — the card states this outright ('FineMath-4+ (a subset of FineMath-3+)'). Adding it would double-count 10.06B tokens, a 29% inflation of the category.",
+      "note": "6,699,493 rows. Two estimators agreed to 0.19%. /statistics was PARTIAL (942,120 of 6.7M rows) but the partial mean_chars (5014.7) and the random-sample mean_chars (5024.2) agree to 0.2%, so the partial-head bias did not fire here. dolma2_to_upstream_ratio = 1.074 against the card's own Llama-3 token_count column — this ratio is reused below to project the two unmeasured FineMath configs.",
+      "measured_detail": {
+        "n_rows": 6699493,
+        "n_sampled": 135,
+        "n_distinct_offsets": 60,
+        "tokens_per_char": 0.29953,
+        "tokens_per_char_cv": 0.2136,
+        "stats_mean_chars": 5014.7,
+        "stats_partial": true,
+        "estimator_divergence": 0.0019,
+        "dolma2_to_upstream_ratio": 1.074,
+        "sampling_degraded_by_429": true
+      },
+      "artifact": "artifacts/recount/math-finemath-4plus.json"
+    },
+    {
+      "dataset": "HuggingFaceTB/finemath",
+      "config": "infiwebmath-3plus",
+      "status": "rate-limited-not-measured",
+      "card_tokens": 20500000000,
+      "measured_tokens": null,
+      "projected_tokens": 22017000000,
+      "projection_method": "card 20.5B (Llama-3 tokens) x 1.074, the dolma2/Llama-3 ratio MEASURED on finemath-4plus in the same repo with the same schema and text extraction. This is a PROJECTION, not a measurement.",
+      "estimator": "card-figure x measured-ratio",
+      "confidence": "low",
+      "license": "odc-by",
+      "license_source": "same repo as finemath-3plus",
+      "include_in_total": false,
+      "exclusion_reason": "Not measured, AND its overlap with finemath-3plus is real but unquantified — see overlaps[]. Excluded from the defensible total on both grounds.",
+      "note": "13,882,669 rows, 46.8 GB parquet. Filtered English text-only portion of Infi-MM/InfiMM-WebMath-40B, scored with the same classifier. This is the single largest recoverable addition to the math pool and is what would take the category comfortably past 36B — it should be the first thing re-measured.",
+      "artifact": null
+    },
+    {
+      "dataset": "HuggingFaceTB/finemath",
+      "config": "infiwebmath-4plus",
+      "status": "rate-limited-not-measured",
+      "card_tokens": 8500000000,
+      "measured_tokens": null,
+      "projected_tokens": 9129000000,
+      "projection_method": "card 8.5B x 1.074 (see infiwebmath-3plus)",
+      "estimator": "card-figure x measured-ratio",
+      "confidence": "low",
+      "license": "odc-by",
+      "include_in_total": false,
+      "exclusion_reason": "SUBSET of infiwebmath-3plus per the card ('InfiMM-WebMath-4+ (a subset of InfiMM-WebMath-3+)'), and unmeasured. Excluded twice over.",
+      "note": "6,296,212 rows.",
+      "artifact": null
+    },
+    {
+      "dataset": "EleutherAI/proof-pile-2",
+      "config": "algebraic-stack",
+      "status": "rate-limited-not-measured",
+      "card_tokens": 10955700000,
+      "measured_tokens": null,
+      "estimator": null,
+      "confidence": "low",
+      "license": "PASS-THROUGH / UNRESOLVED",
+      "license_source": "No license in cardData and no license: tag on the repo. Card says verbatim: 'We do not alter the license of any of the underlying data.' AlgebraicStack is filtered GitHub source across 17 languages, so the effective license is the union of every upstream repo's license — NOT a single grantable term.",
+      "include_in_total": false,
+      "exclusion_reason": "Not measured. Independently, the license is not a clean grant and needs a decision before this source can be committed to.",
+      "note": "The canonical repo has NO dataset-viewer support at all: /size returns HTTP 501 ('runs arbitrary Python code' — it is a loading-script dataset). recount.py cannot touch it directly. WORKAROUND FOUND: two independent parquet mirrors, aklein4/proof-pile-2-fixed (config algebraic-stack) and typeof/algebraic-stack, both report EXACTLY 3,404,654 train rows / 18,040 validation / 18,000 test via /info, which cross-corroborates their fidelity. Card gives a per-language token table summing to 10,955.7M, of which Python alone is 6,098.8M (56%) — i.e. this is majority general Python, not formal math. Uniquely non-overlapping with prose math, which is its whole value.",
+      "measurement_route": "Re-run against aklein4/proof-pile-2-fixed --config algebraic-stack --split train --text-column text. NOTE A TOOL BUG: recount.py sizes the estimate from the CONFIG-total num_rows (3,440,694 = train+val+test) while sampling only the named split, which would overstate by 1.06%. Pass the split row count explicitly or correct afterwards.",
+      "artifact": null
+    },
+    {
+      "dataset": "tokyotech-llm/swallow-math-v2",
+      "config": "swallow-math-v2-qa",
+      "status": "measured-on-partial-viewer",
+      "card_tokens": 13600000000,
+      "measured_tokens": 1886661453,
+      "measured_tokens_caveat": "THIS NUMBER COVERS ONLY 1,627,659 of 12,635,739 documents (12.9%). It is NOT the config total.",
+      "extrapolated_full_config_tokens": 14648000000,
+      "extrapolation_method": "measured 1159.1 dolma2 tokens/doc (from the converted head) x 12,635,739 docs from the card. Lands 7.7% above the card's 13.6B Llama-3 figure, consistent with dolma2 counting ~5-7% higher.",
+      "estimator": "stats-ratio (on head) x card doc-count",
+      "confidence": "low",
+      "license": "apache-2.0",
+      "license_source": "cardData.license = apache-2.0, tags license:apache-2.0, and card body '### Licensing Information: SwallowMath-v2 is released under the Apache-2.0 license.' Cleanest license in the category.",
+      "include_in_total": false,
+      "exclusion_reason": "DERIVATIVE of FineMath-3+ — see overlaps[]. Also only partially measured.",
+      "note": "TRAP: the datasets-server viewer for this repo is PARTIAL (top-level /size returns partial:true, num_rows 2,632,280 vs estimated_num_rows 17,378,970). Only 10 parquet files per config were converted on refs/convert/parquet. recount.py reads num_rows and therefore silently sizes the whole corpus from 12.9% of it. Anyone re-running this MUST NOT take the tool's est_total_tokens at face value.",
+      "artifact": "artifacts/recount/math-swallow-math-v2.json"
+    },
+    {
+      "dataset": "tokyotech-llm/swallow-math-v2",
+      "config": "swallow-math-v2-textbook",
+      "status": "measured-on-partial-viewer",
+      "card_tokens": 18300000000,
+      "measured_tokens": 1435995200,
+      "measured_tokens_caveat": "THIS NUMBER COVERS ONLY 1,004,621 of 13,302,336 documents (7.6%). It is NOT the config total.",
+      "extrapolated_full_config_tokens": 19011000000,
+      "extrapolation_method": "measured 1429.4 dolma2 tokens/doc x 13,302,336 docs from the card. Lands 3.9% above the card's 18.3B Llama-3 figure.",
+      "estimator": "stats-ratio (on head) x card doc-count",
+      "confidence": "low",
+      "license": "apache-2.0",
+      "include_in_total": false,
+      "exclusion_reason": "DERIVATIVE of FineMath-3+. Also only partially measured.",
+      "note": "Two estimators agreed to 0.89% ON THE CONVERTED HEAD, which validates the per-doc rate but says nothing about the 92% of the corpus the viewer never converted. Same partial-viewer trap as the qa config.",
+      "artifact": "artifacts/recount/math-swallow-math-v2.json"
+    }
+  ],
+
+  "non_overlapping_arithmetic": {
+    "principle": "Every source in this category is on ONE lineage rooted at FineMath-3+, except algebraic-stack. Only lineage roots may be summed.",
+    "lineage_tree": "finemath-3plus (root, 34.69B measured) -> finemath-4plus (subset, 10.06B measured) -> swallow-math-v2 stage1 length-filter -> stage2 LLM math extraction -> stage3 {qa 14.65B, textbook 19.01B} (both LLM rewrites of the SAME source docs). Separately: infiwebmath-3plus (partly-independent root, unmeasured) -> infiwebmath-4plus (subset). Separately: algebraic-stack (fully independent, math CODE, unmeasured).",
+    "included": [
+      {"source": "finemath-3plus", "tokens": 34688782547, "why": "lineage root, measured"}
+    ],
+    "excluded": [
+      {"source": "finemath-4plus", "tokens": 10063028784, "why": "card-declared SUBSET of finemath-3plus"},
+      {"source": "infiwebmath-4plus", "tokens": null, "why": "card-declared SUBSET of infiwebmath-3plus; also unmeasured"},
+      {"source": "infiwebmath-3plus", "tokens": null, "why": "unmeasured; overlap with finemath-3plus real but unquantified"},
+      {"source": "swallow-math-v2-qa", "tokens": null, "why": "LLM rewrite of FineMath-3+ documents — same underlying documents, new surface form"},
+      {"source": "swallow-math-v2-textbook", "tokens": null, "why": "LLM rewrite of the SAME FineMath-3+ documents as the qa config; qa and textbook overlap EACH OTHER as well"},
+      {"source": "algebraic-stack", "tokens": null, "why": "genuinely non-overlapping and would be a legitimate addend, but unmeasured and license unresolved"}
+    ],
+    "category_total_measured": 34688782547,
+    "arithmetic_shown": "34,688,782,547 (finemath-3plus) + 0 (everything else is a subset, a derivative, or unmeasured) = 34,688,782,547",
+    "upper_bound_if_projections_hold": 67661782547,
+    "upper_bound_arithmetic": "34.69B (finemath-3plus, measured) + 22.02B (infiwebmath-3plus, card x 1.074) + 10.96B (algebraic-stack, card) = 67.66B, BEFORE subtracting the unquantified finemath/infiwebmath overlap. Do not plan on this number."
+  },
+
+  "category_total_measured": 34688782547,
+  "meets_3x_peak_demand": true,
+  "meets_3x_peak_demand_detail": "3x peak demand = 21B. The measured non-overlapping total of 34.69B is 4.96x the 7B peak demand, so the 3x floor is met on MEASURED tokens alone, from finemath-3plus by itself.",
+  "meets_plan_pool_36B": false,
+  "meets_plan_pool_36B_detail": "34.69B measured vs a 36B plan pool — SHORT by 1.31B (3.6%). Closing it needs exactly one thing: a real count of infiwebmath-3plus (projected 22.02B), which would clear 36B with wide margin even after a large overlap discount. algebraic-stack (10.96B) is a second, license-blocked route.",
+
+  "overlaps": [
+    "swallow-math-v2 (both configs) is an LLM rewrite of FineMath-3+, stated on its own card ('derived from FineMath-3+', stage1 = 'Filtered subset of finemath-3+ by text length'). Its ~33.7B tokens are the SAME documents as finemath-3plus in new prose. Summing FineMath + SwallowMath double-counts the corpus; the design doc's 'dedupe or substitute' is correct, and SUBSTITUTE is the cleaner call because the rewrite defeats document-level dedup entirely — it is not near-duplicate text, it is regenerated text about the same content.",
+    "swallow-math-v2-qa and swallow-math-v2-textbook overlap EACH OTHER, not just FineMath: both are stage-3 rewrites of the same stage-2 extraction in two different styles. They are two views of one corpus. Using both = ~2 epochs of the same documents wearing different clothes.",
+    "finemath-4plus is a card-declared subset of finemath-3plus (measured 10.06B of the 34.69B). Same for infiwebmath-4plus within infiwebmath-3plus.",
+    "finemath-3plus and infiwebmath-3plus OVERLAP and the FineMath card proves it: curation Phase 2 step 2 'Added URLs from OpenWebMath and InfiMM-WebMath datasets' into the FineMath candidate pool, and results finding 4 says 'Deduplicating the pages repeated between FineMath and InfiWebMath reduces performance compared to a non-deduplicated combination' — an explicit admission of repeated pages. The card's own combined figure is telling: 34B + 20.5B = 54.5B naively, and it advertises 54B, so HF is NOT netting the overlap out either. I attempted to MEASURE this overlap by sampling infiwebmath-3plus URLs and querying /filter on finemath-3plus for each (the /filter endpoint does work on this repo); 114 URLs were sampled before the 429 stop order landed, so the overlap fraction is unquantified. This is a cheap, high-value measurement to finish — it is the difference between a 36B pool and a padded one.",
+    "SwallowMath-v2 inherits FineMath's decontamination and nothing more. FineMath removed 13-gram overlaps against GSM8k/MATH/MMLU/ARC test sets, but SwallowMath REWROTE those documents with Qwen3-235B afterwards. Per the project's existing 'rephrased synthetic hides contamination' finding, rephrasing is exactly what defeats n-gram decontam — so SwallowMath-v2's effective decontamination status is WEAKER than its FineMath parent's, not equal to it."
+  ],
+
+  "needs_streaming_count": [
+    {
+      "source": "HuggingFaceTB/finemath (infiwebmath-3plus)",
+      "reason": "Never sampled — the 429 stop order landed first. /statistics and /rows both work on this repo, so this needs only a datasets-server re-run at low concurrency, NOT a Batch streaming job.",
+      "priority": "HIGHEST — it is the 1.31B gap to the 36B pool, and then some"
+    },
+    {
+      "source": "HuggingFaceTB/finemath (infiwebmath-4plus)",
+      "reason": "Never sampled. Low value: it is a subset of infiwebmath-3plus, so it never enters the non-overlapping total.",
+      "priority": "low"
+    },
+    {
+      "source": "EleutherAI/proof-pile-2 (algebraic-stack)",
+      "reason": "Canonical repo has NO viewer (HTTP 501, loading-script dataset) so it can never be counted from the canonical id. Route via the parquet mirror aklein4/proof-pile-2-fixed --config algebraic-stack --split train (3,404,654 train rows, cross-confirmed by typeof/algebraic-stack). Mind the recount.py config-vs-split row-count bug noted above. Only needs a real Batch streaming job if both mirrors are judged untrustworthy.",
+      "priority": "medium — 10.96B claimed, but license is unresolved so measuring it may be moot"
+    },
+    {
+      "source": "tokyotech-llm/swallow-math-v2 (both configs)",
+      "reason": "Viewer is PARTIAL — only 2.63M of ~17.4M rows converted to parquet, so datasets-server can NEVER give a whole-corpus count for this repo no matter the rate limit. A true count requires streaming the 50+50 source .jsonl files (18.3 GB qa + 38.5 GB textbook, plus 31.9 GB stage1) on Batch. The per-document token rate IS solidly measured (1159.1 qa / 1429.4 textbook), so the extrapolations are trustworthy to within a few percent IF the card's document counts are correct.",
+      "priority": "low — it is a FineMath derivative that should probably be SUBSTITUTED for FineMath rather than added to it, so its exact size does not change the pool arithmetic"
+    },
+    {
+      "source": "finemath-3plus / infiwebmath-3plus URL-level overlap fraction",
+      "reason": "Not a token count but the missing input to the only real sizing question in this category. Measurable cheaply via /filter on url equality (verified working); 114 URLs sampled before the stop order, zero results tabulated.",
+      "priority": "HIGH"
+    }
+  ],
+
+  "method_notes": [
+    "429s degraded even the runs that completed: finemath-4plus landed 135 usable docs at 60 distinct offsets instead of the requested 300, and swallow-math-v2-qa FAILED outright on the second attempt after 5 consecutive 429s (its number here is salvaged from the first attempt's log). Small-n sampling widens the sample-mean CI but does NOT bias the stats-ratio estimator, whose heavy-tailed factor comes from /statistics over the whole split — this is exactly the robustness the factored estimator was built for, and it is why these numbers are still usable.",
+    "No dataset bytes were downloaded. All calls were datasets-server metadata endpoints (/size, /splits, /statistics, /rows, /info, /filter) plus the HF repo API (/api/datasets/...) for licenses and file sizes. No load_dataset(), no hf_hub_download of a data file.",
+    "Every license was read from cardData AND cross-checked against the card body prose, because the two disagree in the one case that matters: proof-pile-2 has no license field at all and its prose declines to grant one."
+  ]
+}

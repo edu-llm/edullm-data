@@ -1,0 +1,118 @@
+{
+  "category": "code",
+  "plan_pool_tokens": 40000000000,
+  "peak_plausible_demand_tokens": 8000000000,
+  "required_pool_at_3x_demand": 24000000000,
+  "tokenizer": "allenai/dolma2-tokenizer",
+
+  "status": "NO SOURCE IN THIS CATEGORY WAS MEASURED. Every /rows call returned HTTP 429 (shared per-IP datasets-server quota, ~13 concurrent recount jobs). The numbers below are card figures and desk-derived byte estimates, explicitly NOT measured counts.",
+
+  "sources": [
+    {
+      "dataset": "common-pile/stackv2_edu_filtered",
+      "config": "default",
+      "split": "train",
+      "status": "rate-limited-not-measured",
+      "card_tokens": null,
+      "card_tokens_note": "The design doc's 67.8B has NO basis on this repo's card. The card carries NO token count at all -- only '69,588,607 documents / 255 UTF-8 GB' -- and that card is a VERBATIM COPY of the stackv2_edu_RAW card: its own text reads 'This is the raw version of the Stack V2 dataset' and its 'Other Versions' link points at ITSELF. So 69.6M docs / 255 GB describe the RAW superset, not this filtered repo. Treat any 67.8B for this dataset as unsourced.",
+      "measured_tokens": null,
+      "desk_estimate_tokens": 61000000000,
+      "desk_estimate_range": [61000000000, 80000000000],
+      "desk_estimate_method": "95 .gz data files totalling 83.04 GB compressed (HF tree API, not datasets-server) x a 2.67-3.5x json.gz expansion x 0.2740 dolma2 tokens/char measured LOCALLY on real Python source. The 2.67x low end is the compression ratio measured on the sibling github_archive_filtered (card UTF-8 GB / repo .gz bytes), so the 61B floor is the conservative end.",
+      "estimator": "none-desk-only",
+      "confidence": "low",
+      "confidence_note": "No corpus byte was tokenized. Two independent desk signals agree it is well above 40B: the byte-derived 61-80B range, and datasets-server's estimated_num_rows of 57,038,024 filtered docs (vs 69,588,607 raw -- the right direction for a filter).",
+      "license": "per-document permissive; repo card declares NO license field",
+      "license_detail": "cardData has license: null. The card states every document comes from a repo whose detected license(s) are ALL on the Blue Oak Council certified list, and ships the license per document in metadata.license. Sampled 26 rows: MIT 19, Apache-2.0 5, Unlicense 1, BSD-3-Clause+MIT 1; metadata.license_type was 'permissive' for 26/26. Blue Oak is fine for redistribution. Caveat recorded on the card itself: license laundering and bad upstream metadata can mis-assign a license, so filter on metadata.license rather than assuming uniformity.",
+      "note": "PRIORITY 1 and it ships REAL TEXT -- confirmed by inspecting rows: the `text` column holds source code and markdown, and there is no SWHID-only indirection. Also confirms the task premise: this is the correct way to route around the Software Heritage bulk agreement."
+    },
+    {
+      "dataset": "tokyotech-llm/swallow-code-v2",
+      "config": "swallowcode-v2",
+      "config_note": "swallowcode-v2 == stage5-auto-format/python/medium is THE release. stage1-4 are intermediate pipeline stages and must not be counted as the corpus, nor summed with it -- they are successive filterings of the same documents.",
+      "split": "train",
+      "status": "not-measurable-by-this-tool",
+      "card_tokens": 49800000000,
+      "card_tokens_tokenizer": "Llama-3 (the card NAMES its tokenizer, which is rare and makes this figure usable)",
+      "measured_tokens": null,
+      "desk_estimate_tokens": 63000000000,
+      "desk_estimate_method": "150 JSONL files totalling 953.67 GB uncompressed (HF tree API) x ~24.3% payload fraction x 0.2740 dolma2 tok/char. The payload fraction is the weak link: each row carries FOUR near-duplicate copies of the code (text, improved_text, old_text, text_formatted) plus an LLM evaluation blob, and 24.3% comes from a single sampled row.",
+      "estimator": "none-desk-only",
+      "confidence": "low",
+      "confidence_note": "Implies a dolma2/Llama-3 ratio of ~1.27 against the card's 49.8B, which is plausible for code but rests on a one-row payload fraction.",
+      "license": "apache-2.0",
+      "license_detail": "Confirmed in cardData ('apache-2.0') and repo tags ('license:apache-2.0'). Fine for redistribution. This is the dataset's headline improvement over SwallowCode-v1, which was Llama-3.3-Community-licensed.",
+      "blocker": "The release config CANNOT be counted through datasets-server at any quota. /statistics for both swallowcode-v2 and stage5-auto-format returns 'The dataset generation failed', cause TypeError: \"Couldn't cast array of type struct<type: string, message: string> to null\" (the lint_report / auto_fix_output columns are struct-typed in some shards and null in others). /size does not list the config at all -- it enumerates only stage1-4. So recount.py cannot reach the release even when the quota drains; this one needs a streaming count regardless.",
+      "text_column_verified": "text",
+      "text_column_note": "Checked for the FinePhrase-style trap and it is CLEAN, but only because `text` is the right column by luck of naming: `old_text` and `text_formatted` hold the PRE-rewrite source, `improved_text` holds the raw LLM output still wrapped in a '<|REWRITTEN_CODE|>: ```python' marker, and `text` holds the unwrapped rewrite. Counting old_text/text_formatted would measure unrewritten Stack-v2 code while labelling it synthetic."
+    },
+    {
+      "dataset": "common-pile/github_archive_filtered",
+      "config": "default",
+      "split": "train",
+      "status": "rate-limited-not-measured",
+      "card_tokens": null,
+      "card_documents": 23358580,
+      "card_utf8_gb": 40.4,
+      "card_figures_are_for_this_version": true,
+      "measured_tokens": null,
+      "desk_estimate_tokens": 11900000000,
+      "desk_estimate_method": "card's own 40.4 UTF-8 GB x 0.2942 dolma2 tokens/char measured locally on English markdown (prose rate, not the code rate -- see is_actually_code).",
+      "estimator": "none-desk-only",
+      "confidence": "low-but-card-cross-checked",
+      "confidence_note": "This card's document count is trustworthy in a way the other two are not: 23,358,580 card docs vs datasets-server's estimated_num_rows of 23,306,158 agree to 0.22%. That agreement is also what validates using estimated_num_rows as the row count for the partial-conversion correction below.",
+      "license": "per-document permissive; repo card declares NO license field",
+      "license_detail": "cardData license: null. Threads are included only where the associated repo carries a Blue Oak Council-approved license (per GitHub ToS, issue/PR text inherits the repo's license). Sampled 90 rows: MIT 59 (incl. lowercase 'mit'), Apache-2.0 18, BSD-3-Clause 10, BSD-2-Clause 1, CC-BY-4.0 2; license_type 'permissive' for 90/90. Note metadata.license is NOT case-normalised ('MIT' and 'mit' both occur) -- match case-insensitively.",
+      "is_actually_code": false,
+      "disqualifier": "THIS IS NOT CODE. Inspected rows directly: the payload is GitHub ISSUE, PULL-REQUEST and COMMENT prose, converted from GitHub-flavored markdown to plain text by PyMarkdown ('Describe the bug / maxHP is used in line 39 but still reported as not used'). source is 'gharchive/issue' or 'gharchive/pull-request'. It is developer discussion ABOUT code, closer to the QA/forum category than to a code pool. Counting its ~11.9B toward a 40B CODE pool would misrepresent the mix -- a model needing 8B of code tokens would get prose."
+    }
+  ],
+
+  "category_total_measured": 0,
+  "category_total_measured_note": "Zero measured. Do not substitute the desk estimates into a sizing table without a real count.",
+  "meets_3x_peak_demand": null,
+  "meets_3x_peak_demand_note": "UNPROVEN, but very likely met, and by priority-1 alone. stackv2_edu_filtered's conservative desk floor of 61B already exceeds both the 40B plan pool and the 24B (3x8B) requirement, and swallow-code-v2 independently offers a card-declared 49.8B under a named tokenizer. The pool is unlikely to be the binding constraint here; the binding constraint is that neither number is measured.",
+
+  "overlaps": [
+    "ALL THREE code candidates trace to the SAME upstream, bigcode/the-stack-v2. stackv2_edu_filtered is an independent re-filter of it; swallow-code-v2 is 'a fully rewritten Python corpus derived from The-Stack-v2'; github_archive_filtered draws issues from the same repositories (and sources part of its license metadata FROM the StackV2 metadata). There is no Stack-v2-independent source in this category -- do not sum any two of these and call it pool growth.",
+    "stackv2_edu_filtered vs swallow-code-v2 is the dangerous pair: swallow's Python is an LLM REWRITE (Qwen3-235B-A22B-Instruct) of Stack-v2 Python documents that stackv2_edu_filtered also contains as originals. Near-duplicate content that no digest or n-gram check will catch, because rephrasing is precisely what defeats n-gram matching. Their union is far less than 61B + 49.8B.",
+    "stack-edu IS inside Stack v2 -- confirmed from its card: '125B token dataset of educational code filtered from The Stack v2', counted under the SmolLM2 tokenizer. So stack-edu, stackv2_edu_filtered and swallow-code-v2 are three overlapping views of one corpus.",
+    "The task's routing instruction is CONFIRMED, not contradicted. stack-edu's card states outright: 'This dataset only contains the SWHIDs to download the code files and not the content of the files itself' -- contents must be pulled from Software Heritage's S3 bucket, and it defers its license to the-stack-v2. bigcode/the-stack-v2 is gated (gated='auto', license 'other'). stackv2_edu_filtered ships real text and is correctly ranked first.",
+    "swallow-code-v2 is PYTHON-ONLY (plus a small stage1 C directory). stackv2_edu_filtered is multi-language. Substituting swallow for stackv2 would collapse language diversity even where the token count looks adequate.",
+    "Within swallow-code-v2, do not sum configs: stage1-auto-format -> stage2-length-filter -> stage3-llm-score -> stage4-llm-rewrite -> stage5-auto-format are successive stages over the same documents, and only stage5 (= swallowcode-v2) is the release."
+  ],
+
+  "needs_streaming_count": [
+    {
+      "dataset": "common-pile/stackv2_edu_filtered",
+      "config": "default",
+      "reason": "rate-limited (HTTP 429) only -- retriable through datasets-server once the shared per-IP quota drains. No corpus-specific obstacle found.",
+      "must_apply_partial_correction": true
+    },
+    {
+      "dataset": "common-pile/github_archive_filtered",
+      "config": "default",
+      "reason": "rate-limited (HTTP 429) only -- retriable. But settle the category question first: its payload is issue/PR prose, so it probably belongs to QA/forum rather than code.",
+      "must_apply_partial_correction": true
+    },
+    {
+      "dataset": "tokyotech-llm/swallow-code-v2",
+      "config": "swallowcode-v2",
+      "reason": "NOT retriable through datasets-server at any quota. The release config fails server-side parquet conversion (TypeError casting struct<type,message> to null) and /size does not enumerate it. Needs a real streaming count on Batch, reading the 150 JSONL files under stage5-auto-format/python/medium and tokenizing the `text` column only.",
+      "must_apply_partial_correction": false
+    }
+  ],
+
+  "tool_bug_found": {
+    "severity": "would have silently produced a 46x undercount",
+    "summary": "recount.py multiplies by per_config['num_rows'] (line ~399), but /size returns partial=true for ALL THREE code corpora: datasets-server converted only a ~5 GB prefix of each config, so num_rows counts that prefix, not the corpus. The corpus figure is the sibling field estimated_num_rows.",
+    "measured_discrepancies": {
+      "common-pile/stackv2_edu_filtered": {"num_rows": 1240916, "estimated_num_rows": 57038024, "scale": 45.96},
+      "common-pile/github_archive_filtered": {"num_rows": 2503341, "estimated_num_rows": 23306158, "scale": 9.31},
+      "tokyotech-llm/swallow-code-v2:stage1-auto-format": {"num_rows": 403101, "estimated_num_rows": 54822209, "scale": 136.0}
+    },
+    "why_it_is_silent": "The tool records stats_partial (whether the /statistics MEAN is partial) but never reads the /size partial flag, so a prefix row count flows into est_total_tokens with confidence 'high'. Note this is a DIFFERENT partial from the one the README documents.",
+    "validation_of_the_fix": "On github_archive_filtered the card states a real filtered document count of 23,358,580; estimated_num_rows is 23,306,158 -- 0.22% agreement. So estimated_num_rows is the right multiplicand at this precision.",
+    "applies_beyond_this_category": "Any category whose corpora exceed the ~5 GB conversion cap -- i.e. most large ones. Worth checking every sibling artifact for size_endpoint_partial before merging."
+  }
+}
