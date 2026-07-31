@@ -14,30 +14,34 @@ profile:  pretrain-tokens/v1              [verified in registry]
 name:     pretrain/reservoir-260b-dolma2  [validate_dataset_id: PASS]
 ```
 
-**⚠️ IMPLEMENTERS: start at §9 (EXECUTION RUNBOOK).** It scopes Phase 0, names the subagent task
-graph, and ends at a **hard stop** requiring a human decision before ~$595 is spent. Do not plan past
-that stop.
+**⚠️ IMPLEMENTERS: PHASE 0 IS DONE (2026-07-31).** Do not re-run it. Its results, the ten plan defects
+it found, and the resume state are in `artifacts/` — start with `artifacts/PHASE0-REPORT.md`, then
+`artifacts/PLAN-CORRECTIONS.md`. §9's hard stop has been reached and **resolved by the owner**: the
+domain classification it gated is **cancelled** (§1.2), so §9.4's dual-judge gate is now historical
+record rather than pending work. Phase 1 (§5.6) is the next unstarted phase, and it still requires
+the three pre-publish items listed in §9.7.
 
 **All open decisions are CLOSED as of 2026-07-31.** In review order:
 
 | decision | resolution | §  |
 |---|---|---|
 | synthetic path encoding | `synthetic-` prefix on the `source` segment | 1.1 |
-| domain labels | classify every source into Essential-Web's 24 topics via `EAI-Distill-0.5b`, gated by a dual-judge smoke test at **≥85%** | 1.2, 9.4 |
-| MinHash cluster-ID home | **`_dedup/clusters.parquet` control file** — NOT `entry.labels`, which Gate A rejects | 1.3 |
+| **domain labels** | **REVISED 2026-07-31 (post-Phase-0): NO classification. `domain` only where a source SHIPS one upstream; every other source is flat.** | **1.2** |
+| MinHash cluster-ID home | **`_dedup/clusters.parquet` control file** — NOT `entry.labels`, which Gate A rejects. ⚠️ needs a one-line `validate.py` allowlist change first | 1.3 |
 | dedup actions | Bloom **deletes**, MinHash **annotates only** | 1.3, 4.1 |
 | shard size | **25,001,984 tokens** (~100 MB) → ~10,400 objects | 2.2 |
 | curated-source pools | over-provisioned (15% of default) rather than tuned to the evidence's 2% | 2.1 |
 | synthetic split | **equal 15B** from each of faq/tutorial/math/table | 3.3 |
 | decontamination | n-gram over all 260B **+ LLM-based over the synthetic 60B** | 4.2 |
 | proxy sweep | **deferred** until after the reservoir exists; no escalation path | 5.2 |
-| classification failure | **HARD STOP**, no automatic escalation | 9.1 |
+| **share-alike** | **keep SA sources SEPARABLE (precautionary only); do NOT drop them** | **1.5** |
 | mix guidance | shipped in the generated README (`notes`, outside the hash chain) | 5.5 |
 | OpenStax / Nemotron licensing | resolved — record per-book variants; Nemotron excluded | 7 |
 
-**Budget: ~$1,006 one-time + $24/month storage.** 59% of the build cost is the domain classification
-(~$595), which is exactly what the Phase-0 hard stop gates. Not included: training runs, and the
-deferred proxy sweep ($180–900).
+**Budget: ~$411 one-time + $24/month storage.** The ~$595 domain classification is **cancelled**
+(§1.2) — measured throughput put its real cost at $920–$10k, not $595 (`artifacts/COST-RECHECK.md`),
+and inheriting upstream labels is free. Not included: training runs, and the deferred proxy sweep
+($180–900).
 
 **The governing principle, which resolves most of the open questions below:** in a reservoir, **ratios
 are a read-time decision and pool sizes are not.** A ratio is a config field, changeable per run at zero
@@ -47,10 +51,26 @@ $24/month against a re-publish.
 
 ---
 
-## 1. The three irreversible decisions
+## 1. The irreversible decisions
 
-Everything else here can be revised in a `v2`. These three cannot. (§1.3 was on this list until
-2026-07-31; under the corrected design it is backfillable and no longer blocks the first publish.)
+Everything else here can be revised in a `v2`. These cannot — they are inside `manifest_sha256`, so
+changing one means republishing, which means re-copying every payload byte.
+
+**The list moved twice, both times because someone checked rather than assumed:**
+
+| § | decision | status |
+|---|---|---|
+| **1.1** | realness fused into `source` with a `synthetic-` prefix | **irreversible** |
+| **1.2** | which sources carry a `domain`, and the **slug + fold** of each inherited value | **irreversible** ⚠️ see §9.7 item 2 |
+| **1.4** | held-out carved from documents, per source, before tokenizing | **irreversible** |
+| **NEW** | whether the tokenizer emits a per-document key `(shard_path, doc_index)` | **irreversible** ⚠️ see §9.7 item 3 |
+| 1.3 | MinHash cluster-ID home | *demoted* — backfillable under the control-file design |
+| 1.5 | share-alike separability | *not on the list* — SA maps onto whole `source` values, so it survives in the names alone |
+
+The new fourth item is the one the original plan missed entirely: the manifest's grain is **one shard
+object**, so there is no per-document key. EOS boundaries are recoverable from a `.u32le.bin` later, but
+the document→row mapping is gone the moment tokenization finishes. If per-document licenses or cluster
+IDs are ever wanted, the tokenizer has to emit that key at build time.
 
 ### 1.1 Real vs synthetic goes in the `source` label — NOT in separate groups
 
@@ -91,22 +111,101 @@ sources, or give them ratio 0.
 Do **not** spend a level on quality tier or grade band. Fold quality into the source name
 (`dclm` vs `dclm-hq`) or make it a child dataset.
 
-**DECIDED 2026-07-31 — classify a domain onto every source, gated by a smoke test.** Sources that ship
-a subdomain upstream use it directly (`stackv2-edu/Python`, `essential-web/<topic>`). Sources that do
-not — DCLM, FineMath, academic, reference, QA — get one **classified** with
-`EssentialAI/EAI-Distill-0.5b` into **Essential-Web's published 24-topic taxonomy** (do not invent
-categories). Full protocol and the dual-judge gate: **§9.4**.
+#### REVISED 2026-07-31 (owner decision, post-Phase-0): inherit `domain`, never classify it
 
-Why gate it rather than just classify: a `domain` label is inside `manifest_sha256`, so a wrong one
-costs a ~1 TB re-copy. The gate is **≥85% top-1 agreement on the judge-consensus subset**, measured
-on 500 sampled docs per source at a cost under $1 — and it sits in front of the ~$595 full run.
+**The rule: a source gets a `domain` segment if and only if it SHIPS one upstream. Every other source
+is published flat.** No classification model, no smoke-test gate, no ~$595 (or ~$920–$10k) run.
 
-**Why the risk is tolerable anyway** (the user's observation, and it checks out): a wrong `domain` is
-structurally **inert**. `dataset_paths()` without `labels=` returns everything; Gate A compares
-`entry.labels` against `labels_from_path(path)` — both derived from the same path, so a semantically
-wrong label is still structurally valid and validates clean; and `source`-level selection is
-unaffected. The only real failure is a teammate silently *trusting* a bad label — which is why the
-measured accuracy is **published per source in the README** (§5.5), so nobody is misled.
+Supersedes the earlier "classify every source" decision. Two reasons, both measured in Phase 0:
+
+1. **Cost.** The plan budgeted ~$595. Measured throughput of `EAI-Distill-0.5b` was **10.8 doc/s on
+   one A10G**, putting 112 M documents at 3,080 GPU-hours ≈ **$920 spot / $3,100 on-demand** — and
+   that is a floor, since the measurement used 256-token prefixes while real documents average
+   11,010 chars (≈10.8× the input). `artifacts/COST-RECHECK.md`.
+2. **The gate was equivocal anyway.** Pooled 87.5% PASS, but per-source: qa-forum 97.4% PASS,
+   academic 84.9% and finemath 84.8% with CIs *spanning* the 85% bar, reference 80.3% clearly below.
+   And the judges' own agreement ceiling was only 70–78%, because the taxonomy is genuinely ambiguous
+   at the boundaries (science vs medicine, computing vs engineering). Paying five figures to buy a
+   label that is ~85% right on a scale whose ground truth is 75% self-consistent is poor value.
+
+**An inherited label is strictly better evidence than a classified one.** It is the upstream
+publisher's own metadata — `metadata.site` for a StackExchange post is *where the post was actually
+posted*, not a guess about it. That is the golden rule's spirit (`CLAUDE.md`: recompute, never trust)
+applied to labels: prefer the fact over the inference.
+
+#### Who ships a domain — verified by reading real schemas, not cards
+
+| source | upstream field | `domain` value | verified |
+|---|---|---|---|
+| `stackexchange` | `metadata.site` | the site (`mathoverflow`, `physics`, …) | ✅ read from a real record |
+| `stackv2-edu` | `metadata.gha_language` | the language (73 distinct in one shard) | ✅ read from a real record |
+| `essential-web` | `eai_taxonomy.free_decimal_correspondence` | FDC level 1 | ✅ on the card + a real row |
+| `finemath` | — | **flat** | ✅ no subject field in the schema |
+| `finepdfs-edu` | — | **flat** | ✅ 20 columns, none a subject |
+| `fineweb-edu` | — | **flat** | ✅ 10 columns, none a subject |
+| `peS2o` / `pubmed` / `arxiv` | — | **flat** | ✅ Common Pile metadata is provenance, not subject |
+| `finewiki` | — | **flat** | ✅ |
+| `dclm` | — | **flat** | ✅ |
+| `synthetic-finephrase-*` | — | **flat** (format is already in `source`, §1.1) | ✅ |
+
+⚠️ **`essential-web` is the interesting case.** It already carries the *exact* field the cancelled run
+would have computed (`free_decimal_correspondence`, whose level 1 is the 10-category scheme Phase 0
+measured against). So the one source that most wanted a domain label already has one, for free. Use it.
+
+#### Two landmines in inherited values — both verified, both must be handled
+
+**1. Slug the value. `C#` in a key silently truncates any `s3://` URI.** `#` is the URI fragment
+delimiter, so a shard at `tokens/stackv2-edu/C#/train-00000.u32le.bin` parses as:
+
+```
+path     = /pretrain/.../tokens/stackv2-edu/C
+fragment = /train-00000.u32le.bin      <-- the shard name is GONE from the path
+```
+
+`labels_from_path` accepts `C#`, `C++`, and `Jupyter Notebook` happily, and `fnmatch` matches them —
+so **nothing in the pipeline catches this**; it breaks at read time in a consumer. Slug every
+inherited value to `[a-z0-9-]` before it becomes a path segment: `C#` → `c-sharp`, `C++` → `c-plus-plus`,
+`Jupyter Notebook` → `jupyter-notebook`, `3dprinting.stackexchange.com` → `3dprinting`. Record the
+slug map in the README so a teammate can map back.
+
+**2. Cardinality is permanent.** 73 languages and ~180 StackExchange sites each become a directory
+that lives inside `manifest_sha256` forever. Fold the long tail: keep the top ~20 by token count and
+map the rest to `other`. A domain with three shards in it is not a useful slice, and every distinct
+value is a permanent commitment.
+
+#### The consequence you must document: a `domain=` query silently drops flat sources
+
+Verified by execution against `read.py:_matches_labels`, which requires every requested key to be
+present *and* equal:
+
+```
+request labels={'domain': 'science'}
+  tokens/dclm/train-00000.u32le.bin                     skip   <-- flat, no domain key
+  tokens/essential-web/science/train-00001.u32le.bin    MATCH
+  tokens/stackv2-edu/Python/train-00002.u32le.bin       skip
+```
+
+So `build_mixture(..., labels={'domain': 'science'})` returns **only** the sources that happen to be
+nested — silently, with no error, because absence is one-directional by design
+(`validate.py:_check_labels_match_path` docstring). A teammate could ask for "the science slice" and
+get a corpus that excludes DCLM, FineMath and peS2o entirely without being told.
+
+**Mitigations, all cheap:**
+
+- **`source=` selection is unaffected** by mixed depth — verified. That is the primary selector and it
+  keeps working exactly as designed.
+- **The README lists which sources carry a `domain` and which are flat** (§5.5). This is the single
+  most important thing to write down; it is the difference between a documented limitation and a
+  silent one.
+- Gate A permits mixed depth: `_check_labels_match_path` is **per-entry** with no uniformity
+  requirement, and there is no depth-consistency check anywhere in `validate.py` (grepped). Verified
+  by execution — a group holding both `tokens/dclm/train-*.bin` and
+  `tokens/essential-web/science/train-*.bin` validates clean.
+
+**What this does NOT foreclose.** Classification stays possible later as a **child dataset** — a
+separate `curriculum/`-family artifact keyed to this reservoir's shards, which is where a *derived,
+model-generated* label belongs anyway. Nothing here is a one-way door except the slug and cardinality
+choices above.
 
 ### 1.3 Dedup: Bloom deletes, MinHash annotates — but NOT via `entry.labels`
 
@@ -133,8 +232,14 @@ not a settled one.** Three options, in preference order:
 | **C. Extend the schema** | Add an `entry.meta` free-form field to `manifest.py` + a Gate A check | Correct long-term, but it is a spec change to a shared standard, needs a profile bump, and blocks the build until merged |
 
 **Recommendation: option A**, and drop cluster IDs from the "irreversible" list — under A they are
-backfillable, which means **this is no longer a decision that must precede the first publish.** That
-leaves **three** genuinely irreversible decisions (§1.1, §1.2, §1.4), not four.
+backfillable, which means **this is no longer a decision that must precede the first publish.** See the
+§1 header for the current list.
+
+⚠️ **Two corrections to option A, both from Phase 0.** (a) `_dedup/clusters.parquet` is **rejected by
+Gate A today** — `_is_control_key` returns `False`, so it needs a one-line `CONTROL_PREFIXES` entry
+first (§9.7 item 1). The "no Gate A risk" claim above was wrong. (b) Even with that fixed, a cluster
+table needs a **per-document join key**, which the manifest does not have — that is the new fourth
+irreversible decision in the §1 header. So option A is still right, but it is not free.
 
 **The two-stage design, and why the order matters:**
 
@@ -161,6 +266,44 @@ DCLM's own comparison. Zero flagship corpora ship it.
 Not "is there a val split" but "is val drawn from a different pool than train." A val split sampled
 from the same shuffled pool is not a val split. This project has already shipped a corpus whose six
 held-out shards were byte-copies of train shards.
+
+### 1.5 Share-alike: keep it SEPARABLE, keep it IN
+
+**Owner decision 2026-07-31: SA sources stay in the reservoir. Separability is precautionary only.**
+The judgement is that an SA obligation is very unlikely to bite, and the design should reflect that
+rather than distort around it — so **nothing is dropped, nothing is downsized, and no category loses
+tokens.** The only requirement is that SA sources remain *identifiable* after publication, so that if
+the question ever does arise it is a query rather than a re-audit.
+
+Why it is worth the small effort anyway: Phase 0 measured SA as far more load-bearing than §7 item 4
+assumed — it is **100% of QA/forum** (StackExchange is CC-BY-SA), **100% of reference** (FineWiki is
+CC-BY-SA 4.0 + GFDL), **32% of LibreTexts rows**, and ~2% of peS2o (per the Common Pile paper, and
+invisible from repo metadata). So SA is not a fringe slice that could be dropped cheaply later; it is
+structural. Separability is what keeps a future answer *possible* at zero cost today, and that is the
+whole reason to bother.
+
+**How separability is achieved, without spending a label level.** The `domain` level is now reserved
+for inherited upstream values (§1.2) and `source` is already fused with realness (§1.1), so SA does
+**not** get its own path segment. Two mechanisms instead, neither of which costs anything permanent:
+
+| mechanism | what it gives | cost |
+|---|---|---|
+| **`source` naming is already sufficient** | SA sources are wholly-SA *by source*: `stackexchange`, `finewiki`, `libretexts`. Excluding SA = omitting those source names from a `build_mixture` call. No new machinery. | zero |
+| **`_licenses.parquet`** (task B's schema) | the precise license string per source — needed anyway because SA is not a boolean (FineWiki carries **GFDL** alongside CC, a different copyleft, and LibreTexts has Public Domain + GFDL rows) | one control file |
+
+⚠️ **Do not model SA as a boolean.** Phase 0 found 7 distinct license values in LibreTexts alone, of
+which **4.86% are not Creative Commons at all** (Public Domain, GFDL). Record the license *string*;
+let a consumer decide what counts.
+
+⚠️ **`_licenses.parquet` is rejected by Gate A today** — `_is_control_key` returns `False` for it, so
+it trips `unlisted-object-dataset-level`. It needs the same one-line `CONTROL_PREFIXES` change as
+§1.3's `_dedup/`. Both must land before the first publish.
+
+**Not a blocker for the first publish**, unlike §1.2's slugging: because SA maps cleanly onto whole
+sources, the ability to exclude it survives in the `source` names alone even if
+`_licenses.parquet` slips to a later backfill.
+
+*Licensing notes are research findings, not legal advice.*
 
 ---
 
@@ -650,6 +793,33 @@ Draft `notes` content:
 >
 > **Repetition, not ratio, is the usual failure.** `epochs = total × weight / pool_tokens`. Green ≤4,
 > amber 4–16, red >16, hard-fail >40. Narrow selection from a small source is the real risk.
+>
+> **⚠️ Only SOME sources carry a `domain` label, and a `domain=` query silently drops the rest.**
+> A `domain` here is always the upstream publisher's own metadata — never a label we generated — so it
+> exists only where the source shipped one:
+>
+> | carries a `domain` | from | flat (no `domain`) |
+> |---|---|---|
+> | `stackexchange` | the site it was posted on | `dclm`, `finemath`, `finepdfs-edu`, `fineweb-edu` |
+> | `stackv2-edu` | the file's language | `peS2o`, `pubmed`, `arxiv`, `finewiki` |
+> | `essential-web` | FDC subject, level 1 | every `synthetic-finephrase-*` |
+>
+> `build_mixture(..., labels={'domain': ...})` matches only shards that carry that key, so it returns
+> **only the nested sources** — silently, with no error. Ask for "the science slice" and you get a
+> corpus with no DCLM, FineMath or peS2o in it. **Select by `source` unless you specifically want one
+> of the three labelled sources**; `source=` is unaffected by the mixed layout.
+>
+> We deliberately did **not** classify domains onto the unlabelled sources. A smoke test on 2,000
+> documents put a 0.5 B classifier at 87.5% pooled agreement — but its own judges agreed with each
+> other only 70–78% of the time, because the subject boundaries are genuinely ambiguous (is a biofilm
+> proteomics paper *science* or *medicine*?). Paying five figures for an ~85%-accurate label against a
+> 75%-self-consistent ground truth was not worth it. Inherited metadata is a *fact*; a classified label
+> would have been a guess.
+>
+> **Share-alike sources are separable by name.** `stackexchange`, `finewiki` and `libretexts` are
+> share-alike (CC-BY-SA, and FineWiki also GFDL); omit those `source` values to exclude SA entirely.
+> Per-source license strings are in `_licenses.parquet`. Note SA is not a boolean — LibreTexts alone
+> carries 7 distinct licenses, ~5% of them not Creative Commons at all.
 
 ---
 
@@ -659,8 +829,9 @@ The deferral in §5.2 only makes sense as an ordering, so here it is explicitly.
 
 | phase | do | why here |
 |---|---|---|
-| **0. Pre-flight** | Re-count every candidate source **under dolma2**. Record per-book licenses for OpenStax/LibreTexts (§7). Choose the cluster-ID home (§1.3 — option A recommended; no longer blocking). | Token counts from cards are not comparable — most don't name a tokenizer and peS2o reports *words*. |
-| **1. Assemble** | Bloom-dedup (delete) → decontaminate → MinHash (annotate) → carve val from documents per source → tokenize → shard at 25,001,984 tokens. | §4.1 order. Val carve precedes tokenization (§1.4). |
+| **0. Pre-flight** ✅ **DONE 2026-07-31** | Re-counted 6 sources under dolma2; per-book licenses for OpenStax (129 books) + LibreTexts (40,049 rows); validator timeout set to 7200 s; airlock re-verified. Found 10 plan defects. | Token counts from cards are not comparable — most name no tokenizer, and every Common Pile "token" figure is `Size(GB) × 0.25`, pure arithmetic. |
+| **0b. Pre-publish gate** ⬅ **NEXT** | The three items in **§9.7**: two `CONTROL_PREFIXES` entries, slug+fold the inherited `domain` values, decide on `(shard_path, doc_index)`. Optionally finish the 4 unverified token counts (~$10). | Each is irreversible if wrong and cheap if done first. `domain` slugs and the doc-index key are both inside `manifest_sha256`. |
+| **1. Assemble** | Bloom-dedup (delete) → decontaminate → MinHash (annotate) → carve val from documents per source → tokenize → **attach inherited `domain` where the source ships one (§1.2), flat otherwise** → shard at 25,001,984 tokens. | §4.1 order. Val carve precedes tokenization (§1.4). The `domain` attach is now a metadata join, not a classification pass. |
 | **2. Publish** | `publish()` on Batch, in-region, `hash_workers`/`copy_workers=16`, `--timeout 7200`. Gate A ≈1.4 h. | §8. |
 | **3. Verify** | `verify_seal`, read a shard back, confirm `dataset_paths(labels={...})` slices, confirm the airlock still denies intern writes. | The airlock re-check is a standing project rule after anything touching permissions. |
 | **4. First run** | Train once on the §2.1 default **plus a web-only baseline**. | Calibration, not a result. The baseline is what tells you whether any later tuning helped. |
@@ -716,6 +887,13 @@ validator job or disable `edullm-landing-manifest-created` **first**.
 4. Confirm the dataloader shuffle **spans sources**: both OLMo-core mixers *concatenate*
    (`ConcatenatedTokenSource`), so cross-source shuffling must come from
    `NumpyDataLoaderConfig(global_batch_size=…, seed=…)` or you get curriculum-by-accident.
+5. **NEW (§1.2): warn when a `labels=` filter silently drops sources.** Under the mixed-depth layout,
+   `labels={'domain': …}` matches only the three sources that carry a `domain`, so it can quietly
+   discard most of the reservoir. `read.py` already distinguishes "this dataset is unlabelled" from
+   "nothing matched" and raises for the former (`read.py:296-300`) — extend that to the *partial* case:
+   if a requested label key is absent from some entries in the group, say which sources were excluded
+   and how many tokens that removed. **~10 lines, and it is the difference between a documented
+   limitation and a silent one.** Second-highest value per line in this design after the epoch guard.
 
 ---
 
@@ -799,23 +977,44 @@ plan past it.
   `credential_process` profile — never one broker call per object.
 - **Persist every artifact to disk as you go.** This machine has died mid-run before.
 
-### 9.1 🛑 THE HARD STOP
+### 9.1 🛑 THE HARD STOP — REACHED AND RESOLVED 2026-07-31
 
 ```
 ╔══════════════════════════════════════════════════════════════════════════╗
-║  STOP after the dual-judge smoke test (§9.3 task E).                     ║
+║  ✅ CLEARED. The gate ran, the owner decided, and the answer was NO:     ║
+║     the full domain classification is CANCELLED (§1.2).                  ║
 ║                                                                          ║
-║  DO NOT run the full domain classification. DO NOT spend the ~$595.      ║
-║  DO NOT begin Phase 1 assembly.                                          ║
+║  `domain` is now INHERITED from upstream where a source ships one, and   ║
+║  omitted otherwise. No classification model, no ~$595, no ~$920-$10k.    ║
 ║                                                                          ║
-║  Report the smoke-test numbers and WAIT for an explicit human decision.  ║
-║  This applies whether the gate PASSES or FAILS — passing is not consent. ║
+║  The gate below is HISTORICAL RECORD. Do not re-run it.                  ║
+║  Phase 1 is still gated — by the three pre-publish items in §9.7.        ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
-Rationale: the smoke test costs <$1 and gates a ~$595 spend plus a **permanent** labelling decision
-(§1.2 — `entry.labels` is inside `manifest_sha256`; a wrong label needs a ~1 TB re-copy to fix). The
-asymmetry is large enough that a human confirms.
+**What the gate measured, for the record.** Pooled **87.5% PASS** (CI [85.8, 89.1], n=1,555), but
+per-source: qa-forum 97.4% PASS; academic 84.9% and finemath 84.8% with CIs *spanning* the 85% bar
+(statistically indistinguishable from a pass); reference 80.3% clearly below. The judges' own agreement
+ceiling was 70–78%, and a 50-document human spot-check confirmed that ceiling reflects **real taxonomic
+ambiguity** (science vs medicine, computing vs engineering), not broken judges.
+
+**Why the answer was still no**, on the owner's call: the measured cost was $920–$10k rather than
+~$595, and ~85% accuracy against a 75%-self-consistent ground truth is poor value at that price when
+upstream labels are free and are *facts* rather than inferences.
+
+**The rationale for having stopped here remains sound and is worth keeping**: the smoke test cost under
+$1 and gated both a five-figure spend and a permanent labelling decision (a `domain` is inside
+`manifest_sha256`; a wrong one costs a ~1 TB re-copy). That asymmetry is exactly what a hard stop is
+for — and in this case the cheap measurement is what revealed the expensive step was mispriced.
+
+**One lesson from running it, recorded because it nearly produced a wrong decision** (full detail in
+`artifacts/smoke/SUBSTRATE.md`): the first gate run scored **49.1% and failed everything**, entirely
+because of a four-word prompt error — category 0 was labelled "General works", copying the
+Essential-Web card's abbreviation, when Dewey class 0 is "Computer science, information & general
+works" and computing lives at `005.x` *inside* it. Fixing those words moved qa-forum from 3.3% to
+97.4%. It was not caught by the score looking low — a low score is exactly what a failing candidate
+looks like — but by reading the model's **raw output**. Never trust an aggregate you have not traced
+to a raw example.
 
 ### 9.2 Delegation strategy — why, and the rule
 
@@ -828,7 +1027,21 @@ and returns 6 numbers is a context win. One that returns a transcript is a loss.
 **Fan-out discipline** (per `CLAUDE.md`): ≤~16 concurrent, in sequential waves, each subagent writing
 its own artifact file. The orchestrator holds only the file paths and the summary numbers.
 
-### 9.3 Phase 0 task graph
+### 9.3 Phase 0 task graph — ✅ EXECUTED 2026-07-31, kept as the record
+
+**All six tasks ran. Do not re-run them.** Outcomes and artifacts: `artifacts/PHASE0-REPORT.md`.
+Two notes for anyone reusing this graph shape:
+
+- **The 8-way fan-out on task A backfired.** HuggingFace's datasets-server throttles **per-IP, not
+  per-account**, so eight concurrent agents exhausted one shared quota and every in-flight count died
+  with HTTP 429 — failures that look identical to broken corpora in the artifact. The delegation rule
+  in §9.2 is sound for *context*, but it needs a concurrency budget per shared external resource.
+  What worked instead: reading parquet footers off the hub CDN, which is quota-free (500 documents
+  from 12 shards in 75 s).
+- **Task D's S3 path in the table is wrong** — writing samples to `s3://edullm-landing/_smoke/` risks
+  the EventBridge auto-promote landmine (§5.7). They went to
+  `s3://sbsandbox-intern-edullm-outputs/teams/data-prep/runs/…` instead, which is also the only prefix
+  the GPU role's IAM policy grants.
 
 Wave 1 and Wave 2 are internally parallel; Wave 3 depends on Wave 1.
 
@@ -847,7 +1060,24 @@ returning a handful of integers, versus the orchestrator reading ~35 cards seria
 **Orchestrator responsibilities** (do NOT delegate): the §9.4 pass/fail judgement, the stop decision,
 and the final report. Everything else is delegable.
 
-### 9.4 The dual-judge gate
+### 9.4 The dual-judge gate — ✅ RAN, and its outcome CANCELLED the thing it gated
+
+**Historical record. Do not re-run.** The protocol below is preserved because the reasoning is reusable
+(and because §1.2's decision rests on what it measured), but three things in it were wrong as written
+and had to be corrected live — see `artifacts/smoke/SUBSTRATE.md`:
+
+1. **"Essential-Web's 24 topics" does not exist.** Essential-Web publishes the **Free Decimal
+   Correspondence, 12 main categories**, whose **level 1 has 10 values**. "24" is the *paper's title*
+   — "24T **tokens**". The run used FDC level 1.
+2. **Both named judge models were unreachable.** HF Inference returned **HTTP 402, credits depleted**,
+   and `Qwen2.5-32B-Instruct` has no enabled provider besides. Judges moved to **Bedrock**:
+   A = `qwen.qwen3-next-80b-a3b`, B = `qwen.qwen3-32b-v1:0` — B being a dense 32 B Qwen, i.e. the real
+   teacher's exact parameter count, so a *better* proxy than the plan's own fallback.
+3. **The candidate has no inference provider at all** and must be self-hosted; it ran on Batch GPU
+   (`g5.xlarge`), where local `torch` being broken was moot anyway.
+
+**Result:** pooled 87.5% PASS; qa-forum 97.4% PASS; academic 84.9% / finemath 84.8% with CIs spanning
+the bar; reference 80.3% FAIL. Judge ceiling J = 70–78%. See §9.1 for what the owner decided and why.
 
 **Models** — all Apache-2.0, all ungated, all verified present on HF 2026-07-31:
 
@@ -886,7 +1116,18 @@ inherited_error_rate = P(D == B AND A != B)   <- report it
 taxonomy is genuinely fuzzy here" from "one judge is broken," and it is what makes the published
 accuracy number believable.
 
+*(Ran, and it earned its place: the disagreements clustered on real boundaries — NatSci/Math vs
+Tech/Applied 13, Computing vs Tech/Applied 9, Arts vs Literature 4 — each a document a careful human
+would hesitate on. That is what established the 70–78% ceiling as a property of the taxonomy rather
+than a defect in the instruments, and it is the finding that made cancelling the run the obvious call.)*
+
 **Gate: `score ≥ 85%` per source.** Then **stop either way** (§9.1).
+
+⚠️ **The gate design has one flaw worth knowing if you reuse it: a per-source PASS can be
+near-meaningless.** qa-forum scored 97.4%, but 96% of its documents carry a single label (StackOverflow
+→ Technology), so a classifier emitting one constant would have scored ~96% there. **Always report the
+label distribution beside the score** — J and accuracy are both inflated by a degenerate class prior.
+`reference` was the opposite and the most informative row: 9 distinct labels, 28% mode, lowest score.
 
 ### 9.5 The report to hand back
 
@@ -925,6 +1166,12 @@ structure):
       sliceable by `source`) · escalate the model (out of scope in the current plan) ·
       revise the taxonomy.
 
+**ANSWERED 2026-07-31: NO — cancelled.** The owner took the first option, generalised: *every* source
+without an upstream label ships flat (§1.2). The deciding facts were that the measured cost was
+$920–$10k rather than ~$595, and that the accuracy on offer (~85%) sat below the ground truth's own
+self-consistency (70–78%). Nothing about the reservoir's structure changes — `domain` was always
+optional and `source` selection is unaffected.
+
 ### 9.6 Fail-safes
 
 - **Any irreversible action outside Phase 0 → stop and ask.** Publishing, deleting from
@@ -936,3 +1183,38 @@ structure):
 - **If a subagent stalls** (transcript frozen >10 min, ending on a `tool_result` with no assistant
   turn — a known failure mode in this project): kill it, re-spawn narrower, and record the artifact
   path it had reached.
+
+### 9.7 🛑 THE NEXT GATE — three items that must land BEFORE the first publish
+
+Phase 0 is done; the classification is cancelled. **Phase 1 (§5.6) is still blocked**, on three things
+that are each irreversible-if-wrong and cheap-if-done-first. All three were found by executing Phase 0,
+not by reading the plan.
+
+**1. Two `CONTROL_PREFIXES` entries in `validate.py`.** Both sidecars this design depends on are
+rejected by Gate A today — verified by execution:
+
+```
+_is_control_key('_dedup/clusters.parquet')  -> False    # §1.3, MinHash cluster IDs
+_is_control_key('_licenses.parquet')        -> False    # §1.5, per-source license strings
+```
+
+They match neither `CONTROL_BASENAMES` (anchored to depth 0) nor `CONTROL_PREFIXES`
+(`{'_catalog/', 'dependents/'}`), so they trip `unlisted-object-dataset-level` (`validate.py:626`).
+One-line fix plus a test and a failing fixture per `CONTRIBUTING.md`. **Do not hide them under
+`_catalog/`** — that prefix passes, but it is the version resolver's namespace.
+
+**2. Slug and fold every inherited `domain` value (§1.2).** `C#` in an object key silently truncates
+any `s3://` URI at the `#`, and nothing in the pipeline catches it — `labels_from_path` accepts it and
+`fnmatch` matches it. Slug to `[a-z0-9-]`, fold the long tail to `other`, and publish the slug map in
+the README. Irreversible because the segment is inside `manifest_sha256`.
+
+**3. Decide whether the tokenizer emits `(shard_path, doc_index)`.** The manifest's grain is one shard
+object, so there is **no per-document join key**. If per-document licenses or MinHash cluster IDs are
+ever to be joined back to documents, the tokenizer must emit that key **at build time** — EOS
+boundaries are recoverable from a `.u32le.bin` afterwards, but the document→row mapping is not. This is
+the one genuinely irreversible item the original §1 did not list.
+
+**Also worth doing before Phase 1, but not blocking** (~$10, ~1 h, in-region): finish the token
+re-count for the four unverified categories via the footer-bytes method that worked in Phase 0. §2.1's
+pools are currently 5-of-8 verified, 1 verified-failing (`reference`, see `artifacts/sizing-revised.md`),
+and 2 unverified.
