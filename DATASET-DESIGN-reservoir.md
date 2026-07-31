@@ -571,12 +571,12 @@ against 125B** (≈3.3 epochs) — *effective*, not unique tokens.
 | category | pool | source (priority order) | license |
 |---|---|---|---|
 | edu-web/PDF | 48B | `HuggingFaceFW/finepdfs-edu` `eng_Latn` → `fineweb-edu` `sample-100BT` → `EssentialAI/essential-web-v1.0` filtered | ODC-BY |
-| code | 40B | **`common-pile/stackv2_edu_filtered` 67.8B** (ships real text, Blue Oak) → `tokyotech-llm/swallow-code-v2` 49.8B (Apache-2.0) → `common-pile/github_archive_filtered` | Blue Oak / Apache-2.0 |
+| code | 40B | **MEASURED 2026-07-31: `stackv2_edu_filtered` = 74.81B** (card 67.8B), which meets the pool ALONE at 1.87×. `swallow-code-v2` **excluded** (59.38B, but a Python-only rewrite of the same blobs — measured self-similarity 0.064, so no dedup catches it; and 74% of its bytes are `no_license` upstream despite the apache-2.0 tag). `github_archive_filtered` **moved to QA/forum** — it is issue/PR prose, not code | Blue Oak (100% permissive per-doc) |
 | math | 36B | `HuggingFaceTB/finemath` 3plus 34B → `proof-pile-2/algebraic-stack` 11B (math *code*, uniquely non-overlapping) → `swallow-math-v2` 32B (Apache-2.0; a FineMath rewrite — dedupe or substitute) | ODC-BY / Apache-2.0 |
 | web (diverse) | 30B | `mlfoundations/dclm-baseline-1.0` — the diversity counterweight to edu filtering | CC-BY-4.0 |
 | academic | 20B | **MEASURED 2026-07-31**: `peS2o_filtered` **40.48B** (card 43.3B — the card is 7% HIGH) → `pubmed_filtered` **37.54B** → `arxiv_papers_filtered` **6.23B**. ⚠️ **Non-overlapping total 64.12B, not the naive 84.26B** — see below | CC-BY/CC0 |
 | reference | **9B** ‡ | `HuggingFaceFW/finewiki` en — **measured 8.87B** by parquet footers, NOT the ~3.5B this row used to claim (a figure absent from the card, which names no token count and no tokenizer) | ⚠ CC-BY-SA 4.0 **+ GFDL** (share-alike; §1.5) |
-| QA/forum | 12B | `common-pile/stackexchange_filtered` 23.9B | ⚠ CC-BY-SA |
+| QA/forum | 12B | **MEASURED: `stackexchange_filtered` 24.05B + `ubuntu_irc_filtered` 1.87B = 25.93B** (2.16× the pool). Plus `github_archive_filtered` **11.51B**, moved here from code | ⚠ **92.8% CC-BY-SA** — measured from per-doc `metadata.license`, not assumed. `ubuntu_irc` is the only Public-Domain source; `github_archive` is permissive |
 
 **The academic overlap is now MEASURED, not inferred — and it is half the source.** §3.1 listed
 peS2o∩pubmed as a suspicion reasoned from field-of-study tables, with no number. peS2o's per-document

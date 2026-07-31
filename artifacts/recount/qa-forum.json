@@ -2,152 +2,394 @@
   "category": "qa-forum",
   "plan_pool_tokens": 12000000000,
   "peak_plausible_demand_tokens": 2400000000,
-  "peak_demand_basis": "12% of a 20B-token run (DATASET-DESIGN-reservoir.md §2.1 table row 'QA/forum': 3% default / 12% ceiling)",
   "required_pool_at_3x": 7200000000,
-
-  "status": "NOT MEASURED — datasets-server rate-limited (per-IP HTTP 429, 13 concurrent recount.py processes). Every token figure below is a CARD-DERIVED estimate, not a dolma2 measurement.",
-
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "status": "MEASURED (Phase 0c). Supersedes the Phase 0 'NOT MEASURED \u2014 HTTP 429' state of this file.",
+  "measurement_method": {
+    "formula": "tokens = text_bytes (EXACT, from parquet footers over ALL rows) x tokens_per_byte (sampled, dolma2)",
+    "why_not_datasets_server": "Phase 0 stalled on HTTP 429 because /rows quota is PER-IP, not per-account. Footers are quota-immune: they come off the HF CDN by HTTP Range.",
+    "why_a_byte_total_and_not_num_rows_x_mean": "the Phase 0 tool multiplied a PARTIAL converted row count by a mean and would have understated stackexchange ~24x. A footer byte total has no such denominator: total_uncompressed_size is summed over every row group of every file.",
+    "footer_arithmetic": "sum(row_group.column('text').total_uncompressed_size) - 4 bytes/value (PLAIN BYTE_ARRAY length prefix; encodings confirmed PLAIN, correction 0.03-0.23%)",
+    "raw_vs_filtered": "\u00a73.2 specifies the _filtered corpora, but those repos are .json.gz with ZERO parquet \u2014 unmeasurable by footers, which is exactly why Phase 0 could not touch them. common-pile/raw_v0.1_parquet carries the RAW collection as parquet, so RAW is measured exactly and scaled to filtered by the cards' own byte ratio. Both figures are reported per source.",
+    "transfer_budget": {
+      "raw_repo_footers_mb": 7.9,
+      "filtered_footers_mb": 9.4,
+      "id_column_scan_mb": 3.0,
+      "doc_samples_mb": 301.9,
+      "total_mb": 1598.7,
+      "uncompressed_text_addressed_gb": 365.3,
+      "note": "\u00a75.7 honoured \u2014 no dataset download; footers + sampled column chunks only, nothing written to disk (disk at 92%)",
+      "raw_repo_crosscheck_sample_mb": 1276.7
+    },
+    "scripts": [
+      "artifacts/recount/_footer_cp_raw.py",
+      "artifacts/recount/_tokbyte_filtered.py",
+      "artifacts/recount/_dupe_cp_raw.py",
+      "artifacts/recount/_probe_cp_raw_ids.py"
+    ]
+  },
+  "CRITICAL_TRAP_FOUND": {
+    "severity": "HIGH \u2014 a naive footer read of raw_v0.1_parquet overstates ubuntu_irc 2.1x and github_archive 4.5x",
+    "what": "For ubuntu_irc and github_archive the consolidated parquet swept TWO document trees from the source repo. Its `text` byte total is therefore a SUPERSET of the corpus the card describes.",
+    "evidence_ubuntu_irc": {
+      "source_repo_has": "raw/documents (8 files, 2.44 GB gz) AND v0/documents (8 files, 2.24 GB gz)",
+      "id_level_proof": "read the FULL id column (2.95 MB): 1,062,264 rows -> 733,149 distinct; the copies-per-id histogram is EXACTLY {1: 404034, 2: 329115} and 329,115 IS the raw card's document count \u2014 i.e. one whole tree is duplicated inside the other",
+      "duplication_factor": 1.4489
+    },
+    "evidence_github_archive": {
+      "source_repo_has": "gharchive/raw/documents (2000 files, 65.16 GB gz) AND gharchive/v0/documents (2000 files, 18.69 GB gz)",
+      "id_level_proof": "ZERO duplicate ids across sampled row groups \u2014 so unlike ubuntu_irc this is not a duplicate, it is a genuinely LARGER pre-filter row set (177M threads before license filtering, per the card). The overshoot is real extra rows, not double-counting."
+    },
+    "correction_applied": "scale the footer total by the v0 tree's share of gz bytes. This reproduces each RAW card independently: ubuntu_irc 6.39 vs 6.3 GB (+1.47%), github_archive 55.05 vs 54.7 GB (+0.64%). stackexchange has ONE tree and needed no correction: 104.98 vs 103.7 GB (+1.24%).",
+    "why_it_would_pass_unnoticed": "nothing in a footer read reveals it; the byte total is internally consistent and the corpus is the one you asked for by name. Only the card disagreement exposes it.",
+    "affects_other_agents": "ANY Phase 0c agent footer-counting common-pile/raw_v0.1_parquet must check its source repo for a second document tree. stackv2 (415 files), cccc (87), peS2o (58), uspto (116) are all large enough for this to matter."
+  },
+  "card_unit_resolved": {
+    "question": "is Common Pile's 'UTF-8 GB' 10^9 bytes or GiB?",
+    "answer": "10^9 bytes",
+    "how": "ubuntu_irc_filtered is the one corpus here whose datasets-server parquet conversion is COMPLETE, so its footer byte total is exact: 5,292,175,174 B. Card says 5.3 GB -> -0.15% as 10^9, -7.01% as GiB.",
+    "consequence": "the card GB ratios used for raw->filtered scaling are unit-consistent with our bytes"
+  },
   "sources": [
     {
       "dataset": "common-pile/stackexchange_filtered",
-      "config": "default",
-      "split": "train",
-      "role": "primary",
-      "status": "rate-limited-not-measured",
-      "card_tokens": 23900000000,
-      "measured_tokens": null,
-      "estimator": "card-bytes-anchored (NOT a recount.py estimator)",
-      "confidence": "low",
-      "confidence_note": "Two recount.py runs (300-sample, seed 0) returned status=FAILED with HTTP 429 on every sampled offset; n_sampled=0, so no tokens/char was measured. The figure here is the card's own 89.7 UTF-8 GB x 0.266 tok/byte, NOT a measurement.",
-      "card_documents": 30987814,
-      "card_utf8_gb": 89.7,
-      "license": "CC-BY-SA-4.0",
+      "role": "PRIMARY \u2014 the category rests on this one source",
+      "measured_via": "common-pile/raw_v0.1_parquet/stackexchange/ footers (RAW), scaled to filtered",
+      "license": "CC-BY-SA (3.0 / 4.0 / 2.5 mixed)",
       "share_alike": true,
-      "license_evidence": "Observed directly in row metadata: metadata.all_licenses == ['Creative Commons - Attribution Share-Alike - https://creativecommons.org/licenses/by-sa/4.0/'] (2 rows inspected at offset 700000). Card: 'Per-document license information is available in the license entry of the metadata field'. HfApi cardData carries NO license field — the SA fact is only visible per-row.",
-      "text_column": "text",
-      "text_column_chosen_by": "verified-by-inspection (not guessed): schema is {added, created, id, metadata:dict, source, text}; `text` is the only payload string column, the other 5 are metadata. No nested payload, so the FinePhrase §3.3 trap does not apply here.",
-      "qa_structure_note": "Question and answers are NOT in separate columns — the card states 'We use a question, its comments, its answers, and the comments on each answer as a single document', answers ordered by votes with the accepted answer first. Confirmed by inspection: one doc opens with the question title, then body, then comment/answer text concatenated as plain prose (PyMarkdown-flattened). So counting `text` counts the whole Q+A+comments thread exactly once; no cross-column handling was needed.",
-      "note": "Card figure 23.9B is reproduced exactly by 89.7 GB x 0.266 tok/byte, which is a consistency check on the CARD, not an independent measurement of the corpus."
+      "raw_measurement": {
+        "footer_text_bytes_ALL_TREES_exact": 104984965100,
+        "v0_tree_byte_share": 1.0,
+        "raw_v0_text_bytes_exact": 104984965100,
+        "raw_v0_text_gb": 104.985,
+        "raw_card_utf8_gb": 103.7,
+        "agreement_with_raw_card_pct": 1.24,
+        "raw_tokens": 27805464737,
+        "is_upper_bound_for_filtered": true
+      },
+      "filtered_estimate": {
+        "raw_to_filtered_byte_ratio": 0.865,
+        "ratio_source": "filtered_card_GB / raw_card_GB (both from the corpora's own cards); the ratio is applied to BYTES, the same quantity measured, not to doc counts",
+        "filtered_text_bytes": 90811488615,
+        "filtered_text_gb": 90.811,
+        "filtered_card_utf8_gb": 89.7,
+        "filtered_tokens": 24051592931
+      },
+      "tokens_per_byte": {
+        "value": 0.264852,
+        "tokens_per_char": 0.266006,
+        "n_docs": 800,
+        "n_row_groups": 32,
+        "sampled_from": "the CONVERTED _filtered parquet (correct row set) at random row groups",
+        "per_doc_cv": 0.1349,
+        "per_doc_spread_x": 2.39,
+        "between_rowgroup_cv": 0.1071,
+        "rel_ci95": 0.0361,
+        "cv_note": "docs are CLUSTERED by row group (a column chunk is the minimum unit parquet serves), so the honest uncertainty on the corpus ratio is the BETWEEN-ROW-GROUP figure, not the per-doc one",
+        "cross_checked_against_all_rows": {
+          "raw_all_rows_tpb": 0.27189,
+          "divergence_pct": 2.66
+        }
+      },
+      "card_cross_check": {
+        "card_tokens": 23.9,
+        "card_tokens_are_arithmetic_not_measured": "Common Pile 'tokens' = Size(GB) x 0.25 exactly",
+        "our_ratio_vs_card_implied_0.25_pct": 5.9
+      },
+      "license_detail": {
+        "sa_token_share_measured": 1.0,
+        "license_token_share": {
+          "Creative Commons - Attribution Share-Alike - https://creativecommons.org/licenses/by-sa/3.0/": 0.513558,
+          "Creative Commons - Attribution Share-Alike - https://creativecommons.org/licenses/by-sa/4.0/": 0.453294,
+          "Creative Commons - Attribution Share-Alike - https://creativecommons.org/licenses/by-sa/2.5/": 0.033148
+        },
+        "license_doc_counts": {
+          "Creative Commons - Attribution Share-Alike - https://creativecommons.org/licenses/by-sa/3.0/": 435,
+          "Creative Commons - Attribution Share-Alike - https://creativecommons.org/licenses/by-sa/4.0/": 347,
+          "Creative Commons - Attribution Share-Alike - https://creativecommons.org/licenses/by-sa/2.5/": 18
+        },
+        "evidence": "per-document metadata.license read off 800 sampled docs (a STRUCT CHILD; columns=['license'] raises KeyError, must request `metadata`)"
+      },
+      "source_field_observed": {
+        "Stack Exchange": 800
+      },
+      "confidence": "medium-high",
+      "confidence_note": "Byte total is EXACT over all 34.0M raw rows and its v0 figure matches the raw card to +1.24%. The tok/byte ratio carries a +-3.6% CI95 (between-row-group) \u2014 the widest of the three, as predicted for Q&A. Residual risk is the raw->filtered ratio (0.8650), taken from card GB rather than measured, because the _filtered repo has no parquet.",
+      "note": "Card 23.9B is Size(GB)x0.25 arithmetic. Our measured ratio 0.2649 tok/byte is 5.9% above that 0.25 assumption, so the card slightly UNDERSTATES this corpus under dolma2."
     },
     {
       "dataset": "common-pile/ubuntu_irc_filtered",
-      "role": "secondary — forum-like, and the only non-share-alike option in this category",
-      "status": "not-measured (metadata only, by instruction)",
-      "card_tokens": 1400000000,
-      "measured_tokens": null,
-      "estimator": "card-bytes-anchored",
-      "confidence": "low",
-      "card_documents": 234982,
-      "card_utf8_gb": 5.3,
+      "role": "secondary \u2014 the only non-share-alike source native to this category",
+      "measured_via": "common-pile/raw_v0.1_parquet/ubuntu_irc/ footers (RAW), scaled to filtered",
       "license": "Public Domain",
       "share_alike": false,
-      "note": "IRC support logs — dialogue-shaped Q&A, one document per channel-day. Parquet conversion is COMPLETE (partial=false, 216,197 rows converted), so this one is cheap to measure properly later. Small: ~1.4B tokens is under 12% of the pool."
-    },
-    {
-      "dataset": "common-pile/stackexchange",
-      "role": "REJECTED — do not add",
-      "status": "not-measured",
-      "card_tokens": 27600000000,
-      "card_documents": 33415400,
-      "card_utf8_gb": 103.7,
-      "license": "CC-BY-SA-4.0",
-      "share_alike": true,
-      "note": "The unfiltered superset of stackexchange_filtered (33.4M vs 31.0M docs, same dumps). Use ONE of the two, never both. Prefer _filtered."
+      "raw_measurement": {
+        "footer_text_bytes_ALL_TREES_exact": 13355862768,
+        "v0_tree_byte_share": 0.478632,
+        "raw_v0_text_bytes_exact": 6392549700,
+        "raw_v0_text_gb": 6.393,
+        "raw_card_utf8_gb": 6.3,
+        "agreement_with_raw_card_pct": 1.47,
+        "raw_tokens": 2228705609,
+        "is_upper_bound_for_filtered": true
+      },
+      "filtered_estimate": {
+        "raw_to_filtered_byte_ratio": 0.8413,
+        "ratio_source": "filtered_card_GB / raw_card_GB (both from the corpora's own cards); the ratio is applied to BYTES, the same quantity measured, not to doc counts",
+        "filtered_text_bytes": 5377859272,
+        "filtered_text_gb": 5.378,
+        "filtered_card_utf8_gb": 5.3,
+        "filtered_tokens": 1874942814
+      },
+      "tokens_per_byte": {
+        "value": 0.348641,
+        "tokens_per_char": 0.348687,
+        "n_docs": 800,
+        "n_row_groups": 33,
+        "sampled_from": "the CONVERTED _filtered parquet (correct row set) at random row groups",
+        "per_doc_cv": 0.1156,
+        "per_doc_spread_x": 4.652,
+        "between_rowgroup_cv": 0.0268,
+        "rel_ci95": 0.009,
+        "cv_note": "docs are CLUSTERED by row group (a column chunk is the minimum unit parquet serves), so the honest uncertainty on the corpus ratio is the BETWEEN-ROW-GROUP figure, not the per-doc one"
+      },
+      "card_cross_check": {
+        "card_tokens": 1.4,
+        "card_tokens_are_arithmetic_not_measured": "Common Pile 'tokens' = Size(GB) x 0.25 exactly",
+        "our_ratio_vs_card_implied_0.25_pct": 39.5
+      },
+      "license_detail": {
+        "sa_token_share_measured": 0,
+        "license_token_share": {
+          "Public Domain": 1.0
+        },
+        "license_doc_counts": {
+          "Public Domain": 800
+        },
+        "evidence": "per-document metadata.license read off 800 sampled docs (a STRUCT CHILD; columns=['license'] raises KeyError, must request `metadata`)"
+      },
+      "source_field_observed": {
+        "ubuntu-chat": 800
+      },
+      "confidence": "high",
+      "confidence_note": "The strongest number in the category. Its converted _filtered parquet is COMPLETE, giving an EXACT filtered byte total (5,292,175,174 B) that needs no card ratio at all; that exact path and the raw-scaled path agree to 1.62%, which validates the whole raw->filtered chain end to end. tok/byte CI95 is +-0.9%.",
+      "note": "Card 1.4B is GBx0.25 arithmetic and is 39.5% LOW: IRC transcripts tokenize at 0.3486 tok/byte, far above the 0.25 assumption, because nicknames/timestamps/paths fragment. This is the single largest card error found in the category."
     },
     {
       "dataset": "common-pile/github_archive_filtered",
-      "role": "REJECTED for this category — belongs to `code`",
-      "status": "not-measured",
-      "card_tokens": 10700000000,
-      "card_documents": 23358580,
-      "card_utf8_gb": 40.4,
-      "license": "Blue Oak Council-approved (permissive)",
+      "role": "CONTESTED \u2014 measured here, claimed by `code` in \u00a73.2. See category_verdict_github_archive.",
+      "measured_via": "common-pile/raw_v0.1_parquet/github_archive/ footers (RAW), scaled to filtered",
+      "license": "permissive OSS (Apache-2.0 40.5%, MIT 41.9%, BSD/ISC/Zlib/CC0/... remainder)",
       "share_alike": false,
-      "note": "Issue/PR threads are genuinely forum-shaped and permissively licensed, which makes this the best share-alike-free QA/forum substitute available. BUT §3.2 already lists it as the third-priority source for the `code` pool (40B). Claiming it here would double-count against code. Flagging for the orchestrator to arbitrate; NOT counted in category_total."
-    },
-    {
-      "dataset": "common-pile/data_provenance_initiative_filtered",
-      "role": "REJECTED — FLAN-like instruction data, not pretrain forum text",
-      "status": "not-measured",
-      "card_tokens": 800000000,
-      "card_documents": 3508518,
-      "card_utf8_gb": 3.0,
-      "license": "mixed; audited-open only, per-document in metadata.license",
-      "share_alike": false,
-      "note": "This is the closest HF analogue to the internal datamix1 `flan` category. Only ~0.8B tokens — too small to move a 12B pool, and it is supervised/instruction data whose inclusion in a pretrain mixture is a separate design decision (§4 does not budget for instruction data in the real half)."
-    },
-    {
-      "dataset": "common-pile/cccc_filtered",
-      "role": "REJECTED — Common Crawl web, not QA/forum",
-      "status": "not-measured",
-      "card_tokens": 15400000000,
-      "card_utf8_gb": 58.0,
-      "license": "permissive / public domain",
-      "share_alike": false,
-      "note": "Enumerated and dismissed: 52 Common Crawl snapshots. Its own card warns of 'a higher level of duplication across this collection'. Belongs to web/edu-web, and overlaps DCLM-baseline."
+      "raw_measurement": {
+        "footer_text_bytes_ALL_TREES_exact": 246968692777,
+        "v0_tree_byte_share": 0.222898,
+        "raw_v0_text_bytes_exact": 55048835635,
+        "raw_v0_text_gb": 55.049,
+        "raw_card_utf8_gb": 54.7,
+        "agreement_with_raw_card_pct": 0.64,
+        "raw_tokens": 15585488374,
+        "is_upper_bound_for_filtered": true
+      },
+      "filtered_estimate": {
+        "raw_to_filtered_byte_ratio": 0.7386,
+        "ratio_source": "filtered_card_GB / raw_card_GB (both from the corpora's own cards); the ratio is applied to BYTES, the same quantity measured, not to doc counts",
+        "filtered_text_bytes": 40657640944,
+        "filtered_text_gb": 40.658,
+        "filtered_card_utf8_gb": 40.4,
+        "filtered_tokens": 11511037117
+      },
+      "tokens_per_byte": {
+        "value": 0.283121,
+        "tokens_per_char": 0.283636,
+        "n_docs": 824,
+        "n_row_groups": 33,
+        "sampled_from": "the CONVERTED _filtered parquet (correct row set) at random row groups",
+        "per_doc_cv": 0.1505,
+        "per_doc_spread_x": 2.446,
+        "between_rowgroup_cv": 0.0734,
+        "rel_ci95": 0.0246,
+        "cv_note": "docs are CLUSTERED by row group (a column chunk is the minimum unit parquet serves), so the honest uncertainty on the corpus ratio is the BETWEEN-ROW-GROUP figure, not the per-doc one",
+        "cross_checked_against_all_rows": {
+          "raw_all_rows_tpb": 0.30562,
+          "divergence_pct": 7.94
+        }
+      },
+      "card_cross_check": {
+        "card_tokens": 11.9,
+        "card_tokens_are_arithmetic_not_measured": "Common Pile 'tokens' = Size(GB) x 0.25 exactly",
+        "our_ratio_vs_card_implied_0.25_pct": 13.2
+      },
+      "license_detail": {
+        "sa_token_share_measured": 0,
+        "license_token_share": {
+          "Apache-2.0": 0.404813,
+          "MIT": 0.33429,
+          "mit": 0.085323,
+          "apache-2.0": 0.044989,
+          "BSD-3-Clause": 0.040856,
+          "CC-BY-4.0": 0.022767,
+          "Unlicense": 0.012275,
+          "UPL-1.0": 0.011267,
+          "BSD-2-Clause": 0.00795,
+          "bsd-3-clause": 0.007805,
+          "bsd-2-clause": 0.006526,
+          "ECL-2.0": 0.003875,
+          "isc": 0.002843,
+          "ISC": 0.00241,
+          "Zlib": 0.00225,
+          "Vim": 0.001889,
+          "CC0-1.0": 0.001865,
+          "BSL-1.0": 0.001346,
+          "WTFPL": 0.001339,
+          "cc0-1.0": 0.00116,
+          "LPPL-1.3c": 0.000887,
+          "0BSD": 0.000602,
+          "MIT-0": 0.000353,
+          "unlicense": 0.000219,
+          "artistic-2.0": 0.000102
+        },
+        "license_doc_counts": {
+          "MIT": 322,
+          "Apache-2.0": 249,
+          "mit": 89,
+          "apache-2.0": 57,
+          "BSD-3-Clause": 31,
+          "CC-BY-4.0": 23,
+          "bsd-3-clause": 12,
+          "BSD-2-Clause": 6,
+          "bsd-2-clause": 5,
+          "Unlicense": 4,
+          "CC0-1.0": 4,
+          "ISC": 3,
+          "cc0-1.0": 3,
+          "Zlib": 2,
+          "isc": 2,
+          "Vim": 2,
+          "BSL-1.0": 2,
+          "ECL-2.0": 1,
+          "artistic-2.0": 1,
+          "unlicense": 1,
+          "UPL-1.0": 1,
+          "WTFPL": 1,
+          "LPPL-1.3c": 1,
+          "0BSD": 1,
+          "MIT-0": 1
+        },
+        "evidence": "per-document metadata.license read off 824 sampled docs (a STRUCT CHILD; columns=['license'] raises KeyError, must request `metadata`)"
+      },
+      "source_field_observed": {
+        "gharchive/issue": 484,
+        "gharchive/pull-request": 340
+      },
+      "confidence": "medium-high",
+      "confidence_note": "Byte total exact over 139.7M raw rows; v0-corrected figure matches the raw card to +0.64%. tok/byte CI95 +-2.5%. Same residual raw->filtered ratio caveat as stackexchange.",
+      "note": "Card 11.9B is GBx0.25; our 0.2831 tok/byte puts it 13.2% higher. The `source` field on every sampled doc is gharchive/issue (484) or gharchive/pull-request (340) \u2014 prose threads, not code."
     }
   ],
-
-  "collections_enumerated": {
-    "method": "HfApi().list_datasets(author='common-pile') — 63 repos, 31 raw/filtered pairs plus comma_v0.1_training_dataset and raw_v0.1_parquet",
-    "forum_or_qa_shaped": [
-      "stackexchange_filtered",
-      "stackexchange",
-      "ubuntu_irc_filtered",
-      "github_archive_filtered",
-      "data_provenance_initiative_filtered"
-    ],
-    "conclusion": "common-pile contains exactly ONE large true Q&A corpus (StackExchange). There is no second 10B-scale QA/forum source in the collection, so this category cannot be diversified away from share-alike within common-pile."
+  "category_total_measured": 25926535745,
+  "category_total_basis": "stackexchange_filtered 24.052B + ubuntu_irc_filtered 1.875B, filtered-scaled, dolma2. github_archive_filtered's 11.511B is EXCLUDED to avoid double-counting against `code`.",
+  "category_total_if_github_archive_included": 37437572862,
+  "raw_upper_bounds_do_not_use_for_sizing": {
+    "stackexchange": 27805464737,
+    "ubuntu_irc": 2228705609,
+    "github_archive": 15585488374,
+    "note": "these are the RAW (pre-filter) collections \u2014 an upper bound on each _filtered corpus"
   },
-
-  "category_total_measured": null,
-  "category_total_estimated": 25300000000,
-  "category_total_basis": "stackexchange_filtered ~23.9B + ubuntu_irc_filtered ~1.4B, both card-bytes-anchored at 0.266 tok/byte. Conservative bound at 0.21 tok/byte: ~19.9B.",
-
-  "meets_3x_peak_demand": null,
-  "meets_3x_peak_demand_note": "PROVISIONALLY YES, on card figures only. stackexchange_filtered alone (~23.9B) is 10x the 2.4B peak and 2x the 12B plan pool, and the margin survives the pessimistic 0.21 tok/byte bound (~18.8B, still 7.8x peak). The 3x test is not close enough to the line for the missing measurement to flip it — but the number is unverified and must not be recorded in §3.2 as measured.",
-
+  "meets_plan_pool_12B": true,
+  "meets_3x_peak_demand": true,
+  "sizing_verdict": "MET. 25.93B is 2.16x the 12B plan pool and 3.60x the 7.2B floor \u2014 WITHOUT github_archive. Phase 0's provisional 'yes' on card figures is confirmed by measurement, and the measured total is 2.5% ABOVE the card-derived 25.3B estimate.",
+  "sa_tokens": 24051592931,
+  "non_sa_tokens": 1874942814,
+  "sa_split": {
+    "sa_tokens": 24051592931,
+    "non_sa_tokens": 1874942814,
+    "sa_fraction": 0.9277,
+    "measured_how": "per-document metadata.license on 1,600 sampled docs across the two counted sources: stackexchange 800/800 CC-BY-SA (3.0 51.4% / 4.0 45.3% / 2.5 3.3% by tokens), ubuntu_irc 800/800 Public Domain. NOT inferred from the cards, which carry no license field.",
+    "confirms_phase0": "\u00a77 item 4 treated SA as a footnote; Phase 0 called it structural. Measured: 92.8% of this category's tokens are CC-BY-SA.",
+    "if_SA_dropped": {
+      "remaining_tokens": 1874942814,
+      "vs_7.2B_floor": 0.26,
+      "verdict": "FAILS the 3x floor at 0.26x, and fails the 2.4B peak itself at 0.78x",
+      "the_fix_is_github_archive": "adding github_archive_filtered's 11.511B non-SA tokens brings the SA-free pool to 13.386B = 1.86x the floor, which PASSES. github_archive is the only reason a share-alike-free QA/forum pool is feasible at all \u2014 that, not the token count, is the strongest argument for classifying it here."
+    },
+    "actionable": "make share-alike a first-class queryable `label` on every entry before first publish. entry.labels is inside manifest_sha256 and is therefore UNBACKFILLABLE (see memory); a later 'strip SA and re-mix' must be a metadata query, not a re-copy."
+  },
+  "category_verdict_github_archive": {
+    "verdict": "It is QA/forum by content, and it should be BUDGETED to QA/forum, not code.",
+    "evidence_content": "the `source` field on all 824 sampled documents is gharchive/issue (484) or gharchive/pull-request (340) \u2014 GitHub issue/PR threads. Its own card describes PyMarkdown-flattened issue and PR comment threads, not source files. Mean doc 1,981 bytes / median 894 \u2014 comment-thread length, not file length.",
+    "evidence_tokenizer": "0.2831 tok/byte sits between StackExchange prose-Q&A (0.2649) and IRC dialogue (0.3486), and NOWHERE near a code corpus; \u00a73.2's code row cites stackv2_edu at 0.274 tok/char. Its per-doc spread (2.45x) matches StackExchange's (2.39x) \u2014 the same prose+code-block interleaving.",
+    "the_decisive_argument": "code's pool does not need it (stackv2_edu alone floors at 61-80B against a 40B pool), whereas QA/forum's SA-free pool CANNOT meet its floor without it (1.875B = 0.26x). Assigning it to code leaves a measured license risk unmitigated to pad a pool that is already met.",
+    "double_counting_guard": "it must be counted ONCE. Our category_total EXCLUDES it, so no double count exists today; if it moves here, `code` must drop it from its own table in the same edit.",
+    "reconcile_with": "artifacts/recount/code-github-archive-filtered.json and code.json \u2014 the code agent measured the same corpus; the two numbers should be compared before \u00a73.2 is rewritten.",
+    "reconciliation_with_code_agent": {
+      "status": "AGREED, and no conflicting number exists to reconcile.",
+      "code_agent_state": "artifacts/recount/code.json lists github_archive_filtered as 'rate-limited-not-measured' with measured_tokens=null, and its needs_streaming_count entry says outright: 'settle the category question first: its payload is issue/PR prose, so it probably belongs to QA/forum rather than code.'",
+      "so": "the 11.511B measured here is the FIRST real figure for this corpus in either category, and the two agents reached the same category conclusion independently \u2014 that agent from the payload description, this one from the `source` field (824/824 docs gharchive/issue or /pull-request) plus a tok/byte ratio that sits between prose Q&A and IRC dialogue.",
+      "code_pool_impact_if_moved": "none material. code.json's own floor for stackv2_edu_filtered alone is 61-80B against a 40B pool and a 24B 3x floor, so code clears its floor without github_archive.",
+      "one_caveat_from_the_code_agent_worth_carrying": "code.json notes github_archive 'draws issues from the same repositories' as Stack-v2 and sources part of its license metadata FROM Stack-v2 metadata. That is repo-level provenance overlap, not text overlap (issue prose is not the source files), so it does not double-count tokens \u2014 but it does mean github_archive is not a Stack-v2-INDEPENDENT source if it is ever used for a code-adjacent dedup claim."
+    }
+  },
   "overlaps": [
-    "common-pile/stackexchange (33.4M docs) is the UNFILTERED SUPERSET of common-pile/stackexchange_filtered (31.0M docs) — same Dec-2024 Internet Archive dumps plus the July-2024 official dumps. Never sum them; pick _filtered.",
-    "StackExchange dumps are the single most re-derived corpus in open pretraining: the same posts appear in The Pile (StackExchange component), RedPajama, SlimPajama, Dolma, and the datamix1 `stackexchange` category. Any of those entering the reservoir alongside this source double-counts. §2.1's QA/forum pool must be sourced from exactly one StackExchange derivative.",
-    "The published 150B corpus in s3://edullm-data is dolma3_mix-150B (see memory), and Dolma mixes carry a StackExchange component — so a reservoir built on stackexchange_filtered overlaps the corpus already published. Not checked (S3 out of scope for this task).",
-    "github_archive_filtered is claimed by the `code` pool in §3.2; counting it as QA/forum would double-count across categories.",
-    "cccc_filtered overlaps DCLM-baseline / the web pool (both are Common Crawl), and self-reports elevated internal duplication."
+    "common-pile/stackexchange (RAW, 33.4M docs / 104.98 GB measured) is the UNFILTERED SUPERSET of stackexchange_filtered (30.99M / ~90.8 GB). Never sum; use _filtered.",
+    "StackExchange dumps are the most re-derived corpus in open pretraining \u2014 the same posts sit in The Pile, RedPajama, SlimPajama and Dolma. Source the QA/forum pool from exactly ONE derivative.",
+    "LIVE-CORPUS OVERLAP, UNQUANTIFIED: the published 150B in s3://edullm-data is dolma3_mix-150B, which carries a StackExchange component. So this category's PRIMARY source likely overlaps the corpus already published. Not measured (S3 out of scope here) \u2014 but it bears on whether the reservoir's QA/forum slice is additive to the live corpus or a re-draw of it. Worth a Phase 1 check.",
+    "github_archive_filtered is currently claimed by `code` in \u00a73.2 \u2014 count it once, in whichever category wins the arbitration above.",
+    "raw_v0.1_parquet's ubuntu_irc prefix contains each v0 document TWICE (measured, factor 1.4489). Anyone sampling that prefix for training data \u2014 not just counting it \u2014 must dedup by id."
   ],
-
-  "share_alike_finding": {
-    "flag": "SHARE-ALIKE, and structurally unavoidable in this category",
-    "detail": "The entire QA/forum pool rests on CC-BY-SA-4.0 content. Unlike `reference` (FineWiki), there is no permissive alternative at 10B scale inside common-pile — ubuntu_irc_filtered is public domain but only ~1.4B tokens, and the one permissive forum-shaped corpus of adequate size (github_archive_filtered, ~10.7B) is already spoken for by the `code` pool.",
-    "design_impact": "§7 item 4 wants FineWiki and StackExchange kept separable in case of publication. Combined with another agent's LibreTexts finding (32% share-alike rows), share-alike is a THIRD source and a larger slice of the reservoir than §7 item 4 assumed. Recommendation: make share-alike a first-class `label` on every entry (queryable at mixture-build time) rather than a per-source note — that is the only way a future 'strip SA and re-mix' request is a metadata query instead of a re-copy. Note this must be decided BEFORE first publish: entry.labels is inside manifest_sha256 and is therefore unbackfillable.",
-    "if_SA_must_be_dropped": "The QA/forum category collapses from ~25B to ~1.4B (ubuntu_irc only), which does NOT meet 3x of the 2.4B peak. This is the single largest license-driven sizing risk found in this category."
-  },
-
   "needs_streaming_count": [
     {
       "dataset": "common-pile/stackexchange_filtered",
-      "why": "Rate-limited (HTTP 429, per-IP, 13 concurrent processes) — no tokens/char sample was obtained. Also blocked by the partial-conversion bug below even once the quota recovers.",
-      "cheap_retry_first": "A 300-sample recount.py run WITH the rows-scaling fix below should settle this in minutes once the quota is free; a Batch streaming count is only needed if /rows stays unavailable."
+      "why": "the raw->filtered byte ratio (0.8650) is taken from the cards, not measured, because the _filtered repo is .json.gz with no parquet. Everything else about this source is exact.",
+      "impact": "~+-3% on 24.05B; does not threaten the 12B pool or the 7.2B floor",
+      "cheap_alternative": "the datasets-server conversion is 4.7% complete (1.28M of ~27.5M rows) and growing; when it completes, footer it for an exact filtered total, as ubuntu_irc already allows"
     },
     {
-      "dataset": "common-pile/ubuntu_irc_filtered",
-      "why": "Not attempted (metadata-only by instruction). Parquet conversion is COMPLETE, so recount.py needs no fix for this one — it is the cheapest real number in the category."
+      "dataset": "common-pile/github_archive_filtered",
+      "why": "same card-ratio caveat (0.7386)",
+      "impact": "~+-3% on 11.51B"
     }
   ],
-
-  "tool_bug_found": {
-    "severity": "HIGH — silently understates every partially-converted corpus by ~24x",
-    "where": "artifacts/recount/recount.py main(), `n = per_config[cfg]['num_rows']` (and the same field via /size in combine()'s caller)",
-    "problem": "For these corpora the datasets-server parquet conversion is PARTIAL (`/size` returns `partial: true`). `num_rows` is then only the CONVERTED head, not the split. For stackexchange_filtered: num_rows=1,282,779 converted, estimated_num_rows=27,497,605, card=30,987,814 documents. recount.py multiplies mean_chars x tokens/char by 1.28M and would have reported ~1.1B tokens for a ~24B corpus — a 24x undercount that looks like a clean high-confidence stats-ratio result, because /statistics is ALSO computed over the same partial head so the two estimators AGREE and estimator_divergence stays small.",
-    "why_it_passes_every_guard": "`stats_partial: true` is recorded and downgrades confidence to 'medium' at most — it flags the mean_chars factor as provisional but says nothing about num_rows being the wrong denominator. Nothing in the output reveals the 24x error.",
-    "affected_in_this_category": "stackexchange_filtered (partial, 24x), stackexchange (partial), github_archive_filtered (partial, 23.4M card vs 2.5M converted), cccc_filtered (partial, 6.9M vs 0.9M). NOT affected: ubuntu_irc_filtered, data_provenance_initiative_filtered (both partial=false).",
-    "fix": "Scale by `estimated_num_rows` when `/size` reports `partial: true`, falling back to `num_rows` only when the conversion is complete; record which was used. Note estimated_num_rows is itself ~13% below the card's document count for stackexchange_filtered (27.5M vs 31.0M), so it is an improvement, not ground truth — the card doc count is the better anchor where one exists.",
-    "affects_other_agents": "Any Phase-0 agent whose corpus is large enough to be partially converted has the same 24x exposure. This is worth broadcasting before the §3.2 table is rewritten."
+  "notes_for_section_2_1": {
+    "use_these": "the filtered_scaled_tokens figures: stackexchange 24.05B, ubuntu_irc 1.87B, github_archive 11.51B (category assignment pending).",
+    "do_not_use": "the raw_tokens figures (27.81 / 2.23 / 15.59B) \u2014 those are pre-filter upper bounds.",
+    "and_do_not_use": "any card 'token' figure. All three are Size(GB)x0.25 arithmetic and we measured errors of +5.9%, +39.5% and +13.2% against real dolma2 ratios.",
+    "tok_per_byte_for_future_scaling": {
+      "stackexchange": 0.2649,
+      "ubuntu_irc": 0.3486,
+      "github_archive": 0.2831
+    }
   },
-
-  "method_caveat_for_this_domain": {
-    "finding": "tokens/char is much LESS stable on Q&A than the README's premise assumes",
-    "evidence": "Tokenizing the two real stackexchange_filtered document prefixes obtained before the rate limit (dolma2, locally): a terminal/code-heavy Ubuntu answer ran 0.4524 tok/char, a mostly-prose answer 0.2101 tok/char — a 2.15x spread across two documents in the same corpus.",
-    "why_it_matters": "The README justifies the stats-ratio estimator on tokens/char having low CV (~0.27 on FineMath, ~0.1 for English prose). StackExchange documents interleave prose with code blocks, shell transcripts, tracebacks and markdown tables, so the per-document tok/char CV here should be expected to be substantially higher than on prose corpora. n=2 is anecdote, not a measurement — but whoever re-runs this should READ `tokens_per_char_cv` in the output rather than assume the prose prior, and consider raising --n-sample above 300 if it comes back high.",
-    "direction_of_error": "Unknown sign, but it widens the interval around any stats-ratio figure for this category specifically."
+  "method_caveat_this_category_confirmed": {
+    "phase0_warning": "Phase 0 measured 0.4524 vs 0.2101 tok/char on two documents (2.15x) and warned the single-ratio estimator is weaker here than on prose.",
+    "measured_at_scale": "CONFIRMED but BOUNDED. Per-document spread is 2.39x (stackexchange), 2.45x (github_archive), 4.65x (ubuntu_irc) \u2014 Phase 0's 2.15x was, if anything, an underestimate of the tails. Per-document CV 0.135 / 0.150 / 0.116.",
+    "why_the_estimate_survives_it": "per-document variance is NOT the uncertainty on a corpus-level ratio. Aggregating byte-weighted over 800+ docs in 32-33 independent row groups, the between-row-group CV falls to 0.107 / 0.073 / 0.027 and CI95 to +-3.6% / +-2.5% / +-0.9%.",
+    "how_much_weaker_plainly": "the QA/forum ratio is ~4x less precise than a prose corpus's would be (+-3.6% vs the ~+-1% typical of English prose), so the category total should be read as 25.9B +- ~1B on the ratio alone. That is nowhere near the 2.16x margin over the plan pool, so the sizing verdict is robust; a re-weighting decision at the 5% level would not be."
+  },
+  "head_bias_cross_check": {
+    "question": "the tok/byte ratio is sampled from the datasets-server-CONVERTED _filtered parquet, which covers only 4.7% (stackexchange) / 10.7% (github_archive) of rows. Is that head a biased sample?",
+    "why_it_was_a_real_worry": "the StackExchange source repo is laid out ONE DIRECTORY PER SITE in alphabetical order, and stackoverflow.com (95 of 835 files) is both the largest site and the most code-dense. Code raises tok/byte sharply, so a head that stops before 's' would yield a PROSE-SITE ratio and understate the corpus.",
+    "test": "an independent tok/byte sample drawn from common-pile/raw_v0.1_parquet, whose row set covers ALL 34.0M / 139.7M rows and therefore every site, at random row groups across distinct files.",
+    "results": {
+      "stackexchange": {
+        "head_tpb": 0.26485,
+        "raw_all_rows_tpb": 0.27189,
+        "divergence_pct": 2.66,
+        "raw_n_docs": 700,
+        "raw_n_row_groups": 14,
+        "raw_rel_ci95": 0.0452
+      },
+      "github_archive": {
+        "head_tpb": 0.28312,
+        "raw_all_rows_tpb": 0.30562,
+        "divergence_pct": 7.94,
+        "raw_n_docs": 500,
+        "raw_n_row_groups": 10,
+        "raw_rel_ci95": 0.0529
+      }
+    },
+    "verdict": "No material bias. Both divergences (+2.7%, +7.9%) sit inside the overlapping CI95 bands of the two independent samples, and BOTH point the same way \u2014 the full-corpus ratio is slightly HIGHER than the head's, so the head-based figures reported above are CONSERVATIVE (they understate tokens).",
+    "which_ratio_the_headline_uses": "the HEAD (converted _filtered) ratio, deliberately: it is drawn from the correct FILTERED row set and it is the lower of the two. Substituting the raw ratios would raise the category total from 25.93B to ~26.6B and would not change any verdict.",
+    "residual_caveat": "the raw-repo sample is cheap in requests but expensive in bytes (that repo writes 40k-120k-row row groups, so 700 docs cost 607 MB vs 74 MB for 800 docs from the converted parquet), hence its smaller row-group count (14 / 10) and wider CI."
   }
 }

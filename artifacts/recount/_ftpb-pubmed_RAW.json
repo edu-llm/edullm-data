@@ -1,0 +1,18 @@
+{
+  "repo": "common-pile/pubmed",
+  "status": "ok",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "n_shards_sampled": 17,
+  "n_shards_total": 17,
+  "n_docs_sampled": 403,
+  "sample_text_bytes": 20948381,
+  "sample_tokens": 5457242,
+  "tokens_per_byte": 0.2605090102189759,
+  "tokens_per_byte_cv_per_shard": 0.050812062357690084,
+  "tokens_per_byte_min_shard": 0.22539127664048123,
+  "tokens_per_byte_max_shard": 0.27427213389346056,
+  "bytes_per_token": 3.838638821587901,
+  "mean_doc_bytes_in_sample": 51981.09429280397,
+  "sampling": "head prefix of EVERY shard (see module docstring for the bias note)",
+  "errors": []
+}

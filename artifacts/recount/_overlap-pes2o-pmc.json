@@ -1,0 +1,193 @@
+{
+  "n_docs": 6756,
+  "n_shards": 91,
+  "pdf_src_doc_counts": [
+    [
+      "PubMedCentral",
+      3306
+    ],
+    [
+      "Anansi",
+      962
+    ],
+    [
+      "ScienceParsePlus",
+      461
+    ],
+    [
+      "MergedPDFExtraction",
+      384
+    ],
+    [
+      "Adhoc",
+      365
+    ],
+    [
+      "ScienceParseMerged",
+      252
+    ],
+    [
+      "SpringerNature",
+      151
+    ],
+    [
+      "Arxiv",
+      120
+    ],
+    [
+      "Springer",
+      106
+    ],
+    [
+      "IOP",
+      98
+    ],
+    [
+      "Highwire",
+      86
+    ],
+    [
+      "TaylorAndFrancis",
+      76
+    ],
+    [
+      "Wiley",
+      65
+    ],
+    [
+      "ArXiv",
+      46
+    ],
+    [
+      "Frontier",
+      40
+    ],
+    [
+      "IEEE",
+      35
+    ],
+    [
+      "BioRxiv",
+      27
+    ],
+    [
+      "ACL",
+      26
+    ],
+    [
+      "Crawler",
+      26
+    ],
+    [
+      "Sage",
+      26
+    ],
+    [
+      "CiteSeerX",
+      21
+    ],
+    [
+      "ElsevierPush",
+      11
+    ],
+    [
+      "Grobid",
+      9
+    ],
+    [
+      "Cambridge",
+      9
+    ],
+    [
+      "ASMUSA",
+      9
+    ],
+    [
+      "Elsevier",
+      8
+    ],
+    [
+      "Neliti",
+      5
+    ],
+    [
+      "Dynamic",
+      4
+    ],
+    [
+      "Unpaywall",
+      4
+    ],
+    [
+      "ACM",
+      4
+    ],
+    [
+      "WoltersKluwer",
+      3
+    ],
+    [
+      "BioOne",
+      3
+    ],
+    [
+      "RoyalSociety",
+      3
+    ],
+    [
+      "DeGruyter",
+      2
+    ],
+    [
+      "MedRxiv",
+      2
+    ],
+    [
+      "ScientificNet",
+      1
+    ]
+  ],
+  "pmc_doc_share": 0.48934280639431615,
+  "pmc_byte_share": 0.49742762645688426,
+  "pmc_share_cv_across_shards": 0.14774370685523106,
+  "pmc_share_min_shard": 0.323943661971831,
+  "pmc_share_max_shard": 0.8529411764705882,
+  "byte_share_by_src": {
+    "PubMedCentral": 0.49742762645688426,
+    "Anansi": 0.11548870880005759,
+    "ScienceParsePlus": 0.07697901235694567,
+    "MergedPDFExtraction": 0.05732405022644504,
+    "Adhoc": 0.05227258280482593,
+    "ScienceParseMerged": 0.03282767646414752,
+    "SpringerNature": 0.024856292328444135,
+    "Springer": 0.019881343960410112,
+    "Arxiv": 0.0192534531500724,
+    "Highwire": 0.015100421640479224,
+    "TaylorAndFrancis": 0.012947167077474477,
+    "IOP": 0.011119687631988577,
+    "Wiley": 0.010201641706294598,
+    "ArXiv": 0.009759569479261149,
+    "Frontier": 0.006538811155341215,
+    "IEEE": 0.006462662474716366,
+    "Sage": 0.0053106149127442786,
+    "Crawler": 0.004904987384998208,
+    "BioRxiv": 0.004091845896561924,
+    "ACL": 0.002683786667861342,
+    "CiteSeerX": 0.00247704448145672,
+    "ElsevierPush": 0.001957934678693852,
+    "Elsevier": 0.001703157588499483,
+    "Cambridge": 0.0016284558315726296,
+    "ASMUSA": 0.0012029022385657768,
+    "Grobid": 0.0008453293678339993,
+    "ACM": 0.0008328305150025148,
+    "Unpaywall": 0.0005994659202160149,
+    "Dynamic": 0.0005593224296323968,
+    "RoyalSociety": 0.0005427692274628449,
+    "DeGruyter": 0.0005233567460402588,
+    "BioOne": 0.00048424536143916935,
+    "Neliti": 0.00045171180061189957,
+    "MedRxiv": 0.00040399294841488866,
+    "WoltersKluwer": 0.0003037947169052797,
+    "ScientificNet": 5.174357169825938e-05
+  }
+}

@@ -3,10 +3,13 @@
 Phase 0 task F. Recomputes the §2.1 table against what task A actually measured, and flags any pool
 now below 3× peak plausible demand.
 
-**Headline: 6 of 8 pools verified met, 2 still being measured, none failing.** `reference` was the one
-failure and was **resolved 2026-07-31** by resizing the pool 14 B → 9 B (owner decision, below).
-`academic` and `synthetic` came in during Phase 0c and both clear comfortably; `code` and `qa-forum` are
-in flight, so this file will move once more.
+**Headline: ALL 8 POOLS MEASURED, all 8 clear their 3× floor.** Phase 0c finished 2026-07-31. Seven
+clear their nominal pool outright; `math` clears its floor 4.96× but sits 3.6% under its nominal 36 B,
+and `reference` was resized 14 B → 9 B by owner decision rather than padded. **No category is short of
+usable data.** Phase 0's four `0.00 B` readings were all rate-limit artifacts, not scarcity.
+
+Every figure below is `exact whole-split text bytes (parquet footers or gzip ISIZE) × sampled dolma2
+tokens/byte`. No datasets-server `/rows` calls, no downloads, all tokens/byte CVs under 0.25.
 
 ⚠️ **Two things Phase 0c corrected that this file previously asserted:**
 
@@ -36,8 +39,8 @@ any tokenizer.
 | **web (diverse)** | 30 B | 21 B | **114.69 B** | ✅ **MET 5.5×** | `dclm_100BT`, exact rows, `partial: false` |
 | **math** | 36 B | 21 B | **34.69 B** | ⚠️ **3× met (4.96×), pool short 3.6%** | finemath-3plus alone; everything else in the category overlaps it |
 | **academic** | 20 B | 12 B | **64.12 B** | ✅ **MET 3.2× (5.3× the floor)** | footer-exact; non-overlapping after dropping peS2o's **measured 49.7% PMC share** (naive sum would be 84.26 B) |
-| **code** | 40 B | 24 B | *unmeasured* | ⚠️ **UNVERIFIED, likely met** | stackv2_edu desk floor 61–80 B from 83.0 GB × 0.274 tok/char |
-| **QA/forum** | 12 B | 7.2 B | *unmeasured* | ⚠️ **UNVERIFIED, likely met** | stackexchange_filtered ~23.9 B; survives a pessimistic 0.21 tok/byte bound at ~18.8 B |
+| **code** | 40 B | 24 B | **74.81 B** | ✅ **MET 1.87× (3.12× the floor)** | `stackv2_edu_filtered` ALONE; ISIZE over all 95 shards × 0.2938 tok/byte. Excludes swallow (a rewrite of the same blobs) and github_archive (not code) |
+| **QA/forum** | 12 B | 7.2 B | **25.93 B** | ✅ **MET 2.16× (3.60× the floor)** | stackexchange 24.05 B + ubuntu_irc 1.87 B. ⚠️ **92.8% share-alike** — drop SA and it is 1.87 B, which FAILS even peak demand |
 | **reference** | **9 B** ✅ *(was 14 B)* | 7.2 B → **2.4 B** | **8.87 B** | ✅ **MET 3.70×** | finewiki/en, footer-exact. Resolved by resizing the POOL, not by padding it |
 | **synthetic** | 60 B (4×15 B) | 18 B | **478.15 B** | ✅ **MET 8.0× (26× the floor)** | exact nested-leaf footers; faq 148.54 / tutorial 147.92 / math 94.74 / table 86.95 |
 
@@ -98,21 +101,74 @@ are **not independent**. To get a real counterweight, draw from the DCLM documen
 classifier *rejected* (`edu_score ≤ 2`), or source edu-web from FineWeb-Edu instead. Measured, not
 inferred: `olmo-mix-1124` is **99.9% DCLM by document count** (3,033,948,632 of 3,035,925,377 rows).
 
-**2. `github_archive_filtered` is claimed by two categories and is neither.** §3.2 lists it under
-**code**, but its rows are GitHub issue/PR/comment **prose** (`source` = `gharchive/issue`). It
-belongs in QA/forum. Two agents found this independently. Whichever category keeps it, the other's
-total drops.
+**2. `github_archive_filtered` — RESOLVED: it is QA/forum, and it is budgeted there.** §3.2 lists it
+under **code**, but every sampled row is `gharchive/issue` or `gharchive/pull-request` prose, mean
+1,707 bytes, and its tokens/byte (0.278–0.283) sits between StackExchange prose and IRC dialogue —
+nowhere near code.
 
-## What would settle the unverified pools
+**Two agents measured it independently and agree within 2.4%** (11.51 B vs 11.23 B), reaching the same
+verdict without conferring. The deciding argument is asymmetric need, not taxonomy: **code clears its
+floor 3.12× without it, while QA/forum's SA-free pool cannot clear anything without it** — 1.87 B alone
+is 0.26× the floor, and adding github_archive's ~11.5 B of *permissive* tokens takes the SA-free pool to
+13.39 B, which passes at 1.86×. So it goes where it is load-bearing. `code.json` counts 0 of it.
 
-All four unmeasured categories need the same thing, and it is cheap: **a footer-bytes scan or a ~1%
-shard stream, run in-region on Batch.** The method that worked is worth reusing — reading parquet
-footers off the hub CDN gives *exact* whole-split column bytes with **zero** datasets-server quota,
-and it caught two bad numbers during Phase 0 (a 60-doc sample put finepdfs-edu doc length 68% high;
-`/statistics` was partial at 6.4% of finewiki's rows with 32% estimator divergence).
+## ⚠️ Two traps in `raw_v0.1_parquet` that any re-measurement must handle
 
-For Common Pile sources specifically, the parquet mirror is `common-pile/raw_v0.1_parquet` — not
-`comma_v0.1`, which is `.json.gz` and has no footers to read.
+Both were caught by agents mid-measurement and both produce a **plausible wrong number**, not an error.
 
-**Cost estimate: well under $10 and about an hour.** None of it is on the far side of the §9.1 hard
-stop, so it can be done before the ~$595 decision rather than after.
+**1. The mirror sweeps TWO document trees for some sources.** A naive footer read overstates
+`ubuntu_irc` **2.1×** and `github_archive` **4.5×**. The proof is exact and I reproduced it myself —
+reading the whole `id` column for `ubuntu_irc` gives the multiplicity histogram:
+
+```
+{1: 404034, 2: 329115}      and 329,115 IS the raw card's document count
+```
+
+so a third of the ids appear twice. Row counts confirm the signature cheaply: `ubuntu_irc` has
+**3.23× its card's rows** while `peS2o` (1.03×) and `pubmed` (1.06×) are normal. **I verified the
+academic figures in this table are unaffected** — only `ubuntu_irc` shows it, and the qa-forum agent
+corrected for it before reporting. But `stackv2`, `cccc`, `peS2o` and `uspto` are all large enough to
+hide a second tree, so **check the row-count ratio against the card before trusting any footer sum**.
+
+**2. gzip `ISIZE` is mod 2³².** `pubmed`'s shards exceed 4 GiB and wrapped, reporting "uncompressed"
+*smaller than compressed*. A ratio guard caught it; per-shard wrap recovery then matched the card ratio
+to 0.35%. Any ISIZE-based byte count on shards >4 GiB needs the same guard.
+
+**And the raw→filtered gap is not a size gap, it is a LENGTH-BIAS gap.** For `stackv2_edu` the edu
+filter keeps 31.4% of documents but only **5.33% of bytes** — an 18.8× byte reduction, because it
+preferentially drops long files. The raw upper bound (~1,403 B) overstates usable supply by ~19× and
+must never enter §2.1. This is why every row above uses a filtered-corpus measurement rather than a
+scaled raw one.
+
+## Done — and what the method cost
+
+**Every category is measured. `needs_streaming_count` is empty across all eight artifacts**, so the
+Batch streaming job this section used to call for is unnecessary. The parquet-footer / gzip-ISIZE route
+did it from a laptop in metadata-scale traffic: the qa-forum agent moved **1.6 GB against 365 GB of
+text**, and the academic agent 7.1 MB of footers for three corpora.
+
+That is the durable lesson from Phase 0c. Phase 0 stalled because it used datasets-server, whose quota
+is **per-IP, not per-account** — so parallel agents starve each other and the failures look exactly like
+broken corpora. The footer route touches the hub CDN instead and is quota-free, which is why four agents
+could run at once here where eight could not before.
+
+**Cost: effectively zero.** No Batch job, no egress beyond footers, well under the ~$10 budgeted.
+
+## Still open, and each is a decision rather than a measurement
+
+1. **`math` sits 3.6% under its nominal 36 B pool** (34.69 B, floor cleared 4.96×). Adding
+   `algebraic-stack` would close it, but its license is *not a grant* — "we do not alter the license of
+   any of the underlying data" means the union of 17 languages' GitHub repos.
+2. **QA/forum is 92.8% share-alike**, measured from per-document `metadata.license`. The owner has
+   decided SA stays in, separable. Worth knowing what separable costs here: dropping SA leaves 1.87 B,
+   which fails even peak demand — unless `github_archive`'s ~11.5 B permissive tokens are counted, which
+   takes the SA-free pool to 13.39 B (1.86× the floor). That is the strongest argument for filing
+   `github_archive` here.
+3. **`swallow-code-v2` is measurable after all** (59.38 B) — Phase 0 called it unmeasurable, but its
+   blockers were datasets-server-only. It is excluded anyway: a Python-only rewrite of the same Stack-v2
+   blobs, with measured surface similarity to its own originals of **0.064**, so no n-gram or MinHash
+   dedup catches the duplication. Also **74% of its bytes are `no_license` upstream** despite the repo's
+   apache-2.0 tag. If that is ever cleared, the total is 124.32 B (74.81 − 9.88 Python + 59.38), never
+   the naive 134.19 B.
+4. **The reservoir total moved**, so the dataset name `reservoir-260b-dolma2` needs deciding — see the
+   design doc's header. Recommendation there: drop the number.
