@@ -34,11 +34,13 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from .contracts import (
+    CONTROL_BASENAMES,
     NamingError,
     SCHEMA_VERSION,
     SPLITS,
     _resolve_families_dir,
     canonical_json,
+    is_control_prefix,
     validate_dataset_id,
     validate_purpose,
 )
@@ -169,7 +171,45 @@ def _stream_count_newlines(s3: S3, bucket: str, key: str, *, gz: bool) -> int:
 # --------------------------------------------------------------------------------------
 
 
-_CONTROL_BASENAMES = {"dataset.json", "manifest.json", "_SUCCESS", "_VALIDATED.json", "_REJECTED.json", "README.md"}
+#: Imported from `contracts`, NOT redeclared. This module used to carry its own literal copy,
+#: byte-identical to the validator's — so the suite could only prove the two agreed, never that
+#: there was one definition. See the `contracts.CONTROL_PREFIXES` comment; the alias is kept
+#: because `CLAUDE.md` names `_CONTROL_BASENAMES` as the thing a control file belongs to.
+_CONTROL_BASENAMES = CONTROL_BASENAMES
+
+
+def _is_control_source(rel: str) -> bool:
+    """Whether a staged/enumerated source path is a control file rather than payload.
+
+    THE BUG THIS FIXES. Both enumeration paths matched control files by BASENAME ONLY, with no
+    prefix support at all — so a sidecar under a control prefix was enumerated as payload, got a
+    manifest entry, and was folded into `manifest_sha256`. That is strictly worse than the
+    validator merely rejecting it: it makes a MUTABLE sidecar part of a FROZEN dataset's
+    identity, so recomputing the cluster table (which §1.3 expects to happen as sources are
+    added) would invalidate the hash chain of an already-published dataset. Verified before the
+    fix: a staged `_dedup/clusters.parquet` produced a whole spurious `_dedup` GROUP with the
+    parquet as its only manifest entry.
+
+    Basename matching is deliberately kept UNANCHORED here, unlike the validator's
+    depth-anchored `_is_control_key`. The two are answering different questions: this one filters
+    a producer's SOURCE tree, where a stray `README.md` in a subdirectory is a file the producer
+    does not want published at all; the validator's sweeps a PUBLISHED tree, where an unanchored
+    basename let `sneaky/README.md` hide from the exhaustiveness check. Narrowing this to depth 0
+    would start publishing nested READMEs as payload — a behaviour change nothing asked for.
+
+    CONSEQUENCE, and it is the intended one: a sidecar staged in the source tree is skipped
+    ENTIRELY, exactly as a hand-written `README.md` already was — it is not uploaded, so it is
+    not promoted either (`promote()` copies dataset.json, the group manifests, and
+    manifest-listed keys, nothing else). Sidecars arrive by the same route the generated README
+    does: written in place under the published prefix, which is the descriptive-keys-only
+    backfill `CLAUDE.md` sanctions, and which both design sections (§1.3 "backfillable", §1.5
+    "may slip to a later backfill") assume. Copying them to landing instead would be worse than
+    skipping: they would pass Gate A, then be silently dropped by `promote()` and expire with
+    landing's 14-day lifecycle — published in appearance only.
+    """
+    if rel.rsplit("/", 1)[-1] in _CONTROL_BASENAMES:
+        return True
+    return is_control_prefix(rel)
 
 
 def _stage_local_to_landing(source: Path, s3: S3, landing_bucket: str, staging_prefix: str) -> None:
@@ -183,7 +223,7 @@ def _stage_local_to_landing(source: Path, s3: S3, landing_bucket: str, staging_p
         if not p.is_file():
             continue
         rel = p.relative_to(source).as_posix()
-        if rel.rsplit("/", 1)[-1] in _CONTROL_BASENAMES:
+        if _is_control_source(rel):
             continue
         s3.put_file(landing_bucket, f"{staging_prefix}/{rel}", str(p))
 
@@ -197,7 +237,7 @@ def _enumerate_s3(s3: S3, bucket: str, prefix: str) -> list[tuple[str, int]]:
     for obj in sorted(s3.list(bucket, prefix + "/"), key=lambda o: o["key"]):
         key = obj["key"]
         rel = key[len(prefix) + 1 :]
-        if rel.rsplit("/", 1)[-1] in _CONTROL_BASENAMES:
+        if _is_control_source(rel):
             continue
         out.append((rel, obj["size"]))
     return out

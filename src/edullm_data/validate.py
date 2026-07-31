@@ -25,10 +25,13 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from .contracts import (
+    CONTROL_BASENAMES,
+    CONTROL_PREFIXES,
     FAMILIES,
     _resolve_families_dir,
     SPLITS,
     TRAINABLE_SPLITS,
+    is_control_prefix,
     is_trainable,
     READABLE_SCHEMA_VERSIONS,
     NamingError,
@@ -60,10 +63,13 @@ from .s3 import S3, NotFound
 
 # Control files that live under a dataset prefix but are not group payload — excluded from
 # the manifest-exhaustiveness comparison so they never read as "extra".
-CONTROL_BASENAMES = frozenset(
-    {"dataset.json", "manifest.json", "_SUCCESS", "_VALIDATED.json", "_REJECTED.json", "README.md"}
-)
-CONTROL_PREFIXES = ("_catalog/", "dependents/")
+#
+# RE-EXPORTED, NOT REDEFINED. Both names now come from `contracts.py`, which `publish.py` reads
+# from the same import, so the producer and the validator cannot disagree about what a control
+# file is. They were separate literals here and in `publish._CONTROL_BASENAMES` before; the two
+# copies were identical, which meant the suite could only ever prove they AGREED, never that
+# there was one definition to change. Kept importable under these names because
+# `CLAUDE.md`, `HANDOFF.md`, and tests all refer to `validate.CONTROL_BASENAMES`.
 
 FAMILIES_DIR = _resolve_families_dir()
 
@@ -142,6 +148,14 @@ def _is_control_key(rel: str) -> bool:
     Control BASENAMES are anchored to the dataset root (or one level down, where a group's
     manifest.json lives). Matching a basename anywhere in the tree let `sneaky/README.md` and
     `sneaky/dataset.json` hide from the exhaustiveness sweep entirely.
+
+    Control PREFIXES are matched at ANY depth beneath the prefix — that is the point of a
+    prefix, and it is why the sidecar subtrees (`_dedup/`, `_licenses/`) are modelled as
+    prefixes rather than pinned basenames: a file added under one later needs no code change.
+    The exhaustiveness sweep this feeds is the check that catches an object no manifest lists,
+    so the prefix list stays SHORT and every entry is a leading-underscore directory that
+    cannot be mistaken for a group. A prefix that matched something payload-shaped would
+    silently disable the sweep for that subtree, which is the whole check.
     """
     base = rel.rsplit("/", 1)[-1]
     depth = rel.count("/")
@@ -149,7 +163,7 @@ def _is_control_key(rel: str) -> bool:
         return True
     if base == "manifest.json" and depth == 1:
         return True  # a group's own manifest, e.g. tokens/manifest.json
-    return any(rel.startswith(cp) for cp in CONTROL_PREFIXES)
+    return is_control_prefix(rel)
 
 
 def _load_json(s3: S3, bucket: str, key: str) -> Any:

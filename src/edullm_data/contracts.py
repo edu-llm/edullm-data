@@ -23,6 +23,9 @@ from typing import Any, Literal, get_args
 __all__ = [
     "SCHEMA_VERSION",
     "READABLE_SCHEMA_VERSIONS",
+    "CONTROL_BASENAMES",
+    "CONTROL_PREFIXES",
+    "is_control_prefix",
     "FAMILIES",
     "RELATIONS",
     "SPLITS",
@@ -153,6 +156,72 @@ def is_trainable(split: str | None) -> bool:
     rather than relying on ``None`` meaning "train".
     """
     return split in TRAINABLE_SPLITS
+
+
+# --------------------------------------------------------------------------------------
+# Control files — ONE definition, shared by the producer and the validator
+# --------------------------------------------------------------------------------------
+#
+# WHY THIS LIVES HERE AND NOT IN EITHER CALLER. Until now `publish.py` and `validate.py` each
+# carried their own copy of the control-file allowlist. The two sets happened to be identical
+# character-for-character, so no test could tell them apart — and that is exactly the
+# `families/`-half-fix shape this repo has already been bitten by: a change made in the
+# validator that nobody notices is missing from the producer, because a green suite proves only
+# that the two copies AGREE, never that there is one. `_dedup/` is the first entry where they
+# would have diverged, and diverging is worse than either behaviour alone: the validator would
+# have accepted the sidecar as a control file while the producer folded it into
+# `manifest_sha256`, making a mutable sidecar part of the dataset's frozen identity.
+#
+# `contracts.py` is the right home because it is the "primitives every other module depends on"
+# layer and both callers already import from it, so sharing costs no new edge in the import
+# graph. What a control file IS is a fact about the standard (§3), not a policy either side owns.
+
+#: Control BASENAMES — objects that live at the dataset root (or, for ``manifest.json``, one
+#: level down inside a group) and are not payload. Anchored by depth at the point of use; see
+#: ``validate._is_control_key``.
+CONTROL_BASENAMES = frozenset(
+    {"dataset.json", "manifest.json", "_SUCCESS", "_VALIDATED.json", "_REJECTED.json", "README.md"}
+)
+
+#: Control PREFIXES — whole subtrees under the dataset prefix that hold sidecar metadata rather
+#: than payload. Prefix-matched, so ANY key at ANY depth beneath one is a control file and a
+#: future file added under an existing prefix needs no further code change.
+#:
+#: Every entry must be a directory whose name cannot collide with a group name. Group names are
+#: kebab-case ``[a-z0-9-]`` (``_NAME_RE`` below) and `publish._group_of` derives a group from the
+#: first path segment, so a LEADING UNDERSCORE is the thing that makes a prefix unambiguously
+#: not-a-group. `dependents/` is the one legacy exception, kept for compatibility.
+#:
+#: `_dedup/`   — §1.3 MinHash near-duplicate cluster IDs (doc-id → cluster-id → source). Sidecar
+#:               and deliberately OUTSIDE the hash chain: the table is recomputed as sources are
+#:               added, and a frozen dataset must not have its identity move when it is. This is
+#:               the RedPajama-V2 arrangement (ship the signatures, keep the duplicates).
+#: `_licenses/` — §1.5 per-source license strings. A PREFIX, not a bare `_licenses.parquet` at
+#:               depth 0, for two independent reasons. (1) A bare basename would need a THIRD
+#:               matching rule (basename + depth anchor) in `_is_control_key` and a matching
+#:               depth-0 special case in the producer — where a depth-0 file is not merely
+#:               unlisted but a hard `PublishError`, because `_group_of("_licenses.parquet")`
+#:               returns "" and every object must live under a group prefix. Prefix form makes
+#:               both modules agree with the same single rule. (2) License data grows: per-source
+#:               strings today, per-document rows or a spdx map later. A prefix absorbs that; a
+#:               pinned basename would need this list edited again, which is the one thing this
+#:               comment exists to prevent.
+#:
+#: NOT `_catalog/` for either. That prefix does pass the check, but it is the version resolver's
+#: namespace (`read.dataset_paths` LISTs `_catalog/<dataset_id>/` and parses every key it finds
+#: as a version), so a sidecar there would corrupt dataset discovery.
+CONTROL_PREFIXES = ("_catalog/", "dependents/", "_dedup/", "_licenses/")
+
+
+def is_control_prefix(rel: str) -> bool:
+    """Whether a dataset-relative key falls under a control PREFIX (any depth).
+
+    Split out from the basename rule on purpose: the producer needs the prefix half without the
+    depth-anchored basename half, and duplicating `startswith` loops is how the two modules
+    drifted before.
+    """
+    return any(rel.startswith(cp) for cp in CONTROL_PREFIXES)
+
 
 #: §2 — kebab-case, lowercase, and nothing else. Rejects ``dolma2_150B``.
 _WORD_RE = re.compile(r"^[a-z0-9]+$")
