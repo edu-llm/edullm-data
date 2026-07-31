@@ -87,9 +87,26 @@ tightest one.
 | `ImportError: cannot import name …` | job def bootstraps an older wheel | re-register against the current version |
 | `no enabled Expiration lifecycle rule` | `expire-ingest-30d` missing | deploy `infra/07-landing-ingest-lifecycle.json` (merge, don't replace) |
 | `AccessDenied … GetLifecycleConfiguration` | policy predates the guard | re-apply `infra/08-reservoir-ingest-policy.json` |
+| **exit 139, `Segmentation fault`** | **short HTTP read handed to pyarrow** | fixed in `0.6.2`; if it recurs, the read loop is gone |
 | `shard parts are missing` | a child failed | re-run those indices, then merge again |
 
-Each of the first four has actually happened, in that order.
+Every row has actually happened, in that order.
+
+### ⚠️ Exit 139 is not exit 137, and the difference is the whole diagnosis
+
+**137** is SIGKILL — the container hit its memory cap. **139** is SIGSEGV — a crash inside C++.
+
+When three of four array children returned 139, the tempting read was "I halved memory from 16 GB
+to 8 GB when sizing the array down, so give it more RAM." That is what 137 would have meant. 139
+meant pyarrow segfaulted, and the cause was a **short HTTP read**: `RawIOBase.read` may legally
+return fewer bytes than requested, a throttled connection does exactly that, and pyarrow does not
+re-request the remainder — it parses a page header at an offset inside the wrong bytes.
+
+Two details that identified it as deterministic rather than flaky: every child died on the config
+*after* its first successful one (long enough to get throttled), and shard 0 survived only because
+it happened not to be cut. Random memory pressure would not produce that shape.
+
+The job definition now asserts the read loop is present before doing any work.
 
 ## The preflight the job def runs before touching anything
 
