@@ -18,8 +18,12 @@ name:     pretrain/reservoir-260b-dolma2  [validate_dataset_id: PASS]
 it found, and the resume state are in `artifacts/` — start with `artifacts/PHASE0-REPORT.md`, then
 `artifacts/PLAN-CORRECTIONS.md`. §9's hard stop has been reached and **resolved by the owner**: the
 domain classification it gated is **cancelled** (§1.2), so §9.4's dual-judge gate is now historical
-record rather than pending work. Phase 1 (§5.6) is the next unstarted phase, and it still requires
-the three pre-publish items listed in §9.7.
+record rather than pending work. **§9.7's gate is now CLEAR — all three items closed on 2026-07-31:**
+item 1 (`CONTROL_PREFIXES`, both modules) landed in `4d6768e`; item 2 (slug + fold, plus the
+partial-label reader warning) landed in `934dd75`; item 3 (the per-document key) was **DECIDED —
+SKIP**. Suite at **692 passing**. **Phase 1 (§5.6) is the next unstarted phase and is unblocked** —
+though see §5.6 phase 0b for the token re-count that is *advisable* before assembly rather than
+blocking, and §2.1/`artifacts/sizing-revised.md` for the one pool (`reference`) measured as NOT met.
 
 **All open decisions are CLOSED as of 2026-07-31.** In review order:
 
@@ -27,7 +31,8 @@ the three pre-publish items listed in §9.7.
 |---|---|---|
 | synthetic path encoding | `synthetic-` prefix on the `source` segment | 1.1 |
 | **domain labels** | **REVISED 2026-07-31 (post-Phase-0): NO classification. `domain` only where a source SHIPS one upstream; every other source is flat.** | **1.2** |
-| MinHash cluster-ID home | **`_dedup/clusters.parquet` control file** — NOT `entry.labels`, which Gate A rejects. ⚠️ needs a one-line `validate.py` allowlist change first | 1.3 |
+| MinHash cluster-ID home | **`_dedup/clusters.parquet` control file** — NOT `entry.labels`, which Gate A rejects. ⚠️ needs a `CONTROL_PREFIXES` allowlist entry in **both** `validate.py` and `publish.py` first (§9.7 item 1) | 1.3 |
+| **per-document key `(shard_path, doc_index)`** | **DECIDED 2026-07-31 — SKIP. Not emitted.** Per-document licensing is unavailable in `v1`; licenses and cluster IDs are **source-level** | **9.7 item 3**, 1.3, 1.5 |
 | dedup actions | Bloom **deletes**, MinHash **annotates only** | 1.3, 4.1 |
 | shard size | **25,001,984 tokens** (~100 MB) → ~10,400 objects | 2.2 |
 | curated-source pools | over-provisioned (15% of default) rather than tuned to the evidence's 2% | 2.1 |
@@ -63,14 +68,23 @@ changing one means republishing, which means re-copying every payload byte.
 | **1.1** | realness fused into `source` with a `synthetic-` prefix | **irreversible** |
 | **1.2** | which sources carry a `domain`, and the **slug + fold** of each inherited value | **irreversible** ⚠️ see §9.7 item 2 |
 | **1.4** | held-out carved from documents, per source, before tokenizing | **irreversible** |
-| **NEW** | whether the tokenizer emits a per-document key `(shard_path, doc_index)` | **irreversible** ⚠️ see §9.7 item 3 |
-| 1.3 | MinHash cluster-ID home | *demoted* — backfillable under the control-file design |
-| 1.5 | share-alike separability | *not on the list* — SA maps onto whole `source` values, so it survives in the names alone |
+| **NEW** | whether the tokenizer emits a per-document key `(shard_path, doc_index)` | ✅ **DECIDED 2026-07-31 — SKIP. It will not be emitted.** Still irreversible, now *exercised*: unrecoverable in `v1`, revisitable only in a `v2`. See §9.7 item 3 |
+| 1.3 | MinHash cluster-ID home | *demoted* — backfillable under the control-file design. ⚠️ but now **source-level**, per the row above |
+| 1.5 | share-alike separability | *not on the list* — SA maps onto whole `source` values, so it survives in the names alone. ⚠️ true for `stackexchange`/`finewiki`; `libretexts` and `peS2o` are **mixed** (§1.5) |
 
-The new fourth item is the one the original plan missed entirely: the manifest's grain is **one shard
-object**, so there is no per-document key. EOS boundaries are recoverable from a `.u32le.bin` later, but
-the document→row mapping is gone the moment tokenization finishes. If per-document licenses or cluster
-IDs are ever wanted, the tokenizer has to emit that key at build time.
+**The fourth item stays on this list, decided rather than deleted.** It is the one the original plan
+missed entirely: the manifest's grain is **one shard object**, so there is no per-document key. EOS
+boundaries are recoverable from a `.u32le.bin` later, but the document→row mapping is gone the moment
+tokenization finishes.
+
+**The owner considered it and chose to skip it (2026-07-31).** No per-document key is emitted. So
+per-document licensing is permanently unavailable for this version, and MinHash cluster IDs are
+**source-level** (§1.3). The reasoning, in full, is in §9.7 item 3; the short version is that both
+things the key would have bought are answerable at source granularity — SA exclusion is a set of
+`source` names to omit, and the cluster table's job is to *warn at mix time* about overlapping sources.
+It is recorded here rather than removed because a future reader needs to know the option was weighed and
+closed, and why: it is the difference between "nobody thought of this" and "this is out of scope for
+`v1`."
 
 ### 1.1 Real vs synthetic goes in the `source` label — NOT in separate groups
 
@@ -227,7 +241,7 @@ not a settled one.** Three options, in preference order:
 
 | option | how | trade-off |
 |---|---|---|
-| **A. A sibling non-manifest artifact** (recommended) | Write `_dedup/clusters.parquet` (doc-id → cluster-id → source) alongside the payload, as a **control file** outside the hash chain | Backfillable, no schema change, no Gate A risk. Cost: not covered by `manifest_sha256`, so it is not tamper-evident. Precedent: RedPajama-V2 ships `.duplicates.parquet` exactly this way |
+| **A. A sibling non-manifest artifact** (recommended) | Write `_dedup/clusters.parquet` (cluster-id → source → count) alongside the payload, as a **control file** outside the hash chain | Backfillable, no schema change, no Gate A risk. Cost: not covered by `manifest_sha256`, so it is not tamper-evident. Precedent: RedPajama-V2 ships `.duplicates.parquet` exactly this way |
 | **B. A second group** | `dedup/` group holding the cluster table as its own payload | Inside the hash chain and tamper-evident. Cost: makes the dataset multi-group, so **every `build_mixture` call must name `group=`** (§1.1) — a permanent ergonomic tax on every reader |
 | **C. Extend the schema** | Add an `entry.meta` free-form field to `manifest.py` + a Gate A check | Correct long-term, but it is a spec change to a shared standard, needs a profile bump, and blocks the build until merged |
 
@@ -236,10 +250,44 @@ backfillable, which means **this is no longer a decision that must precede the f
 §1 header for the current list.
 
 ⚠️ **Two corrections to option A, both from Phase 0.** (a) `_dedup/clusters.parquet` is **rejected by
-Gate A today** — `_is_control_key` returns `False`, so it needs a one-line `CONTROL_PREFIXES` entry
-first (§9.7 item 1). The "no Gate A risk" claim above was wrong. (b) Even with that fixed, a cluster
-table needs a **per-document join key**, which the manifest does not have — that is the new fourth
-irreversible decision in the §1 header. So option A is still right, but it is not free.
+Gate A today** — `_is_control_key` returns `False`, so it needs a `CONTROL_PREFIXES` entry first
+(§9.7 item 1, and note that fix has a **producer half** as well: `publish.py`'s control-file matcher is
+basename-only, so an un-allowlisted sidecar is swept in as *payload* and enters `manifest_sha256`).
+The "no Gate A risk" claim above was wrong. (b) Even with that fixed, a *per-document* cluster table
+needs a **per-document join key**, which the manifest does not have. So option A is still right, but it
+is not free.
+
+#### ⚠️ Cluster IDs are SOURCE-LEVEL, not per-document (consequence of §9.7 item 3's SKIP)
+
+The owner decided 2026-07-31 **not** to emit `(shard_path, doc_index)`, so the per-document join key
+will never exist in `v1`. `_dedup/clusters.parquet` therefore ships the **cluster × source membership
+count matrix** — §4.1 step 6's output, which was always the shipped artifact — and **not** a
+doc-id → cluster-id mapping. One row per (cluster_id, source) with a document count; the doc-id column
+in option A's description above is dropped.
+
+**What that costs, stated plainly: overlap accounting at mix time becomes coarser — source × source, not
+doc × doc.** Concretely:
+
+| what you can still ask | what you can no longer ask |
+|---|---|
+| "Do `fineweb-edu` and `essential-web` share near-duplicate clusters, and how many?" | "Which documents are the duplicates?" |
+| "If I select these 5 sources at these weights, what is the expected duplicate *mass*?" — the §6 item 3 dot product, unchanged | "Drop the overlapping documents and keep the rest." |
+| A **warning** at mix time, which is exactly what §1.3 was for | A **surgical removal** at mix time. |
+
+Two honest limits on the coarser number:
+
+1. **It is an expectation over sources, not a measurement of the selection.** Selection is whole-shard
+   and seeded (§2.2), so the shards actually drawn from a source carry an unknown share of that source's
+   clusters. The overlap figure is therefore accurate in expectation and approximate for any single
+   seed — fine for a warning, not for a guarantee.
+2. **A source that overlaps *itself* is invisible.** Intra-source near-duplicates land in the same
+   `(cluster_id, source)` row as everything else from that source, so the matrix cannot distinguish "one
+   source containing 3 copies of an article" from "3 sources containing 1 each." §4.1's Bloom stage
+   already deletes byte-identical duplicates within a source, which bounds this — but near-duplicates
+   inside one source are neither deleted nor separately reported. Record it in `limitations`.
+
+Neither limit changes the decision: §4.1's own exposure arithmetic gives cross-corpus overlap a ~1,000×
+margin to the damage threshold, so this was an efficiency signal, never a correctness gate.
 
 **The two-stage design, and why the order matters:**
 
@@ -288,20 +336,47 @@ for inherited upstream values (§1.2) and `source` is already fused with realnes
 
 | mechanism | what it gives | cost |
 |---|---|---|
-| **`source` naming is already sufficient** | SA sources are wholly-SA *by source*: `stackexchange`, `finewiki`, `libretexts`. Excluding SA = omitting those source names from a `build_mixture` call. No new machinery. | zero |
-| **`_licenses.parquet`** (task B's schema) | the precise license string per source — needed anyway because SA is not a boolean (FineWiki carries **GFDL** alongside CC, a different copyleft, and LibreTexts has Public Domain + GFDL rows) | one control file |
+| **`source` naming is already sufficient** | Excluding SA = omitting source names from a `build_mixture` call. No new machinery. ⚠️ exact only for the *uniform* SA sources — see the correction below | zero |
+| **`_licenses/sources.parquet`** (task B's schema) | the precise license string(s) **per source**, with each one's share — needed anyway because SA is not a boolean (FineWiki carries **GFDL** alongside CC, a different copyleft, and LibreTexts has Public Domain + GFDL rows) | one control file |
+
+⚠️ **CORRECTION (2026-07-31, from writing the schema): "SA sources are wholly-SA *by source*" is true
+for two of the four, and it is the claim the §9.7 item 3 SKIP decision rests on — so the qualifier
+matters.** Measured:
+
+| source | SA share of upstream rows | omitting the name drops | collateral (non-SA lost) |
+|---|---|---|---|
+| `stackexchange` | **100%** (CC-BY-SA-4.0) | exactly the SA content | 0% |
+| `finewiki` | **100%** (CC-BY-SA-4.0 + GFDL) | exactly the SA content | 0% |
+| `libretexts` | **32.05%** (12,836 / 40,049, exact) | the whole source | **67.95%**, incl. 24,205 CC BY 4.0 rows |
+| `peS2o` | **≈1.9%** (120,150 rows, Common Pile Table 3) | the whole source | **≈98%** — the academic pool's largest source |
+
+So name-level exclusion is **conservative in the safe direction — no SA leaks through — but over-broad
+on the two mixed sources.** For `peS2o`, removing 1.9% of a source removes 100% of it, and §2.1 sizes
+the academic pool on that source. This does not reverse the SKIP decision: what §1.5 *requires* is that
+SA remain **identifiable**, which the source-level table delivers exactly. It forecloses the *surgical*
+case — strip SA, keep the rest of a mixed source — which now needs a `v2`. Full measurements and the
+schema: `artifacts/licenses/SCHEMA.md` §3.
 
 ⚠️ **Do not model SA as a boolean.** Phase 0 found 7 distinct license values in LibreTexts alone, of
 which **4.86% are not Creative Commons at all** (Public Domain, GFDL). Record the license *string*;
-let a consumer decide what counts.
+let a consumer decide what counts. And note the direction of error runs both ways: `stackexchange`'s
+CC-BY-SA is visible **only in per-row `metadata.all_licenses`** — its `cardData` declares no license at
+all — while peS2o's ~2% SA is invisible from repo metadata entirely. A declared license can both
+overstate and understate what is inside.
 
-⚠️ **`_licenses.parquet` is rejected by Gate A today** — `_is_control_key` returns `False` for it, so
-it trips `unlisted-object-dataset-level`. It needs the same one-line `CONTROL_PREFIXES` change as
-§1.3's `_dedup/`. Both must land before the first publish.
+⚠️ **`_licenses/` is rejected by Gate A today** — `_is_control_key` returns `False`, so it trips
+`unlisted-object-dataset-level`. It needs the same `CONTROL_PREFIXES` change as §1.3's `_dedup/`,
+**including the producer half** (§9.7 item 1). Both must land before the first publish.
 
-**Not a blocker for the first publish**, unlike §1.2's slugging: because SA maps cleanly onto whole
-sources, the ability to exclude it survives in the `source` names alone even if
-`_licenses.parquet` slips to a later backfill.
+⚠️ **Name it `_licenses/sources.parquet`, not `_licenses.parquet`.** A bare depth-0 parquet cannot be
+made to work: `_group_of('_licenses.parquet')` returns `''`, which is a hard `PublishError` — *"every
+object must live under a group prefix"* — and it would need a third matching rule in `_is_control_key`.
+Verified by execution; see `artifacts/licenses/SCHEMA.md` §9.
+
+**Not a blocker for the first publish**, unlike §1.2's slugging: because SA is *identifiable* from the
+`source` names alone, the ability to exclude it survives even if the licenses table slips to a later
+backfill. (It has to arrive that way regardless — a control file is skipped by `publish()`, so it is
+written in place under the published prefix, exactly like the generated README.)
 
 *Licensing notes are research findings, not legal advice.*
 
@@ -523,7 +598,14 @@ tokens rather than synthetic ones.
 
 ## 4. Dedup, decontamination, and the epoch guard
 
-### 4.1 Cross-corpus dedup: measure at build time, remove at mix time
+### 4.1 Cross-corpus dedup: measure at build time, ~~remove~~ **warn** at mix time
+
+⚠️ **The heading used to say "remove at mix time." It cannot, and after §9.7 item 3's SKIP it never
+will in `v1`.** Removal at mix time would need to identify *which documents* are duplicates, which needs
+a per-document key that will not be emitted. What the reservoir ships is the source-level count matrix
+(step 6), so mix-time behaviour is a **warning with a magnitude**, not a removal. The rest of this
+section's reasoning is unaffected — MinHash was always annotate-only, and §1.3's whole argument is that
+removing near-duplicates is affirmatively harmful.
 
 Exposures for a document over a run are `N · Σ_s w_s / S_s` (doc length cancels). Verified:
 
@@ -549,7 +631,11 @@ dumps, then trained on the ~31B *kept* vs 171B *removed* tokens — **the remove
 3. **Decontamination** (`allenai/decon`, `ngram_size 5`, threshold 0.8, whole-doc removal), per source
 4. MinHash signatures — **compute and keep, do not filter** (datatrove defaults: 5-gram, 14×8)
 5. LSH → connected components → global cluster IDs (single-task, ~460 GB RAM, 1–2 days, on-demand)
-6. Per-cluster × per-source membership counts → shipped as metadata
+6. Per-cluster × per-source membership counts → shipped as metadata (`_dedup/clusters.parquet`).
+   **This aggregate is the ONLY dedup artifact that ships**, and step 5's per-document cluster
+   assignment is consumed by it and then discarded — the cluster IDs exist inside the build, but
+   nothing in the published dataset can attach one to a document (§1.3, §9.7 item 3). Steps 4–6 still
+   run and still cost ~$96; the output is just coarser than the plan originally implied.
 
 **Skip semantic/embedding dedup**: ~$1,788, scored *below* the no-filter baseline in DCLM Table 4,
 second-worst of 19 samplers in the Ask-LLM benchmark, shipped by **zero** flagship corpora.
@@ -816,10 +902,22 @@ Draft `notes` content:
 > 75%-self-consistent ground truth was not worth it. Inherited metadata is a *fact*; a classified label
 > would have been a guess.
 >
-> **Share-alike sources are separable by name.** `stackexchange`, `finewiki` and `libretexts` are
-> share-alike (CC-BY-SA, and FineWiki also GFDL); omit those `source` values to exclude SA entirely.
-> Per-source license strings are in `_licenses.parquet`. Note SA is not a boolean — LibreTexts alone
-> carries 7 distinct licenses, ~5% of them not Creative Commons at all.
+> **Share-alike sources are separable by name — but only two of them cleanly.** `stackexchange` (100%
+> CC-BY-SA-4.0) and `finewiki` (100% CC-BY-SA-4.0 + GFDL) are wholly SA, so omitting those `source`
+> values excludes exactly their SA content. `libretexts` (**32.05%** SA) and `peS2o` (**≈1.9%** SA) are
+> **mixed**: omitting the name drops all of it, including 24,205 CC BY 4.0 LibreTexts rows and ~98% of
+> peS2o. Exclusion by name is therefore safe — no SA leaks through — and over-broad on those two.
+>
+> Per-source license strings, with each license's share, are in **`_licenses/sources.parquet`**.
+> Note SA is not a boolean — LibreTexts alone carries 7 distinct licenses, ~5% of them not Creative
+> Commons at all, and FineWiki's GFDL is a *different* copyleft from CC's, not interchangeable with it.
+>
+> **⚠️ Licensing is source-level only, and per-document licensing is unavailable in this version.** The
+> tokenizer deliberately does not emit a per-document key (§9.7 item 3), so no license can be attached
+> to an individual document, and license exposure is expressible in upstream *document counts*, never in
+> this dataset's *tokens*. The shares above also describe the **upstream** corpora: dedup and
+> decontamination ran between them and these shards, so a source's post-pipeline license mix is unknown.
+> Selecting or excluding by license means selecting or excluding whole `source` values.
 
 ---
 
@@ -830,10 +928,11 @@ The deferral in §5.2 only makes sense as an ordering, so here it is explicitly.
 | phase | do | why here |
 |---|---|---|
 | **0. Pre-flight** ✅ **DONE 2026-07-31** | Re-counted 6 sources under dolma2; per-book licenses for OpenStax (129 books) + LibreTexts (40,049 rows); validator timeout set to 7200 s; airlock re-verified. Found 10 plan defects. | Token counts from cards are not comparable — most name no tokenizer, and every Common Pile "token" figure is `Size(GB) × 0.25`, pure arithmetic. |
-| **0b. Pre-publish gate** ⬅ **NEXT** | The three items in **§9.7**: two `CONTROL_PREFIXES` entries, slug+fold the inherited `domain` values, decide on `(shard_path, doc_index)`. Optionally finish the 4 unverified token counts (~$10). | Each is irreversible if wrong and cheap if done first. `domain` slugs and the doc-index key are both inside `manifest_sha256`. |
+| **0b. Pre-publish gate** ✅ **CLEAR** | All three §9.7 items closed 2026-07-31. Item 1 (`CONTROL_PREFIXES`, both the validator and producer halves) → `4d6768e`. Item 2 (`slug_path_segment` / `build_domain_slug_map` + the `PartialLabelCoverage` reader warning) → `934dd75`. Item 3 (per-document key) → **DECIDED — SKIP**. Suite 626 → **692**. | Each was irreversible-if-wrong and cheap-if-done-first: the `domain` slugs sit inside `manifest_sha256`, and so would the doc-index key — which is why skipping it had to be a deliberate decision rather than an omission. |
+| **0c. Token re-count** ⬅ **NEXT, advisable not blocking** | Finish the 4 unverified categories via the footer-bytes method (~$10, ~1 h, in-region). Then decide the `reference` pool, which Phase 0 measured at **8.87 B against a 14 B target** — the one pool verified NOT met (`artifacts/sizing-revised.md`). | Sizing is a pool-size question, not a layout one, so it can trail the irreversible work — but going into assembly with 3 of 8 pools unverified and 1 known short is a choice, not an oversight. |
 | **1. Assemble** | Bloom-dedup (delete) → decontaminate → MinHash (annotate) → carve val from documents per source → tokenize → **attach inherited `domain` where the source ships one (§1.2), flat otherwise** → shard at 25,001,984 tokens. | §4.1 order. Val carve precedes tokenization (§1.4). The `domain` attach is now a metadata join, not a classification pass. |
 | **2. Publish** | `publish()` on Batch, in-region, `hash_workers`/`copy_workers=16`, `--timeout 7200`. Gate A ≈1.4 h. | §8. |
-| **2b. Backfill the sidecars** ⬅ **NEW, and the order is not optional** | AFTER promotion, write `_dedup/clusters.parquet` and `_licenses/licenses.parquet` **in place under the published prefix**. Do NOT stage them to landing. | See below — staging them loses them silently. |
+| **2b. Backfill the sidecars** ⬅ **NEW, and the order is not optional** | AFTER promotion, write `_dedup/clusters.parquet` (cluster × source counts) and `_licenses/sources.parquet` (+ optionally `_licenses/works.parquet`) **in place under the published prefix**. Do NOT stage them to landing. | See below — staging them loses them silently. Both are **source-level** artifacts, per §9.7 item 3's SKIP; schema in `artifacts/licenses/SCHEMA.md`. |
 | **3. Verify** | `verify_seal`, read a shard back, confirm `dataset_paths(labels={...})` slices, confirm the airlock still denies intern writes, **and confirm both sidecars survived promotion**. | The airlock re-check is a standing project rule after anything touching permissions. |
 | **4. First run** | Train once on the §2.1 default **plus a web-only baseline**. | Calibration, not a result. The baseline is what tells you whether any later tuning helped. |
 | **5. Sweep** | Now run the proxy search (§5.2.1) against the real reservoir. | It needs the reservoir to exist. |
@@ -903,6 +1002,23 @@ validator job or disable `edullm-landing-manifest-created` **first**.
    in this design.
 3. **Cluster-aware overlap accounting at mix time** — a dot product over the shipped MinHash cluster
    metadata, no re-hashing. This is what §1.3's annotate-don't-delete buys.
+
+   **The dot-product claim STILL HOLDS under source-level clusters — verify this, because it is the one
+   §6 item the SKIP decision could have broken.** It survives because the shipped artifact was always
+   §4.1 step 6's **cluster × source count matrix**, and a dot product is precisely the operation a matrix
+   like that supports: for a selection with weights `w_s`, expected duplicate mass is
+   `Σ_clusters Σ_{s≠t} w_s · w_t · n(c,s) · n(c,t) / (S_s · S_t)` — no per-document data anywhere in it.
+   Nothing about item 3's *implementation* changes.
+
+   **What changes is what the output is licensed to say.** Three qualifications, all from §1.3:
+   - It is a **magnitude for a warning**, not a removal list. "These two sources overlap in 8,400
+     clusters" is actionable; "drop the overlapping documents" is not implementable in `v1`.
+   - It is an **expectation over sources**, approximate for any single seed, because selection is
+     whole-shard (§2.2) and a drawn shard carries an unknown share of its source's clusters.
+   - **Intra-source overlap is invisible** — same-source duplicates collapse into one matrix cell.
+
+   So item 3 stays on this list at unchanged cost and unchanged mechanics; only its *ceiling* dropped,
+   from doc × doc to source × source.
 4. Confirm the dataloader shuffle **spans sources**: both OLMo-core mixers *concatenate*
    (`ConcatenatedTokenSource`), so cross-source shuffling must come from
    `NumpyDataLoaderConfig(global_batch_size=…, seed=…)` or you get curriculum-by-accident.
@@ -933,17 +1049,32 @@ validator job or disable `edullm-landing-manifest-created` **first**.
    1.2B). `Nemotron-Pretraining-Code-v3` is likewise ungated CC-BY-4.0. The design already sourced the
    web half from `odc-by`/`cc-by` corpora, so nothing in §3.2 changes.
 2. ~~**OpenStax's license.**~~ **RESOLVED by the user 2026-07-31: OpenStax is Creative Commons
-   throughout, but the variant differs per textbook** (some CC BY, some CC BY-NC-SA). Use is
-   non-commercial, so no variant blocks it today. **Action: record the license per book in metadata
-   anyway** — variant, title, source URL — so that a future commercial question is a metadata query
-   rather than a re-audit. Same treatment for LibreTexts, which mirrors OpenStax books and declares
-   licenses per page (`common-pile/libretexts_filtered` carries `metadata.license`; filter on it rather
-   than assuming the collection is uniform).
+   throughout, but the variant differs per textbook** — measured: **129 books, 75 CC BY-NC-SA 4.0 / 53
+   CC BY 4.0 / 1 unresolved (a retired empty stub), 0 non-CC**, cross-checked against a second
+   independent API with 0 disagreements. **NC-SA is 86.9% of the *live* catalog (73 of 84)**, so a future
+   commercial question removes most of OpenStax, not a fringe. Use is non-commercial, so no variant
+   blocks it today. **Action: record the license per book in metadata anyway** — variant, title, source
+   URL — so that a future commercial question is a metadata query rather than a re-audit. Same treatment
+   for LibreTexts, which mirrors OpenStax books and declares licenses per page
+   (`common-pile/libretexts_filtered` carries `metadata.license`; filter on it rather than assuming the
+   collection is uniform — it is genuinely non-uniform, 7 distinct values over 40,049 rows).
+   ⚠️ **Both land in `_licenses/works.parquet`, which is an UPSTREAM CATALOG SNAPSHOT and is NOT
+   joinable to the reservoir.** After §9.7 item 3's SKIP there is no key from a work to a shard, an
+   offset or a token, so nothing in `build_mixture` can select on it. It is evidence and audit trail —
+   which is exactly what "a metadata query rather than a re-audit" asks for — not a mix-time selector.
+   Also unresolved by a per-book variant: OpenStax states NC-SA books may contain third-party material
+   under separate terms. Schema: `artifacts/licenses/SCHEMA.md` §4.1.
 3. **Software Heritage bulk agreement** — gates `the-stack-v2`/`stack-edu`; its LLM principles demand
    open model release. A decision, not a workaround. (Routed around via
    `common-pile/stackv2_edu_filtered`.)
 4. **Share-alike segregation** — FineWiki and StackExchange are CC-BY-SA. Private S3 triggers nothing
    (CC obligations attach on *public* Share), but keep them separable in case of publication.
+   ⚠️ **This item understates the exposure — Phase 0 found SA in FOUR sources, not two**, and two of
+   them are *mixed* rather than wholly SA: `stackexchange` 100%, `finewiki` 100% (CC-BY-SA **+ GFDL**, a
+   different copyleft), `libretexts` **32.05%**, `peS2o` **≈1.9%** (invisible from repo metadata).
+   Segregation is by `source` name only (§1.5), which is safe but over-broad on the mixed two: excluding
+   `peS2o` to drop 1.9% drops 100% of the academic pool's largest source. Per-document SA selection is
+   **foreclosed for `v1`** by §9.7 item 3.
 5. **Common Crawl §9** — you indemnify CC for AI-training claims against a **$100** liability cap.
    Rides under nearly every web source here.
 
@@ -1007,7 +1138,10 @@ plan past it.
 ║  omitted otherwise. No classification model, no ~$595, no ~$920-$10k.    ║
 ║                                                                          ║
 ║  The gate below is HISTORICAL RECORD. Do not re-run it.                  ║
-║  Phase 1 is still gated — by the three pre-publish items in §9.7.        ║
+║                                                                          ║
+║  §9.7's pre-publish gate is now CLEAR TOO: item 1 landed (4d6768e),      ║
+║  item 2 landed (934dd75), item 3 was DECIDED - SKIP. 692 tests pass.    ║
+║  PHASE 1 IS UNBLOCKED.                                                   ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 ```
 
@@ -1067,7 +1201,7 @@ Wave 1 and Wave 2 are internally parallel; Wave 3 depends on Wave 1.
 | task | wave | agent | writes | returns to orchestrator |
 |---|---|---|---|---|
 | **A. Token re-count** — for each of the 8 categories, resolve the real dolma2 token count per candidate source (§3.2). Card figures are not comparable (§3.1). | 1 | **8 subagents, one per category** | `artifacts/recount/<category>.json` | one line each: category, source, tokens, method |
-| **B. License metadata** — per-book license variant for OpenStax + LibreTexts; write the schema for `_licenses.parquet` (§7 item 2) | 1 | 1 subagent | `artifacts/licenses/` | row count + distinct variants |
+| **B. License metadata** — per-book license variant for OpenStax + LibreTexts; write the schema for `_licenses.parquet` (§7 item 2). *As executed the schema was per-DOCUMENT; it was rewritten source-level on 2026-07-31 after §9.7 item 3's SKIP, and the file is `_licenses/sources.parquet`* | 1 | 1 subagent | `artifacts/licenses/` | row count + distinct variants |
 | **C. Infra gaps** — set `edullm-validator` job-def timeout to 7200s; report whether bucket-policy v2 is deployed (§5.7). **Report only, do not deploy the policy.** | 1 | 1 subagent | `artifacts/infra-status.md` | 2 booleans |
 | **D. Sample harvest** — pull 500 docs per source needing classification (DCLM, FineMath, academic, reference, QA), 256-token prefixes, to S3 | 2 | 1 subagent | `s3://edullm-landing/_smoke/samples/` | doc counts per source |
 | **E. Dual-judge smoke test** — label each sample with D/A/B, score per §9.4 | 3 | 1 subagent (needs D complete) | `artifacts/smoke/results.json` | the §9.4 table |
@@ -1203,35 +1337,98 @@ optional and `source` selection is unaffected.
   turn — a known failure mode in this project): kill it, re-spawn narrower, and record the artifact
   path it had reached.
 
-### 9.7 🛑 THE NEXT GATE — three items that must land BEFORE the first publish
+### 9.7 ✅ THE PRE-PUBLISH GATE — CLEAR. All three items closed 2026-07-31.
 
-Phase 0 is done; the classification is cancelled. **Phase 1 (§5.6) is still blocked**, on three things
-that are each irreversible-if-wrong and cheap-if-done-first. All three were found by executing Phase 0,
-not by reading the plan.
+Phase 0 is done and the classification is cancelled. Three items were listed here, each
+irreversible-if-wrong and cheap-if-done-first, and **all three were found by executing Phase 0 rather
+than by reading the plan** — which is the argument for having run it at all. Every one is now closed:
+item 1 landed as code (`4d6768e`), item 2 landed as code (`934dd75`), item 3 was **decided and
+skipped**. Suite 626 → **692 passing**. **Nothing irreversible is owed before Phase 1.**
 
-**1. Two `CONTROL_PREFIXES` entries in `validate.py`.** Both sidecars this design depends on are
-rejected by Gate A today — verified by execution:
+Kept in full below, not collapsed to a checklist: each entry records a defect in this plan that a
+careful reading had already missed once, and the reasoning is what stops it recurring in a `v2`.
+
+**1. ✅ LANDED (`4d6768e`) — `CONTROL_PREFIXES` entries for `_dedup/` and `_licenses/`.** Both sidecars
+this design depends on were rejected by Gate A. The original diagnosis, kept because the second half of
+it was missed the first time:
 
 ```
-_is_control_key('_dedup/clusters.parquet')  -> False    # §1.3, MinHash cluster IDs
-_is_control_key('_licenses.parquet')        -> False    # §1.5, per-source license strings
+# before the fix
+validate._is_control_key('_dedup/clusters.parquet')  -> False    # §1.3, MinHash cluster IDs
+validate._is_control_key('_licenses.parquet')        -> False    # §1.5, per-source license strings
 ```
 
-They match neither `CONTROL_BASENAMES` (anchored to depth 0) nor `CONTROL_PREFIXES`
-(`{'_catalog/', 'dependents/'}`), so they trip `unlisted-object-dataset-level` (`validate.py:626`).
-One-line fix plus a test and a failing fixture per `CONTRIBUTING.md`. **Do not hide them under
-`_catalog/`** — that prefix passes, but it is the version resolver's namespace.
+They matched neither `CONTROL_BASENAMES` (anchored to depth 0) nor `CONTROL_PREFIXES`
+(`('_catalog/', 'dependents/')`), so they tripped `unlisted-object-dataset-level`.
 
-**2. Slug and fold every inherited `domain` value (§1.2).** `C#` in an object key silently truncates
-any `s3://` URI at the `#`, and nothing in the pipeline catches it — `labels_from_path` accepts it and
-`fnmatch` matches it. Slug to `[a-z0-9-]`, fold the long tail to `other`, and publish the slug map in
-the README. Irreversible because the segment is inside `manifest_sha256`.
+⚠️ **There were TWO halves, and this plan only named one.** `publish.py` carried its **own**
+basename-only allowlist with no prefix support, so an un-allowlisted sidecar was not rejected — it was
+enumerated as **payload**, given a manifest entry, and folded into `manifest_sha256`, which would make a
+*mutable* sidecar part of a *frozen* dataset's identity. Fixing only the validator would have produced
+that exact divergence. Both names now live in `contracts.py` and are imported by each caller. Verified
+against the committed tree:
 
-**3. Decide whether the tokenizer emits `(shard_path, doc_index)`.** The manifest's grain is one shard
-object, so there is **no per-document join key**. If per-document licenses or MinHash cluster IDs are
-ever to be joined back to documents, the tokenizer must emit that key **at build time** — EOS
-boundaries are recoverable from a `.u32le.bin` afterwards, but the document→row mapping is not. This is
-the one genuinely irreversible item the original §1 did not list.
+```
+CONTROL_PREFIXES = ('_catalog/', 'dependents/', '_dedup/', '_licenses/')
+_licenses/sources.parquet   validate -> True    publish -> True
+_licenses.parquet           validate -> False   publish -> False   # correct: use the prefix form
+```
+
+Two things this surfaced that the plan had wrong: **the licenses table must be `_licenses/sources.parquet`,
+not a depth-0 `_licenses.parquet`** (`_group_of('')` → hard `PublishError`), and **a control file never
+travels through landing** — hence phase 2b in §5.6. **Do not hide either sidecar under `_catalog/`** —
+that prefix passes, but it is the version resolver's namespace.
+
+**2. ✅ LANDED (`934dd75`) — slug and fold every inherited `domain` value (§1.2).** `C#` in an object
+key silently truncates any `s3://` URI at the `#`, and nothing in the pipeline caught it —
+`labels_from_path` accepts it and `fnmatch` matches it, so it broke in a consumer instead.
+
+**The collision was the worse half, and it is why this needed code rather than a convention.** Naive
+character-stripping sends `C#`, `C++`, `C` and `C--` **all to `c`** — four languages merged into one
+permanent directory, every token count still adding up, nothing downstream able to tell them apart.
+
+Shipped in `manifest.py`, deliberately split across two functions: `slug_path_segment` can still
+collide, but **`build_domain_slug_map` — the function that decides permanent directories — RAISES**,
+naming both raw values. Fail-loud at the point of consequence. Also refused: a real value slugging to
+the fold target `other`; a case-only difference (`Python`/`python`); a value over 63 chars (refused,
+never truncated); `.apply()` on a value the map never saw, since that means the counts the map was
+built from do not cover the data being published.
+
+`keep=20` by default — 73 `gha_language` values plus ~180 StackExchange sites would otherwise be ~250
+permanent directories, and at 25 M-token shards the 50th-ranked value holds one or two shards, which
+cannot be re-weighted to any ratio. `DomainSlugMap.readme_table()` emits the reverse mapping and
+`folded_fraction` reports what the choice cost, so an operator can raise `keep` while it is still free.
+
+**Use `build_domain_slug_map` in Phase 1, never `slug_path_segment` alone.** The collision check lives
+in the map builder; calling the per-value function directly bypasses the one guard that matters.
+
+**3. ~~Decide whether the tokenizer emits `(shard_path, doc_index)`.~~ ✅ DECIDED 2026-07-31 — SKIP.
+NO LONGER A BLOCKER.** The owner's call: **no per-document key will be emitted.** The manifest's grain
+stays one shard object, and nothing in the build records which document landed in which shard at which
+ordinal. Phase 1 may proceed without it.
+
+Two consequences, permanent for `v1`:
+
+- **Per-document licensing is unavailable.** Licenses are recorded **per source** instead
+  (`_licenses/sources.parquet`, `artifacts/licenses/SCHEMA.md`).
+- **MinHash cluster IDs become source-level**, not per-document (§1.3, §4.1 step 6).
+
+Both are acceptable, on two grounds:
+
+1. **§1.5 already established that SA maps onto whole `source` values.** `stackexchange` and `finewiki`
+   are wholly SA, so excluding SA is *omitting source names* from a `build_mixture` call — it needs no
+   per-document data at all. ⚠️ With the qualifier §1.5 now carries: `libretexts` (32.05% SA) and
+   `peS2o` (≈1.9% SA) are **mixed**, so for those two, name-level exclusion is safe but over-broad. The
+   surgical case — strip SA and keep the rest of a mixed source — is what this forecloses.
+2. **§1.3's cluster table exists to *warn at mix time*** about overlapping sources, and that works at
+   source granularity: the shipped artifact is a cluster × source count matrix (§4.1 step 6), which is
+   already what §6 item 3's dot product consumes.
+
+**A future `v2` could still emit the key.** This forecloses it for **this** version, not forever — and
+it is genuinely unrecoverable within `v1`, because after tokenization the document→row mapping no longer
+exists in the artifact. What is *not* lost: EOS boundaries remain recoverable from a `.u32le.bin`
+(§2.3), so a consumer can still count and split documents inside a shard; it just cannot say which
+upstream document any of them was.
 
 **Also worth doing before Phase 1, but not blocking** (~$10, ~1 h, in-region): finish the token
 re-count for the four unverified categories via the footer-bytes method that worked in Phase 0. §2.1's
