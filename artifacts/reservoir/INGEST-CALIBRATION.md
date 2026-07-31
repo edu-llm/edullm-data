@@ -64,6 +64,59 @@ checkpointing is one network blip away from starting over, and this pass has a b
 
 Option 3 is a reasonable fallback if the array plumbing turns out to be more than an hour.
 
+---
+
+# ⚠️ THE JOB ALSO FAILED, AND THE FAILURE INVERTS THE SIZING ABOVE
+
+The run this file was written from **exited 2**. It completed `faq` and `math`, then:
+
+```
+error: 8 of 20 table files failed and --tolerate-errors was not set.
+First: table/000_00000_13.parquet: HTTP Error 429: Too Many Requests
+```
+
+**The per-IP Hugging Face rate limit again** — the same one that stalled Phase 0
+(`PLAN-CORRECTIONS.md` §6), now reached from Batch at 16 workers.
+
+## Two consequences
+
+**1. I had reintroduced a bug this repo already documented.** The Range reader's retry was
+`3*(n+1)` seconds over five attempts — it gives up after 30 s, and the 429 window outlasts that.
+§6 records the identical defect in `recount.py`: *"a 3 s linear retry that could never outlast the
+limit."* Fixed in `0.6.1`: exponential 4 s → 120 s cap over 8 attempts, honouring a numeric
+`Retry-After`.
+
+**2. The "20 children, all at once" plan above was wrong, and backwards.** Sharding across N
+machines multiplies the request rate against a limit that does not care how many machines you have.
+More children make the 429s *worse*. The throughput table above is therefore an upper bound that
+cannot be reached by adding parallelism — the binding constraint is requests per IP, not CPU.
+
+## What replaced it
+
+- A process-wide `_RateGate`: a 429 in any worker pauses **every** worker until a shared deadline.
+  A thread that backs off privately while its siblings hammer has changed nothing.
+- Default `--workers` 16 → **8**.
+- The array runs **10 shards × 4 workers = 40 concurrent requests, in waves** — not 20 × 32 = 640.
+
+Revised sizing, same 2.25 worker-seconds/file:
+
+| shape | per child | concurrent requests | verdict |
+|---|---|---|---|
+| 10 × 4 | 25.4 min | 40 | ✅ start here |
+| 20 × 4 | 12.7 min | 80 | ⚠️ only if 40 shows no 429s |
+| 20 × 8 | 6.4 min | 160 | ✗ 10× what already failed |
+
+Each child is far inside the 7200 s timeout even at 10 × 4, so there is no reason to push
+concurrency for its own sake. **If a wave reports 429s, lower the shard count — never raise it.**
+`ids` now prints a running 429 count and says exactly that on failure.
+
+## The lesson worth keeping
+
+The calibration measured the right number (0.44 files/s) and I drew the wrong conclusion from it —
+"too slow, add parallelism" — because the timeout was the visible constraint and the rate limit was
+not yet. A throughput measurement that does not also record *what limited it* invites exactly that
+error. The 429 counter now travels with the throughput number.
+
 ## What the calibration also proved
 
 Beyond the number, the run end-to-end validated the whole chain: `WHEEL_VERSION=0.6.0`,
