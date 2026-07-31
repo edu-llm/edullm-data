@@ -1,4 +1,4 @@
-# Dataset design: `pretrain/reservoir-260b-dolma2`
+# Dataset design: `pretrain/reservoir-dolma2`
 
 **Status: DESIGN — no bytes written.** Written 2026-07-30, revised 2026-07-31 after review. Supersedes
 the earlier 64B `olmo100b`-only draft. Built from a six-agent research sweep plus local verification:
@@ -11,30 +11,46 @@ purpose:  A reservoir. One published pool that every 20B training run draws a we
           by a bespoke corpus per experiment.
 family:   pretrain
 profile:  pretrain-tokens/v1              [verified in registry]
-name:     pretrain/reservoir-260b-dolma2  [validate_dataset_id: PASS]
-          ⚠️ THE "260b" IS NOW WRONG — see below. Do not publish under this name.
+name:     pretrain/reservoir-dolma2      [validate_dataset_id: PASS]
+          DECIDED 2026-07-31 — deliberately carries NO size. See below.
 ```
 
-⚠️ **THE NAME NEEDS ONE DECISION BEFORE PUBLISH, AND IT IS IRREVERSIBLE.** The reference pool dropped
-14B → 9B (§2.1), so the real total is **255B**, and four categories are still being re-counted — the
-total may move again. The name is part of the address (`<family>/<name>/<version>/`) and cannot be
-changed without republishing.
+✅ **THE NAME CARRIES NO SIZE, DECIDED 2026-07-31.** It was `pretrain/reservoir-260b-dolma2`; the
+`260b` was wrong within a day and would have gone wrong again.
 
-This project already has a scar from a name that disagreed with its bytes: the legacy `.npy` shards
-were headerless raw `uint32`, and `CLAUDE.md`'s rule — *"extension must match real bytes"* — exists
-because of it. A `260b` in the name of a 255B corpus is the same class of lie, smaller.
+**Why no number.** The total moved twice in one day — 260B → 255B when the reference pool was resized
+(§2.1), and the measured pools then came in far above their card figures (code 74.81B vs 67.8B,
+synthetic 478B vs a 60B plan). It will move again the moment anything in §4.1 runs: Bloom dedup deletes,
+decontamination removes, MinHash annotates, and adding a source changes it outright. **A number in the
+name is a claim that ages; the size in `dataset.json` is derived and recomputed.** Nothing reads the
+name for size.
 
-Three options, all `validate_dataset_id`-clean (verified by execution):
+This repo already has a scar from a name disagreeing with its bytes: the legacy `.npy` shards were
+headerless raw `uint32`, which is why `CLAUDE.md` says *"extension must match real bytes."* A `260b` on
+a 255B corpus is the same class of lie, smaller.
 
-| name | trade-off |
-|---|---|
-| `pretrain/reservoir-255b-dolma2` | accurate today; wrong again if a re-count moves the total |
-| **`pretrain/reservoir-dolma2`** | **no number to go stale.** The size lives in `dataset.json` and the README, which are derived and always correct |
-| `pretrain/reservoir-250b-dolma2` | a deliberate floor — true as "at least", stable against small drift |
+⚠️ **The ordering is the reverse of what "rename it after `dataset.json` is computed" would suggest, so
+it is worth stating.** In `publish()`, `ds_prefix` is built as `f"{dataset_id}/{version}"` and
+`dataset.json` is then written *into* that prefix — the source comment there reads
+`# 1. reserve the version: create-only dataset.json FIRST (§6 order)`. **The name is not something
+`dataset.json` produces; it is the address `dataset.json` gets written to.** So it must be chosen before
+the first publish, not derived from it.
 
-**Recommendation: `pretrain/reservoir-dolma2`.** The number in a name is decoration that ages; the
-number in `dataset.json` is recomputed. Nothing reads the name for size. **Decide after the re-counts
-land** (§5.6 phase 0c) so it is set once.
+**How expensive a rename actually is — checked, because an earlier revision of this document overstated
+it.** `dataset_id` is **NOT** inside `manifest_sha256`. `build_manifest` takes only
+`(entries, group_name)` and returns `{schema_version, group, entries, objects, bytes}` — no
+`dataset_id` anywhere — and `manifest_sha256` is the canonical JSON of exactly that dict. Verified by
+reading the source. So renaming does *not* invalidate the hash chain and does *not* require
+re-tokenizing; it requires re-copying every object to a new prefix (~1 TB of server-side copies) and
+strands the old `_catalog/` entry. Costly, recoverable. **A middle tier: expensive, not unrecoverable.**
+The genuinely irreversible decisions are the three in §1.
+
+*(Cited by symbol rather than line number deliberately — `publish.py` shifted by ~800 lines during this
+session's concurrent work, which is exactly how a `file:line` citation rots.)*
+
+Alternatives considered and rejected, both `validate_dataset_id`-clean (verified by execution):
+`reservoir-255b-dolma2` (accurate today, wrong after the first dedup pass) and `reservoir-250b-dolma2`
+(a floor — defensible as "at least", but it invites the reader to treat a floor as a measurement).
 
 **⚠️ IMPLEMENTERS: PHASE 0 IS DONE (2026-07-31).** Do not re-run it. Its results, the ten plan defects
 it found, and the resume state are in `artifacts/` — start with `artifacts/PHASE0-REPORT.md`, then
@@ -1155,8 +1171,8 @@ from edullm_data.s3 import Boto3S3
 import datetime
 
 publish(
-    "s3://edullm-landing/_migrate/reservoir-260b-staged/",
-    dataset_id="pretrain/reservoir-260b-dolma2",
+    "s3://edullm-landing/_migrate/reservoir-staged/",
+    dataset_id="pretrain/reservoir-dolma2",
     purpose="A ~260B-token reservoir that any 20B training run draws a weighted, seeded subset from",
     profile="pretrain-tokens/v1",
     tokenizer="tokenizer/dolma2-bpe",

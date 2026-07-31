@@ -22,9 +22,10 @@ tokens/byte`. No datasets-server `/rows` calls, no downloads, all tokens/byte CV
    per its own per-document `metadata.pdf_src`. This file called it a hazard to "check"; it is now
    measured and netted out below.
 
-**Reservoir total: 260 B → 255 B**, which makes the design doc's `reservoir-260b-dolma2` name wrong by
-5 B. Flagged there as a decision to take once the re-counts land — the name is part of the address and
-cannot be changed without republishing.
+**Reservoir total: 260 B → 255 B.** ✅ The dataset is consequently named **`pretrain/reservoir-dolma2`**
+— no size in the name, decided 2026-07-31, because the total moved twice in one day and every §4.1 step
+(dedup, decontamination, adding a source) moves it again. The size lives in `dataset.json`, which is
+derived.
 
 ## The table
 
@@ -170,5 +171,8 @@ could run at once here where eight could not before.
    dedup catches the duplication. Also **74% of its bytes are `no_license` upstream** despite the repo's
    apache-2.0 tag. If that is ever cleared, the total is 124.32 B (74.81 − 9.88 Python + 59.38), never
    the naive 134.19 B.
-4. **The reservoir total moved**, so the dataset name `reservoir-260b-dolma2` needs deciding — see the
-   design doc's header. Recommendation there: drop the number.
+4. ✅ **The dataset name is decided: `pretrain/reservoir-dolma2`**, carrying no size. Worth knowing the
+   ordering, since it is counter-intuitive: `publish()` builds the S3 prefix from `dataset_id` and writes
+   `dataset.json` *into* it, so the name is the address rather than something the JSON produces. Also
+   checked: `dataset_id` is **not** in `manifest_sha256`, so a later rename costs a ~1 TB re-copy rather
+   than a re-tokenization — expensive, not unrecoverable.

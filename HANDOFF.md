@@ -96,7 +96,7 @@ runbook a fresh compacted session can execute.
 ## THE RESERVOIR DESIGN SESSION (2026-07-31) — design only, nothing built
 
 **Deliverable: `DATASET-DESIGN-reservoir.md`** (untracked — commit it first). Target dataset
-`pretrain/reservoir-260b-dolma2`: **200B real + 60B synthetic**, 25M-token shards, ~10,400 objects,
+`pretrain/reservoir-dolma2`: **~195B real + 60B synthetic**, 25M-token shards, ~10,200 objects,
 0.95 TiB, **~$1,006 one-time + $24/month**. A 20B training run draws a weighted seeded subset, so a run
 is described by `(dataset, version, sources, ratios, total, seed)` instead of 10,400 URIs.
 
