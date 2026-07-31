@@ -574,9 +574,23 @@ against 125B** (≈3.3 epochs) — *effective*, not unique tokens.
 | code | 40B | **`common-pile/stackv2_edu_filtered` 67.8B** (ships real text, Blue Oak) → `tokyotech-llm/swallow-code-v2` 49.8B (Apache-2.0) → `common-pile/github_archive_filtered` | Blue Oak / Apache-2.0 |
 | math | 36B | `HuggingFaceTB/finemath` 3plus 34B → `proof-pile-2/algebraic-stack` 11B (math *code*, uniquely non-overlapping) → `swallow-math-v2` 32B (Apache-2.0; a FineMath rewrite — dedupe or substitute) | ODC-BY / Apache-2.0 |
 | web (diverse) | 30B | `mlfoundations/dclm-baseline-1.0` — the diversity counterweight to edu filtering | CC-BY-4.0 |
-| academic | 20B | `common-pile/peS2o_filtered` 43.3B → `pubmed_filtered` 36.6B → `arxiv_papers_filtered` 6.0B | CC-BY/CC0 |
+| academic | 20B | **MEASURED 2026-07-31**: `peS2o_filtered` **40.48B** (card 43.3B — the card is 7% HIGH) → `pubmed_filtered` **37.54B** → `arxiv_papers_filtered` **6.23B**. ⚠️ **Non-overlapping total 64.12B, not the naive 84.26B** — see below | CC-BY/CC0 |
 | reference | **9B** ‡ | `HuggingFaceFW/finewiki` en — **measured 8.87B** by parquet footers, NOT the ~3.5B this row used to claim (a figure absent from the card, which names no token count and no tokenizer) | ⚠ CC-BY-SA 4.0 **+ GFDL** (share-alike; §1.5) |
 | QA/forum | 12B | `common-pile/stackexchange_filtered` 23.9B | ⚠ CC-BY-SA |
+
+**The academic overlap is now MEASURED, not inferred — and it is half the source.** §3.1 listed
+peS2o∩pubmed as a suspicion reasoned from field-of-study tables, with no number. peS2o's per-document
+`metadata.pdf_src` names the provenance directly: **49.7% of peS2o's bytes are PubMedCentral-derived**
+(~20.1B tokens, 24% of the naive three-source sum).
+
+So the academic total is **64.12B, not 84.26B** — peS2o's entire PMC share is dropped rather than
+deduplicated, because the same article extracted by Grobid-over-PDF and by pandoc-over-nXML yields two
+documents that differ in >10% of their 20-grams and **survive Common Pile's own global fuzzy dedup as
+distinct**. A digest never catches it and neither does MinHash at the usual threshold.
+
+Both academic figures still clear their bars — 64.12B is **3.2× the 20B pool** and **5.3× the 12B
+floor**, and peS2o alone clears the floor 3.4×. Phase 0's `0.00B` for this category was a measurement
+failure, not scarcity.
 
 **Avoid `stack-edu` and `the-stack-v2` directly** — they ship **SWHIDs only**, and bulk access
 "requires an agreement with SoftwareHeritage and INRIA" whose LLM principles demand open model

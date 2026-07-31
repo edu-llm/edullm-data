@@ -3,10 +3,21 @@
 Phase 0 task F. Recomputes the §2.1 table against what task A actually measured, and flags any pool
 now below 3× peak plausible demand.
 
-**Headline: 6 of 8 pools verified met, 2 unverified, none failing.** `reference` was the one failure and
-was **resolved 2026-07-31** by resizing the pool 14 B → 9 B (owner decision, below). The four categories
-that measured 0.00 B are being re-counted now by the footer method (§"What would settle the unverified
-pools"), so this file will move again.
+**Headline: 6 of 8 pools verified met, 2 still being measured, none failing.** `reference` was the one
+failure and was **resolved 2026-07-31** by resizing the pool 14 B → 9 B (owner decision, below).
+`academic` and `synthetic` came in during Phase 0c and both clear comfortably; `code` and `qa-forum` are
+in flight, so this file will move once more.
+
+⚠️ **Two things Phase 0c corrected that this file previously asserted:**
+
+1. **Common Pile card figures are not conservative floors.** The `Size(GB) × 0.25` assertion errs in
+   *both* directions — measured tok/byte is peS2o 0.2212 (so 0.25 is **13% too high**), pubmed 0.2556,
+   arxiv 0.3265 (**23% too low**). peS2o's card of 43.3 B against a measured **40.48 B** means the card
+   is **7% HIGH**. `PLAN-CORRECTIONS.md` §8 previously said the error direction was "at least
+   favourable"; it isn't, and no single multiplier corrects it.
+2. **The peS2o∩pubmed overlap is real and large** — **49.7% of peS2o's bytes are PubMedCentral-derived**,
+   per its own per-document `metadata.pdf_src`. This file called it a hazard to "check"; it is now
+   measured and netted out below.
 
 **Reservoir total: 260 B → 255 B**, which makes the design doc's `reservoir-260b-dolma2` name wrong by
 5 B. Flagged there as a decision to take once the re-counts land — the name is part of the address and
@@ -24,11 +35,11 @@ any tokenizer.
 | **edu-web** | 48 B | 37.2 B | **261.3 B** | ✅ **MET 7.0×** | finepdfs-edu 161.1 B + fineweb-edu 100.24 B, both measured |
 | **web (diverse)** | 30 B | 21 B | **114.69 B** | ✅ **MET 5.5×** | `dclm_100BT`, exact rows, `partial: false` |
 | **math** | 36 B | 21 B | **34.69 B** | ⚠️ **3× met (4.96×), pool short 3.6%** | finemath-3plus alone; everything else in the category overlaps it |
-| **academic** | 20 B | 12 B | *unmeasured* | ⚠️ **UNVERIFIED, not at risk** | peS2o alone is 182.6 GB of UTF-8; missing 12 B would need >15.2 bytes/token |
+| **academic** | 20 B | 12 B | **64.12 B** | ✅ **MET 3.2× (5.3× the floor)** | footer-exact; non-overlapping after dropping peS2o's **measured 49.7% PMC share** (naive sum would be 84.26 B) |
 | **code** | 40 B | 24 B | *unmeasured* | ⚠️ **UNVERIFIED, likely met** | stackv2_edu desk floor 61–80 B from 83.0 GB × 0.274 tok/char |
 | **QA/forum** | 12 B | 7.2 B | *unmeasured* | ⚠️ **UNVERIFIED, likely met** | stackexchange_filtered ~23.9 B; survives a pessimistic 0.21 tok/byte bound at ~18.8 B |
 | **reference** | **9 B** ✅ *(was 14 B)* | 7.2 B → **2.4 B** | **8.87 B** | ✅ **MET 3.70×** | finewiki/en, footer-exact. Resolved by resizing the POOL, not by padding it |
-| **synthetic** | 60 B (4×15 B) | 18 B | *unmeasured* | ⚠️ **UNVERIFIED, ≥6× headroom** | two independent non-sampling routes agree within 3–9% of card |
+| **synthetic** | 60 B (4×15 B) | 18 B | **478.15 B** | ✅ **MET 8.0× (26× the floor)** | exact nested-leaf footers; faq 148.54 / tutorial 147.92 / math 94.74 / table 86.95 |
 
 ## reference — RESOLVED 2026-07-31 by owner decision: the pool is 9 B
 

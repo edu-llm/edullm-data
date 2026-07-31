@@ -191,9 +191,29 @@ carry no information about any tokenizer — and **every Common Pile row in §3.
 peS2o, pubmed, arxiv_papers, stackexchange, github_archive, stackv2_edu, libretexts. That is 4 of the
 8 categories.
 
-The error direction is at least favourable: at a measured ~0.27 dolma2 tokens/byte, real counts run
-*above* the published figures, so pools are understated rather than overstated. But no §2.1 pool
-resting on a Common Pile figure is verified, and none should be entered in §3.2 as measured.
+⚠️ **CORRECTION 2026-07-31 (Phase 0c) — I got the direction wrong here, and the mistake is
+instructive.** This paragraph used to read: *"The error direction is at least favourable: at a measured
+~0.27 dolma2 tokens/byte, real counts run above the published figures, so pools are understated rather
+than overstated."* That was extrapolated from one corpus's tokens/byte and it does not hold. Measured
+by exact parquet footers over whole splits:
+
+| source | measured tok/byte | the card's implied 0.25 is | card vs measured tokens |
+|---|---|---|---|
+| peS2o | **0.2212** | **+13% too high** | card 43.3B vs **40.48B** → card is **7% HIGH** |
+| pubmed | 0.2556 | −2% | card 36.6B vs 37.54B → card 2.5% low |
+| arxiv_papers | **0.3265** | **−23% too low** | card 6.0B vs 6.23B → card 3.7% low |
+
+**The `Size(GB) × 0.25` assertion errs in BOTH directions, by up to ±23%, so no single multiplier
+corrects a Common Pile figure.** The only fix is measurement. My "at least favourable" framing would
+have licensed treating card figures as conservative floors — exactly the reasoning §3.1 exists to
+forbid, and I reproduced it while documenting it.
+
+The "peS2o reports whitespace words" claim (§3.1) is *directionally* right — measured 1.44 tokens per
+whitespace word — but the 47.37B/58.6B pair it cites describes the full `allenai/peS2o`, **not** the
+openly-licensed `_filtered` subset §3.2 actually specifies. Two different corpora.
+
+No §2.1 pool resting on a Common Pile figure was verified when this was written; the four that mattered
+now are (Phase 0c).
 
 ## 9. `github_archive_filtered` is in the wrong category
 

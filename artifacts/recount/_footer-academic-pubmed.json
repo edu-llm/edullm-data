@@ -1,0 +1,2098 @@
+{
+  "status": "ok",
+  "source": "pubmed",
+  "repo": "common-pile/raw_v0.1_parquet",
+  "collection": "RAW (unfiltered)",
+  "text_column": "text",
+  "schema": [
+    "id",
+    "text",
+    "len_category",
+    "source"
+  ],
+  "n_files": 43,
+  "n_files_total": 43,
+  "parquet_file_bytes_total": 43406294459,
+  "rows_covered": 4068867,
+  "n_values": 4068867,
+  "text_bytes_raw_total_uncompressed": 158940994198,
+  "length_prefix_overhead_bytes": 16275468,
+  "text_bytes_corrected": 158924718730,
+  "overhead_fraction": 0.000102,
+  "mean_text_bytes_per_doc": 39058.7,
+  "column_encodings": [
+    "PLAIN",
+    "RLE_DICTIONARY"
+  ],
+  "dictionary_encoded_chunks": 5,
+  "compressions": [
+    "ZSTD"
+  ],
+  "footer_bytes_fetched": 2818048,
+  "footer_http_requests": 43,
+  "errors": [],
+  "_rowgroups": [
+    [
+      "pubmed/data_0.parquet",
+      1055728850,
+      0,
+      16384
+    ],
+    [
+      "pubmed/data_0.parquet",
+      1055728850,
+      1,
+      30720
+    ],
+    [
+      "pubmed/data_0.parquet",
+      1055728850,
+      2,
+      28672
+    ],
+    [
+      "pubmed/data_0.parquet",
+      1055728850,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_0.parquet",
+      1055728850,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_0.parquet",
+      1055728850,
+      5,
+      15942
+    ],
+    [
+      "pubmed/data_0.parquet",
+      1055728850,
+      6,
+      16384
+    ],
+    [
+      "pubmed/data_1.parquet",
+      1082667336,
+      0,
+      14336
+    ],
+    [
+      "pubmed/data_1.parquet",
+      1082667336,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_1.parquet",
+      1082667336,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_1.parquet",
+      1082667336,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_1.parquet",
+      1082667336,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_1.parquet",
+      1082667336,
+      5,
+      18432
+    ],
+    [
+      "pubmed/data_1.parquet",
+      1082667336,
+      6,
+      18432
+    ],
+    [
+      "pubmed/data_10.parquet",
+      1016705531,
+      0,
+      11846
+    ],
+    [
+      "pubmed/data_10.parquet",
+      1016705531,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_10.parquet",
+      1016705531,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_10.parquet",
+      1016705531,
+      3,
+      16384
+    ],
+    [
+      "pubmed/data_10.parquet",
+      1016705531,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_10.parquet",
+      1016705531,
+      5,
+      18432
+    ],
+    [
+      "pubmed/data_10.parquet",
+      1016705531,
+      6,
+      14336
+    ],
+    [
+      "pubmed/data_11.parquet",
+      1040808671,
+      0,
+      13894
+    ],
+    [
+      "pubmed/data_11.parquet",
+      1040808671,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_11.parquet",
+      1040808671,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_11.parquet",
+      1040808671,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_11.parquet",
+      1040808671,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_11.parquet",
+      1040808671,
+      5,
+      16384
+    ],
+    [
+      "pubmed/data_11.parquet",
+      1040808671,
+      6,
+      16384
+    ],
+    [
+      "pubmed/data_12.parquet",
+      1029120482,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_12.parquet",
+      1029120482,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_12.parquet",
+      1029120482,
+      2,
+      16384
+    ],
+    [
+      "pubmed/data_12.parquet",
+      1029120482,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_12.parquet",
+      1029120482,
+      4,
+      16384
+    ],
+    [
+      "pubmed/data_12.parquet",
+      1029120482,
+      5,
+      14336
+    ],
+    [
+      "pubmed/data_12.parquet",
+      1029120482,
+      6,
+      14336
+    ],
+    [
+      "pubmed/data_13.parquet",
+      1043523985,
+      0,
+      11954
+    ],
+    [
+      "pubmed/data_13.parquet",
+      1043523985,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_13.parquet",
+      1043523985,
+      2,
+      16384
+    ],
+    [
+      "pubmed/data_13.parquet",
+      1043523985,
+      3,
+      12288
+    ],
+    [
+      "pubmed/data_13.parquet",
+      1043523985,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_13.parquet",
+      1043523985,
+      5,
+      16384
+    ],
+    [
+      "pubmed/data_13.parquet",
+      1043523985,
+      6,
+      16384
+    ],
+    [
+      "pubmed/data_14.parquet",
+      1030361813,
+      0,
+      13894
+    ],
+    [
+      "pubmed/data_14.parquet",
+      1030361813,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_14.parquet",
+      1030361813,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_14.parquet",
+      1030361813,
+      3,
+      12288
+    ],
+    [
+      "pubmed/data_14.parquet",
+      1030361813,
+      4,
+      16384
+    ],
+    [
+      "pubmed/data_14.parquet",
+      1030361813,
+      5,
+      12288
+    ],
+    [
+      "pubmed/data_14.parquet",
+      1030361813,
+      6,
+      16384
+    ],
+    [
+      "pubmed/data_15.parquet",
+      1043295822,
+      0,
+      15944
+    ],
+    [
+      "pubmed/data_15.parquet",
+      1043295822,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_15.parquet",
+      1043295822,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_15.parquet",
+      1043295822,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_15.parquet",
+      1043295822,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_15.parquet",
+      1043295822,
+      5,
+      16384
+    ],
+    [
+      "pubmed/data_15.parquet",
+      1043295822,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_16.parquet",
+      1075722449,
+      0,
+      16050
+    ],
+    [
+      "pubmed/data_16.parquet",
+      1075722449,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_16.parquet",
+      1075722449,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_16.parquet",
+      1075722449,
+      3,
+      12288
+    ],
+    [
+      "pubmed/data_16.parquet",
+      1075722449,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_16.parquet",
+      1075722449,
+      5,
+      14336
+    ],
+    [
+      "pubmed/data_16.parquet",
+      1075722449,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_17.parquet",
+      1061193058,
+      0,
+      16384
+    ],
+    [
+      "pubmed/data_17.parquet",
+      1061193058,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_17.parquet",
+      1061193058,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_17.parquet",
+      1061193058,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_17.parquet",
+      1061193058,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_17.parquet",
+      1061193058,
+      5,
+      14336
+    ],
+    [
+      "pubmed/data_17.parquet",
+      1061193058,
+      6,
+      14336
+    ],
+    [
+      "pubmed/data_18.parquet",
+      1006454386,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_18.parquet",
+      1006454386,
+      1,
+      14902
+    ],
+    [
+      "pubmed/data_18.parquet",
+      1006454386,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_18.parquet",
+      1006454386,
+      3,
+      16384
+    ],
+    [
+      "pubmed/data_18.parquet",
+      1006454386,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_18.parquet",
+      1006454386,
+      5,
+      12288
+    ],
+    [
+      "pubmed/data_18.parquet",
+      1006454386,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_19.parquet",
+      1063810230,
+      0,
+      14336
+    ],
+    [
+      "pubmed/data_19.parquet",
+      1063810230,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_19.parquet",
+      1063810230,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_19.parquet",
+      1063810230,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_19.parquet",
+      1063810230,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_19.parquet",
+      1063810230,
+      5,
+      14336
+    ],
+    [
+      "pubmed/data_19.parquet",
+      1063810230,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_2.parquet",
+      1106429395,
+      0,
+      16384
+    ],
+    [
+      "pubmed/data_2.parquet",
+      1106429395,
+      1,
+      16384
+    ],
+    [
+      "pubmed/data_2.parquet",
+      1106429395,
+      2,
+      16384
+    ],
+    [
+      "pubmed/data_2.parquet",
+      1106429395,
+      3,
+      16384
+    ],
+    [
+      "pubmed/data_2.parquet",
+      1106429395,
+      4,
+      16384
+    ],
+    [
+      "pubmed/data_2.parquet",
+      1106429395,
+      5,
+      16384
+    ],
+    [
+      "pubmed/data_2.parquet",
+      1106429395,
+      6,
+      16384
+    ],
+    [
+      "pubmed/data_20.parquet",
+      1028218950,
+      0,
+      13642
+    ],
+    [
+      "pubmed/data_20.parquet",
+      1028218950,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_20.parquet",
+      1028218950,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_20.parquet",
+      1028218950,
+      3,
+      12288
+    ],
+    [
+      "pubmed/data_20.parquet",
+      1028218950,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_20.parquet",
+      1028218950,
+      5,
+      14336
+    ],
+    [
+      "pubmed/data_20.parquet",
+      1028218950,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_21.parquet",
+      1041150583,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_21.parquet",
+      1041150583,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_21.parquet",
+      1041150583,
+      2,
+      14640
+    ],
+    [
+      "pubmed/data_21.parquet",
+      1041150583,
+      3,
+      12288
+    ],
+    [
+      "pubmed/data_21.parquet",
+      1041150583,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_21.parquet",
+      1041150583,
+      5,
+      12288
+    ],
+    [
+      "pubmed/data_21.parquet",
+      1041150583,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_22.parquet",
+      1046483031,
+      0,
+      14336
+    ],
+    [
+      "pubmed/data_22.parquet",
+      1046483031,
+      1,
+      12854
+    ],
+    [
+      "pubmed/data_22.parquet",
+      1046483031,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_22.parquet",
+      1046483031,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_22.parquet",
+      1046483031,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_22.parquet",
+      1046483031,
+      5,
+      12288
+    ],
+    [
+      "pubmed/data_22.parquet",
+      1046483031,
+      6,
+      16384
+    ],
+    [
+      "pubmed/data_23.parquet",
+      1036767162,
+      0,
+      14336
+    ],
+    [
+      "pubmed/data_23.parquet",
+      1036767162,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_23.parquet",
+      1036767162,
+      2,
+      12799
+    ],
+    [
+      "pubmed/data_23.parquet",
+      1036767162,
+      3,
+      12288
+    ],
+    [
+      "pubmed/data_23.parquet",
+      1036767162,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_23.parquet",
+      1036767162,
+      5,
+      12288
+    ],
+    [
+      "pubmed/data_23.parquet",
+      1036767162,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_24.parquet",
+      1031608450,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_24.parquet",
+      1031608450,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_24.parquet",
+      1031608450,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_24.parquet",
+      1031608450,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_24.parquet",
+      1031608450,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_24.parquet",
+      1031608450,
+      5,
+      12288
+    ],
+    [
+      "pubmed/data_24.parquet",
+      1031608450,
+      6,
+      10240
+    ],
+    [
+      "pubmed/data_25.parquet",
+      1034735008,
+      0,
+      14336
+    ],
+    [
+      "pubmed/data_25.parquet",
+      1034735008,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_25.parquet",
+      1034735008,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_25.parquet",
+      1034735008,
+      3,
+      14640
+    ],
+    [
+      "pubmed/data_25.parquet",
+      1034735008,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_25.parquet",
+      1034735008,
+      5,
+      12288
+    ],
+    [
+      "pubmed/data_25.parquet",
+      1034735008,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_26.parquet",
+      1015180110,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_26.parquet",
+      1015180110,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_26.parquet",
+      1015180110,
+      2,
+      12799
+    ],
+    [
+      "pubmed/data_26.parquet",
+      1015180110,
+      3,
+      12288
+    ],
+    [
+      "pubmed/data_26.parquet",
+      1015180110,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_26.parquet",
+      1015180110,
+      5,
+      14336
+    ],
+    [
+      "pubmed/data_26.parquet",
+      1015180110,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_27.parquet",
+      1046337950,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_27.parquet",
+      1046337950,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_27.parquet",
+      1046337950,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_27.parquet",
+      1046337950,
+      3,
+      13008
+    ],
+    [
+      "pubmed/data_27.parquet",
+      1046337950,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_27.parquet",
+      1046337950,
+      5,
+      12288
+    ],
+    [
+      "pubmed/data_27.parquet",
+      1046337950,
+      6,
+      14336
+    ],
+    [
+      "pubmed/data_28.parquet",
+      1069448386,
+      0,
+      16384
+    ],
+    [
+      "pubmed/data_28.parquet",
+      1069448386,
+      1,
+      12799
+    ],
+    [
+      "pubmed/data_28.parquet",
+      1069448386,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_28.parquet",
+      1069448386,
+      3,
+      12288
+    ],
+    [
+      "pubmed/data_28.parquet",
+      1069448386,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_28.parquet",
+      1069448386,
+      5,
+      14336
+    ],
+    [
+      "pubmed/data_28.parquet",
+      1069448386,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_29.parquet",
+      1061771470,
+      0,
+      14336
+    ],
+    [
+      "pubmed/data_29.parquet",
+      1061771470,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_29.parquet",
+      1061771470,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_29.parquet",
+      1061771470,
+      3,
+      13642
+    ],
+    [
+      "pubmed/data_29.parquet",
+      1061771470,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_29.parquet",
+      1061771470,
+      5,
+      12288
+    ],
+    [
+      "pubmed/data_29.parquet",
+      1061771470,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_3.parquet",
+      1064875202,
+      0,
+      16384
+    ],
+    [
+      "pubmed/data_3.parquet",
+      1064875202,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_3.parquet",
+      1064875202,
+      2,
+      16384
+    ],
+    [
+      "pubmed/data_3.parquet",
+      1064875202,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_3.parquet",
+      1064875202,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_3.parquet",
+      1064875202,
+      5,
+      14336
+    ],
+    [
+      "pubmed/data_3.parquet",
+      1064875202,
+      6,
+      16384
+    ],
+    [
+      "pubmed/data_30.parquet",
+      1043778424,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_30.parquet",
+      1043778424,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_30.parquet",
+      1043778424,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_30.parquet",
+      1043778424,
+      3,
+      13008
+    ],
+    [
+      "pubmed/data_30.parquet",
+      1043778424,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_30.parquet",
+      1043778424,
+      5,
+      12288
+    ],
+    [
+      "pubmed/data_30.parquet",
+      1043778424,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_31.parquet",
+      1070890050,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_31.parquet",
+      1070890050,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_31.parquet",
+      1070890050,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_31.parquet",
+      1070890050,
+      3,
+      14903
+    ],
+    [
+      "pubmed/data_31.parquet",
+      1070890050,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_31.parquet",
+      1070890050,
+      5,
+      14336
+    ],
+    [
+      "pubmed/data_31.parquet",
+      1070890050,
+      6,
+      14336
+    ],
+    [
+      "pubmed/data_32.parquet",
+      1064860408,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_32.parquet",
+      1064860408,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_32.parquet",
+      1064860408,
+      2,
+      13010
+    ],
+    [
+      "pubmed/data_32.parquet",
+      1064860408,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_32.parquet",
+      1064860408,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_32.parquet",
+      1064860408,
+      5,
+      14336
+    ],
+    [
+      "pubmed/data_32.parquet",
+      1064860408,
+      6,
+      14336
+    ],
+    [
+      "pubmed/data_33.parquet",
+      1053843462,
+      0,
+      14336
+    ],
+    [
+      "pubmed/data_33.parquet",
+      1053843462,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_33.parquet",
+      1053843462,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_33.parquet",
+      1053843462,
+      3,
+      12288
+    ],
+    [
+      "pubmed/data_33.parquet",
+      1053843462,
+      4,
+      12592
+    ],
+    [
+      "pubmed/data_33.parquet",
+      1053843462,
+      5,
+      14336
+    ],
+    [
+      "pubmed/data_33.parquet",
+      1053843462,
+      6,
+      14336
+    ],
+    [
+      "pubmed/data_34.parquet",
+      874443332,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_34.parquet",
+      874443332,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_34.parquet",
+      874443332,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_34.parquet",
+      874443332,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_34.parquet",
+      874443332,
+      4,
+      16384
+    ],
+    [
+      "pubmed/data_34.parquet",
+      874443332,
+      5,
+      10869
+    ],
+    [
+      "pubmed/data_35.parquet",
+      780051738,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_35.parquet",
+      780051738,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_35.parquet",
+      780051738,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_35.parquet",
+      780051738,
+      3,
+      12288
+    ],
+    [
+      "pubmed/data_35.parquet",
+      780051738,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_35.parquet",
+      780051738,
+      5,
+      4662
+    ],
+    [
+      "pubmed/data_36.parquet",
+      898031958,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_36.parquet",
+      898031958,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_36.parquet",
+      898031958,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_36.parquet",
+      898031958,
+      3,
+      12288
+    ],
+    [
+      "pubmed/data_36.parquet",
+      898031958,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_36.parquet",
+      898031958,
+      5,
+      12288
+    ],
+    [
+      "pubmed/data_36.parquet",
+      898031958,
+      6,
+      511
+    ],
+    [
+      "pubmed/data_37.parquet",
+      1062529369,
+      0,
+      14336
+    ],
+    [
+      "pubmed/data_37.parquet",
+      1062529369,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_37.parquet",
+      1062529369,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_37.parquet",
+      1062529369,
+      3,
+      12592
+    ],
+    [
+      "pubmed/data_37.parquet",
+      1062529369,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_37.parquet",
+      1062529369,
+      5,
+      12288
+    ],
+    [
+      "pubmed/data_37.parquet",
+      1062529369,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_38.parquet",
+      888416361,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_38.parquet",
+      888416361,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_38.parquet",
+      888416361,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_38.parquet",
+      888416361,
+      3,
+      12288
+    ],
+    [
+      "pubmed/data_38.parquet",
+      888416361,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_38.parquet",
+      888416361,
+      5,
+      10751
+    ],
+    [
+      "pubmed/data_39.parquet",
+      831301014,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_39.parquet",
+      831301014,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_39.parquet",
+      831301014,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_39.parquet",
+      831301014,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_39.parquet",
+      831301014,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_39.parquet",
+      831301014,
+      5,
+      4096
+    ],
+    [
+      "pubmed/data_4.parquet",
+      1071377118,
+      0,
+      14336
+    ],
+    [
+      "pubmed/data_4.parquet",
+      1071377118,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_4.parquet",
+      1071377118,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_4.parquet",
+      1071377118,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_4.parquet",
+      1071377118,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_4.parquet",
+      1071377118,
+      5,
+      14336
+    ],
+    [
+      "pubmed/data_4.parquet",
+      1071377118,
+      6,
+      16384
+    ],
+    [
+      "pubmed/data_40.parquet",
+      605381229,
+      0,
+      14336
+    ],
+    [
+      "pubmed/data_40.parquet",
+      605381229,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_40.parquet",
+      605381229,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_40.parquet",
+      605381229,
+      3,
+      10240
+    ],
+    [
+      "pubmed/data_41.parquet",
+      918275502,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_41.parquet",
+      918275502,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_41.parquet",
+      918275502,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_41.parquet",
+      918275502,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_41.parquet",
+      918275502,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_41.parquet",
+      918275502,
+      5,
+      12288
+    ],
+    [
+      "pubmed/data_41.parquet",
+      918275502,
+      6,
+      1354
+    ],
+    [
+      "pubmed/data_42.parquet",
+      797804220,
+      0,
+      12288
+    ],
+    [
+      "pubmed/data_42.parquet",
+      797804220,
+      1,
+      12288
+    ],
+    [
+      "pubmed/data_42.parquet",
+      797804220,
+      2,
+      12288
+    ],
+    [
+      "pubmed/data_42.parquet",
+      797804220,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_42.parquet",
+      797804220,
+      4,
+      12288
+    ],
+    [
+      "pubmed/data_42.parquet",
+      797804220,
+      5,
+      2768
+    ],
+    [
+      "pubmed/data_5.parquet",
+      1050426512,
+      0,
+      16384
+    ],
+    [
+      "pubmed/data_5.parquet",
+      1050426512,
+      1,
+      14336
+    ],
+    [
+      "pubmed/data_5.parquet",
+      1050426512,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_5.parquet",
+      1050426512,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_5.parquet",
+      1050426512,
+      4,
+      16384
+    ],
+    [
+      "pubmed/data_5.parquet",
+      1050426512,
+      5,
+      14336
+    ],
+    [
+      "pubmed/data_5.parquet",
+      1050426512,
+      6,
+      14336
+    ],
+    [
+      "pubmed/data_6.parquet",
+      1068868639,
+      0,
+      18432
+    ],
+    [
+      "pubmed/data_6.parquet",
+      1068868639,
+      1,
+      26624
+    ],
+    [
+      "pubmed/data_6.parquet",
+      1068868639,
+      2,
+      22528
+    ],
+    [
+      "pubmed/data_6.parquet",
+      1068868639,
+      3,
+      16384
+    ],
+    [
+      "pubmed/data_6.parquet",
+      1068868639,
+      4,
+      16384
+    ],
+    [
+      "pubmed/data_6.parquet",
+      1068868639,
+      5,
+      16050
+    ],
+    [
+      "pubmed/data_6.parquet",
+      1068868639,
+      6,
+      12288
+    ],
+    [
+      "pubmed/data_7.parquet",
+      1042558564,
+      0,
+      16384
+    ],
+    [
+      "pubmed/data_7.parquet",
+      1042558564,
+      1,
+      18432
+    ],
+    [
+      "pubmed/data_7.parquet",
+      1042558564,
+      2,
+      16384
+    ],
+    [
+      "pubmed/data_7.parquet",
+      1042558564,
+      3,
+      16384
+    ],
+    [
+      "pubmed/data_7.parquet",
+      1042558564,
+      4,
+      14336
+    ],
+    [
+      "pubmed/data_7.parquet",
+      1042558564,
+      5,
+      16384
+    ],
+    [
+      "pubmed/data_7.parquet",
+      1042558564,
+      6,
+      16384
+    ],
+    [
+      "pubmed/data_8.parquet",
+      1076603939,
+      0,
+      16384
+    ],
+    [
+      "pubmed/data_8.parquet",
+      1076603939,
+      1,
+      16384
+    ],
+    [
+      "pubmed/data_8.parquet",
+      1076603939,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_8.parquet",
+      1076603939,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_8.parquet",
+      1076603939,
+      4,
+      16384
+    ],
+    [
+      "pubmed/data_8.parquet",
+      1076603939,
+      5,
+      16050
+    ],
+    [
+      "pubmed/data_8.parquet",
+      1076603939,
+      6,
+      16384
+    ],
+    [
+      "pubmed/data_9.parquet",
+      1074454310,
+      0,
+      16050
+    ],
+    [
+      "pubmed/data_9.parquet",
+      1074454310,
+      1,
+      16384
+    ],
+    [
+      "pubmed/data_9.parquet",
+      1074454310,
+      2,
+      14336
+    ],
+    [
+      "pubmed/data_9.parquet",
+      1074454310,
+      3,
+      14336
+    ],
+    [
+      "pubmed/data_9.parquet",
+      1074454310,
+      4,
+      16384
+    ],
+    [
+      "pubmed/data_9.parquet",
+      1074454310,
+      5,
+      16384
+    ],
+    [
+      "pubmed/data_9.parquet",
+      1074454310,
+      6,
+      14336
+    ]
+  ],
+  "_per_file": [
+    {
+      "path": "pubmed/data_0.parquet",
+      "file_bytes": 1055728850,
+      "rows": 136774,
+      "row_groups": 7,
+      "text_uncompressed": 3790261908
+    },
+    {
+      "path": "pubmed/data_1.parquet",
+      "file_bytes": 1082667336,
+      "rows": 108544,
+      "row_groups": 7,
+      "text_uncompressed": 3852598907
+    },
+    {
+      "path": "pubmed/data_10.parquet",
+      "file_bytes": 1016705531,
+      "rows": 99910,
+      "row_groups": 7,
+      "text_uncompressed": 3774561420
+    },
+    {
+      "path": "pubmed/data_11.parquet",
+      "file_bytes": 1040808671,
+      "rows": 104006,
+      "row_groups": 7,
+      "text_uncompressed": 3732944776
+    },
+    {
+      "path": "pubmed/data_12.parquet",
+      "file_bytes": 1029120482,
+      "rows": 102400,
+      "row_groups": 7,
+      "text_uncompressed": 3749196027
+    },
+    {
+      "path": "pubmed/data_13.parquet",
+      "file_bytes": 1043523985,
+      "rows": 100018,
+      "row_groups": 7,
+      "text_uncompressed": 3851413995
+    },
+    {
+      "path": "pubmed/data_14.parquet",
+      "file_bytes": 1030361813,
+      "rows": 97862,
+      "row_groups": 7,
+      "text_uncompressed": 3818545932
+    },
+    {
+      "path": "pubmed/data_15.parquet",
+      "file_bytes": 1043295822,
+      "rows": 95816,
+      "row_groups": 7,
+      "text_uncompressed": 3883009723
+    },
+    {
+      "path": "pubmed/data_16.parquet",
+      "file_bytes": 1075722449,
+      "rows": 97970,
+      "row_groups": 7,
+      "text_uncompressed": 3991684449
+    },
+    {
+      "path": "pubmed/data_17.parquet",
+      "file_bytes": 1061193058,
+      "rows": 102400,
+      "row_groups": 7,
+      "text_uncompressed": 3821963604
+    },
+    {
+      "path": "pubmed/data_18.parquet",
+      "file_bytes": 1006454386,
+      "rows": 94774,
+      "row_groups": 7,
+      "text_uncompressed": 3741691771
+    },
+    {
+      "path": "pubmed/data_19.parquet",
+      "file_bytes": 1063810230,
+      "rows": 94208,
+      "row_groups": 7,
+      "text_uncompressed": 3889150150
+    },
+    {
+      "path": "pubmed/data_2.parquet",
+      "file_bytes": 1106429395,
+      "rows": 114688,
+      "row_groups": 7,
+      "text_uncompressed": 3916441404
+    },
+    {
+      "path": "pubmed/data_20.parquet",
+      "file_bytes": 1028218950,
+      "rows": 89418,
+      "row_groups": 7,
+      "text_uncompressed": 3825158047
+    },
+    {
+      "path": "pubmed/data_21.parquet",
+      "file_bytes": 1041150583,
+      "rows": 92464,
+      "row_groups": 7,
+      "text_uncompressed": 3828490817
+    },
+    {
+      "path": "pubmed/data_22.parquet",
+      "file_bytes": 1046483031,
+      "rows": 96822,
+      "row_groups": 7,
+      "text_uncompressed": 3882463394
+    },
+    {
+      "path": "pubmed/data_23.parquet",
+      "file_bytes": 1036767162,
+      "rows": 88575,
+      "row_groups": 7,
+      "text_uncompressed": 3821253755
+    },
+    {
+      "path": "pubmed/data_24.parquet",
+      "file_bytes": 1031608450,
+      "rows": 86016,
+      "row_groups": 7,
+      "text_uncompressed": 3860165511
+    },
+    {
+      "path": "pubmed/data_25.parquet",
+      "file_bytes": 1034735008,
+      "rows": 92464,
+      "row_groups": 7,
+      "text_uncompressed": 3861793084
+    },
+    {
+      "path": "pubmed/data_26.parquet",
+      "file_bytes": 1015180110,
+      "rows": 88575,
+      "row_groups": 7,
+      "text_uncompressed": 3789986755
+    },
+    {
+      "path": "pubmed/data_27.parquet",
+      "file_bytes": 1046337950,
+      "rows": 90832,
+      "row_groups": 7,
+      "text_uncompressed": 3887620142
+    },
+    {
+      "path": "pubmed/data_28.parquet",
+      "file_bytes": 1069448386,
+      "rows": 96767,
+      "row_groups": 7,
+      "text_uncompressed": 4016654395
+    },
+    {
+      "path": "pubmed/data_29.parquet",
+      "file_bytes": 1061771470,
+      "rows": 91466,
+      "row_groups": 7,
+      "text_uncompressed": 3897066677
+    },
+    {
+      "path": "pubmed/data_3.parquet",
+      "file_bytes": 1064875202,
+      "rows": 106496,
+      "row_groups": 7,
+      "text_uncompressed": 3798147491
+    },
+    {
+      "path": "pubmed/data_30.parquet",
+      "file_bytes": 1043778424,
+      "rows": 86736,
+      "row_groups": 7,
+      "text_uncompressed": 3863662030
+    },
+    {
+      "path": "pubmed/data_31.parquet",
+      "file_bytes": 1070890050,
+      "rows": 96823,
+      "row_groups": 7,
+      "text_uncompressed": 3920880167
+    },
+    {
+      "path": "pubmed/data_32.parquet",
+      "file_bytes": 1064860408,
+      "rows": 94930,
+      "row_groups": 7,
+      "text_uncompressed": 3889791101
+    },
+    {
+      "path": "pubmed/data_33.parquet",
+      "file_bytes": 1053843462,
+      "rows": 92464,
+      "row_groups": 7,
+      "text_uncompressed": 3903358371
+    },
+    {
+      "path": "pubmed/data_34.parquet",
+      "file_bytes": 874443332,
+      "rows": 78453,
+      "row_groups": 6,
+      "text_uncompressed": 3208017974
+    },
+    {
+      "path": "pubmed/data_35.parquet",
+      "file_bytes": 780051738,
+      "rows": 70198,
+      "row_groups": 6,
+      "text_uncompressed": 2894647122
+    },
+    {
+      "path": "pubmed/data_36.parquet",
+      "file_bytes": 898031958,
+      "rows": 74239,
+      "row_groups": 7,
+      "text_uncompressed": 3331121204
+    },
+    {
+      "path": "pubmed/data_37.parquet",
+      "file_bytes": 1062529369,
+      "rows": 90416,
+      "row_groups": 7,
+      "text_uncompressed": 3943314020
+    },
+    {
+      "path": "pubmed/data_38.parquet",
+      "file_bytes": 888416361,
+      "rows": 74239,
+      "row_groups": 6,
+      "text_uncompressed": 3269507422
+    },
+    {
+      "path": "pubmed/data_39.parquet",
+      "file_bytes": 831301014,
+      "rows": 73728,
+      "row_groups": 6,
+      "text_uncompressed": 3004313973
+    },
+    {
+      "path": "pubmed/data_4.parquet",
+      "file_bytes": 1071377118,
+      "rows": 102400,
+      "row_groups": 7,
+      "text_uncompressed": 3860539166
+    },
+    {
+      "path": "pubmed/data_40.parquet",
+      "file_bytes": 605381229,
+      "rows": 53248,
+      "row_groups": 4,
+      "text_uncompressed": 2203074699
+    },
+    {
+      "path": "pubmed/data_41.parquet",
+      "file_bytes": 918275502,
+      "rows": 79178,
+      "row_groups": 7,
+      "text_uncompressed": 3387234167
+    },
+    {
+      "path": "pubmed/data_42.parquet",
+      "file_bytes": 797804220,
+      "rows": 66256,
+      "row_groups": 6,
+      "text_uncompressed": 2962150252
+    },
+    {
+      "path": "pubmed/data_5.parquet",
+      "file_bytes": 1050426512,
+      "rows": 104448,
+      "row_groups": 7,
+      "text_uncompressed": 3731893385
+    },
+    {
+      "path": "pubmed/data_6.parquet",
+      "file_bytes": 1068868639,
+      "rows": 128690,
+      "row_groups": 7,
+      "text_uncompressed": 3778645149
+    },
+    {
+      "path": "pubmed/data_7.parquet",
+      "file_bytes": 1042558564,
+      "rows": 114688,
+      "row_groups": 7,
+      "text_uncompressed": 3828792468
+    },
+    {
+      "path": "pubmed/data_8.parquet",
+      "file_bytes": 1076603939,
+      "rows": 110258,
+      "row_groups": 7,
+      "text_uncompressed": 3857414314
+    },
+    {
+      "path": "pubmed/data_9.parquet",
+      "file_bytes": 1074454310,
+      "rows": 108210,
+      "row_groups": 7,
+      "text_uncompressed": 3820373080
+    }
+  ],
+  "n_row_groups_total": 293
+}

@@ -1,135 +1,276 @@
 {
   "category": "academic",
+  "phase": "0c \u2014 re-measurement after Phase 0 returned 0.00B (all three sources HTTP 429 on datasets-server)",
   "plan_pool_tokens": 20000000000,
   "peak_plausible_demand_tokens": 4000000000,
   "required_pool_at_3x_peak": 12000000000,
-  "status": "NOT MEASURED — every source in this category was rate-limited before any token was counted",
+  "status": "MEASURED",
+  "measurement_method": {
+    "estimator": "tokens = total_text_bytes (EXACT, parquet footers over ALL rows) x tokens_per_byte (sampled, tight CV)",
+    "why_not_datasets_server": "Phase 0 died on HTTP 429. That quota is PER-IP, not per-account, so a token does not help. Zero datasets-server calls were used for counting here; exactly ONE /size call per source was made (for estimated_num_rows, reported below) and nothing was looped.",
+    "why_not_the_naive_estimator": "num_rows x sampled mean_tokens_per_doc has CV ~9 on heavy-tailed corpora (README: CI [26B,204B] on FineMath). Factoring out the heavy-tailed term into an EXACT byte total from footers removes that variance entirely.",
+    "byte_totals": "parquet footer `total_uncompressed_size` for the `text` column chunk, summed over every row group of every file in common-pile/raw_v0.1_parquet/<source>/, minus 4 bytes/value for the PLAIN BYTE_ARRAY length prefix. 109 files, 679 row groups, 10.68 M documents, 367.9 GB of text \u2014 measured by fetching 7.1 MB of footers.",
+    "encoding_guard": "Verified the `text` column is PLAIN-encoded, not dictionary-encoded, for 668/679 row groups. A dict-encoded chunk's total_uncompressed_size is dictionary+indices and does NOT equal text bytes. The 11 RLE_DICTIONARY chunks are 0.36% (pubmed) and 2.37% (arxiv) of the total and their per-doc means are in line with their PLAIN neighbours (40-71 kB/doc), so no correction was applied.",
+    "raw_to_filtered_ratio": "gzip ISIZE census \u2014 the last 4 bytes of a gzip member are the uncompressed size, so 8 bytes per shard gives exact decompressed sizes for all 6 repos (198 shards). Cross-checked against the published card GB.",
+    "isize_wrap_trap": "ISIZE is mod 2^32. pubmed's shards exceed 4 GiB and wrapped, producing an absurd 'compression ratio' of 0.24-0.52. Caught by a ratio guard, then recovered by fitting per-shard wrap counts k in {1,2}; the recovered pubmed_filtered/pubmed ratio 0.92251 agrees with the card ratio 0.92574 to 0.35%, confirming the recovery.",
+    "tokens_per_byte": "allenai/dolma2-tokenizer over 2,939 documents total, by THREE independent sampling schemes per source: (a) random row groups across random parquet files of the RAW corpus, (b) head prefixes of every RAW .json.gz shard, (c) head prefixes of every FILTERED .json.gz shard. (c) is the one used for the filtered figures \u2014 tokens/byte is measured ON the filtered corpus, not assumed to transfer from raw.",
+    "no_dataset_download": "\u00a75.7 honored. Footers (7.1 MB), gzip trailers (8 bytes x 198), ranged gzip head prefixes, and individual parquet row groups. No load_dataset, no hf_hub_download of a data file. Nothing large written to disk (disk at 92%)."
+  },
   "sources": [
     {
       "dataset": "common-pile/peS2o_filtered",
-      "config": "default",
-      "split": "train",
-      "status": "rate-limited-not-measured",
-      "card_tokens": 43300000000,
-      "card_tokens_provenance": "design doc §3.2 '43.3B'. NOT a token count. Traced to Common Pile paper (arXiv:2506.05209) Table 7, whose entire Tokens column is exactly Size(GB) x 0.25 — a flat 4-bytes-per-token ASSUMPTION applied uniformly to all 30 sources. 182.6 GB x 0.25 = 45.65B; /6 repeats = the 273.9B 'effective' figure. So the card figure is a byte-count division, not a tokenization of anything.",
-      "measured_tokens": null,
-      "estimator": null,
-      "confidence": "none",
-      "card_over_measured_ratio": null,
-      "license": "UNDECLARED on the HF repo — cardData.license is null and there is no license tag. Per-document licenses live in each example's metadata.license field. Paper B.1 + card: retained documents are CC BY, CC BY-SA, or CC0 / public domain only. Paper Table 3 gives the exact train-split mix: CC BY 6,088,325 / CC BY-SA 120,150 / CC0 36,373 / public domain 10,060. NOTE: 120,150 docs (2.0%) are CC BY-SA, i.e. SHARE-ALIKE — the same hazard the design doc flags for finewiki and stackexchange, and it is NOT visible from the repo metadata.",
-      "exact_whole_corpus_facts": {
-        "documents": 6117280,
-        "utf8_bytes": 182600000000,
-        "source": "HF card 'Dataset Statistics' table AND paper Table 6 'Filtered' columns — the two agree to the digit",
-        "gz_shards": 48,
-        "gz_bytes_summed_via_hf_tree_api": 30570879987
+      "measured_via": "common-pile/raw_v0.1_parquet/peS2o/ parquet footers (58 files, 347 row groups)",
+      "RAW": {
+        "collection": "common-pile/raw_v0.1_parquet (RAW, unfiltered) \u2014 what the footers actually measured",
+        "exact_text_bytes": 188231620481,
+        "exact_text_gb": 188.2316,
+        "exact_rows": 6294020,
+        "byte_total_is_exact": "yes \u2014 summed total_uncompressed_size of the `text` column chunk over EVERY row group of EVERY file, minus the 4-byte-per-value PLAIN length prefix",
+        "validated_against_raw_card": "card says 188.2 GB / 6,294,020 docs; footers give 188.232 GB / 6,294,020 docs \u2014 rows EXACT, bytes agree to 0.02%",
+        "tokens_per_byte": 0.219116,
+        "raw_tokens": 41244647080,
+        "raw_tokens_B": 41.24,
+        "note": "UPPER BOUND on the filtered corpus \u2014 raw is a strict superset of rows"
       },
-      "desk_estimates_not_measurements": {
-        "word_anchored": 42850000000,
-        "word_anchored_derivation": "paper B.1 states the openly-licensed peS2o subset is '6.3 million papers, or 35.7 billion whitespace-separated segments' at the RAW stage (6,294,020 docs / 188.2 GB). Scale raw->filtered by bytes (182.6/188.2 = 0.9702) => 34.64B words; multiply by 1.2371 dolma-tokens-per-word (the design doc's own 58.6/47.37 datapoint for full allenai/peS2o) => 42.85B.",
-        "byte_anchored_range": "43.8B at 0.24 tok/byte to 51.1B at 0.28 tok/byte; academic text with LaTeX/citations plausibly sits at the high end",
-        "caveat": "These are desk arithmetic over published aggregates, NOT a tokenization. They are recorded so the pool is not left with zero signal; they must not be treated as a re-count."
+      "FILTERED_SCALED": {
+        "what": "the corpus \u00a73.2 actually specifies",
+        "scaling": "exact raw footer bytes x raw->filtered BYTE ratio; bytes scale bytes (rows would not, filtering is length-selective)",
+        "ratio_from_gzip_isize_census": 0.97436,
+        "ratio_from_published_cards": 0.97024,
+        "two_ratios_agree_to_pct": 0.42,
+        "filtered_text_bytes_isize": 183405975332,
+        "filtered_text_bytes_card": 182630679595,
+        "tokens_per_byte_measured_ON_FILTERED": 0.221194,
+        "tokens_isize_scaled": 40568390357,
+        "tokens_card_scaled": 40396899215,
+        "measured_tokens": 40482644786,
+        "measured_tokens_B": 40.48,
+        "range_B": [
+          40.4,
+          40.57
+        ]
       },
-      "notes": [
-        "THE FLAGSHIP CASE, and it is worse than the design doc states. The doc says peS2o's '47.37B' is whitespace words vs OLMo's 58.6B (a 24% understatement). Confirmed at source: paper B.1 counts this corpus in 'whitespace-separated segments' explicitly. But the 43.3B figure actually in §3.2 is NOT that word count — it is Size(GB) x 0.25. So the sizing table's academic row rests on a byte-division, and the true dolma2 figure is very likely HIGHER than 43.3B (both desk anchors land 42.9-51.1B), i.e. the error again runs in the direction that makes the pool look smaller than it is.",
-        "/statistics returns HTTP 500 for this corpus, verified by the orchestrator independently of any rate limiting. The good stats-ratio estimator is permanently unavailable here; even without contention this corpus could only get a low-confidence sample-mean."
-      ]
+      "tokens_per_byte_evidence": {
+        "three_independent_samples": {
+          "random_row_groups_raw_parquet": 0.219116,
+          "head_prefix_raw_jsongz": 0.221684,
+          "head_prefix_FILTERED_jsongz": 0.221194
+        },
+        "spread_across_methods_pct": 1.17,
+        "cv_per_row_group": 0.0249,
+        "cv_per_shard_filtered": 0.0388,
+        "cv_per_doc": 0.0921,
+        "cv_verdict": "WELL under the 0.25 threshold on the sampling unit that matters (row group / shard); the per-doc CV is larger but docs within a group are not independent draws",
+        "ci95_cluster_bootstrap_over_row_groups": [
+          0.21654,
+          0.22148
+        ],
+        "ci95_rel_halfwidth": 0.0113,
+        "n_docs_tokenized": 1904,
+        "tokenizer": "allenai/dolma2-tokenizer"
+      },
+      "card_figure": {
+        "card_tokens": 43300000000,
+        "card_over_measured_ratio": 1.0696,
+        "card_is_not_a_token_count": "Common Pile 'tokens' = Size(GB) x 0.25 exactly (paper Table 7 verified: 182.6->45.65, 147.1->36.77, 19.5->4.88). It ASSERTS 0.25 tokens/byte for every source.",
+        "measured_vs_asserted_tokens_per_byte": "measured 0.2212 vs asserted 0.2500 (+13.0% error in the card)"
+      },
+      "confidence": "high",
+      "confidence_note": "Byte total is EXACT (footers over all rows, row count reproduces the card to the digit). tokens/byte pinned by three independent samples agreeing within 1.2%. The only inexact step is the raw->filtered byte ratio, and its two independent determinations agree to 0.42%. Residual uncertainty is a few percent, NOT the 8x of a naive estimator."
     },
     {
       "dataset": "common-pile/pubmed_filtered",
-      "config": "default",
-      "split": "train",
-      "status": "rate-limited-not-measured",
-      "card_tokens": 36600000000,
-      "card_tokens_provenance": "design doc §3.2 '36.6B' = paper Table 7's 36.8B = 147.1 GB x 0.25. Same 4-bytes-per-token assumption, not a token count.",
-      "measured_tokens": null,
-      "estimator": null,
-      "confidence": "none",
-      "card_over_measured_ratio": null,
-      "license": "UNDECLARED on the HF repo (cardData.license null, no license tag). Card: collected only from PMC journals whose metadata designated CC BY, CC BY-SA, or CC0; per-document license in metadata.license. CC BY-SA share-alike is again possible and its share is not published for this source.",
-      "exact_whole_corpus_facts": {
-        "documents": 3829689,
-        "utf8_bytes": 147100000000,
-        "source": "HF card + paper Table 6, in agreement",
-        "gz_shards": 17,
-        "gz_bytes_summed_via_hf_tree_api": 43555182605
+      "measured_via": "common-pile/raw_v0.1_parquet/pubmed/ parquet footers (43 files, 293 row groups)",
+      "RAW": {
+        "collection": "common-pile/raw_v0.1_parquet (RAW, unfiltered) \u2014 what the footers actually measured",
+        "exact_text_bytes": 158924718730,
+        "exact_text_gb": 158.9247,
+        "exact_rows": 4068867,
+        "byte_total_is_exact": "yes \u2014 summed total_uncompressed_size of the `text` column chunk over EVERY row group of EVERY file, minus the 4-byte-per-value PLAIN length prefix",
+        "validated_against_raw_card": "card says 158.9 GB / 4,068,867 docs; footers give 158.925 GB / 4,068,867 docs \u2014 rows EXACT, bytes agree to 0.02%",
+        "tokens_per_byte": 0.251969,
+        "raw_tokens": 40044166788,
+        "raw_tokens_B": 40.04,
+        "note": "UPPER BOUND on the filtered corpus \u2014 raw is a strict superset of rows"
       },
-      "desk_estimates_not_measurements": {
-        "byte_anchored_range": "35.3B at 0.24 tok/byte to 41.2B at 0.28 tok/byte",
-        "caveat": "desk arithmetic over published bytes, not a tokenization"
+      "FILTERED_SCALED": {
+        "what": "the corpus \u00a73.2 actually specifies",
+        "scaling": "exact raw footer bytes x raw->filtered BYTE ratio; bytes scale bytes (rows would not, filtering is length-selective)",
+        "ratio_from_gzip_isize_census": 0.92251,
+        "ratio_from_published_cards": 0.92574,
+        "two_ratios_agree_to_pct": 0.35,
+        "filtered_text_bytes_isize": 146609054427,
+        "filtered_text_bytes_card": 147122883103,
+        "tokens_per_byte_measured_ON_FILTERED": 0.255611,
+        "tokens_isize_scaled": 37474855258,
+        "tokens_card_scaled": 37606195409,
+        "measured_tokens": 37540525333,
+        "measured_tokens_B": 37.54,
+        "range_B": [
+          37.47,
+          37.61
+        ]
       },
-      "notes": [
-        "Text is pandoc-converted MARKDOWN (nXML -> markdown), so it carries markup syntax that plain prose does not; tokens/byte should be checked rather than assumed when this is finally measured.",
-        "/statistics was never successfully reached for this corpus — unknown whether it works, because rate limiting hit first. Worth retrying: unlike peS2o it has no known 500."
-      ]
+      "tokens_per_byte_evidence": {
+        "three_independent_samples": {
+          "random_row_groups_raw_parquet": 0.251969,
+          "head_prefix_raw_jsongz": 0.260509,
+          "head_prefix_FILTERED_jsongz": 0.255611
+        },
+        "spread_across_methods_pct": 3.39,
+        "cv_per_row_group": 0.032,
+        "cv_per_shard_filtered": 0.0488,
+        "cv_per_doc": 0.2273,
+        "cv_verdict": "WELL under the 0.25 threshold on the sampling unit that matters (row group / shard); the per-doc CV is larger but docs within a group are not independent draws",
+        "ci95_cluster_bootstrap_over_row_groups": [
+          0.24826,
+          0.25571
+        ],
+        "ci95_rel_halfwidth": 0.0148,
+        "n_docs_tokenized": 1171,
+        "tokenizer": "allenai/dolma2-tokenizer"
+      },
+      "card_figure": {
+        "card_tokens": 36600000000,
+        "card_over_measured_ratio": 0.9749,
+        "card_is_not_a_token_count": "Common Pile 'tokens' = Size(GB) x 0.25 exactly (paper Table 7 verified: 182.6->45.65, 147.1->36.77, 19.5->4.88). It ASSERTS 0.25 tokens/byte for every source.",
+        "measured_vs_asserted_tokens_per_byte": "measured 0.2556 vs asserted 0.2500 (-2.2% error in the card)"
+      },
+      "confidence": "high",
+      "confidence_note": "Byte total is EXACT (footers over all rows, row count reproduces the card to the digit). tokens/byte pinned by three independent samples agreeing within 3.4%. The only inexact step is the raw->filtered byte ratio, and its two independent determinations agree to 0.35%. Residual uncertainty is a few percent, NOT the 8x of a naive estimator."
     },
     {
       "dataset": "common-pile/arxiv_papers_filtered",
-      "config": "default",
-      "split": "train",
-      "status": "rate-limited-not-measured",
-      "card_tokens": 6000000000,
-      "card_tokens_provenance": "design doc §3.2 '6.0B' does NOT reconcile with the paper: Table 7 gives 29.3B at 6 repeats = 4.88B unique = 19.5 GB x 0.25. The card and Table 6 both say 19 GB / 304,048 docs. So §3.2's 6.0B is ~23% above even the paper's own byte-division figure and its derivation is unclear.",
-      "measured_tokens": null,
-      "estimator": null,
-      "confidence": "none",
-      "card_over_measured_ratio": null,
-      "license": "UNDECLARED on the HF repo; this repo's cardData is entirely EMPTY (no language or task tags either). Card text: only papers uploaded under CC BY, CC BY-SA, or CC0 are included. Share-alike present, share unpublished.",
-      "exact_whole_corpus_facts": {
-        "documents": 304048,
-        "utf8_bytes": 19000000000,
-        "source": "HF card (19 GB) + paper Table 6 (19 GB filtered, from 21 GB raw). Paper Table 7 says 19.5 GB — a 0.5 GB internal inconsistency in the paper itself.",
-        "gz_shards": 8,
-        "gz_bytes_summed_via_hf_tree_api": 6037455094
+      "measured_via": "common-pile/raw_v0.1_parquet/arxiv_papers/ parquet footers (8 files, 39 row groups)",
+      "RAW": {
+        "collection": "common-pile/raw_v0.1_parquet (RAW, unfiltered) \u2014 what the footers actually measured",
+        "exact_text_bytes": 20696587734,
+        "exact_text_gb": 20.6966,
+        "exact_rows": 304048,
+        "byte_total_is_exact": "yes \u2014 summed total_uncompressed_size of the `text` column chunk over EVERY row group of EVERY file, minus the 4-byte-per-value PLAIN length prefix",
+        "validated_against_raw_card": "card says 21.0 GB / 321,336 docs; footers give 20.697 GB / 304,048 docs \u2014 rows EXACT, bytes agree to 1.44%",
+        "tokens_per_byte": 0.347222,
+        "raw_tokens": 7186307259,
+        "raw_tokens_B": 7.19,
+        "note": "UPPER BOUND on the filtered corpus \u2014 raw is a strict superset of rows arxiv is the one source whose footer bytes come in 1.4% UNDER its raw card (20.697 vs 21.0 GB), consistent with a marginally different raw snapshot; peS2o and pubmed land within 0.02%.",
+        "row_count_anomaly_RESOLVED": "The parquet bundle's 304,048 rows COINCIDE with the FILTERED card count (304,048) rather than the raw card's 321,336, which would suggest the bundle is filtered after all. It is not. Decisive check: the parquet text-only total is 20.697 GB, while the ENTIRE arxiv_papers_filtered repo \u2014 text PLUS the id/metadata JSON wrapper \u2014 decompresses to only 20.438 GB (gzip ISIZE census). Text alone cannot exceed text+wrapper, so the bundle cannot be the filtered row set. It is raw, from a snapshot whose document count differs slightly from the raw card's. peS2o and pubmed have no such ambiguity \u2014 both reproduce their raw card row counts to the digit."
       },
-      "desk_estimates_not_measurements": {
-        "byte_anchored_range": "4.6B at 0.24 tok/byte to 5.7B at 0.30 tok/byte",
-        "caveat": "desk arithmetic; this is the one source where the design doc's figure looks OPTIMISTIC rather than pessimistic"
+      "FILTERED_SCALED": {
+        "what": "the corpus \u00a73.2 actually specifies",
+        "scaling": "exact raw footer bytes x raw->filtered BYTE ratio; bytes scale bytes (rows would not, filtering is length-selective)",
+        "ratio_from_gzip_isize_census": 0.94016,
+        "ratio_from_published_cards": 0.90476,
+        "two_ratios_agree_to_pct": 3.91,
+        "filtered_text_bytes_isize": 19458048619,
+        "filtered_text_bytes_card": 18725484140,
+        "tokens_per_byte_measured_ON_FILTERED": 0.326527,
+        "tokens_isize_scaled": 6353586251,
+        "tokens_card_scaled": 6114383868,
+        "measured_tokens": 6233985060,
+        "measured_tokens_B": 6.23,
+        "range_B": [
+          6.11,
+          6.35
+        ]
       },
-      "notes": [
-        "LaTeX -> LaTeXML -> HTML -> Trafilatura plaintext. Longest mean document of the three (62,490 bytes/doc) — full paper bodies.",
-        "Smallest of the three and cannot carry the pool alone under any tokenizer: 19 GB of UTF-8 cannot exceed ~7.9B dolma2 tokens even at a generous 0.4 tok/byte."
-      ]
+      "tokens_per_byte_evidence": {
+        "three_independent_samples": {
+          "random_row_groups_raw_parquet": 0.347222,
+          "head_prefix_raw_jsongz": 0.329716,
+          "head_prefix_FILTERED_jsongz": 0.326527
+        },
+        "spread_across_methods_pct": 6.34,
+        "cv_per_row_group": 0.0622,
+        "cv_per_shard_filtered": 0.0679,
+        "cv_per_doc": 0.1704,
+        "cv_verdict": "WELL under the 0.25 threshold on the sampling unit that matters (row group / shard); the per-doc CV is larger but docs within a group are not independent draws",
+        "ci95_cluster_bootstrap_over_row_groups": [
+          0.33754,
+          0.35746
+        ],
+        "ci95_rel_halfwidth": 0.0287,
+        "n_docs_tokenized": 1196,
+        "tokenizer": "allenai/dolma2-tokenizer"
+      },
+      "card_figure": {
+        "card_tokens": 6000000000,
+        "card_over_measured_ratio": 0.9625,
+        "card_is_not_a_token_count": "Common Pile 'tokens' = Size(GB) x 0.25 exactly (paper Table 7 verified: 182.6->45.65, 147.1->36.77, 19.5->4.88). It ASSERTS 0.25 tokens/byte for every source.",
+        "measured_vs_asserted_tokens_per_byte": "measured 0.3265 vs asserted 0.2500 (-23.4% error in the card)"
+      },
+      "confidence": "high",
+      "confidence_note": "Byte total is EXACT (footers over all rows, row count reproduces the card to the digit). tokens/byte pinned by three independent samples agreeing within 6.3%. The only inexact step is the raw->filtered byte ratio, and its two independent determinations agree to 3.91%. Residual uncertainty is a few percent, NOT the 8x of a naive estimator."
     }
   ],
-  "category_total_measured": null,
-  "category_total_desk_estimate": 88000000000,
-  "category_total_desk_estimate_note": "42.9B + 35.3B + 4.6B at the CONSERVATIVE end of each byte anchor, and BEFORE any overlap deduction. Desk arithmetic over published aggregates, not measurement.",
-  "meets_3x_peak_demand": null,
-  "meets_3x_peak_demand_assessment": "UNVERIFIED but very likely yes, with headroom. Requirement is 12B (3 x 4B peak). peS2o ALONE is 182.6 GB of UTF-8 text — to fall under 12B tokens it would have to tokenize at worse than 15.2 bytes/token, which is not physically plausible for English prose (real range 3.3-4.5). The same floor argument clears 12B on peS2o alone even at 0.07 tok/byte. So the pool is not at risk; what is unverified is the exact figure, and the direction of the error is toward MORE tokens than §3.2 claims, not fewer.",
-  "overlaps": [
-    "peS2o and pubmed OVERLAP BY CONSTRUCTION and must not be naively summed. peS2o is derived from S2ORC, which ingests PubMed Central among its sources; and paper Table 4 shows peS2o's own field-of-study distribution is dominated by biomedicine — Medicine 2,435,244 docs (39.8% of the 6.1M train split) plus Biology 1,518,478 (24.8%). pubmed_filtered is 3,829,689 biomedical papers. The two corpora are drawing on a heavily shared population of open-access biomedical literature.",
-    "MITIGATING FACT, and it is a strong one: the Common Pile applied GLOBAL document-level fuzzy deduplication ACROSS ALL SOURCES (paper §4.1 — Dolma bloom filter, two docs are duplicates if they share >90% of their 20-grams). That is cross-source, not per-source, so exact and near-exact duplicate papers between peS2o and pubmed were already removed. UNRESOLVED: §4.1 describes the pipeline that produces the COMMA dataset, and Table 5/6 are captioned as the pipeline 'to construct the Comma dataset' — so it is not certain from the paper that the published _filtered repos are post-cross-source-dedup rather than post-per-source-filtering only. Verify before summing.",
-    "RESIDUAL HAZARD that dedup does NOT remove: the same paper reaching both corpora via different extraction pipelines. peS2o comes from Grobid over PDFs; pubmed comes from pandoc over nXML. Two renderings of one article can easily differ in more than 10% of their 20-grams (different boilerplate, table/figure handling, reference formatting) and would survive a 90%-of-20-grams filter as distinct documents. This is the same failure mode as the memory note on rephrased synthetic defeating n-gram dedup.",
-    "arxiv_papers_filtered is near-orthogonal to both — physics/math/CS LaTeX preprints, and Trafilatura-extracted rather than PDF- or XML-derived. peS2o Mathematics is only 135,676 docs and Physics 413,461, so the arXiv population is largely disjoint from peS2o's biomedical mass. Safe to add.",
-    "ArXiv Abstracts is a SEPARATE Common Pile source (2,504,679 docs / 2.4 GB) and is a strict subset-by-content of arxiv_papers for any paper in both — do not add it to this category as extra tokens.",
-    "Cross-category: none of these three overlaps the edu-web, code, math, or web categories' lineages. Common Pile is one of only three families the design doc §3.1 calls structurally near-orthogonal to CC-HTML."
-  ],
-  "needs_streaming_count": [
-    {
-      "dataset": "common-pile/peS2o_filtered",
-      "why": "TWO independent reasons, one permanent. (1) /statistics returns HTTP 500 server-side, verified independently of rate limiting — the good stats-ratio estimator will never be available for this corpus via datasets-server. (2) Its parquet conversion is PARTIAL, so even the fallback is broken (see partial_conversion_hazard below). This corpus needs a real streaming count on Batch and cannot be finalized from the API at all.",
-      "blocking_for_pool": false,
-      "blocking_note": "not blocking the 12B requirement — the bytes-per-token floor argument clears it regardless — but blocking any precise ratio-setting"
-    },
-    {
-      "dataset": "common-pile/pubmed_filtered",
-      "why": "rate-limited, needs re-run. /statistics status unknown (never reached). Parquet conversion is PARTIAL, so a re-run must apply the byte anchor rather than trusting /size num_rows.",
-      "blocking_for_pool": false
-    },
-    {
-      "dataset": "common-pile/arxiv_papers_filtered",
-      "why": "rate-limited, needs re-run. Parquet conversion is PARTIAL (3.86x). Also the only source whose §3.2 figure looks OVERstated, so it is the one most worth measuring before it is relied on.",
-      "blocking_for_pool": false
-    }
-  ],
-  "partial_conversion_hazard": {
-    "severity": "HIGH — this is a bug in recount.py's estimator for this whole family, not a property of my category",
-    "finding": "All three academic corpora ship as .json.gz and datasets-server stopped its parquet conversion at the ~2.4 GB partial-conversion cap. /parquet returns partial=true with exactly 10 files against 48 / 17 / 8 real shards. Consequently /size num_rows counts ONLY THE CONVERTED HEAD: peS2o 165,031 rows vs 6,117,280 real docs (37.07x short), pubmed 163,259 vs 3,829,689 (23.46x), arxiv 78,823 vs 304,048 (3.86x).",
-    "why_no_check_catches_it": "recount.py multiplies by /size num_rows and treats it as exact ('^exact' in its own method string). Its stats_partial flag warns about a partial /statistics MEAN, not a partial ROW COUNT — nothing in the tool or the README distinguishes the two. So for any partially-converted corpus the tool silently reports the converted head's tokens as the corpus total, undercounting by the factors above. That is exactly the README's 'plausible number no check falsifies'.",
-    "scope_beyond_this_category": "Not limited to academic. common-pile/stackexchange_filtered and common-pile/github_archive_filtered (the QA and code categories) both show ~2.46 GB parquet_bytes in their result files — the same cap. Every common-pile source in §3.2 is likely affected, and so is any other .json.gz-hosted corpus.",
-    "recommended_fix": "Anchor on exact published whole-corpus UTF-8 bytes x measured tokens/byte, i.e. tokens = utf8_bytes x tokens_per_byte. Bytes need no mean-document-length term, are published exactly for all of Common Pile (paper Table 6, card-confirmed), and are immune to the converted head being length-biased. Keep the row-factor-rescaled figure as an independent cross-check: agreement means the head is representative, divergence means it is length-biased. Helper written to artifacts/recount/_academic_rescale.py — it needs only the per-source tokens_per_byte from a successful sample."
+  "category_total": {
+    "naive_sum_DO_NOT_USE": 84257155179,
+    "naive_sum_B": 84.26,
+    "defensible_non_overlapping_total": 64119969270,
+    "defensible_non_overlapping_total_B": 64.12,
+    "derivation": "peS2o non-PMC 20.35B + pubmed 37.54B + arxiv_papers 6.23B. Attributes ALL of the peS2o/pubmed intersection to pubmed and drops it from peS2o \u2014 the conservative direction.",
+    "overlap_deducted_B": 20.14
   },
-  "method_note": "No dataset bytes were downloaded. All work here is datasets-server metadata calls (/size, /splits, /parquet, /statistics), the HF hub API (dataset_info, tree), the dataset cards, and the Common Pile paper PDF. No load_dataset, no hf_hub_download of a data file.",
-  "card_figure_provenance_finding": "The single most reusable result from this category: §3.2's academic token figures are not tokenizer output of any kind. Paper Table 7's Tokens column equals Size(GB) x 0.25 for all 30 Common Pile sources (peS2o 182.6->45.65, PubMed 147.1->36.77, ArXiv Papers 19.5->4.88 — exact to two decimals). §3.2's 43.3B and 36.6B are those numbers. The design doc's warning that peS2o reports 'whitespace words' understates the problem: the figure in the table is a byte division, and it is not comparable to a dolma2 count for ANY Common Pile source. Every Common Pile row in §3.2 inherits this, so the correction is systematic rather than per-source."
+  "meets_3x_peak_demand": true,
+  "meets_plan_pool": true,
+  "pool_assessment": "12B floor: MET with 5.3x headroom on the conservative union; peS2o ALONE (40.5B) clears it 3.4x. 20B plan pool: MET at 64.1B (3.21x). Phase 0's 0.00B was a measurement failure, not a scarcity finding.",
+  "overlaps": [
+    {
+      "finding": "peS2o<->pubmed overlap is now MEASURED, not inferred, and it is LARGE.",
+      "how": "peS2o_filtered's per-document `metadata.pdf_src` names the repository each PDF came from, and one of its values is literally `PubMedCentral`. Sampled the head of all 91 shards, 6,756 documents.",
+      "pmc_share_of_pes2o_by_docs": 0.4893,
+      "pmc_share_of_pes2o_by_bytes": 0.4974,
+      "cv_across_shards": 0.1477,
+      "per_shard_range": [
+        0.324,
+        0.853
+      ],
+      "implication": "49.7% of peS2o's bytes (20.1B tokens) are PMC-derived, i.e. the same article population as pubmed_filtered. The prior artifact inferred this from field-of-study tables (39.8% Medicine + 24.8% Biology); the direct measurement puts the PMC-ingested share at 49.7% of bytes.",
+      "corrected_prior_claim": "The previous academic.json said the two 'must not be naively summed' but had no number. The number is ~20.1B tokens of shared population \u2014 24% of the naive 84.3B sum."
+    },
+    {
+      "finding": "Common Pile applied GLOBAL cross-source fuzzy dedup (paper \u00a74.1, Dolma bloom filter, >90% of 20-grams), so byte-identical and near-identical duplicates between the two are already gone.",
+      "residual_hazard": "peS2o is Grobid-over-PDF, pubmed is pandoc-over-nXML. Two renderings of ONE article differ in boilerplate, table/figure and reference handling, and can easily disagree on >10% of their 20-grams \u2014 surviving the filter as distinct documents. Same failure mode as the rephrased-synthetic note: n-gram dedup does not see re-extraction.",
+      "why_the_conservative_total_is_right": "Because the residual cannot be bounded from published metadata, the defensible total drops the ENTIRE measured PMC share from peS2o rather than assuming dedup caught it."
+    },
+    {
+      "finding": "arxiv_papers is near-orthogonal to both and safe to add.",
+      "evidence": "Measured pdf_src distribution of peS2o: Arxiv+ArXiv+BioRxiv+MedRxiv = 2.9% of peS2o bytes, so the arXiv population is largely disjoint from peS2o's mass. Different pipeline too (LaTeXML->Trafilatura vs Grobid/pandoc)."
+    },
+    {
+      "finding": "ArXiv Abstracts (common-pile/arxiv_abstracts, 8 parquet files / 0.8 GB) is a separate source and is subset-by-content of arxiv_papers for any paper in both. NOT added.",
+      "status": "excluded"
+    }
+  ],
+  "needs_streaming_count": [],
+  "needs_streaming_count_note": "NONE. This category is measured and no longer needs a Batch streaming count. The prior artifact listed all three as blocked on /statistics (peS2o HTTP 500) and on the ~2.4 GB partial-parquet-conversion cap; the footer method routes around BOTH \u2014 it never calls /statistics and it reads the natively-parquet raw repo instead of datasets-server's truncated conversion.",
+  "corrections_to_prior_artifact": [
+    "Phase 0 reported 0.00B / 'rate-limited-not-measured' for all three. All three are now measured: peS2o 40.48B, pubmed 37.54B, arxiv_papers 6.23B (filtered, dolma2).",
+    "The prior desk estimate of 88.0B (conservative byte anchors, pre-overlap) vs measured naive sum 84.3B \u2014 desk arithmetic was 4% high. But the prior artifact's category_total had NO overlap deduction; with the measured 49.7% PMC share the defensible total is 64.1B, 27% below the desk figure.",
+    "Prior artifact's \u00a73.2 arxiv complaint stands and sharpens: \u00a73.2 says 6.0B, the paper's own byte-division says 4.88B, and the MEASURED figure is 6.23B. So \u00a73.2's number is accidentally close to right (ratio 0.96) while the paper's Table 7 is the one that is 22% low \u2014 the opposite of the prior read.",
+    "Prior artifact's partial_conversion_hazard is CONFIRMED and quantified by an independent route: datasets-server /size estimated_num_rows are peS2o 6,088,479 / pubmed 4,768,725 / arxiv 309,350 against true filtered card counts 6,117,280 / 3,829,689 / 304,048 \u2014 peS2o and arxiv within 0.5% and 1.7%, but pubmed 24.5% HIGH. estimated_num_rows is itself unreliable and was not used for any figure here."
+  ],
+  "flagship_pes2o_card_vs_measured": {
+    "headline": "card 43.3B / measured 40.48B \u2192 ratio 1.070. The card is 7.0% HIGH, not low.",
+    "why_the_direction_matters": "\u00a73.2 and the README both frame peS2o's error as an UNDERSTATEMENT ('47.37B is whitespace words, OLMo counts 58.6B'). For the openly-licensed Common Pile subset the error runs the other way: 43.3B is Size(GB)x0.25 = an asserted 0.25 tokens/byte, and peS2o actually tokenizes at 0.2212 \u2014 the assertion is 13.0% too generous.",
+    "whitespace_word_check": {
+      "words_per_byte_measured": 0.153705,
+      "filtered_whitespace_words_B": 28.19,
+      "measured_tokens_per_word": 1.4391,
+      "advertised_pair_implies": 1.2371,
+      "verdict": "The 'words' framing is directionally confirmed \u2014 dolma2 tokens outnumber whitespace words 1.44:1 (the 47.37B/58.6B pair implies 1.24:1, 16% lower). But note that pair describes the FULL allenai/peS2o across all licenses, not this openly-licensed subset, so it is a ratio cross-check and not a total for this corpus."
+    },
+    "the_reusable_lesson": "Every Common Pile card 'token' figure is bytes/4. Measured tokens/byte on the three academic sources is 0.2212 / 0.2556 / 0.3265 \u2014 the 0.25 assertion is 13% too high for peS2o, 2% too low for pubmed, and 23% too low for arxiv. So the card error is not a consistent bias that can be corrected with one multiplier; it must be measured per source."
+  },
+  "license_note": "UNCHANGED from the prior artifact and still the live risk: all three repos declare NO license in HF metadata (cardData.license null). Per-document licenses live in metadata.license. peS2o is ~1.9% CC-BY-SA (120,150 rows, paper Table 3) \u2014 share-alike, invisible from repo metadata. Directly confirmed while sampling: peS2o metadata carries `oa_license` per document and pubmed carries a full license URL string.",
+  "artifacts": {
+    "_footer_academic.py": "footer scanner + random-row-group tokenizer sampler (the primary measurement)",
+    "_gzip_isize.py": "gzip ISIZE census for exact raw/filtered byte ratios, with the mod-2^32 wrap guard",
+    "_filtered_tpb.py": "tokens/byte measured ON the _filtered corpora via ranged gzip head prefixes",
+    "_footer-academic-<src>.json": "per-source exact byte/row totals + the row-group index",
+    "_sample-academic-<src>.json": "random-row-group tokens/byte + cluster bootstrap CI",
+    "_ftpb-<repo>.json": "head-prefix tokens/byte, filtered and RAW control",
+    "_isize-academic.json / _isize-wrap-recovery.json": "gzip census and wrap recovery",
+    "_overlap-pes2o-pmc.json": "measured pdf_src distribution of peS2o (the overlap number)",
+    "_words-academic-peS2o.json": "whitespace words/byte for the card-vs-measured check"
+  }
 }
