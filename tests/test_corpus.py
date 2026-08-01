@@ -465,3 +465,28 @@ def test_the_registry_covers_every_design_category():
         "math", "academic", "reference", "qa-forum",
     }
     assert set(_registry()["categories"]) == expected
+
+
+def test_every_registry_row_pins_a_revision():
+    """`resolve/main` follows a branch; a pin is what makes the build reproducible.
+
+    Without this, a corpus re-downloaded a month later can return different bytes under the same
+    name and NOTHING downstream notices: the manifest hashes whatever arrived, Gate A passes it, and
+    "the dataset built from fineweb-edu" quietly means two different things across two runs.
+    """
+    import re
+
+    for row in _registry()["corpora"]:
+        rev = row.get("revision")
+        assert rev, f"{row['key']}: no pinned revision"
+        assert re.fullmatch(r"[0-9a-f]{40}", rev), f"{row['key']}: {rev!r} is not a 40-hex sha"
+
+
+def test_rows_sharing_a_repo_share_its_revision():
+    """One repo, one pin. The four FinePhrase configs and the three Common Pile subsets each live in
+    a single repo, so two different shas for one repo would mean the build read two states of it."""
+    by_repo: dict[str, set] = {}
+    for row in _registry()["corpora"]:
+        by_repo.setdefault(row["repo"], set()).add(row["revision"])
+    for repo, revs in by_repo.items():
+        assert len(revs) == 1, f"{repo} pinned at {len(revs)} different revisions: {sorted(revs)}"

@@ -42,6 +42,78 @@ VERIFIED_TEXT_COLUMN = {
     ),
 }
 
+#: Repo commit shas, resolved from the HF API on 2026-08-01 and pinned here.
+#:
+#: WHY PINNING IS NOT OPTIONAL. `resolve/main` follows the branch, so a corpus re-downloaded a month
+#: later can return different bytes under the same name — and nothing downstream would notice: the
+#: manifest would hash whatever arrived, Gate A would pass it, and "the dataset built from
+#: fineweb-edu" would silently mean two different things across two runs. `dclm-baseline` last moved
+#: in 2024 and `finephrase` in 2026-03, so drift is not hypothetical, just slow.
+#:
+#: These are dataset-level commit shas (the `sha` field of `/api/datasets/<repo>`), which is exactly
+#: what `resolve/<sha>/<path>` accepts. Verified by execution rather than assumed: a tree listing at
+#: the pinned `finephrase` sha returned `faq/000_00000_0.parquet`, and a Range request for its first
+#: 16 bytes returned **HTTP 206** with magic **`PAR1`** — a real parquet file, at the pin.
+#:
+#: All eight were `gated=False` and `private=False` at pin time. To refresh:
+#:   python3 -c "import json,urllib.request as u; print(json.load(u.urlopen(
+#:     'https://huggingface.co/api/datasets/<repo>'))['sha'])"
+#: ⚠️ **PINNING CAUGHT A WRONG REPO, which is the strongest argument for doing it.** All seven
+#: Common Pile rows named `common-pile/raw_v0.1_parquet` with the subset as a `config`. Resolving the
+#: pins showed that repo's tree at the pinned sha holds `peS2o/`, `stackv2/`, `ubuntu_irc/` — the
+#: **raw** subsets, not the `_filtered` ones — and every `<name>_filtered` path 404s. The filtered
+#: variants are **standalone repos** (`common-pile/peS2o_filtered`, …), each holding `.json.gz` files
+#: at the repo ROOT, not parquet under a config. So those rows had the wrong repo, the wrong
+#: file_format, and a config that does not exist; nothing would have been read.
+REVISION = {
+    "EssentialAI/essential-web-v1.0": "ce4eccc7e9604667b6d7f32cb6274b8b41f3113d",
+    "HuggingFaceFW/finepdfs-edu": "9cfabe2127faca99b3d5c4dc6d1fcb397399ebde",
+    "HuggingFaceFW/finephrase": "78cf4a5ed0099214979c094c963e699c19163838",
+    "HuggingFaceFW/fineweb-edu": "87f09149ef4734204d70ed1d046ddc9ca3f2b8f9",
+    "HuggingFaceFW/finewiki": "8bd13e72e6a002407649b3e898535f42ceb1aeb9",
+    "HuggingFaceTB/finemath": "e92b25a616738fe95dc186b64dfb19f9c8525594",
+    "mlfoundations/dclm-baseline-1.0": "a3b142c183aebe5af344955ae20836eb34dcf69b",
+    "common-pile/peS2o_filtered": "297747513bfb0ff1fbf61ddad3b03319d0f04597",
+    "common-pile/pubmed_filtered": "c156f0569a92d8f2edc33cebe1f72f7d3e1cae84",
+    "common-pile/arxiv_papers_filtered": "033cf7f53f9b348deec868c1a5a48484f3ee9e52",
+    "common-pile/stackv2_edu_filtered": "c354dbe88469a1153e97c6a63ac50591849654de",
+    "common-pile/stackexchange_filtered": "c0ac7373830c688a43fc12d1988c4b19ccd884ab",
+    "common-pile/ubuntu_irc_filtered": "84f88c986584f11d672befab542fa4d5123f3e8f",
+    "common-pile/github_archive_filtered": "52282fe96670254bdc0d44dd718ee7a27210ee85",
+}
+
+#: When each pinned sha was last modified upstream, for judging staleness at read time.
+REVISION_DATE = {
+    "EssentialAI/essential-web-v1.0": "2025-10-02T20:58:14.000Z",
+    "HuggingFaceFW/finepdfs-edu": "2025-11-11T18:49:02.000Z",
+    "HuggingFaceFW/finephrase": "2026-03-31T06:26:09.000Z",
+    "HuggingFaceFW/fineweb-edu": "2025-07-11T20:16:53.000Z",
+    "HuggingFaceFW/finewiki": "2025-10-22T11:02:22.000Z",
+    "HuggingFaceTB/finemath": "2025-02-06T10:31:11.000Z",
+    "mlfoundations/dclm-baseline-1.0": "2024-07-22T15:27:52.000Z",
+    "common-pile/peS2o_filtered": "2025-06-06",
+    "common-pile/pubmed_filtered": "2025-06-06",
+    "common-pile/arxiv_papers_filtered": "2025-06-06",
+    "common-pile/stackv2_edu_filtered": "2025-06-06",
+    "common-pile/stackexchange_filtered": "2025-06-06",
+    "common-pile/ubuntu_irc_filtered": "2025-06-06",
+    "common-pile/github_archive_filtered": "2025-06-06",
+}
+
+#: Filename prefix of each Common Pile repo's `.json.gz` shards, at the repo root. The prefix does
+#: NOT match the repo name — `stackv2_edu_filtered` ships `stack-edu-NNNN.json.gz` and
+#: `github_archive_filtered` ships `gharchive-dolma-NNNN.json.gz` — so a reader cannot derive it.
+#: Read from the pinned tree listing.
+CP_FILE_PREFIX = {
+    "common-pile/peS2o_filtered": "peS2o-",
+    "common-pile/pubmed_filtered": "licensed_pubmed-",
+    "common-pile/arxiv_papers_filtered": "arxiv-papers-",
+    "common-pile/stackv2_edu_filtered": "stack-edu-",
+    "common-pile/stackexchange_filtered": "stackexchange-dolma-",
+    "common-pile/ubuntu_irc_filtered": "ubuntu-chat-dolma-",
+    "common-pile/github_archive_filtered": "gharchive-dolma-",
+}
+
 #: Measured pool sizes from `artifacts/sizing-revised.md`'s table, which states the basis per row.
 #: These are dolma2 re-counts, NOT card figures.
 MEASURED = {
@@ -63,7 +135,10 @@ MEASURED = {
     "finephrase-table": 86_950_000_000,
 }
 
-_CP = "common-pile/raw_v0.1_parquet"
+#: Each Common Pile subset is its OWN repo, holding `.json.gz` at the root — NOT a config of
+#: `raw_v0.1_parquet`, which is what these rows said until the pins were resolved. See REVISION.
+def _cp(subset: str) -> str:
+    return f"common-pile/{subset}"
 
 
 #: Category pools where summing the rows OVERSTATES what is available, because the sources are not
@@ -100,7 +175,20 @@ def _row(**kw) -> dict:
     key = kw.pop("_verify_key", kw["key"])
     col, src = VERIFIED_TEXT_COLUMN.get(key, ("UNVERIFIED", None))
     kw["text_column"] = kw.pop("text_column", col)
+    # A row whose repo has no pin is a build that cannot be reproduced. Fail here rather than emit
+    # `revision: null`, which reads as "not applicable" instead of "nobody pinned this."
+    if kw["repo"] not in REVISION:
+        raise SystemExit(f"{kw['key']}: no pinned revision for {kw['repo']!r}; add one to REVISION")
+    kw["revision"] = REVISION[kw["repo"]]
     traps = list(kw.pop("traps", ()))
+    if kw["repo"] in CP_FILE_PREFIX:
+        pfx = CP_FILE_PREFIX[kw["repo"]]
+        traps.append(
+            f"`.json.gz` at the REPO ROOT, named {pfx}NNNN.json.gz — no config, no data/ prefix. "
+            f"The prefix does not match the repo name and cannot be derived from it "
+            f"(stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships "
+            f"gharchive-dolma-*), so list the tree at the pinned revision rather than guessing."
+        )
     if kw["text_column"] == "UNVERIFIED":
         traps.insert(
             0,
@@ -152,10 +240,18 @@ ROWS = [
     # ---- web (diverse): 30 B pool, measured 114.69 B (5.5x) ----
     _row(
         key="dclm-baseline", category="web-diverse", source_label="dclm",
-        repo="mlfoundations/dclm-baseline-1.0", config="default", file_format="parquet",
+        repo="mlfoundations/dclm-baseline-1.0", config=None, file_format="jsonl.zst",
         id_column="UNVERIFIED", target_tokens=30_000_000_000,
         pool_tokens=MEASURED["dclm-baseline"], license="CC-BY-4.0",
         traps=(
+            "🛑 BLOCKED ON A READER: this is `.jsonl.zst`, and `corpus_read` REFUSES zstd — the "
+            "package declares no `zstandard` dependency. Verified from bytes at the pinned "
+            "revision: `global-shard_01_of_10/local-shard_0_of_10/shard_00000000_processed."
+            "jsonl.zst`, magic `28 b5 2f fd`. The row said `parquet` under a `default` config, and "
+            "neither exists. Either add the dependency and a zstd branch to the reader, or source "
+            "diverse web elsewhere. 30B of the 252.6B target depends on this.",
+            "Layout is `global-shard_NN_of_10/local-shard_N_of_10/shard_NNNNNNNN_processed."
+            "jsonl.zst` — two levels of sharding, no config, no data/ prefix.",
             "The diversity counterweight to edu filtering — the point is that it is NOT filtered.",
             "olmo-mix-1124 is ~95% DCLM-baseline (§3.1), so this overlaps the published corpora.",
         ),
@@ -177,7 +273,7 @@ ROWS = [
     # ---- academic: 20 B pool, measured 64.12 B non-overlapping (3.2x) ----
     _row(
         key="peS2o_filtered", category="academic", source_label="pes2o",
-        repo=_CP, config="peS2o_filtered", file_format="parquet",
+        repo=_cp("peS2o_filtered"), config=None, file_format="json.gz",
         id_column="UNVERIFIED", target_tokens=14_000_000_000,
         pool_tokens=MEASURED["peS2o_filtered"], license="CC-BY / CC0 (mixed)", share_alike=True,
         traps=(
@@ -192,14 +288,14 @@ ROWS = [
     ),
     _row(
         key="pubmed_filtered", category="academic", source_label="pubmed",
-        repo=_CP, config="pubmed_filtered", file_format="parquet",
+        repo=_cp("pubmed_filtered"), config=None, file_format="json.gz",
         id_column="UNVERIFIED", target_tokens=6_000_000_000,
         pool_tokens=MEASURED["pubmed_filtered"], license="CC-BY / CC0 (mixed)",
         traps=("Overlaps peS2o's PMC share — see the peS2o row. Count one, not both.",),
     ),
     _row(
         key="arxiv_papers_filtered", category="academic", source_label="arxiv",
-        repo=_CP, config="arxiv_papers_filtered", file_format="parquet",
+        repo=_cp("arxiv_papers_filtered"), config=None, file_format="json.gz",
         id_column="UNVERIFIED", target_tokens=0,
         pool_tokens=MEASURED["arxiv_papers_filtered"], license="CC-BY / CC0 (mixed)",
         traps=(
@@ -210,7 +306,7 @@ ROWS = [
     # ---- code: 40 B pool, measured 74.81 B from ONE source (1.87x) ----
     _row(
         key="stackv2_edu_filtered", category="code", source_label="stackv2-edu",
-        repo=_CP, config="stackv2_edu_filtered", file_format="parquet",
+        repo=_cp("stackv2_edu_filtered"), config=None, file_format="json.gz",
         id_column="UNVERIFIED", target_tokens=40_000_000_000,
         pool_tokens=MEASURED["stackv2_edu_filtered"], license="Blue Oak (100% permissive per-doc)",
         domain_column="metadata.gha_language",
@@ -231,7 +327,7 @@ ROWS = [
     # ---- QA/forum: 12 B pool, measured 25.93 B (2.16x) — 92.8% share-alike ----
     _row(
         key="stackexchange_filtered", category="qa-forum", source_label="stackexchange",
-        repo=_CP, config="stackexchange_filtered", file_format="parquet",
+        repo=_cp("stackexchange_filtered"), config=None, file_format="json.gz",
         id_column="UNVERIFIED", target_tokens=10_000_000_000,
         pool_tokens=MEASURED["stackexchange_filtered"], license="CC-BY-SA-4.0", share_alike=True,
         domain_column="metadata.site",
@@ -244,7 +340,7 @@ ROWS = [
     ),
     _row(
         key="ubuntu_irc_filtered", category="qa-forum", source_label="ubuntu-irc",
-        repo=_CP, config="ubuntu_irc_filtered", file_format="parquet",
+        repo=_cp("ubuntu_irc_filtered"), config=None, file_format="json.gz",
         id_column="UNVERIFIED", target_tokens=1_800_000_000,
         pool_tokens=MEASURED["ubuntu_irc_filtered"], license="Public Domain",
         traps=(
@@ -256,7 +352,7 @@ ROWS = [
     ),
     _row(
         key="github_archive_filtered", category="qa-forum", source_label="github-archive",
-        repo=_CP, config="github_archive_filtered", file_format="parquet",
+        repo=_cp("github_archive_filtered"), config=None, file_format="json.gz",
         id_column="UNVERIFIED", target_tokens=0,
         pool_tokens=MEASURED["github_archive_filtered"], license="permissive",
         traps=(
@@ -345,14 +441,26 @@ def main() -> int:
             "target_tokens 0 means RESERVE — listed deliberately, not drawn in v1. "
             "text_column 'UNVERIFIED' means not confirmed from real bytes; the row's first trap "
             "carries the command that settles it. pool_tokens are dolma2 re-counts from "
-            "artifacts/recount + artifacts/sizing-revised.md, never card figures (§3.1)."
+            "artifacts/recount + artifacts/sizing-revised.md, never card figures (§3.1). "
+            "Every revision is PINNED: read with resolve/<revision>/<path>, never resolve/main, "
+            "or a re-download can return different bytes under the same name."
         ),
+        "_revisions_pinned_at": "2026-08-01",
+        "_revision_dates": REVISION_DATE,
+        "_revisions_verified": (
+            "All 14 (repo, sha) pairs resolved against the HF tree API on 2026-08-01. Resolving "
+            "them is what caught the seven Common Pile rows pointing at the wrong repo entirely."
+        ),
+        "_common_pile_file_prefix": CP_FILE_PREFIX,
         "categories": _categories(by_cat),
         "corpora": ROWS,
     }
     out = ROOT / "artifacts" / "reservoir" / "corpus-registry.json"
     out.write_text(json.dumps(doc, indent=1) + "\n")
 
+    unpinned = [r["key"] for r in ROWS if not r.get("revision")]
+    if unpinned:  # belt and braces: _row() already refuses, so this can only fire on a code edit
+        raise SystemExit(f"unpinned revisions: {unpinned}")
     ver = sum(1 for r in ROWS if r["text_column"] != "UNVERIFIED")
     drawn = [s for s in specs if s.target_tokens > 0]
     print(f"wrote {out.relative_to(ROOT)}")

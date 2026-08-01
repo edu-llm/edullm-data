@@ -22,6 +22,39 @@ in a way a card figure would not be.
 `essential-web`, `arxiv_papers_filtered`, `github_archive_filtered`. They are listed *because* they
 were considered; deleting them would lose the measurement and the reasoning.
 
+## Revisions are pinned, and pinning found three real errors
+
+All 17 rows carry a 40-hex commit sha (14 distinct repos), and
+`python3 artifacts/reservoir/verify_pins.py --deep` re-checks every one against the HF tree API and
+fetches 16 bytes to confirm the file magic. **14/14 resolve with correct magic.** Read with
+`resolve/<revision>/<path>`, never `resolve/main`.
+
+Pinning was supposed to be bookkeeping. It was not — resolving the pins falsified three things the
+registry asserted, none of which any test could have caught, because they are facts about remote
+repositories:
+
+1. **Seven Common Pile rows named the wrong repo entirely.** They said
+   `common-pile/raw_v0.1_parquet` with the subset as a `config`. That repo's tree at the pinned sha
+   holds `peS2o/`, `stackv2/`, `ubuntu_irc/` — the **raw** subsets — and every `<name>_filtered`
+   path 404s. The filtered variants are **standalone repos** shipping `.json.gz` at the root. Wrong
+   repo, wrong `file_format`, and a config that does not exist: the build would have read nothing.
+2. **The Common Pile file prefixes cannot be derived from the repo name.**
+   `stackv2_edu_filtered` ships `stack-edu-NNNN.json.gz`; `github_archive_filtered` ships
+   `gharchive-dolma-NNNN.json.gz`; `pubmed_filtered` ships `licensed_pubmed-NNNN.json.gz`. Now
+   recorded per row and in `_common_pile_file_prefix`.
+3. 🛑 **DCLM-baseline is `.jsonl.zst`, and the reader refuses zstd.** The row said `parquet` under a
+   `default` config; neither exists. Verified from bytes:
+   `global-shard_01_of_10/local-shard_0_of_10/shard_00000000_processed.jsonl.zst`, magic
+   `28 b5 2f fd`. `corpus_read` declines that format because the package declares no `zstandard`
+   dependency. **30 B of the 252.6 B target is blocked on either adding that dependency or sourcing
+   diverse web elsewhere** — see "What is not here".
+
+While confirming the Common Pile layout I also read a real record from each of three repos, which
+settles their schema from bytes rather than from a card: keys are
+`{id, text, source, added, created, metadata}` (peS2o adds `version`; `stackv2_edu` adds
+`score`/`int_score`), and both domain columns exist as claimed — `metadata.gha_language` for
+`stackv2-edu`, `metadata.site` for `stackexchange`.
+
 ## Pools vs. targets
 
 | category | target | non-overlapping pool | ratio | |
@@ -105,11 +138,13 @@ inside. *Licensing notes are research findings, not legal advice.*
 
 ## What is not here
 
-- **`.json.zst`** — `corpus_read` refuses it loudly; it needs a `zstandard` dependency this package
-  does not declare. No row currently requires it.
-- **`revision` shas** are `null` throughout. Pin them before the real build, or a re-download can
-  silently return different bytes for the same "corpus."
-- **`id_column`** is `UNVERIFIED` on every row but the FinePhrase four. It matters most where the id
-  is a join key — the FinePhrase partition and the FineWeb-Edu anti-join.
+- 🛑 **A zstd reader.** `corpus_read` refuses `.zst` because the package declares no `zstandard`
+  dependency, and **one row now requires it**: `dclm-baseline`, 30 B of the target. This was
+  "no row currently requires it" until the pins were resolved. Decide before the build: add
+  `zstandard` plus a decompression branch (the streaming shape mirrors the existing
+  `zlib.decompressobj` path, including the `eof` check), or source diverse web from another corpus.
+- **`id_column`** is `UNVERIFIED` on 13 of 17 rows. Confirmed present as `id` for the three Common
+  Pile repos whose records I read, but not yet pinned per row. It matters most where the id is a
+  join key — the FinePhrase partition and the FineWeb-Edu anti-join.
 - **Nemotron** is absent by decision, not omission: its license forbids making the data available to
   others, which a shared reservoir does by definition (§7 item 1).

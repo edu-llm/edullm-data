@@ -2,7 +2,34 @@
  "_schema": "edullm-corpus-registry/v1",
  "_generated_by": "artifacts/reservoir/build_registry.py",
  "_tokenizer": "allenai/dolma2-tokenizer (published as tokenizer/dolma2-bpe/v1)",
- "_note": "target_tokens 0 means RESERVE \u2014 listed deliberately, not drawn in v1. text_column 'UNVERIFIED' means not confirmed from real bytes; the row's first trap carries the command that settles it. pool_tokens are dolma2 re-counts from artifacts/recount + artifacts/sizing-revised.md, never card figures (\u00a73.1).",
+ "_note": "target_tokens 0 means RESERVE \u2014 listed deliberately, not drawn in v1. text_column 'UNVERIFIED' means not confirmed from real bytes; the row's first trap carries the command that settles it. pool_tokens are dolma2 re-counts from artifacts/recount + artifacts/sizing-revised.md, never card figures (\u00a73.1). Every revision is PINNED: read with resolve/<revision>/<path>, never resolve/main, or a re-download can return different bytes under the same name.",
+ "_revisions_pinned_at": "2026-08-01",
+ "_revision_dates": {
+  "EssentialAI/essential-web-v1.0": "2025-10-02T20:58:14.000Z",
+  "HuggingFaceFW/finepdfs-edu": "2025-11-11T18:49:02.000Z",
+  "HuggingFaceFW/finephrase": "2026-03-31T06:26:09.000Z",
+  "HuggingFaceFW/fineweb-edu": "2025-07-11T20:16:53.000Z",
+  "HuggingFaceFW/finewiki": "2025-10-22T11:02:22.000Z",
+  "HuggingFaceTB/finemath": "2025-02-06T10:31:11.000Z",
+  "mlfoundations/dclm-baseline-1.0": "2024-07-22T15:27:52.000Z",
+  "common-pile/peS2o_filtered": "2025-06-06",
+  "common-pile/pubmed_filtered": "2025-06-06",
+  "common-pile/arxiv_papers_filtered": "2025-06-06",
+  "common-pile/stackv2_edu_filtered": "2025-06-06",
+  "common-pile/stackexchange_filtered": "2025-06-06",
+  "common-pile/ubuntu_irc_filtered": "2025-06-06",
+  "common-pile/github_archive_filtered": "2025-06-06"
+ },
+ "_revisions_verified": "All 14 (repo, sha) pairs resolved against the HF tree API on 2026-08-01. Resolving them is what caught the seven Common Pile rows pointing at the wrong repo entirely.",
+ "_common_pile_file_prefix": {
+  "common-pile/peS2o_filtered": "peS2o-",
+  "common-pile/pubmed_filtered": "licensed_pubmed-",
+  "common-pile/arxiv_papers_filtered": "arxiv-papers-",
+  "common-pile/stackv2_edu_filtered": "stack-edu-",
+  "common-pile/stackexchange_filtered": "stackexchange-dolma-",
+  "common-pile/ubuntu_irc_filtered": "ubuntu-chat-dolma-",
+  "common-pile/github_archive_filtered": "gharchive-dolma-"
+ },
  "categories": {
   "academic": {
    "target_tokens": 20000000000,
@@ -93,6 +120,7 @@
    "pool_tokens": 161100000000,
    "license": "ODC-BY-1.0",
    "text_column": "text",
+   "revision": "9cfabe2127faca99b3d5c4dc6d1fcb397399ebde",
    "traps": [
     "PDF-extracted text; extraction artifacts differ in kind from CC-HTML sources.",
     "text_column verified in artifacts/recount/_footer-finepdfs-edu.json"
@@ -110,6 +138,7 @@
    "pool_tokens": 100240000000,
    "license": "ODC-BY-1.0",
    "text_column": "UNVERIFIED",
+   "revision": "87f09149ef4734204d70ed1d046ddc9ca3f2b8f9",
    "traps": [
     "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of HuggingFaceFW/fineweb-edu>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "\ud83d\uded1 100% of this source has a synthetic sibling: sample-100BT \u2282 sample-350BT, which is FinePhrase's exact parent. Draw synthetic from the ~242M sample-350BT ids NOT in sample-100BT, or every edu-web document appears twice in one run (HANDOFF 'three irreversible decisions', item 3).",
@@ -129,6 +158,7 @@
    "license": "ODC-BY-1.0",
    "domain_column": "eai_taxonomy.free_decimal_correspondence",
    "text_column": "text",
+   "revision": "ce4eccc7e9604667b6d7f32cb6274b8b41f3113d",
    "traps": [
     "target_tokens 0 = RESERVE, not in the v1 draw: the pool is already met 7.0x. Listed because it is the one source that SHIPS the subject label the cancelled ~$920 classification run would have computed (\u00a71.2).",
     "Shares 89 of 101 snapshots with DCLM-Pool (\u00a73.1) \u2014 do not treat as independent.",
@@ -140,15 +170,18 @@
    "category": "web-diverse",
    "source_label": "dclm",
    "repo": "mlfoundations/dclm-baseline-1.0",
-   "config": "default",
-   "file_format": "parquet",
+   "config": null,
+   "file_format": "jsonl.zst",
    "id_column": "UNVERIFIED",
    "target_tokens": 30000000000,
    "pool_tokens": 114690000000,
    "license": "CC-BY-4.0",
    "text_column": "UNVERIFIED",
+   "revision": "a3b142c183aebe5af344955ae20836eb34dcf69b",
    "traps": [
     "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of mlfoundations/dclm-baseline-1.0>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
+    "\ud83d\uded1 BLOCKED ON A READER: this is `.jsonl.zst`, and `corpus_read` REFUSES zstd \u2014 the package declares no `zstandard` dependency. Verified from bytes at the pinned revision: `global-shard_01_of_10/local-shard_0_of_10/shard_00000000_processed.jsonl.zst`, magic `28 b5 2f fd`. The row said `parquet` under a `default` config, and neither exists. Either add the dependency and a zstd branch to the reader, or source diverse web elsewhere. 30B of the 252.6B target depends on this.",
+    "Layout is `global-shard_NN_of_10/local-shard_N_of_10/shard_NNNNNNNN_processed.jsonl.zst` \u2014 two levels of sharding, no config, no data/ prefix.",
     "The diversity counterweight to edu filtering \u2014 the point is that it is NOT filtered.",
     "olmo-mix-1124 is ~95% DCLM-baseline (\u00a73.1), so this overlaps the published corpora."
    ]
@@ -165,6 +198,7 @@
    "pool_tokens": 34690000000,
    "license": "ODC-BY-1.0",
    "text_column": "UNVERIFIED",
+   "revision": "e92b25a616738fe95dc186b64dfb19f9c8525594",
    "traps": [
     "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of HuggingFaceTB/finemath>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "\u26a0\ufe0f The ONLY math source: everything else in the category is a rewrite of it. swallow-math-v2 (32 B, Apache-2.0) is a FineMath rewrite; measured self-similarity means no digest or MinHash catches the duplication.",
@@ -176,19 +210,21 @@
    "key": "peS2o_filtered",
    "category": "academic",
    "source_label": "pes2o",
-   "repo": "common-pile/raw_v0.1_parquet",
-   "config": "peS2o_filtered",
-   "file_format": "parquet",
+   "repo": "common-pile/peS2o_filtered",
+   "config": null,
+   "file_format": "json.gz",
    "id_column": "UNVERIFIED",
    "target_tokens": 14000000000,
    "pool_tokens": 40480000000,
    "license": "CC-BY / CC0 (mixed)",
    "share_alike": true,
    "text_column": "text",
+   "revision": "297747513bfb0ff1fbf61ddad3b03319d0f04597",
    "traps": [
     "\ud83d\uded1 49.7% of its BYTES are PubMedCentral-derived (measured from per-document metadata.pdf_src, artifacts/recount/_overlap-pes2o-pmc.json). The same article via Grobid-over-PDF and pandoc-over-nXML differs in >10% of 20-grams and SURVIVES fuzzy dedup as distinct. Drop the PMC share rather than dedup it, or take pubmed instead.",
     "\u22481.9% share-alike and INVISIBLE from repo metadata (Common Pile paper Table 3). Name-level SA exclusion therefore drops 100% of this source to remove 1.9%.",
     "Card says 43.3 B \u2014 7% HIGH vs the footer-exact 40.48 B.",
+    "`.json.gz` at the REPO ROOT, named peS2o-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing.",
     "text_column verified in artifacts/recount/_footer-academic-peS2o.json"
    ]
   },
@@ -196,16 +232,18 @@
    "key": "pubmed_filtered",
    "category": "academic",
    "source_label": "pubmed",
-   "repo": "common-pile/raw_v0.1_parquet",
-   "config": "pubmed_filtered",
-   "file_format": "parquet",
+   "repo": "common-pile/pubmed_filtered",
+   "config": null,
+   "file_format": "json.gz",
    "id_column": "UNVERIFIED",
    "target_tokens": 6000000000,
    "pool_tokens": 37540000000,
    "license": "CC-BY / CC0 (mixed)",
    "text_column": "text",
+   "revision": "c156f0569a92d8f2edc33cebe1f72f7d3e1cae84",
    "traps": [
     "Overlaps peS2o's PMC share \u2014 see the peS2o row. Count one, not both.",
+    "`.json.gz` at the REPO ROOT, named licensed_pubmed-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing.",
     "text_column verified in artifacts/recount/_footer-academic-pubmed.json"
    ]
   },
@@ -213,16 +251,18 @@
    "key": "arxiv_papers_filtered",
    "category": "academic",
    "source_label": "arxiv",
-   "repo": "common-pile/raw_v0.1_parquet",
-   "config": "arxiv_papers_filtered",
-   "file_format": "parquet",
+   "repo": "common-pile/arxiv_papers_filtered",
+   "config": null,
+   "file_format": "json.gz",
    "id_column": "UNVERIFIED",
    "target_tokens": 0,
    "pool_tokens": 6230000000,
    "license": "CC-BY / CC0 (mixed)",
    "text_column": "text",
+   "revision": "033cf7f53f9b348deec868c1a5a48484f3ee9e52",
    "traps": [
     "target_tokens 0 = reserve; the 20 B academic pool is met by peS2o + pubmed. DoReMi drove ArXiv 10.52% -> 0.36% and RegMix put it near zero (\u00a72.1).",
+    "`.json.gz` at the REPO ROOT, named arxiv-papers-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing.",
     "text_column verified in artifacts/recount/_footer-academic-arxiv_papers.json"
    ]
   },
@@ -230,30 +270,32 @@
    "key": "stackv2_edu_filtered",
    "category": "code",
    "source_label": "stackv2-edu",
-   "repo": "common-pile/raw_v0.1_parquet",
-   "config": "stackv2_edu_filtered",
-   "file_format": "parquet",
+   "repo": "common-pile/stackv2_edu_filtered",
+   "config": null,
+   "file_format": "json.gz",
    "id_column": "UNVERIFIED",
    "target_tokens": 40000000000,
    "pool_tokens": 74810000000,
    "license": "Blue Oak (100% permissive per-doc)",
    "domain_column": "metadata.gha_language",
    "text_column": "UNVERIFIED",
+   "revision": "c354dbe88469a1153e97c6a63ac50591849654de",
    "traps": [
-    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/raw_v0.1_parquet>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
+    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/stackv2_edu_filtered>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "\u26a0\ufe0f 73 distinct languages in ONE shard. Cardinality is PERMANENT \u2014 each becomes a directory inside manifest_sha256. Fold to the top ~20 by token count, rest -> 'other' (\u00a71.2), and pass the map to the reader: it is a reader ARGUMENT, not a spec field.",
     "\ud83d\uded1 SLUG THE VALUE. 'C#' publishes clean and passes Gate A, then urlparse puts everything after the '#' in `fragment` and THE SHARD NAME LEAVES THE PATH. Gate A now rejects '#' and brackets (validate._segment_breakage); other values still need slug_path_segment. 'C#'->'c-sharp', 'C++'->'c-plus-plus'.",
     "Use this, NOT the-stack-v2/stack-edu: those ship SWHIDs only and bulk access needs a Software Heritage agreement demanding open model release (\u00a77 item 3).",
-    "Excludes swallow-code-v2 (a Python-only rewrite of the same blobs, self-similarity 0.064 so nothing catches it; 74% no_license upstream despite the apache-2.0 tag)."
+    "Excludes swallow-code-v2 (a Python-only rewrite of the same blobs, self-similarity 0.064 so nothing catches it; 74% no_license upstream despite the apache-2.0 tag).",
+    "`.json.gz` at the REPO ROOT, named stack-edu-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing."
    ]
   },
   {
    "key": "stackexchange_filtered",
    "category": "qa-forum",
    "source_label": "stackexchange",
-   "repo": "common-pile/raw_v0.1_parquet",
-   "config": "stackexchange_filtered",
-   "file_format": "parquet",
+   "repo": "common-pile/stackexchange_filtered",
+   "config": null,
+   "file_format": "json.gz",
    "id_column": "UNVERIFIED",
    "target_tokens": 10000000000,
    "pool_tokens": 24050000000,
@@ -261,46 +303,52 @@
    "share_alike": true,
    "domain_column": "metadata.site",
    "text_column": "UNVERIFIED",
+   "revision": "c0ac7373830c688a43fc12d1988c4b19ccd884ab",
    "traps": [
-    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/raw_v0.1_parquet>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
+    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/stackexchange_filtered>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "100% share-alike, and the license is visible ONLY in per-row metadata.all_licenses \u2014 cardData declares none. A declared license both over- and under-states what is inside.",
-    "~180 sites; same permanent-cardinality fold as stackv2-edu. Slug: '3dprinting.stackexchange.com' -> '3dprinting'."
+    "~180 sites; same permanent-cardinality fold as stackv2-edu. Slug: '3dprinting.stackexchange.com' -> '3dprinting'.",
+    "`.json.gz` at the REPO ROOT, named stackexchange-dolma-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing."
    ]
   },
   {
    "key": "ubuntu_irc_filtered",
    "category": "qa-forum",
    "source_label": "ubuntu-irc",
-   "repo": "common-pile/raw_v0.1_parquet",
-   "config": "ubuntu_irc_filtered",
-   "file_format": "parquet",
+   "repo": "common-pile/ubuntu_irc_filtered",
+   "config": null,
+   "file_format": "json.gz",
    "id_column": "UNVERIFIED",
    "target_tokens": 1800000000,
    "pool_tokens": 1870000000,
    "license": "Public Domain",
    "text_column": "UNVERIFIED",
+   "revision": "84f88c986584f11d672befab542fa4d5123f3e8f",
    "traps": [
-    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/raw_v0.1_parquet>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
+    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/ubuntu_irc_filtered>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "The ONLY non-share-alike source in this category. Without it the category is 1.87 B, which fails even peak demand once SA is excluded.",
-    "IRC logs: short turns. Watch corpus.MIN_DOC_TOKENS \u2014 a mean under 20 tokens per document means EOS fraction > 0.05 and Gate A rejects the shard."
+    "IRC logs: short turns. Watch corpus.MIN_DOC_TOKENS \u2014 a mean under 20 tokens per document means EOS fraction > 0.05 and Gate A rejects the shard.",
+    "`.json.gz` at the REPO ROOT, named ubuntu-chat-dolma-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing."
    ]
   },
   {
    "key": "github_archive_filtered",
    "category": "qa-forum",
    "source_label": "github-archive",
-   "repo": "common-pile/raw_v0.1_parquet",
-   "config": "github_archive_filtered",
-   "file_format": "parquet",
+   "repo": "common-pile/github_archive_filtered",
+   "config": null,
+   "file_format": "json.gz",
    "id_column": "UNVERIFIED",
    "target_tokens": 0,
    "pool_tokens": 11510000000,
    "license": "permissive",
    "text_column": "UNVERIFIED",
+   "revision": "52282fe96670254bdc0d44dd718ee7a27210ee85",
    "traps": [
-    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/raw_v0.1_parquet>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
+    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/github_archive_filtered>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "Moved here FROM code deliberately: it is issue/PR prose, not code (\u00a73.2).",
-    "target_tokens 0 = reserve; the 12 B pool is met without it."
+    "target_tokens 0 = reserve; the 12 B pool is met without it.",
+    "`.json.gz` at the REPO ROOT, named gharchive-dolma-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing."
    ]
   },
   {
@@ -316,6 +364,7 @@
    "license": "CC-BY-SA-4.0 AND GFDL",
    "share_alike": true,
    "text_column": "UNVERIFIED",
+   "revision": "8bd13e72e6a002407649b3e898535f42ceb1aeb9",
    "traps": [
     "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of HuggingFaceFW/finewiki>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "100% share-alike, and TWO different copyleft regimes (CC-BY-SA + GFDL). Do not model SA as a boolean \u2014 record the license string (\u00a71.5).",
@@ -335,6 +384,7 @@
    "pool_tokens": 148540000000,
    "license": "ODC-BY-1.0",
    "text_column": "rollout_results.list.element.text",
+   "revision": "78cf4a5ed0099214979c094c963e699c19163838",
    "traps": [
     "\ud83d\uded1 THE REWRITE IS AT rollout_results.list.element.text. Top-level `text` holds the ORIGINAL FineWeb-Edu document (its `dataset` field literally reads HuggingFaceFW/fineweb-edu). A flat leaf list contains `text` TWICE and .names.index('text') returns the ORIGINAL \u2014 building from it yields a corpus of unrephrased FineWeb-Edu labelled synthetic, and NO hash, size or decode check catches it. Worse: rollout_results.text does not raise either, it returns ZERO columns.",
     "\ud83d\uded1 The four formats are ~91-93% THE SAME DOCUMENTS. Apply the \u00a79.7 item 4 partition (sha256(id) % 4 == 0) BEFORE tokenizing \u2014 after tokenization there is no document->id mapping and it cannot be retrofitted. This format needs 10.1% of its pool; a disjoint quarter gives 25.0% (measured 24.86-25.26%).",
@@ -355,6 +405,7 @@
    "pool_tokens": 94740000000,
    "license": "ODC-BY-1.0",
    "text_column": "rollout_results.list.element.text",
+   "revision": "78cf4a5ed0099214979c094c963e699c19163838",
    "traps": [
     "\ud83d\uded1 THE REWRITE IS AT rollout_results.list.element.text. Top-level `text` holds the ORIGINAL FineWeb-Edu document (its `dataset` field literally reads HuggingFaceFW/fineweb-edu). A flat leaf list contains `text` TWICE and .names.index('text') returns the ORIGINAL \u2014 building from it yields a corpus of unrephrased FineWeb-Edu labelled synthetic, and NO hash, size or decode check catches it. Worse: rollout_results.text does not raise either, it returns ZERO columns.",
     "\ud83d\uded1 The four formats are ~91-93% THE SAME DOCUMENTS. Apply the \u00a79.7 item 4 partition (sha256(id) % 4 == 1) BEFORE tokenizing \u2014 after tokenization there is no document->id mapping and it cannot be retrofitted. This format needs 15.8% of its pool; a disjoint quarter gives 25.0% (measured 24.86-25.26%).",
@@ -375,6 +426,7 @@
    "pool_tokens": 86950000000,
    "license": "ODC-BY-1.0",
    "text_column": "rollout_results.list.element.text",
+   "revision": "78cf4a5ed0099214979c094c963e699c19163838",
    "traps": [
     "\ud83d\uded1 THE REWRITE IS AT rollout_results.list.element.text. Top-level `text` holds the ORIGINAL FineWeb-Edu document (its `dataset` field literally reads HuggingFaceFW/fineweb-edu). A flat leaf list contains `text` TWICE and .names.index('text') returns the ORIGINAL \u2014 building from it yields a corpus of unrephrased FineWeb-Edu labelled synthetic, and NO hash, size or decode check catches it. Worse: rollout_results.text does not raise either, it returns ZERO columns.",
     "\ud83d\uded1 The four formats are ~91-93% THE SAME DOCUMENTS. Apply the \u00a79.7 item 4 partition (sha256(id) % 4 == 2) BEFORE tokenizing \u2014 after tokenization there is no document->id mapping and it cannot be retrofitted. This format needs 17.3% of its pool; a disjoint quarter gives 25.0% (measured 24.86-25.26%).",
@@ -395,6 +447,7 @@
    "pool_tokens": 147920000000,
    "license": "ODC-BY-1.0",
    "text_column": "rollout_results.list.element.text",
+   "revision": "78cf4a5ed0099214979c094c963e699c19163838",
    "traps": [
     "\ud83d\uded1 THE REWRITE IS AT rollout_results.list.element.text. Top-level `text` holds the ORIGINAL FineWeb-Edu document (its `dataset` field literally reads HuggingFaceFW/fineweb-edu). A flat leaf list contains `text` TWICE and .names.index('text') returns the ORIGINAL \u2014 building from it yields a corpus of unrephrased FineWeb-Edu labelled synthetic, and NO hash, size or decode check catches it. Worse: rollout_results.text does not raise either, it returns ZERO columns.",
     "\ud83d\uded1 The four formats are ~91-93% THE SAME DOCUMENTS. Apply the \u00a79.7 item 4 partition (sha256(id) % 4 == 3) BEFORE tokenizing \u2014 after tokenization there is no document->id mapping and it cannot be retrofitted. This format needs 10.1% of its pool; a disjoint quarter gives 25.0% (measured 24.86-25.26%).",
