@@ -146,6 +146,77 @@ def _warn_ratio_overshoot(
     )
 
 
+class EpochOverrun(UserWarning):
+    """A mixture component will be seen more times than the data supports.
+
+    ``epochs = drawn / available``. The number is trivial; the reason it needs a warning is that
+    **narrow selection, not corpus size, is where repetition comes from**, and the arithmetic that
+    produces it is invisible at the call site. A reservoir sized so that every category sits at
+    0.33-0.50 epochs at the default mix still lets one :class:`MixtureSource` ask for 20 epochs of
+    a small source — a 5B-token source at ``ratio=1.0`` in a 20B run is *exactly* 4.0 epochs, and
+    a 1B-token source is 20.
+
+    Bands from Muennighoff et al. (arXiv:2305.16264), whose measured ``R_D* ~= 15.39`` is where
+    the return on a repeated token has largely gone: ``<=4`` green (silent), ``4-16`` amber,
+    ``16-40`` red, ``>40`` fail — "repeating is worthless".
+
+    **A warning at every band, including ``fail``, and not an error even there.** Repetition is a
+    legitimate technique: the legacy config upsampled arxiv and wikipedia on purpose, and
+    ``MixtureSource.max_repetition_ratio`` exists precisely to permit it, so a mixture that
+    repeats is using the API rather than misusing it. What the caller cannot see is *how much*.
+    Escalate in one line where it matters:
+    ``warnings.simplefilter("error", EpochOverrun)``.
+
+    Reports on what was ACTUALLY drawn, not on the request. A component whose pool fell short
+    repeats less than its ratio asked for, and reporting the request would name a repetition that
+    did not happen.
+    """
+
+
+def _warn_epoch_overrun(
+    counts: Mapping[str, int],
+    available: Mapping[str, int],
+    unit: str | None,
+) -> None:
+    """Warn per component whose realised draw exceeds the data its predicate matches.
+
+    ``counts[name] / available[name]`` rather than ``total * ratio / available``: the former is
+    measured from the shards actually chosen, the latter is the request. They diverge exactly when
+    a component was capped or starved, and there the request overstates the repetition.
+    """
+    import warnings
+
+    from .corpus import epoch_verdict
+
+    bad: list[tuple[str, float, str]] = []
+    for name in sorted(counts):
+        pool = available.get(name, 0)
+        if pool <= 0:
+            continue
+        epochs = counts[name] / pool
+        verdict = epoch_verdict(epochs)
+        if verdict != "green":
+            bad.append((name, epochs, verdict))
+    if not bad:
+        return
+    detail = ", ".join(f"{n} at {e:.1f} epochs ({v})" for n, e, v in bad)
+    worst = max(bad, key=lambda t: t[1])
+    tail = (
+        " Past ~40 epochs repetition is measured to be worthless (arXiv:2305.16264): this "
+        "mixture trains mostly on data the model has already seen."
+        if worst[2] == "fail"
+        else " Widen the source with a broader label predicate, lower its ratio, or accept the "
+        "repetition deliberately."
+    )
+    warnings.warn(
+        f"mixture repeats data: {detail}. A component's {unit or 'count'} budget exceeds the "
+        f"data its predicate matches, so shards are drawn more than once.{tail} "
+        f"warnings.simplefilter('error', EpochOverrun) to make this fatal.",
+        EpochOverrun,
+        stacklevel=3,
+    )
+
+
 class MixedFormat(ReadError):
     """A group's fixed-width shards do not agree on how to decode them.
 
@@ -974,6 +1045,10 @@ def build_mixture(
     chosen: list[str] = []
     counts: dict[str, int] = {}
     shortfall: dict[str, int] = {}
+    #: Per component, the size of the pool its predicate matched. Kept because it is the
+    #: denominator of the epoch guard and the loop below already computes it — deriving it a
+    #: second time afterwards would mean re-running every label predicate.
+    available_by_source: dict[str, int] = {}
     unit: str | None = None
     #: Distinct label-KEY sets already reported. Ten components keyed on ``domain`` describe one
     #: coverage gap, not ten — repeating it per component would train the reader to skim past it.
@@ -1005,6 +1080,7 @@ def build_mixture(
                 f"a single budget cannot span both"
             )
         unit = src_unit
+        available_by_source[src.name] = available
 
         want = int(total * src.ratio)
         # A CEILING and a TARGET behave differently at the last shard, and conflating them makes
@@ -1043,6 +1119,7 @@ def build_mixture(
     actual = {k: (v / grand if grand else 0.0) for k, v in counts.items()}
     requested = {s.name: s.ratio for s in sources}
     _warn_ratio_overshoot(actual, requested, shortfall)
+    _warn_epoch_overrun(counts, available_by_source, unit)
     return ResolvedMixture(
         dataset_id=dataset_id,
         version=version,
@@ -1111,6 +1188,7 @@ __all__ = [
     "MixedFormat",
     "PartialLabelCoverage",
     "RatioOvershoot",
+    "EpochOverrun",
     "SealMismatch",
     "resolve_latest",
     "verify_seal",

@@ -351,3 +351,77 @@ def test_the_warning_can_be_made_fatal_in_one_line():
         with pytest.raises(R.RatioOvershoot):
             build_mixture(DSID, ver, s3=s3, seed=1, total=100_000, sources=[
                 MixtureSource({"source": "big"}, 0.5), MixtureSource({"source": "tiny"}, 0.5)])
+
+
+# ---- the epoch guard (§4.3 / §6 item 2) ----
+
+def test_repetition_warns_with_the_epoch_count():
+    """`tiny` is 10,000 tokens; asking for ~5x that must say so.
+
+    The existing upsampling tests do NOT trip this — `max_repetition_ratio=1.05` is 1.05 epochs,
+    deep green — which is the point: the guard fires on the magnitude, not on the fact that
+    repetition was enabled.
+    """
+    s3 = FakeS3()
+    ver = _publish_promote(s3)
+    import warnings as _w
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        build_mixture(DSID, ver, s3=s3, seed=1, total=50_000, sources=[
+            MixtureSource({"source": "tiny"}, 1.0, max_repetition_ratio=6.0)])
+    msgs = [str(x.message) for x in caught if x.category is R.EpochOverrun]
+    assert msgs, "5 epochs of a 10k-token source must warn"
+    assert "epochs" in msgs[0] and "source=tiny" in msgs[0]
+
+
+def test_the_default_mix_does_not_warn():
+    """A component drawing less than its pool is silent — the common case must stay quiet."""
+    s3 = FakeS3()
+    ver = _publish_promote(s3)
+    import warnings as _w
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        _mix(s3, ver, total=600_000)
+    assert not [x for x in caught if x.category is R.EpochOverrun]
+
+
+def test_the_worthless_band_says_so():
+    """Past ~40 epochs the message must change — that is a different recommendation."""
+    s3 = FakeS3()
+    ver = _publish_promote(s3)
+    import warnings as _w
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        build_mixture(DSID, ver, s3=s3, seed=1, total=500_000, sources=[
+            MixtureSource({"source": "tiny"}, 1.0, max_repetition_ratio=50.0)])
+    msgs = [str(x.message) for x in caught if x.category is R.EpochOverrun]
+    assert msgs and "worthless" in msgs[0]
+
+
+def test_the_epoch_guard_can_be_made_fatal_in_one_line():
+    s3 = FakeS3()
+    ver = _publish_promote(s3)
+    import warnings as _w
+    with _w.catch_warnings():
+        _w.simplefilter("error", R.EpochOverrun)
+        with pytest.raises(R.EpochOverrun):
+            build_mixture(DSID, ver, s3=s3, seed=1, total=50_000, sources=[
+                MixtureSource({"source": "tiny"}, 1.0, max_repetition_ratio=6.0)])
+
+
+def test_a_starved_component_is_not_reported_as_repeating():
+    """The guard reads what was DRAWN, not what was asked for.
+
+    A component whose pool fell short repeats less than its ratio implied, and reporting the
+    request would name a repetition that never happened. `tiny` at ratio 0.5 of a large budget
+    is starved rather than repeated, because max_repetition_ratio defaults to 1.0.
+    """
+    s3 = FakeS3()
+    ver = _publish_promote(s3)
+    import warnings as _w
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        m = build_mixture(DSID, ver, s3=s3, seed=1, total=10_000_000, sources=[
+            MixtureSource({"source": "big"}, 0.5), MixtureSource({"source": "tiny"}, 0.5)])
+    assert m.shortfall, "the fixture must actually starve tiny for this to test anything"
+    assert not [x for x in caught if x.category is R.EpochOverrun]
