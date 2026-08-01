@@ -1272,6 +1272,29 @@ shards have odd token counts — a filename tells you nothing; `size % 4` and a 
 
 ## What Didn't Work (and the fix)
 
+### 2026-08-01 (night) — the registry asserted three things about repos it had never resolved
+
+Pinning the revisions read like bookkeeping — turn `revision: null` into a sha, tick the box. It
+falsified **three** claims instead, and the reason they survived until now is instructive: every one
+is a fact about a *remote* repository, so no test, type check, or code review could have caught them.
+The registry was internally consistent and externally wrong.
+
+The worst was seven of seventeen rows naming `common-pile/raw_v0.1_parquet` with the subset as a
+`config`. Plausible on its face — that repo exists, and the subsets are named exactly as the rows
+said. But the `_filtered` variants are **separate repos** shipping `.json.gz` at the root, so the
+rows had the wrong repo, the wrong `file_format`, and a config that does not exist. A build would
+have read **nothing at all** from 41% of the registry.
+
+Two lessons, both narrower than "verify things":
+
+- **A pin is not metadata, it is the first time anyone asks the remote whether the row is true.**
+  `verify_pins.py --deep` now does that on demand — tree listing plus 16 bytes for the file magic —
+  and it is worth running before any build, not once.
+- **My first version of that verifier cried wolf.** It descended blindly from the repo root, hit
+  `assets/` in finemath, found a PNG and reported a healthy repo as broken. A checker that produces
+  false alarms is worse than no checker, because the next failure gets waved off. It now starts
+  inside the row's own config directory and skips non-payload extensions.
+
 ### 2026-08-01 (night) — I read a percentage as a fraction of the wrong denominator
 
 Sizing the registry, a no-slack warning fired on `math` and `reference`, and I reached for
@@ -1811,8 +1834,35 @@ the script, never the JSON. Seven tests assert every row loads into `CorpusSpec`
 and safe, and an `UNVERIFIED` row carries the command that settles it.
 
 `text_column` is verified from real bytes for **9 of 17**; the rest say the literal `"UNVERIFIED"`.
-`revision` is `null` on every row — **pin the shas before the real build** or a re-download can
-silently return different bytes for the same corpus.
+
+**✅ Revisions are PINNED** — all 17 rows carry a 40-hex sha across 14 repos, and
+`python3 artifacts/reservoir/verify_pins.py --deep` re-resolves every one and checks the file magic:
+**14/14 with correct magic**. Two tests enforce that every row is pinned and that rows sharing a repo
+share its revision.
+
+🛑 **Pinning was supposed to be bookkeeping; it falsified three registry claims.** None were catchable
+offline — they are facts about remote repos:
+
+1. **Seven Common Pile rows named the wrong repo.** They said `common-pile/raw_v0.1_parquet` with the
+   subset as a `config`. That repo's tree at the pinned sha holds `peS2o/`, `stackv2/`,
+   `ubuntu_irc/` — the **raw** subsets — and every `<name>_filtered` path 404s. The filtered variants
+   are **standalone repos** shipping `.json.gz` at the root. Wrong repo, wrong `file_format`, and a
+   config that does not exist: **the build would have read nothing.**
+2. **The Common Pile file prefixes are underivable from the repo name** — `stackv2_edu_filtered` ships
+   `stack-edu-*`, `github_archive_filtered` ships `gharchive-dolma-*`, `pubmed_filtered` ships
+   `licensed_pubmed-*`. Now recorded per row and in `_common_pile_file_prefix`.
+3. 🛑 **DCLM-baseline is `.jsonl.zst` and `corpus_read` REFUSES zstd** (no `zstandard` dependency
+   declared). The row said `parquet` under a `default` config; neither exists. Verified from bytes —
+   `global-shard_01_of_10/local-shard_0_of_10/shard_00000000_processed.jsonl.zst`, magic
+   `28 b5 2f fd`. **This blocks 30 B of the 252.6 B target and needs an owner decision:** add
+   `zstandard` plus a decompression branch (the streaming shape mirrors the existing
+   `zlib.decompressobj` path, `eof` check included), or source diverse web from another corpus.
+   "No row currently requires zstd" was true before this and is false now.
+
+Also settled from real bytes while confirming layouts: the Common Pile record schema is
+`{id, text, source, added, created, metadata}` (peS2o adds `version`; `stackv2_edu` adds
+`score`/`int_score`), and both domain columns exist as claimed — `metadata.gha_language`,
+`metadata.site`.
 
 ⚠️ **Two category pools are reported twice, deliberately.** Summing the rows overstates `academic` by
 20.1 B and `math` by everything that looks like a second source, so the JSON carries
