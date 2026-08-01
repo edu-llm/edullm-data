@@ -1,55 +1,154 @@
 # HANDOFF — eduLLM Dataset Standard
 
-Last updated: **2026-07-31**, after an EXECUTION session. The 150B corpus is still published and
-readable (untouched). This session ran Phase 0 and Phase 0c of the reservoir plan, landed the two code
-blockers, and measured all eight source pools. **The reservoir is one step from assembly.**
+Last updated: **2026-08-01**, after a session that (a) proved the reservoir ingest works end to end
+on Batch, and (b) discovered that the full-pipeline timeline is **weeks shorter** than believed
+because most of it is already built. The published 150B and 127B corpora are untouched and readable.
 
 > ## ▶️ START HERE
 >
-> 1. **`DATASET-DESIGN-reservoir.md`** — the plan. Read its header banner, then **§9.7 item 4**, then
->    §5.6 (build sequence). It is committed and current.
-> 2. **`artifacts/PHASE0-REPORT.md`** — what Phase 0 measured, including the gate that cancelled the
->    domain classification.
-> 3. **`artifacts/sizing-revised.md`** — all 8 pools, measured.
-> 4. **`artifacts/PLAN-CORRECTIONS.md`** — 10 defects found in the plan by executing it.
+> 1. **This file's "Next Steps → THE CURRENT LIST"** — what to do next, in order.
+> 2. **`DATASET-DESIGN-reservoir.md`** — the plan. §5.6 is the build sequence; §4.1 the dedup
+>    pipeline; §2.1 the pool sizing.
+> 3. **`artifacts/reservoir/SEGFAULT-INVESTIGATION.md`** — 10 hypotheses, 9 refuted, 1 correct.
+>    Read before touching the ingest transport.
+> 4. **`artifacts/reservoir/RUN-THE-INGEST.md`** — the operational runbook + a failure table where
+>    every row has actually happened.
 >
-> ## 🛑 THE ONE THING OWED BEFORE PHASE 1: §9.7 item 4
+> ## ✅ THE INGEST WORKS. THE ARRAY IS PROVEN.
 >
-> **Partition the synthetic `id` space 4 ways, and anti-join it against edu-web.** FinePhrase's four
-> "formats" are **~91–93% the same documents** (measured: faq∩math 91.0%, faq∩table 92.6%,
-> faq∩tutorial 92.9%), and FinePhrase shares FineWeb-Edu's id space outright — so the plan's
-> "15B × 4 = 60B synthetic" is really **~15B wearing four hats**, colliding 100% with edu-web at the
-> document level. No digest or MinHash sees it, because four rephrasings are four different strings.
+> `reservoir-ingest-v063-smoke`, job def `edullm-reservoir-ingest:7`, wheel `0.6.3`:
+> **4 of 4 children SUCCEEDED**, all four configs, **zero 429 pauses**, **67 seconds** — on the same
+> shard that segfaulted twice. 16 `.u64` parts in
+> `s3://edullm-landing/_ingest/reservoir-dolma2/_ids/parts/`.
 >
-> `id` is **not** in `manifest_sha256`, so this is not irreversible in the usual sense — but it has a
-> **build-time deadline**: after tokenization the document→id mapping is gone, so retrofitting means
-> re-tokenizing the synthetic half. It is §4.1 **step 0** and the first action in §5.6 phase 1.
+> Everything below about the ingest being blocked is HISTORY. It is not blocked.
 >
-> Fix: `sha256(id) % 4 == f` assigns format *f*; worst case (`table`) needs 17.3%, a quarter gives
-> 25.0%. The anti-join reuses the Bloom filter §4.1 step 2 already builds.
+> ## 🎯 THE DECISION OF RECORD (owner, 2026-08-01)
 >
-> ## ⚠️ BRANCH STATE — read before committing anything
+> **Build the FULL PIPELINE. Not the merge, not the hybrid. MinHash is DEFERRED.**
 >
-> `HEAD` is on **`feat/prm800k-vendor-ingest`**, not the `docs/reservoir-design` branch this session
-> started on. A **concurrent session** in this same working tree is implementing a `vendored/v1`
-> profile and a PRM800K ingester; it branched from the reservoir work and continued. Verified:
-> `git merge-base --is-ancestor bc76de3 HEAD` passes, so **every reservoir commit is an ancestor of
-> HEAD and nothing was lost**. `docs/reservoir-design` still exists at `b0b9b80`.
+> The owner considered and declined: publishing the existing `datamix1-jul22`, merging the two
+> published corpora (283.7B / 12 sources, ~4h), and a hybrid that tokenizes only the 3 missing
+> categories. **Do not re-propose these** — they were evaluated in detail and rejected in favour of
+> a corpus the team designs. The analysis is preserved under "Key Decisions" because the numbers are
+> still useful, not because the choice is open.
 >
-> The working tree carries that other session's uncommitted work (`src/edullm_data/s3.py`,
-> `publish.py`, `profiles/`, several new tests). **It is not mine and I left it alone throughout.**
-> Two things about it worth knowing:
-> - `tests/test_publish.py:517` contains the **real AWS account ID** inside a Batch ARN. This is a
->   public repo; scrub it to `<ACCOUNT_ID>` before that file is committed.
-> - Suite is green at **734 passing** with its work in the tree.
+> **Estimate: 2–3 weeks.** MinHash adds 1–2 more and is deferred on §4.1's own evidence.
+>
+> ## ⚠️ BRANCH STATE
+>
+> Work is on **`agent/claude-01/reservoir-ingest`** (40 commits ahead of `main`), pushed, in the
+> worktree `/Users/ericwu/Developer/Capstone_LLM-worktrees/edullm-data/claude-01--reservoir-ingest`.
+> Suite **786 passing**. Tags `v0.6.0` … `v0.6.3`.
+>
+> Open PRs: **#9** (reservoir design + Phase 0, branch `docs/reservoir-design`) and **#11** (the id
+> partition + ingest job). Both still open; #11's branch has advanced well past its description.
+>
+> A **concurrent session** owns `feat/prm800k-vendor-ingest` and registered `edullm-validator:9`,
+> which bakes code into a digest-pinned image instead of bootstrapping a wheel — **better provenance
+> than our rev 8; theirs wins**. They also **disabled the `edullm-landing-manifest-created`
+> EventBridge rule**, so auto-promotion is OFF and any publish needs a manual `submit-job` or the
+> rule re-enabled. Coordinate before phase 2.
 
 ## THIS SESSION IN ONE PARAGRAPH
 
-The user said: *"run the plan as written up to the first hard gate, I'm AFK."* So: ran Phase 0, hit the
-gate, reported it, and the owner **cancelled** the thing it gated. Then landed the two code blockers,
-measured all eight pools that Phase 0 had left unverified, and closed five owner decisions. 22 commits.
-Suite 626 → **734 passing**. **No dataset bytes were written and no corpus was downloaded** — the whole
-session ran on metadata-scale reads (parquet footers), Bedrock API calls, and one Batch GPU job.
+Every timeline estimate I gave was too pessimistic, and each revision came from finding something
+already built rather than from building it. The day started with the reservoir ingest crashing
+(exit 139) and a belief that the full pipeline was 6–10 weeks away. It ends with the ingest proven
+on Batch and the pipeline at 2–3 weeks. Three findings did that: the SIGSEGV was **pyarrow's
+`pre_buffer=True` default** dispatching range reads into a C++ thread pool, not anything in our
+code; the HTTP 429 storm was **our own 70× quota amplification** (one metered resolve per range read
+instead of per file), not a platform ceiling; and the "2.5 TB ingest = 2–4 weeks" premise was false
+because HF's **data plane is unmetered and sits in us-east-1** — the whole fetch is ~1–3 hours for
+about $1. Separately, a sibling checkout (`pipelines/week1_corpus`) turned out to contain working
+tokenize/pack/val-carve/dedup/decontam code **with a complete, already-exercised S3 backend**, and
+`s3://edullm-datasets/datamix1-jul22/` holds a 96-object release it produced, decontamination bundle
+included. Four wrong diagnoses were shipped and retracted along the way; all are recorded below.
+
+## THE 2026-08-01 SESSION
+
+### The segfault: root-caused, fixed, proven
+
+Array children died with **exit 139 (SIGSEGV)**, always at the `faq → math` boundary. **Ten**
+hypotheses were tested; nine refuted. The cause: `pq.ParquetFile(rf)` takes pyarrow's default
+`pre_buffer=True`, which dispatches a Python file object's range reads onto **Arrow's native C++ IO
+thread pool**. Each such read then runs a full `urlopen` — TLS handshake, 302 redirect, socket read,
+and under a 429 storm a multi-second `time.sleep` — inside a C++ thread-pool callback.
+
+Fix: `pq.ParquetFile(rf, pre_buffer=False)`. One keyword, invisible because the parameter was never
+written at the call site. Measured: `pre_buffer=True` puts 30 of 32 reads on native threads;
+`False` puts zero there. A/B on Batch: 3/4 unpatched children crashed, 0/4 patched.
+
+**Two traps worth keeping.** (1) The plausible wrong answer is a lock — the faulthandler stack shows
+native threads bottoming out in `_RangeFile.read` with *no Python caller*, which looks exactly like a
+race on the unlocked `self.pos`. It is not: measured concurrency was 1, interleavings 0, and an
+`RLock` changed nothing. Arrow serialises calls into one file object. (2) **Instrumentation masks the
+crash** — every faulthandler wrapper survived, because slowing the child misses the window. Any
+wrapper needs an unpatched control through the identical wrapper or you cannot tell "fixed it" from
+"perturbed it."
+
+### The 429s were ours, and the ingest is ~1–3 hours
+
+HF runs two independently-metered services and this project conflated them:
+
+| | metered? | measured |
+|---|---|---|
+| control plane (`resolve/main`) | yes | `q=5000; w=300` authed, `q=3000` anon |
+| data plane (`us.aws.cdn.hf.co`) | **no** | no `RateLimit` headers, no auth, `x-hf-cdn-pop: aws-us-east-1` |
+
+pyarrow issues ~70 range reads per file. `_RangeFile` pointed **every one** at the control plane:
+70 metered requests per file, 1,400 for 20 files, budget empty in ~79s at 40 workers. That
+arithmetic reproduces the observed failures exactly. **Resolve once, reuse the signed URL → 1
+request per file.** Verified by hand: 12 CDN ranges consumed **0** resolver units.
+
+⚠️ Resolve with **no** `Range` header. Sending one signs the URL for that range only, and reuse
+returns `403 invalid range` — silently restoring the bug.
+
+**The inherited belief was wrong.** `PLAN-CORRECTIONS.md` §6 says the limit is "per-IP, not
+per-account." True of `datasets-server`; **false of resolvers** (per-token) and false of the CDN
+(unmetered). As written it deters the fast path. **Still owed:** correct that file and
+`artifacts/smoke/harvest_parquet.py:9-13`.
+
+Also: DCLM is in a **public bucket** — `s3://commoncrawl/contrib/datacomp/DCLM-baseline/`, us-east-1,
+not requester-pays. Prefer it over the HF copy; it is an in-region S3→S3 copy.
+
+### What is already built that nobody knew about
+
+- **`pipelines/week1_corpus`** (77 files, 24k LOC, 136 tests) has `tokenization.py`, `packing.py`
+  (`np.memmap(dtype=np.uint32)`, no `np.save` — the correct `.u32le.bin` bytes), `determinism.py`
+  (seeded per-doc val carve), `reduction.py`, `decontamination.py`. **`worker.py:270` already wires
+  `S3ArtifactStore.from_uri(...)` + `SqsTaskQueue`** — the S3 backend is complete, and it produced a
+  real release. ⚠️ **But it has zero test coverage**: no boto3/moto in `tests/`; 136 tests exercise
+  only the local backend.
+- **`s3://edullm-datasets/datamix1-jul22/`** — 96 objects / 35.8 GiB, uploaded 2026-07-27, still
+  live. Packed tokens plus `validation/audits/decontamination-bundle-manifest.json`,
+  `exclusions.parquet` (521 MiB), `leakage-summary.json`, release attestations. **§4.2 says
+  decontamination is load-bearing and we have none — this is a real bundle, already run.** Caveats:
+  71 objects named `.npy` (probably headerless raw uint32 — the dolma naming convention, *verify the
+  first bytes*), content-addressed by SHA-256 rather than `train-NNNNN.u32le.bin`, and 512 MiB
+  shards rather than the 25,001,984-token size.
+
+### Tokenize/shard: write it fresh, ~400–800 lines
+
+Two independent investigations converged. **No off-the-shelf tool can hit the shard size**, because
+none splits mid-document: dolma undershoots (25,001,242), datatrove overshoots (25,003,321), and
+both leave a remainder that fails `check_seq_len_alignment` on all ~10,200 shards. Verified
+arithmetically.
+
+Every candidate **already emits the right bytes** — no tool writes a real `\x93NUMPY` header. dolma
+sets `MEMMAP_EXTENSION = ".npy"` but writes via `np.memmap`; `np.load()` on its output *fails*. So
+the 7,557 legacy `.npy` objects are **dolma's normal output**, and this standard's ".npy lie" rule is
+a rule against dolma's naming.
+
+Porting `week1_corpus` wholesale is worse than writing fresh: it emits **one pre-mixed file per
+tier** (`plan_mixed_shards`, `pack_mixed_shard`), while eduLLM needs per-source shards mixed at read
+time by `build_mixture`. Write-time mixing would destroy the whole-shard no-positional-bias property
+§2.2 argues for. The genuinely non-obvious correctness in those 24k lines is **~80 lines**, itemised
+in the agent report (EOS counted where it is added; length-prefixed hashing; NFC + NUL strip before
+content hashing; magic-byte sniffing over suffix trust).
+
+
+> **Everything below is the historical log of prior sessions**, kept for the reasoning it records.
 
 ## THE RESERVOIR EXECUTION SESSION (2026-07-31)
 
@@ -135,23 +234,68 @@ silently drops every flat source; the warning now names them and reports **"40.4
 
 ## Goal
 
-Replace ad-hoc S3 dataset sprawl with **one enforced way to create, store, read, and discover
-datasets** for the eduLLM project. The end state: an engineer or agent runs `publish(...)`, and
-a validated dataset appears in the official bucket automatically, with no human in the loop and
-no way to write bad or unvalidated data into the read path.
+Two goals, one nested inside the other.
 
-Motivating audit: `docs/dataset-creation/s3-dataset-audit-2026-07-28.md` (23 buckets,
-~2.53 TB, sprawl + broken metadata). Full spec: `docs/dataset-creation/DATASET-STANDARD.md`
-+ `...-DIAGRAMS.md`.
+**The standing goal:** replace ad-hoc S3 dataset sprawl with **one enforced way to create, store,
+read, and discover datasets**. An engineer or agent runs `publish(...)` and a validated dataset
+appears in the official bucket automatically, with no human in the loop and no way to write bad or
+unvalidated data into the read path. Motivating audit:
+`docs/dataset-creation/s3-dataset-audit-2026-07-28.md`. Full spec:
+`docs/dataset-creation/DATASET-STANDARD.md` + `...-DIAGRAMS.md`.
 
-**Where that goal stands: the produce → validate → publish → read loop is CLOSED.** A 157.5B-token
-corpus is published, sealed, verified, and sliceable from the reader. The one thing still missing
-is a *consumer*: no training run has read it, and the four things blocking that live in
-`edu-llm/platform`, not here (see "WHAT IS ACTUALLY LEFT" #1).
+**Status: CLOSED.** The produce → validate → publish → read loop works. Two corpora are published,
+sealed, and sliceable (157.2B and 126.7B tokens). What is still missing downstream is a *consumer* —
+no training run has read them, and the blockers live in `edu-llm/platform`, not here.
+
+**The current goal:** build **`pretrain/reservoir-dolma2`** — a ~255B-token reservoir the team draws
+20B-token training mixes from, per `DATASET-DESIGN-reservoir.md`. Every run consumes exactly 20B, so
+the reservoir must hold ≥3× peak plausible demand per category and let a teammate re-weight sources
+at read time via `build_mixture`.
+
+**Status: the ingest is proven; the corpus-construction pipeline is ~2–3 weeks of work.** Everything
+between "documents exist upstream" and "shards exist in S3" is what remains — see "Next Steps".
+The owner has chosen the **full pipeline** over three faster alternatives, with MinHash deferred.
 
 ---
 
-## Current Progress — BUILT, DEPLOYED, PROVEN AUTOMATIC, PUBLIC, and carrying REAL DATA
+## Current Progress
+
+### Reservoir pipeline status — 2026-08-01
+
+| stage | status |
+|---|---|
+| ingest transport (HF → S3, array-sharded) | ✅ **proven on Batch**, `v0.6.3`, job def `edullm-reservoir-ingest:7` |
+| §9.7 item 4 id partition | ✅ built + verified on 287,000 real ids (24.86–25.26% per format vs a 17.3% worst-case floor) |
+| domain slugging | ✅ `manifest.build_domain_slug_map` |
+| per-corpus readers (10–13 schemas) | ❌ parquet path generalises; `.json.gz` path absent |
+| tokenize + exact 25,001,984-token shard | ❌ write fresh, ~400–800 lines |
+| bundling / receipts / resumability | ❌ ~420 array children |
+| exact dedup + decontamination | ❌ but a real decontam bundle exists in `datamix1-jul22` |
+| MinHash + LSH + connected components | ⏸ **deferred** (owner, on §4.1's own evidence) |
+| publish / Gate A / promote | ✅ mature, 786 tests, live infra |
+
+**Proof the ingest works** (`reservoir-ingest-v063-smoke`, 4-child array):
+
+```
+WHEEL_VERSION=0.6.3
+PYARROW=25.0.0 NUMPY=2.4.6
+PREFLIGHT_OK=1
+faq / math / table / tutorial: all four configs, 399k–458k distinct ids each
+INGEST_DONE_RC=0        4 of 4 SUCCEEDED · zero 429 pauses · 67 seconds
+```
+
+16 `.u64` parts in `s3://edullm-landing/_ingest/reservoir-dolma2/_ids/parts/`. The same shard
+segfaulted twice before the `pre_buffer=False` fix.
+
+**Infrastructure deployed this session and the last:** `expire-ingest-30d` lifecycle rule on
+`_ingest/` (9 rules total, all originals intact); bucket policy **v2** with `NobodyDeletesPublishedData`
+and no exemptions, verified by four live probes; least-privilege role `edullm-reservoir-ingest` that
+cannot write `edullm-data`; `edullm-fsck:5` timeout 3600s; account IDs scrubbed repo-wide.
+
+---
+
+### Standing platform status — BUILT, DEPLOYED, PROVEN AUTOMATIC, PUBLIC, and carrying REAL DATA
+
 
 The full pipeline is proven end-to-end on live AWS with real data, including fully-automatic
 event-triggered validation. The repo is **public at `https://github.com/edu-llm/edullm-data`**.
@@ -786,6 +930,33 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## What Worked
 
+### From the 2026-08-01 session
+
+- **Fanning subagents at ASSUMPTIONS, not at tasks.** The three biggest wins all came from telling an
+  agent to attack a belief I was treating as settled: "is the rate limit even what I think it is,"
+  "does this have to be ingested that way," "is porting the only option." Each returned a finding that
+  cut weeks. Agents pointed at *tasks* mostly confirmed what I already thought.
+- **Requiring an unpatched control through the identical wrapper.** The segfault A/B is only
+  interpretable because the `noop` arm existed. Instrumentation made crashing children survive, so
+  without a control the conclusion would have been "the wrapper fixed it."
+- **Reverting a fix to prove its test fails.** Done four times this session. It caught a test that
+  passed against the very policy that had just failed in production, because its regex required a
+  receiver named `s3.` while the real call site used `s3_client.`. A test that has never failed is not
+  a test.
+- **Printing the version, not comparing it.** `PYARROW=25.0.0 NUMPY=2.5.1` in the preflight is what
+  exposed a real skew — and then what ruled it out. Three hypotheses were argued blind because nobody
+  logged the number.
+- **Preflight assertions in the job definition.** They cost milliseconds and caught a stale wheel
+  before a 25-minute run, twice. Each asserts a defect that already shipped once:
+  `_backoff_delay(3)==32.0`, a 97-item 4-way shard round-trip, the short-read loop, the
+  `pre_buffer=False` keyword.
+- **Verifying agent claims against live state before repeating them.** Two agents disagreed on whether
+  tokenization code existed; the second was right, and only checking the files settled it. One agent
+  also overstated an A/B as "zero crossover" and self-corrected — worth reading agent reports as
+  evidence, not verdicts.
+
+### Earlier sessions
+
 ### From the reservoir execution session (2026-07-31)
 
 - **Parquet footers instead of the datasets-server API.** The single highest-leverage discovery. A
@@ -879,6 +1050,41 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
   reading `pyproject.toml` both said `families/` shipped. Installing proved it did not.
 
 ## What Didn't Work (and the fix)
+
+### From the 2026-08-01 session — four wrong diagnoses of one bug
+
+All four were shipped or argued with confidence, then refuted by a real run. Recorded because the
+*pattern* matters more than any one error: every wrong answer came from reasoning about our code
+instead of measuring the environment.
+
+1. **"A short HTTP read is SIGSEGV-ing pyarrow."** Shipped `0.6.2`. Identical failure. The read loop
+   is a genuine correctness fix (`RawIOBase.read` may legally return short) but was not the cause.
+2. **"Contention between co-scheduled children."** Trivially wrong and I should have caught it in
+   seconds: shards read **disjoint** files (`[0,4,8…]` vs `[1,5,9…]`), so nothing is shared.
+3. **"The cgroup memory limit."** Doubled RAM 8→16 GB and it got **worse** — all four children died
+   instead of three. RSS peaked at 149 MB of 8192. Exit 139 is SIGSEGV, **not** 137's memory kill, and
+   conflating them is what made this plausible.
+4. **"numpy/pyarrow ABI skew."** The most instructive failure. The container really was running numpy
+   2.5.1 against my local 2.4.6 — a real, unnoticed skew. I declared it "ruled out" from a local
+   control that had **silently used the wrong version**, because `pip install numpy==2.5.1` fails on
+   macOS. **A version comparison you did not print is not a control.**
+
+Other misses this session:
+
+- **I estimated the pipeline at 6–10 weeks, then 1.5–3, then 2–3.** Every revision went *down*, and
+  every one came from finding something already built. The lesson is to inventory what exists before
+  estimating what is missing — I described tokenization as "never written" when a sibling checkout had
+  it working with a complete S3 backend.
+- **I wrote a safety guard and did not grant it permission.** `_assert_lifecycle_covers` calls
+  `GetBucketLifecycleConfiguration`; the IAM policy did not include it. The job reached
+  `INGEST_START`, printed `PARTITION_OK=1`, and died inside its own check.
+- **"The full ingest is a 2–4 week blocker"** rested on a per-IP rate limit inherited from a note about
+  a *different* endpoint, never measured on the path we actually use. The real answer is 1–3 hours.
+- **A diagnostic job died on the documented PEP-427 wheel-filename trap** (`w.whl is not a valid wheel
+  filename`) before reaching the faulthandler that would have named the crash. `CLAUDE.md` warns about
+  exactly that.
+
+### Earlier sessions
 
 ### From the reservoir execution session (2026-07-31)
 
@@ -1040,6 +1246,38 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## Key Decisions
 
+### From the 2026-08-01 session
+
+- **FULL PIPELINE, MinHash deferred** (owner). Three alternatives were evaluated in detail and
+  declined. Do not re-propose them; the numbers are kept below because they are useful context, not
+  because the decision is open.
+  - *Publish `datamix1-jul22` as-is* — 96 objects / 35.8 GiB, ~20B tokens, includes a real
+    decontamination bundle. Minutes of work.
+  - *Merge the two published corpora* — 283.7B tokens / 12 sources, top source share 76.9% → 42.6%,
+    ~4h of Batch, ~$0.10. Verified mergeable: both pin `tokenizer/dolma2-bpe@v1` with byte-identical
+    `manifest_sha256`, and **7,392 entries yield 7,392 distinct digests** (zero cross-collisions), so
+    `duplicate-shard-digest` does not fire. Absent: edu-web, QA/forum, synthetic.
+  - *Hybrid* — merge the 250B, tokenize only the missing 76.4B (169 GB fetch, 6–11h compute). Cuts the
+    ingest by ~85% and lands the same 15 sources.
+- **Write the tokenize/shard driver fresh (~400–800 lines), do not port and do not adopt a tool.**
+  No tool splits mid-document, so none can hit 25,001,984 tokens; `week1_corpus` emits pre-mixed
+  per-tier files where eduLLM needs per-source shards mixed at read time.
+- **Shard tails: floor to a multiple of 8192 and discard the sub-8192 remainder** — then *declare*
+  `seq_len: 8192`. Omitting `seq_len` to dodge `check_seq_len_alignment` is decoration under the golden
+  rule. Cost is ~3.4M of 260B tokens (1.3 × 10⁻⁵), and it also prevents runt shards that OLMo-core
+  would floor to unreadable. **Do not pad with EOS** — padding a 100-token residual to 8192 makes that
+  shard 98.8% EOS and fails the 0.05 bound outright.
+- **Take ONE FinePhrase format, not four.** The four are ~73% the same documents; "60B synthetic" is
+  ~15B wearing four hats. One format also removes the need for the id partition entirely.
+- **`numpy<2.5` is pinned for reproducibility, NOT as the segfault fix.** An unpinned dep resolves at
+  run time, so production runs whatever PyPI served that morning. The pin was tried as a fix and
+  refuted.
+- **EOS risk was inverted.** The family bound `eos_fraction_max: 0.05` needs mean doc length > 20
+  tokens. Measured: IRC **7,863**, github_archive **490**, FinePhrase **437**. QA/forum are the
+  *safest* sources, 20–400× margin — not the riskiest, as previously recorded.
+
+### Earlier sessions
+
 ### From the reservoir execution session (2026-07-31) — all owner calls
 
 | decision | resolution | why it matters |
@@ -1144,36 +1382,85 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## Next Steps (priority order)
 
-### THE CURRENT LIST — 2026-07-31, after the execution session
+### THE CURRENT LIST — 2026-08-01. Decision of record: FULL PIPELINE, MinHash deferred.
 
-**1. 🛑 §9.7 item 4 — partition the synthetic `id` space, anti-join edu-web.** The only thing owed
-before assembly, and the only one with a **build-time deadline** (after tokenization the document→id
-mapping is gone). Full spec in `DATASET-DESIGN-reservoir.md` §9.7 item 4; it is also §4.1 step 0 and the
-first action in §5.6 phase 1. `sha256(id) % 4 == f`; worst case needs 17.3%, a quarter gives 25.0%; the
-anti-join reuses the Bloom filter step 2 already builds.
+Total remaining: **2–3 weeks**. Compute across every stage is ~12 hours and ~$20; the calendar is
+sequential Batch stages and per-corpus verification, not throughput.
 
-**2. Phase 1 assembly** (§5.6), in this order — the order is load-bearing:
-```
-id partition + anti-join  →  Bloom-dedup (delete)  →  decontaminate  →  MinHash (annotate)
-  →  carve val from documents per source  →  tokenize  →  attach inherited `domain`
-  →  shard at 25,001,984 tokens
-```
-Val carve **precedes** tokenization (§1.4). `domain` attach is a metadata join, not a classification pass.
+**1. Per-corpus readers — ~1 week. THE ITEM MOST LIKELY TO BREAK THE ESTIMATE. Start here.**
+Ten to thirteen corpora, each a different schema. The parquet path exists (`_scan_ids` generalises);
+the Common Pile `.json.gz` path does **not**. Each reader needs verification that it pulls the right
+column, because getting it wrong is silent — FinePhrase's `text` holds the ORIGINAL FineWeb-Edu
+document and the rewrite is at `rollout_results.list.element.text`; a flat leaf list contains `text`
+twice and `.names.index("text")` returns the original. Match on exact `path_in_schema`.
 
-**3. Publish (§5.6 phase 2), on Batch, in-region — mandatory.** `publish()` GETs every byte to wherever
-it runs, because content addressing needs a real SHA-256 over the actual bytes. Measured **0.8 MiB/s**
-from a laptop ⇒ a **9-day** ETA for a corpus this size. Copies are server-side and fine from anywhere;
-it is specifically the *hashing* that must be near the data. `hash_workers`/`copy_workers=16`,
-`--timeout attemptDurationSeconds=7200`.
+Per-corpus specs (repo, revision sha, text column, rows, tok/byte, mean doc length, license, traps)
+were measured this session and are in the agent findings; re-derive from `artifacts/sizing-revised.md`
+and `artifacts/recount/*.json` if needed. `.json.gz` needs
+`zlib.decompressobj(16 + zlib.MAX_WBITS)`; carry the partial last line of every range, never
+`json.loads` it; check `do.eof` at end-of-object or a truncated stream reads as a short corpus.
 
-**4. Backfill the two sidecars — AFTER promotion, in place (§5.6 phase 2b).** Do **not** stage them to
-landing: `promote()` copies only `dataset.json`, group manifests, and manifest entries, so a staged
-sidecar passes Gate A and is then silently dropped, expiring with landing's 14-day lifecycle.
+**2. Tokenize + exact shard — 2–3 days, ~400–800 lines.** Write fresh; do not port and do not adopt a
+tool (reasons above). Seven small modules: stream documents, val carve, tokenize+EOS, pack, route,
+drive, finalize. Steal the ~80 lines of non-obvious correctness from `week1_corpus` with attribution.
 
-**5. Verify (§5.6 phase 3).** `verify_seal`, read a shard back, confirm `dataset_paths(labels={...})`
-slices, confirm **both sidecars survived promotion**, and re-verify the airlock (intern `PutObject` to
-`edullm-data` → `AccessDenied`; `edullm-landing` still writable — check both directions, since a Deny
-that also blocked landing is a broken pipeline, not a secure one).
+**3. Bundling + receipts + resumability — 3–4 days.** ~420 Batch array children. Reuse
+`ingest_reservoir`'s `_shard_slice` striding, `_assert_safe_key`, `_assert_lifecycle_covers`, and the
+`_cmd_merge` refuses-incomplete pattern. Resumability is at **bundle** granularity — you cannot skip
+shard *k* of a stream without re-reading the documents that produced it.
+
+**4. Dedup + decontamination.** Exact content-hash dedup (Bloom, ~$3) delivers the entire measured
+quality gain. For decontamination, **first check whether
+`s3://edullm-datasets/datamix1-jul22/validation/` is reusable** before porting
+`week1_corpus/decontamination.py` (~125 lines) — a real bundle already exists.
+
+**5. Publish (§5.6 phase 2) on Batch, in-region.** `publish()` GETs every byte to hash it;
+`hash_workers`/`copy_workers=16`, timeout 7200. ⚠️ Auto-promotion is currently **disabled** — the
+concurrent session turned off `edullm-landing-manifest-created`. Either re-enable it or submit the
+validator job manually.
+
+**6. Backfill sidecars AFTER promotion, in place (§5.6 phase 2b).** `promote()` copies only
+`dataset.json`, group manifests, and manifest entries — a sidecar staged to landing passes Gate A and
+is then silently dropped, expiring with landing's lifecycle.
+
+**7. Verify (§5.6 phase 3).** `verify_seal`, read a shard back, confirm `dataset_paths(labels={...})`
+slices, confirm both sidecars survived, and re-verify the airlock **both** directions (intern
+`PutObject` to `edullm-data` → AccessDenied; `edullm-landing` still writable).
+
+### ⏸ DEFERRED: MinHash + LSH + connected components (owner decision, 2026-08-01)
+
+Saves 1–2 weeks. Justified by §4.1's own evidence, not by trimming scope: DCLM measured
+**Bloom-filter-alone at +1.6 CORE, equal to the full Exact+MinHash+SuffixArray stack**, and FineWeb
+trained on the ~31B kept vs 171B removed and found **the removed data scored better**. MinHash ships
+only a cluster×source warning table.
+
+Addable later without a rebuild: it is annotate-only, so it lands as `_dedup/clusters.parquet`, a
+control file written in place after promotion, outside the hash chain. `week1_corpus` has signature
+and LSH-banding primitives but **no connected-components stage** — union-find over ~1–2B documents is
+the hard part, plus an irreducible 1–2 day run on a 460 GB-RAM box that cannot checkpoint.
+
+### 🛑 THREE IRREVERSIBLE DECISIONS — settle before the first byte is tokenized
+
+Each is inside `manifest_sha256` or destroyed by tokenization. Getting one wrong is a ~1 TB re-copy.
+
+1. **`share_alike`, `source`, `synthetic` must be first-class labels at publish time.**
+   `entry.labels` is inside the hash chain — no backfill. A later "strip SA and re-mix" is a full
+   re-copy.
+2. **Real and synthetic must be fused into the `source` label**, not split into separate groups —
+   `build_mixture` cannot span groups.
+3. **The FineWeb-Edu id disjointness.** `fineweb-edu sample-100BT` ⊂ `sample-350BT`, which is
+   FinePhrase's exact parent — so **100% of an edu-web draw has a synthetic sibling**. Free fix: draw
+   synthetic from the ~242M `sample-350BT` ids NOT in `sample-100BT`. Same join key, one pass. This is
+   the §9.7-item-4 collision reappearing in a category the plan never checked.
+
+### Owed doc corrections (cheap, do whenever)
+
+- **`artifacts/PLAN-CORRECTIONS.md` §6 and `artifacts/smoke/harvest_parquet.py:9-13`** state the
+  per-IP rate limit as a general rule. True for `datasets-server`, **false for resolvers and the
+  CDN**. As written they deter the fast path.
+- **`CLAUDE.md`'s "60-min job-def limit"** — Batch has **no** maximum timeout; that was a value we set.
+- **Deregister three diagnostic job defs**: `edullm-reservoir-diag`, `-diag2`, `-shim`.
+- **`artifacts/reservoir/INGEST-CALIBRATION.md`** still recommends sizing that the 429 fix obsoletes.
 
 ### Cheap, not blocking, do whenever
 - **Scrub `tests/test_publish.py:517`** — real AWS account ID in a Batch ARN, in the concurrent session's
