@@ -1,0 +1,407 @@
+{
+ "_schema": "edullm-corpus-registry/v1",
+ "_generated_by": "artifacts/reservoir/build_registry.py",
+ "_tokenizer": "allenai/dolma2-tokenizer (published as tokenizer/dolma2-bpe/v1)",
+ "_note": "target_tokens 0 means RESERVE \u2014 listed deliberately, not drawn in v1. text_column 'UNVERIFIED' means not confirmed from real bytes; the row's first trap carries the command that settles it. pool_tokens are dolma2 re-counts from artifacts/recount + artifacts/sizing-revised.md, never card figures (\u00a73.1).",
+ "categories": {
+  "academic": {
+   "target_tokens": 20000000000,
+   "naive_sum_pool_tokens": 84250000000,
+   "non_overlapping_pool_tokens": 64120000000,
+   "sources": [
+    "peS2o_filtered",
+    "pubmed_filtered",
+    "arxiv_papers_filtered"
+   ],
+   "_pool_note": "naive sum 84.26 B overstates by 20.1 B: 49.7% of peS2o's BYTES are PubMedCentral-derived (measured from per-document metadata.pdf_src). The same article extracted by Grobid-over-PDF and by pandoc-over-nXML differs in >10% of its 20-grams and survives fuzzy dedup as DISTINCT, so a digest never catches it and neither does MinHash at the usual threshold. Drop peS2o's PMC share rather than dedup it."
+  },
+  "code": {
+   "target_tokens": 40000000000,
+   "naive_sum_pool_tokens": 74810000000,
+   "non_overlapping_pool_tokens": 74810000000,
+   "sources": [
+    "stackv2_edu_filtered"
+   ]
+  },
+  "edu-web": {
+   "target_tokens": 48000000000,
+   "naive_sum_pool_tokens": 261340000000,
+   "non_overlapping_pool_tokens": 261340000000,
+   "sources": [
+    "finepdfs-edu",
+    "fineweb-edu",
+    "essential-web"
+   ]
+  },
+  "math": {
+   "target_tokens": 34000000000,
+   "naive_sum_pool_tokens": 34690000000,
+   "non_overlapping_pool_tokens": 34690000000,
+   "sources": [
+    "finemath"
+   ],
+   "_pool_note": "the category has exactly ONE independent source. Anything that would raise the total is a rewrite of finemath with measured self-similarity too low for dedup to catch."
+  },
+  "qa-forum": {
+   "target_tokens": 11800000000,
+   "naive_sum_pool_tokens": 37430000000,
+   "non_overlapping_pool_tokens": 37430000000,
+   "sources": [
+    "stackexchange_filtered",
+    "ubuntu_irc_filtered",
+    "github_archive_filtered"
+   ]
+  },
+  "reference": {
+   "target_tokens": 8800000000,
+   "naive_sum_pool_tokens": 8870000000,
+   "non_overlapping_pool_tokens": 8870000000,
+   "sources": [
+    "finewiki"
+   ]
+  },
+  "synthetic": {
+   "target_tokens": 60000000000,
+   "naive_sum_pool_tokens": 478150000000,
+   "non_overlapping_pool_tokens": 478150000000,
+   "sources": [
+    "finephrase-faq",
+    "finephrase-math",
+    "finephrase-table",
+    "finephrase-tutorial"
+   ]
+  },
+  "web-diverse": {
+   "target_tokens": 30000000000,
+   "naive_sum_pool_tokens": 114690000000,
+   "non_overlapping_pool_tokens": 114690000000,
+   "sources": [
+    "dclm-baseline"
+   ]
+  }
+ },
+ "corpora": [
+  {
+   "key": "finepdfs-edu",
+   "category": "edu-web",
+   "source_label": "finepdfs-edu",
+   "repo": "HuggingFaceFW/finepdfs-edu",
+   "config": "eng_Latn",
+   "file_format": "parquet",
+   "id_column": "UNVERIFIED",
+   "target_tokens": 28000000000,
+   "pool_tokens": 161100000000,
+   "license": "ODC-BY-1.0",
+   "text_column": "text",
+   "traps": [
+    "PDF-extracted text; extraction artifacts differ in kind from CC-HTML sources.",
+    "text_column verified in artifacts/recount/_footer-finepdfs-edu.json"
+   ]
+  },
+  {
+   "key": "fineweb-edu",
+   "category": "edu-web",
+   "source_label": "fineweb-edu",
+   "repo": "HuggingFaceFW/fineweb-edu",
+   "config": "sample-100BT",
+   "file_format": "parquet",
+   "id_column": "UNVERIFIED",
+   "target_tokens": 20000000000,
+   "pool_tokens": 100240000000,
+   "license": "ODC-BY-1.0",
+   "text_column": "UNVERIFIED",
+   "traps": [
+    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of HuggingFaceFW/fineweb-edu>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
+    "\ud83d\uded1 100% of this source has a synthetic sibling: sample-100BT \u2282 sample-350BT, which is FinePhrase's exact parent. Draw synthetic from the ~242M sample-350BT ids NOT in sample-100BT, or every edu-web document appears twice in one run (HANDOFF 'three irreversible decisions', item 3).",
+    "Zero decontamination upstream (\u00a74.2)."
+   ]
+  },
+  {
+   "key": "essential-web",
+   "category": "edu-web",
+   "source_label": "essential-web",
+   "repo": "EssentialAI/essential-web-v1.0",
+   "config": "default",
+   "file_format": "parquet",
+   "id_column": "UNVERIFIED",
+   "target_tokens": 0,
+   "pool_tokens": null,
+   "license": "ODC-BY-1.0",
+   "domain_column": "eai_taxonomy.free_decimal_correspondence",
+   "text_column": "text",
+   "traps": [
+    "target_tokens 0 = RESERVE, not in the v1 draw: the pool is already met 7.0x. Listed because it is the one source that SHIPS the subject label the cancelled ~$920 classification run would have computed (\u00a71.2).",
+    "Shares 89 of 101 snapshots with DCLM-Pool (\u00a73.1) \u2014 do not treat as independent.",
+    "text_column verified in artifacts/recount/edu-web-essential-web.json"
+   ]
+  },
+  {
+   "key": "dclm-baseline",
+   "category": "web-diverse",
+   "source_label": "dclm",
+   "repo": "mlfoundations/dclm-baseline-1.0",
+   "config": "default",
+   "file_format": "parquet",
+   "id_column": "UNVERIFIED",
+   "target_tokens": 30000000000,
+   "pool_tokens": 114690000000,
+   "license": "CC-BY-4.0",
+   "text_column": "UNVERIFIED",
+   "traps": [
+    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of mlfoundations/dclm-baseline-1.0>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
+    "The diversity counterweight to edu filtering \u2014 the point is that it is NOT filtered.",
+    "olmo-mix-1124 is ~95% DCLM-baseline (\u00a73.1), so this overlaps the published corpora."
+   ]
+  },
+  {
+   "key": "finemath",
+   "category": "math",
+   "source_label": "finemath",
+   "repo": "HuggingFaceTB/finemath",
+   "config": "finemath-3plus",
+   "file_format": "parquet",
+   "id_column": "UNVERIFIED",
+   "target_tokens": 34000000000,
+   "pool_tokens": 34690000000,
+   "license": "ODC-BY-1.0",
+   "text_column": "UNVERIFIED",
+   "traps": [
+    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of HuggingFaceTB/finemath>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
+    "\u26a0\ufe0f The ONLY math source: everything else in the category is a rewrite of it. swallow-math-v2 (32 B, Apache-2.0) is a FineMath rewrite; measured self-similarity means no digest or MinHash catches the duplication.",
+    "Pool is 3.6% under the 36 B plan. 3x peak demand IS met (4.96x).",
+    "NOT inside MegaMath \u2014 independent CC re-extractions (\u00a73.1)."
+   ]
+  },
+  {
+   "key": "peS2o_filtered",
+   "category": "academic",
+   "source_label": "pes2o",
+   "repo": "common-pile/raw_v0.1_parquet",
+   "config": "peS2o_filtered",
+   "file_format": "parquet",
+   "id_column": "UNVERIFIED",
+   "target_tokens": 14000000000,
+   "pool_tokens": 40480000000,
+   "license": "CC-BY / CC0 (mixed)",
+   "share_alike": true,
+   "text_column": "text",
+   "traps": [
+    "\ud83d\uded1 49.7% of its BYTES are PubMedCentral-derived (measured from per-document metadata.pdf_src, artifacts/recount/_overlap-pes2o-pmc.json). The same article via Grobid-over-PDF and pandoc-over-nXML differs in >10% of 20-grams and SURVIVES fuzzy dedup as distinct. Drop the PMC share rather than dedup it, or take pubmed instead.",
+    "\u22481.9% share-alike and INVISIBLE from repo metadata (Common Pile paper Table 3). Name-level SA exclusion therefore drops 100% of this source to remove 1.9%.",
+    "Card says 43.3 B \u2014 7% HIGH vs the footer-exact 40.48 B.",
+    "text_column verified in artifacts/recount/_footer-academic-peS2o.json"
+   ]
+  },
+  {
+   "key": "pubmed_filtered",
+   "category": "academic",
+   "source_label": "pubmed",
+   "repo": "common-pile/raw_v0.1_parquet",
+   "config": "pubmed_filtered",
+   "file_format": "parquet",
+   "id_column": "UNVERIFIED",
+   "target_tokens": 6000000000,
+   "pool_tokens": 37540000000,
+   "license": "CC-BY / CC0 (mixed)",
+   "text_column": "text",
+   "traps": [
+    "Overlaps peS2o's PMC share \u2014 see the peS2o row. Count one, not both.",
+    "text_column verified in artifacts/recount/_footer-academic-pubmed.json"
+   ]
+  },
+  {
+   "key": "arxiv_papers_filtered",
+   "category": "academic",
+   "source_label": "arxiv",
+   "repo": "common-pile/raw_v0.1_parquet",
+   "config": "arxiv_papers_filtered",
+   "file_format": "parquet",
+   "id_column": "UNVERIFIED",
+   "target_tokens": 0,
+   "pool_tokens": 6230000000,
+   "license": "CC-BY / CC0 (mixed)",
+   "text_column": "text",
+   "traps": [
+    "target_tokens 0 = reserve; the 20 B academic pool is met by peS2o + pubmed. DoReMi drove ArXiv 10.52% -> 0.36% and RegMix put it near zero (\u00a72.1).",
+    "text_column verified in artifacts/recount/_footer-academic-arxiv_papers.json"
+   ]
+  },
+  {
+   "key": "stackv2_edu_filtered",
+   "category": "code",
+   "source_label": "stackv2-edu",
+   "repo": "common-pile/raw_v0.1_parquet",
+   "config": "stackv2_edu_filtered",
+   "file_format": "parquet",
+   "id_column": "UNVERIFIED",
+   "target_tokens": 40000000000,
+   "pool_tokens": 74810000000,
+   "license": "Blue Oak (100% permissive per-doc)",
+   "domain_column": "metadata.gha_language",
+   "text_column": "UNVERIFIED",
+   "traps": [
+    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/raw_v0.1_parquet>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
+    "\u26a0\ufe0f 73 distinct languages in ONE shard. Cardinality is PERMANENT \u2014 each becomes a directory inside manifest_sha256. Fold to the top ~20 by token count, rest -> 'other' (\u00a71.2), and pass the map to the reader: it is a reader ARGUMENT, not a spec field.",
+    "\ud83d\uded1 SLUG THE VALUE. 'C#' publishes clean and passes Gate A, then urlparse puts everything after the '#' in `fragment` and THE SHARD NAME LEAVES THE PATH. Gate A now rejects '#' and brackets (validate._segment_breakage); other values still need slug_path_segment. 'C#'->'c-sharp', 'C++'->'c-plus-plus'.",
+    "Use this, NOT the-stack-v2/stack-edu: those ship SWHIDs only and bulk access needs a Software Heritage agreement demanding open model release (\u00a77 item 3).",
+    "Excludes swallow-code-v2 (a Python-only rewrite of the same blobs, self-similarity 0.064 so nothing catches it; 74% no_license upstream despite the apache-2.0 tag)."
+   ]
+  },
+  {
+   "key": "stackexchange_filtered",
+   "category": "qa-forum",
+   "source_label": "stackexchange",
+   "repo": "common-pile/raw_v0.1_parquet",
+   "config": "stackexchange_filtered",
+   "file_format": "parquet",
+   "id_column": "UNVERIFIED",
+   "target_tokens": 10000000000,
+   "pool_tokens": 24050000000,
+   "license": "CC-BY-SA-4.0",
+   "share_alike": true,
+   "domain_column": "metadata.site",
+   "text_column": "UNVERIFIED",
+   "traps": [
+    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/raw_v0.1_parquet>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
+    "100% share-alike, and the license is visible ONLY in per-row metadata.all_licenses \u2014 cardData declares none. A declared license both over- and under-states what is inside.",
+    "~180 sites; same permanent-cardinality fold as stackv2-edu. Slug: '3dprinting.stackexchange.com' -> '3dprinting'."
+   ]
+  },
+  {
+   "key": "ubuntu_irc_filtered",
+   "category": "qa-forum",
+   "source_label": "ubuntu-irc",
+   "repo": "common-pile/raw_v0.1_parquet",
+   "config": "ubuntu_irc_filtered",
+   "file_format": "parquet",
+   "id_column": "UNVERIFIED",
+   "target_tokens": 1800000000,
+   "pool_tokens": 1870000000,
+   "license": "Public Domain",
+   "text_column": "UNVERIFIED",
+   "traps": [
+    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/raw_v0.1_parquet>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
+    "The ONLY non-share-alike source in this category. Without it the category is 1.87 B, which fails even peak demand once SA is excluded.",
+    "IRC logs: short turns. Watch corpus.MIN_DOC_TOKENS \u2014 a mean under 20 tokens per document means EOS fraction > 0.05 and Gate A rejects the shard."
+   ]
+  },
+  {
+   "key": "github_archive_filtered",
+   "category": "qa-forum",
+   "source_label": "github-archive",
+   "repo": "common-pile/raw_v0.1_parquet",
+   "config": "github_archive_filtered",
+   "file_format": "parquet",
+   "id_column": "UNVERIFIED",
+   "target_tokens": 0,
+   "pool_tokens": 11510000000,
+   "license": "permissive",
+   "text_column": "UNVERIFIED",
+   "traps": [
+    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/raw_v0.1_parquet>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
+    "Moved here FROM code deliberately: it is issue/PR prose, not code (\u00a73.2).",
+    "target_tokens 0 = reserve; the 12 B pool is met without it."
+   ]
+  },
+  {
+   "key": "finewiki",
+   "category": "reference",
+   "source_label": "finewiki",
+   "repo": "HuggingFaceFW/finewiki",
+   "config": "en",
+   "file_format": "parquet",
+   "id_column": "UNVERIFIED",
+   "target_tokens": 8800000000,
+   "pool_tokens": 8870000000,
+   "license": "CC-BY-SA-4.0 AND GFDL",
+   "share_alike": true,
+   "text_column": "UNVERIFIED",
+   "traps": [
+    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of HuggingFaceFW/finewiki>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
+    "100% share-alike, and TWO different copyleft regimes (CC-BY-SA + GFDL). Do not model SA as a boolean \u2014 record the license string (\u00a71.5).",
+    "Pool was revised 14 B -> 9 B and max share 15% -> 12%: at 8.87 B, 15% gives only 2.96x headroom and 15% would have been the one row violating \u00a72.1's own 3x rule.",
+    "The card names NO token count and NO tokenizer; 8.87 B is footer-exact measurement."
+   ]
+  },
+  {
+   "key": "finephrase-faq",
+   "category": "synthetic",
+   "source_label": "synthetic-finephrase-faq",
+   "repo": "HuggingFaceFW/finephrase",
+   "config": "faq",
+   "file_format": "parquet",
+   "id_column": "id",
+   "target_tokens": 15000000000,
+   "pool_tokens": 148540000000,
+   "license": "ODC-BY-1.0",
+   "text_column": "rollout_results.list.element.text",
+   "traps": [
+    "\ud83d\uded1 THE REWRITE IS AT rollout_results.list.element.text. Top-level `text` holds the ORIGINAL FineWeb-Edu document (its `dataset` field literally reads HuggingFaceFW/fineweb-edu). A flat leaf list contains `text` TWICE and .names.index('text') returns the ORIGINAL \u2014 building from it yields a corpus of unrephrased FineWeb-Edu labelled synthetic, and NO hash, size or decode check catches it. Worse: rollout_results.text does not raise either, it returns ZERO columns.",
+    "\ud83d\uded1 The four formats are ~91-93% THE SAME DOCUMENTS. Apply the \u00a79.7 item 4 partition (sha256(id) % 4 == 0) BEFORE tokenizing \u2014 after tokenization there is no document->id mapping and it cannot be retrofitted. This format needs 10.1% of its pool; a disjoint quarter gives 25.0% (measured 24.86-25.26%).",
+    "No upstream quality control: a sampled rewrite was the entire string 'Question: Can light accelerate to the speed of light?' (~12 tokens). corpus.MIN_DOC_TOKENS filtering is what makes this half publishable \u2014 a mean under 20 tokens fails the EOS bound.",
+    "Rephrased FineWeb-Edu, which does zero decontamination, and rephrasing is exactly what defeats n-gram decontamination (\u00a74.2). The eval bundle does NOT cover this.",
+    "text_column verified in artifacts/reservoir/id-partition-verification.json"
+   ]
+  },
+  {
+   "key": "finephrase-math",
+   "category": "synthetic",
+   "source_label": "synthetic-finephrase-math",
+   "repo": "HuggingFaceFW/finephrase",
+   "config": "math",
+   "file_format": "parquet",
+   "id_column": "id",
+   "target_tokens": 15000000000,
+   "pool_tokens": 94740000000,
+   "license": "ODC-BY-1.0",
+   "text_column": "rollout_results.list.element.text",
+   "traps": [
+    "\ud83d\uded1 THE REWRITE IS AT rollout_results.list.element.text. Top-level `text` holds the ORIGINAL FineWeb-Edu document (its `dataset` field literally reads HuggingFaceFW/fineweb-edu). A flat leaf list contains `text` TWICE and .names.index('text') returns the ORIGINAL \u2014 building from it yields a corpus of unrephrased FineWeb-Edu labelled synthetic, and NO hash, size or decode check catches it. Worse: rollout_results.text does not raise either, it returns ZERO columns.",
+    "\ud83d\uded1 The four formats are ~91-93% THE SAME DOCUMENTS. Apply the \u00a79.7 item 4 partition (sha256(id) % 4 == 1) BEFORE tokenizing \u2014 after tokenization there is no document->id mapping and it cannot be retrofitted. This format needs 15.8% of its pool; a disjoint quarter gives 25.0% (measured 24.86-25.26%).",
+    "No upstream quality control: a sampled rewrite was the entire string 'Question: Can light accelerate to the speed of light?' (~12 tokens). corpus.MIN_DOC_TOKENS filtering is what makes this half publishable \u2014 a mean under 20 tokens fails the EOS bound.",
+    "Rephrased FineWeb-Edu, which does zero decontamination, and rephrasing is exactly what defeats n-gram decontamination (\u00a74.2). The eval bundle does NOT cover this.",
+    "text_column verified in artifacts/reservoir/id-partition-verification.json"
+   ]
+  },
+  {
+   "key": "finephrase-table",
+   "category": "synthetic",
+   "source_label": "synthetic-finephrase-table",
+   "repo": "HuggingFaceFW/finephrase",
+   "config": "table",
+   "file_format": "parquet",
+   "id_column": "id",
+   "target_tokens": 15000000000,
+   "pool_tokens": 86950000000,
+   "license": "ODC-BY-1.0",
+   "text_column": "rollout_results.list.element.text",
+   "traps": [
+    "\ud83d\uded1 THE REWRITE IS AT rollout_results.list.element.text. Top-level `text` holds the ORIGINAL FineWeb-Edu document (its `dataset` field literally reads HuggingFaceFW/fineweb-edu). A flat leaf list contains `text` TWICE and .names.index('text') returns the ORIGINAL \u2014 building from it yields a corpus of unrephrased FineWeb-Edu labelled synthetic, and NO hash, size or decode check catches it. Worse: rollout_results.text does not raise either, it returns ZERO columns.",
+    "\ud83d\uded1 The four formats are ~91-93% THE SAME DOCUMENTS. Apply the \u00a79.7 item 4 partition (sha256(id) % 4 == 2) BEFORE tokenizing \u2014 after tokenization there is no document->id mapping and it cannot be retrofitted. This format needs 17.3% of its pool; a disjoint quarter gives 25.0% (measured 24.86-25.26%).",
+    "No upstream quality control: a sampled rewrite was the entire string 'Question: Can light accelerate to the speed of light?' (~12 tokens). corpus.MIN_DOC_TOKENS filtering is what makes this half publishable \u2014 a mean under 20 tokens fails the EOS bound.",
+    "Rephrased FineWeb-Edu, which does zero decontamination, and rephrasing is exactly what defeats n-gram decontamination (\u00a74.2). The eval bundle does NOT cover this.",
+    "text_column verified in artifacts/reservoir/id-partition-verification.json"
+   ]
+  },
+  {
+   "key": "finephrase-tutorial",
+   "category": "synthetic",
+   "source_label": "synthetic-finephrase-tutorial",
+   "repo": "HuggingFaceFW/finephrase",
+   "config": "tutorial",
+   "file_format": "parquet",
+   "id_column": "id",
+   "target_tokens": 15000000000,
+   "pool_tokens": 147920000000,
+   "license": "ODC-BY-1.0",
+   "text_column": "rollout_results.list.element.text",
+   "traps": [
+    "\ud83d\uded1 THE REWRITE IS AT rollout_results.list.element.text. Top-level `text` holds the ORIGINAL FineWeb-Edu document (its `dataset` field literally reads HuggingFaceFW/fineweb-edu). A flat leaf list contains `text` TWICE and .names.index('text') returns the ORIGINAL \u2014 building from it yields a corpus of unrephrased FineWeb-Edu labelled synthetic, and NO hash, size or decode check catches it. Worse: rollout_results.text does not raise either, it returns ZERO columns.",
+    "\ud83d\uded1 The four formats are ~91-93% THE SAME DOCUMENTS. Apply the \u00a79.7 item 4 partition (sha256(id) % 4 == 3) BEFORE tokenizing \u2014 after tokenization there is no document->id mapping and it cannot be retrofitted. This format needs 10.1% of its pool; a disjoint quarter gives 25.0% (measured 24.86-25.26%).",
+    "No upstream quality control: a sampled rewrite was the entire string 'Question: Can light accelerate to the speed of light?' (~12 tokens). corpus.MIN_DOC_TOKENS filtering is what makes this half publishable \u2014 a mean under 20 tokens fails the EOS bound.",
+    "Rephrased FineWeb-Edu, which does zero decontamination, and rephrasing is exactly what defeats n-gram decontamination (\u00a74.2). The eval bundle does NOT cover this.",
+    "text_column verified in artifacts/reservoir/id-partition-verification.json"
+   ]
+  }
+ ]
+}

@@ -219,6 +219,15 @@ class CorpusSpec:
     file_format: str
     text_column: str
     id_column: str
+    #: Tokens to draw from this source. **``0`` means RESERVE** — the source is specced, its traps
+    #: are recorded, and it is deliberately not drawn in this version.
+    #:
+    #: Zero is a legal value on purpose. Several sources are listed precisely because they exist and
+    #: were *considered*: ``arxiv`` is over-provisioned into a category already met by peS2o and
+    #: pubmed, and ``essential-web`` is the one source that already ships the subject label a
+    #: cancelled ~$920 classification run would have computed. Deleting those rows would lose the
+    #: measurement and the reasoning; forcing a positive target would put tokens in the corpus that
+    #: §2.1 says should not be there. A build driver iterates the rows where this is ``> 0``.
     target_tokens: int
     #: Upstream pool size. ``None`` where we have no measurement we trust — better than a card
     #: figure, which would look like evidence.
@@ -244,8 +253,11 @@ class CorpusSpec:
                 f"URI fragment, so the shard name vanishes from the path, and both "
                 f"labels_from_path and fnmatch accept it happily."
             )
-        if self.target_tokens <= 0:
-            raise BuildError(f"{self.key}: target_tokens must be positive")
+        if self.target_tokens < 0:
+            raise BuildError(
+                f"{self.key}: target_tokens is {self.target_tokens}; use 0 to mean RESERVE "
+                f"(specced but not drawn), never a negative"
+            )
         if self.pool_tokens is not None and self.pool_tokens < self.target_tokens:
             raise BuildError(
                 f"{self.key}: pool is {self.pool_tokens} tokens but the target asks for "

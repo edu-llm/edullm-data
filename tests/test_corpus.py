@@ -367,3 +367,101 @@ def test_epoch_verdict_boundaries(epochs, verdict):
 def test_epochs_refuses_an_empty_pool():
     with pytest.raises(BuildError):
         epochs_for(20_000_000_000, 1.0, 0)
+
+
+# --------------------------------------------------------------------------------------
+# The source registry — a data file that must stay loadable by the code that consumes it
+# --------------------------------------------------------------------------------------
+
+
+def _registry():
+    import json
+    import pathlib
+
+    p = pathlib.Path(__file__).resolve().parents[1] / "artifacts" / "reservoir" / "corpus-registry.json"
+    if not p.exists():
+        import pytest
+
+        pytest.skip("corpus-registry.json not generated")
+    return json.loads(p.read_text())
+
+
+def test_every_registry_row_loads_into_a_corpus_spec():
+    """The registry is a build INPUT, so a row the reader cannot construct is a broken build.
+
+    Catching it here costs nothing; catching it on Batch costs a job. This also pins the field names
+    against the dataclass, which is the thing most likely to drift when either side is edited.
+    """
+    rows = _registry()["corpora"]
+    assert rows, "an empty registry would make this vacuous"
+    for row in rows:
+        CorpusSpec(**row)  # __post_init__ does the real checking
+
+
+def test_registry_source_labels_are_unique_and_safe():
+    """Two sources sharing a label would silently merge into one slice of the corpus."""
+    from edullm_data.manifest import SAFE_SEGMENT_RE
+
+    labels = [r["source_label"] for r in _registry()["corpora"]]
+    assert len(set(labels)) == len(labels), "duplicate source_label merges two sources"
+    for label in labels:
+        assert SAFE_SEGMENT_RE.match(label), f"{label!r} is not a safe path segment"
+
+
+def test_an_unverified_text_column_carries_the_command_to_settle_it():
+    """`UNVERIFIED` must be actionable, not just honest.
+
+    Getting the text column wrong is the one silent failure in the whole build — FinePhrase's
+    top-level `text` is the ORIGINAL document — so a row admitting it is unverified has to say how to
+    check.
+    """
+    for row in _registry()["corpora"]:
+        if row["text_column"] == "UNVERIFIED":
+            assert row["traps"], f"{row['key']}: unverified with no trap explaining how to settle it"
+            assert "path_in_schema" in row["traps"][0], row["key"]
+
+
+def test_the_finephrase_rows_name_the_nested_rewrite_not_the_original():
+    """The trap that no hash, size or decode check would catch.
+
+    Verified against real bytes elsewhere; asserted here so a registry edit cannot quietly point the
+    synthetic half at unrephrased FineWeb-Edu.
+    """
+    fp = [r for r in _registry()["corpora"] if r["key"].startswith("finephrase-")]
+    assert len(fp) == 4, "four formats, separately weightable (§3.3)"
+    for row in fp:
+        assert row["text_column"] == "rollout_results.list.element.text", row["key"]
+
+
+def test_no_row_targets_more_than_its_measured_pool():
+    """Drawing more than a pool holds means repeating documents.
+
+    `CorpusSpec.__post_init__` enforces this per row; this states it as a property of the registry so
+    the failure names the registry rather than a constructor.
+    """
+    for row in _registry()["corpora"]:
+        pool = row.get("pool_tokens")
+        if pool is not None:
+            assert row["target_tokens"] <= pool, row["key"]
+
+
+def test_category_pools_report_overlap_adjusted_totals():
+    """Where sources are not independent, the naive sum must not be the only number.
+
+    §3.1's lineage trap: summing peS2o and pubmed double-counts peS2o's measured 49.7% PMC share. A
+    registry reporting only the sum would overstate the academic pool by 20.1B.
+    """
+    cats = _registry()["categories"]
+    for name, entry in cats.items():
+        assert entry["non_overlapping_pool_tokens"] <= entry["naive_sum_pool_tokens"], name
+        if entry["non_overlapping_pool_tokens"] < entry["naive_sum_pool_tokens"]:
+            assert "_pool_note" in entry, f"{name} adjusts its pool without saying why"
+
+
+def test_the_registry_covers_every_design_category():
+    """A missing category is a silently absent slice of the corpus."""
+    expected = {
+        "edu-web", "web-diverse", "code", "synthetic",
+        "math", "academic", "reference", "qa-forum",
+    }
+    assert set(_registry()["categories"]) == expected
