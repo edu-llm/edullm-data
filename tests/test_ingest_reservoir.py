@@ -504,11 +504,20 @@ class _ChunkedHTTP:
 
 
 def _range_file(monkeypatch, body: bytes, chunk: int):
+    """A `_RangeFile` whose CDN resolve is pre-seeded, so tests exercise only the read path.
+
+    Ranged reads now go to a signed CDN URL rather than to `self.url` (see `_cdn_url`). Seeding
+    `_cdn`/`_cdn_deadline` keeps these tests about short reads instead of about resolution; the
+    resolve step has its own tests below.
+    """
     import edullm_data.ingest_reservoir as mod
 
     server = _ChunkedHTTP(body, chunk)
     monkeypatch.setattr(mod.urllib.request, "urlopen", server)
-    return mod._RangeFile("https://example/x.parquet", len(body), {}), server
+    rf = mod._RangeFile("https://example/x.parquet", len(body), {})
+    rf._cdn = "https://cdn.example/signed"
+    rf._cdn_deadline = float("inf")
+    return rf, server
 
 
 def test_read_returns_exactly_what_was_asked_for_despite_short_responses(monkeypatch):
@@ -554,6 +563,124 @@ def test_read_past_end_returns_empty_not_an_error(monkeypatch):
     rf, _ = _range_file(monkeypatch, body, chunk=16)
     rf.seek(6)
     assert rf.read(10) == b""
+
+
+def test_resolve_happens_once_per_file_not_once_per_range(monkeypatch):
+    """THE 429 fix, and the reason the first ingest runs were rate-limited.
+
+    pyarrow issues ~70 range reads per file. Sending each to the metered `resolve/main` URL spent
+    70 requests against a 5,000-per-5-minutes budget; at 40 concurrent workers that empties in
+    ~79 s. Resolving once and reusing the signed CDN URL costs 1.
+    """
+    import edullm_data.ingest_reservoir as mod
+
+    resolves = {"n": 0}
+
+    class _Resp:
+        def __init__(self, url):
+            self.url, self.headers = url, {}
+
+        def read(self):
+            return b"x" * 64
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_resolve(req, timeout=None):
+        resolves["n"] += 1
+        assert "Range" not in req.headers and "range" not in req.headers, (
+            "resolving WITH a Range header signs the URL for that range only; reuse then 403s"
+        )
+        return _Resp("https://cdn.example/signed?sig=abc")
+
+    monkeypatch.setattr(mod._NO_REDIRECT, "open", fake_resolve)
+    body = bytes(range(256)) * 40
+    server = _ChunkedHTTP(body, 10_000)
+    monkeypatch.setattr(mod.urllib.request, "urlopen", server)
+
+    rf = mod._RangeFile("https://huggingface.co/datasets/x/resolve/main/f.parquet", len(body), {})
+    for i in range(30):
+        rf.seek(i * 100)
+        rf.read(64)
+
+    assert resolves["n"] == 1, f"resolved {resolves['n']}x for 30 reads — the 70x bug is back"
+    assert server.n_requests == 30
+
+
+def test_ranged_reads_go_to_the_cdn_not_the_metered_host(monkeypatch):
+    """The signed URL is the unmetered data plane; `huggingface.co` is the metered control plane."""
+    import edullm_data.ingest_reservoir as mod
+
+    seen: list[str] = []
+
+    class _Resp:
+        def __init__(self, url):
+            self.url, self.headers = url, {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(
+        mod._NO_REDIRECT, "open",
+        lambda req, timeout=None: _Resp("https://us.aws.cdn.hf.co/xet-bridge-us/deadbeef?sig=1"),
+    )
+
+    class _R:
+        def read(self_inner):
+            return b"z" * 32
+
+        def __enter__(self_inner):
+            return self_inner
+
+        def __exit__(self_inner, *a):
+            return False
+
+    def spy(req, timeout=None):
+        seen.append(req.full_url)
+        return _R()
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", spy)
+    rf = mod._RangeFile("https://huggingface.co/datasets/x/resolve/main/f.parquet", 4096, {})
+    rf.read(32)
+    assert seen and all("huggingface.co" not in u for u in seen), seen
+    assert all("cdn.hf.co" in u for u in seen), seen
+
+
+def test_a_resolve_that_is_already_the_data_plane_is_used_as_is(monkeypatch):
+    """A 2xx (no redirect) means the URL IS the CDN — e.g. a pre-signed URL passed in directly."""
+    import edullm_data.ingest_reservoir as mod
+
+    class _Resp:
+        url = "https://direct.example/already-data-plane"
+        headers: dict = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(mod._NO_REDIRECT, "open", lambda req, timeout=None: _Resp())
+    rf = mod._RangeFile("https://direct.example/already-data-plane", 100, {})
+    assert rf._cdn_url() == "https://direct.example/already-data-plane"
+
+
+def test_a_failed_resolve_raises_ingest_error(monkeypatch):
+    import edullm_data.ingest_reservoir as mod
+
+    def boom(req, timeout=None):
+        raise mod.urllib.error.HTTPError(req.full_url, 404, "Not Found", {}, None)
+
+    monkeypatch.setattr(mod._NO_REDIRECT, "open", boom)
+    rf = mod._RangeFile("https://huggingface.co/x", 100, {})
+    with pytest.raises(IngestError, match="resolve failed"):
+        rf._cdn_url()
 
 
 def test_read_clamps_to_object_size(monkeypatch):

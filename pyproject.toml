@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "edullm-data"
-version = "0.6.2"
+version = "0.6.3"
 description = "Publisher, validator, and reader for the eduLLM Dataset Standard v1"
 readme = "README.md"
 # 3.10, not 3.11. The floor exists to be installable ALONGSIDE OLMo-core, whose own floor is
@@ -31,12 +31,12 @@ dependencies = [
   # against pyarrow 25.0.0, a pairing this suite has never tested. Pinning makes the deployed
   # environment reproducible, which is worth doing on its own.
   #
-  # ⚠️ IT DOES NOT FIX THE INGEST SEGFAULT. Pinning to 2.4.6 was tried against the live array
-  # job (`PYARROW=25.0.0 NUMPY=2.4.6`, interop preflight green) and the crash was IDENTICAL —
-  # same config, same point. So numpy/pyarrow ABI skew is REFUTED as the cause, and this bound
-  # is hygiene, not a cure. See artifacts/reservoir/SEGFAULT-INVESTIGATION.md before assuming
-  # otherwise; four hypotheses have now been tested and refuted, and quoting one of them as
-  # settled is how the next person loses an afternoon.
+  # ⚠️ THIS IS NOT THE SEGFAULT FIX, and it never was. Pinning to 2.4.6 was tried against the
+  # live array job and the crash was IDENTICAL. The real cause was pyarrow's `pre_buffer=True`
+  # default dispatching range reads to Arrow's native C++ IO thread pool — fixed in
+  # `ingest_reservoir._scan_ids`. This bound is reproducibility hygiene only. See
+  # artifacts/reservoir/SEGFAULT-INVESTIGATION.md; ten hypotheses were tested, and citing a
+  # refuted one as settled is how the next person loses an afternoon.
   "numpy<2.5",
 ]
 

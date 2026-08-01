@@ -190,6 +190,22 @@ _MAX_ATTEMPTS = 8
 #: 120 s keeps a stuck worker from idling for half the job's timeout.
 _BACKOFF_CAP_S = 120.0
 
+#: How long to reuse a signed CDN URL. HF signs them for 1 hour (decoded from the token's
+#: `Expires`); 50 minutes leaves margin for a slow file without risking a mid-read expiry, which
+#: would surface as a 403 rather than a retryable error.
+_CDN_TTL_S = 3000.0
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Surface the 302 instead of following it, so the signed CDN target can be captured."""
+
+    def redirect_request(self, *a, **k):  # noqa: D102 - urllib protocol
+        return None
+
+
+#: Module-level opener: building one per file would be wasteful, and it holds no per-file state.
+_NO_REDIRECT = urllib.request.build_opener(_NoRedirect)
+
 
 def _backoff_delay(attempt: int, retry_after: str | None = None) -> float:
     """Seconds to wait before retry `attempt` (0-indexed), honouring `Retry-After` when present.
@@ -260,6 +276,54 @@ class _RangeFile(io.RawIOBase):
         self.pos = 0
         self.bytes_fetched = 0
         self.n_429 = 0
+        #: Signed CDN URL, resolved once per file. See `_cdn_url` — this one field is a 70x
+        #: reduction in metered requests and the actual fix for the 429 storm.
+        self._cdn: str | None = None
+        self._cdn_deadline = 0.0
+
+    def _cdn_url(self) -> str:
+        """Resolve `huggingface.co/.../resolve/main/...` to its signed CDN URL, once.
+
+        ⚠️ THIS IS WHY THE INGEST WAS RATE-LIMITED, AND IT WAS OUR BUG, NOT A PLATFORM CEILING.
+
+        HF runs two independently-metered services. The *control plane*
+        (`huggingface.co/.../resolve/main/...`) is a fixed-window request counter — measured live
+        `q=5000; w=300` authenticated, `q=3000` anonymous. The *data plane* it 302-redirects to
+        (`us.aws.cdn.hf.co/xet-bridge-us/...`) is **unmetered**: no `RateLimit` headers at all, no
+        auth required, and it serves from `x-hf-cdn-pop: aws-us-east-1` — the same region as our
+        buckets.
+
+        pyarrow issues ~70 range reads to pull one column from a 272 MB file. Pointing every one
+        of them at the control-plane URL spent **70 metered requests per file**. At 20 files that
+        is 1,400 against a 5,000 budget; at 40 concurrent workers the bucket empties in ~79 s.
+        That arithmetic reproduces exactly what was observed: partial failures at 16 workers,
+        sustained 429s at 40.
+
+        Resolving once and reusing the signed URL costs **1** request per file. Verified: 12 range
+        reads against a signed URL consumed 0 resolver units.
+
+        ⚠️ **RESOLVE WITH NO `Range` HEADER.** If a `Range` is sent to the resolve URL, the signed
+        URL comes back valid for *that exact range only*, and reusing it returns
+        `403 Auth failed: invalid range` — which would silently force us straight back to one
+        resolve per read. The whole point is a URL that accepts arbitrary ranges.
+
+        Signed URLs last 1 hour; `_CDN_TTL_S` re-resolves well inside that.
+        """
+        now = time.monotonic()
+        if self._cdn and now < self._cdn_deadline:
+            return self._cdn
+        req = urllib.request.Request(self.url, headers=self._h, method="HEAD")
+        try:
+            # A 2xx means no redirect: the URL already IS the data plane. Use it as-is.
+            with _NO_REDIRECT.open(req, timeout=60) as r:
+                self._cdn = r.url
+        except urllib.error.HTTPError as exc:
+            if exc.code in (301, 302, 303, 307, 308) and exc.headers.get("Location"):
+                self._cdn = exc.headers["Location"]
+            else:
+                raise IngestError(f"resolve failed for {self.url}: HTTP {exc.code}") from exc
+        self._cdn_deadline = now + _CDN_TTL_S
+        return self._cdn
 
     def seekable(self) -> bool:
         return True
@@ -314,9 +378,15 @@ class _RangeFile(io.RawIOBase):
         return bytes(out)
 
     def _read_once(self, n: int, start: int) -> bytes:
-        """One ranged GET of at most `n` bytes from `start`, with 429-aware backoff."""
+        """One ranged GET of at most `n` bytes from `start`, with 429-aware backoff.
+
+        Goes to the signed CDN URL, NOT `self.url` — see `_cdn_url`. No auth header: the signature
+        carries the authorisation, and sending a stale bearer token to the CDN is pointless.
+        """
         req = urllib.request.Request(
-            self.url, headers={**self._h, "Range": f"bytes={start}-{start + n - 1}"}
+            self._cdn_url(),
+            headers={"User-Agent": self._h.get("User-Agent", "edullm-data"),
+                     "Range": f"bytes={start}-{start + n - 1}"},
         )
         last: Exception | None = None
         for attempt in range(_MAX_ATTEMPTS):
