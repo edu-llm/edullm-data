@@ -37,18 +37,32 @@ because most of it is already built. The published 150B and 127B corpora are unt
 >
 > ## ⚠️ BRANCH STATE
 >
-> Work is on **`agent/claude-01/reservoir-ingest`** (40 commits ahead of `main`), pushed, in the
+> Work is on **`agent/claude-01/reservoir-ingest`** (46+ commits ahead of `main`; count with
+> `git rev-list --count main..HEAD` rather than trusting this line), pushed, in the
 > worktree `/Users/ericwu/Developer/Capstone_LLM-worktrees/edullm-data/claude-01--reservoir-ingest`.
 > Suite **786 passing**. Tags `v0.6.0` … `v0.6.3`.
 >
 > Open PRs: **#9** (reservoir design + Phase 0, branch `docs/reservoir-design`) and **#11** (the id
 > partition + ingest job). Both still open; #11's branch has advanced well past its description.
 >
-> A **concurrent session** owns `feat/prm800k-vendor-ingest` and registered `edullm-validator:9`,
-> which bakes code into a digest-pinned image instead of bootstrapping a wheel — **better provenance
+> A **concurrent session** owns `feat/prm800k-vendor-ingest` and registered the digest-pinned
+> validator, which bakes code into an image instead of bootstrapping a wheel — **better provenance
 > than our rev 8; theirs wins**. They also **disabled the `edullm-landing-manifest-created`
 > EventBridge rule**, so auto-promotion is OFF and any publish needs a manual `submit-job` or the
 > rule re-enabled. Coordinate before phase 2.
+>
+> **Live job defs, verified 2026-08-01 by `batch describe-job-definitions --status ACTIVE`:**
+> `edullm-validator:` **10** (digest-pinned image, no wheel, 7200 s) · `edullm-fsck:` **6**
+> (wheel `0.6.0`, 3600 s) · `edullm-reservoir-ingest:` **7** (wheel `0.6.3`, 7200 s).
+> Note this is **one revision past** what was written above as `:9` / `:5` — revs 10 and 6 differ
+> from 9 and 5 *only* by swapping `jobRoleArn` to `…-dataset-validator`, which is the
+> airlock-correct identity. Cite 10/6.
+>
+> Also verified live the same day: bucket policy is **`edullm-data-airlock-v2`** (Put and Delete
+> Denies split, nobody exempt from Delete) — several places in this file still said v1 was live.
+> `edullm-wu-fsck-nightly` is ENABLED at `cron(6 9 ? * MON *)` (weekly; the *name* is the stale
+> part). S3 Inventory `edullm-data-weekly` is Enabled. **Ten datasets** are in `_catalog/`.
+> Still ACTIVE and owed a deregister: `edullm-reservoir-diag:2`, `-diag2:1`, `-shim:1`.
 
 ## THIS SESSION IN ONE PARAGRAPH
 
@@ -324,7 +338,9 @@ segfaulted twice before the `pre_buffer=False` fix.
 **Infrastructure deployed this session and the last:** `expire-ingest-30d` lifecycle rule on
 `_ingest/` (9 rules total, all originals intact); bucket policy **v2** with `NobodyDeletesPublishedData`
 and no exemptions, verified by four live probes; least-privilege role `edullm-reservoir-ingest` that
-cannot write `edullm-data`; `edullm-fsck:5` timeout 3600s; account IDs scrubbed repo-wide.
+cannot write `edullm-data`; the fsck job def carries a 3600 s timeout (now at rev **6**, not 5 —
+re-verified 2026-08-01); account IDs scrubbed repo-wide (re-checked: zero 12-digit IDs in tracked
+files).
 
 ---
 

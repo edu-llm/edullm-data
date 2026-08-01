@@ -1,6 +1,12 @@
 # The array-ingest segfault: pyarrow's `pre_buffer` default
 
-**Status: MECHANISM IDENTIFIED, FIX APPLIED, CONFIRMATION PENDING.**
+> ✅ **STATUS UPDATE 2026-08-01: CONFIRMED AND CLOSED.** The "confirmation pending" and the
+> "2×8 replication in flight" below were both resolved: the real ingest ran **4/4 SUCCEEDED** on
+> `edullm-reservoir-ingest:7` / wheel `0.6.3` with the fix in, zero 429 pauses, 67 s. The speed
+> confound noted below did not survive it. Suite is now **786** (not the 782 recorded at the end of
+> this file). The original status line is kept for the reasoning that follows it.
+
+~~**Status: MECHANISM IDENTIFIED, FIX APPLIED, CONFIRMATION PENDING.**~~
 `edullm-reservoir-ingest` array children die with exit 139, and the evidence points at
 `pq.ParquetFile(rf)` taking pyarrow's default `pre_buffer=True`, which dispatches a Python file
 object's range reads to **Arrow's native C++ IO thread pool**. The fix is one keyword:
@@ -156,9 +162,14 @@ Two regression tests in `tests/test_ingest_reservoir.py`:
 - `test_range_file_read_returns_exactly_n_bytes` — recomputes the short-read loop against a
   transport that always returns short, so the 0.6.2 fix stays covered too.
 
-Suite: **782 passing**.
+Suite: **782 passing** at the time of writing (**786** as of 2026-08-01).
 
-## What still has to happen before a production wave
+## ~~What still has to happen before a production wave~~ — done, except the deregisters
+
+> **2026-08-01:** the 4-child re-run below happened and returned **4/4 SUCCEEDED**. The three
+> diagnostic job definitions are the only item here still outstanding — `edullm-reservoir-diag:2`,
+> `edullm-reservoir-diag2:1` and `edullm-reservoir-shim:1` are all still ACTIVE (verified by
+> `batch describe-job-definitions --status ACTIVE`). Deregistering them is a write call.
 
 1. **Ship a wheel with the fix and re-register the job def.** `edullm-reservoir-ingest:6`
    bootstraps `edullm_data-0.6.2-py3-none-any.whl` **by exact filename**; publishing a new wheel
