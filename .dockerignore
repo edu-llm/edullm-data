@@ -1,0 +1,48 @@
+# The platform builds .edullm/Dockerfile with the repository root as the context, so
+# everything not excluded here is sent to the daemon and anything a COPY picks up lands in a
+# published layer that cannot be rewritten.
+#
+# .git is the first line and the reason for the file. actions/checkout leaves the run's
+# token in .git/config; the platform's publish job strips it before building, so what this
+# prevents is weight rather than a secret -- but the ordering that makes that true lives in
+# another repository, and a context that never carries .git does not depend on it.
+.git
+.gitignore
+
+# Byte-compiled and packaging output. A wheel built on the runner would be copied in and
+# then shadowed by the one pip builds inside the image, which is confusing rather than
+# harmful; __pycache__ from another Python version is the half that actually misleads.
+__pycache__
+*.py[cod]
+*$py.class
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Environments. A .venv from a developer's machine is the largest thing in a typical
+# checkout and the least useful thing in an image.
+.venv
+venv/
+env/
+ENV/
+
+# Test and type-checker state
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Local credentials and AWS scratch. Excluded from the build context as well as from git,
+# because the two lists protect different things: .gitignore stops a file being committed,
+# this stops one that exists only on a runner being read into a layer.
+*.pem
+.aws/
+.env
