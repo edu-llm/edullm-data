@@ -137,7 +137,17 @@ cannot be reached by adding parallelism — the binding constraint is requests p
 - Default `--workers` 16 → **8**.
 - The array runs **10 shards × 4 workers = 40 concurrent requests, in waves** — not 20 × 32 = 640.
 
-Revised sizing, same 2.25 worker-seconds/file:
+Revised sizing, same ~~2.25 worker-seconds/file~~:
+
+> ❌ **UNIT ERROR, found 2026-08-01 — the figure is 16× wrong, and it propagates.** 2.25 is
+> **wall**-seconds per file (45.0 s ÷ 20 files). **Worker**-seconds per file is
+> 45.0 × 16 ÷ 20 = **36.0**. Line 36 states the same quantity correctly ("~2.3 s per file per
+> worker"); this line relabels it. Consequence: **every "per child" cell in the table below is 16×
+> too optimistic.** At 36 worker-s/file the 10×4 shape is 27,104 ÷ 10 × 36 ÷ 4 = **406 min
+> (6.8 h)**, not 25.4 min — which would have **exceeded** the 7200 s timeout the next sentence
+> claims it sits comfortably inside. The table was self-refuting on its own model. It is moot now
+> (the real constraint was the resolve amplification, and the fixed run took 67 s), but do not
+> reuse these numbers. `RUN-THE-INGEST.md:35`'s "~25 min per child" inherits the same error.
 
 | shape | per child | concurrent requests | verdict |
 |---|---|---|---|

@@ -101,8 +101,19 @@ pyarrow issues ~70 range reads per file. `_RangeFile` pointed **every one** at t
 arithmetic reproduces the observed failures exactly. **Resolve once, reuse the signed URL → 1
 request per file.** Verified by hand: 12 CDN ranges consumed **0** resolver units.
 
-⚠️ Resolve with **no** `Range` header. Sending one signs the URL for that range only, and reuse
-returns `403 invalid range` — silently restoring the bug.
+⚠️ ~~Resolve with **no** `Range` header. Sending one signs the URL for that range only, and reuse
+returns `403 invalid range` — silently restoring the bug.~~ **RETRACTED 2026-08-01.** Re-tested on
+five repos (Xet- and LFS-backed) by two independent probes: reusing a range-resolved URL for a
+*different* range returns **206 with correct bytes**, never 403. The decoded CloudFront policy has
+exactly two conditions — `Resource` and `DateLessThan` — so there is no byte-range condition for a
+range to bind to. Keep resolving without a `Range` (it costs nothing), but it is not the protection.
+**The real traps:** (1) signed URLs expire at **3600 s** and then 403 — which `huggingface_hub`
+misreports as a token-permissions error and never retries; `_CDN_TTL_S` is what actually saves us.
+(2) `HfFileSystem._fetch_range` re-resolves **every block**, i.e. one metered resolve per 5 MiB —
+reaching for it recreates the exact bug we fixed. (3) Xet CAS reconstruction
+(`cas-server.xethub.hf.co`) is a different, rate-limited endpoint that *does* issue range-bounded
+chunk URLs; the unmetered-CDN property does not extend to it. That is almost certainly where the
+original observation came from.
 
 **The inherited belief was wrong.** `PLAN-CORRECTIONS.md` §6 says the limit is "per-IP, not
 per-account." True of `datasets-server`; **false of resolvers** (per-token) and false of the CDN

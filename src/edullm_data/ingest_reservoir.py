@@ -228,11 +228,18 @@ def _backoff_delay(attempt: int, retry_after: str | None = None) -> float:
 class _RateGate:
     """A process-wide brake shared by every worker thread.
 
-    WHY A PER-WORKER RETRY IS NOT ENOUGH, and this is the whole point. The Hugging Face rate limit
-    is **per IP, not per account** — established in Phase 0 (`PLAN-CORRECTIONS.md` §6, where eight
-    parallel agents starved each other and the failures looked exactly like broken corpora). Every
-    thread in this process shares one IP, so a worker that backs off privately while fifteen others
-    keep hammering has changed nothing: the limit is a property of the *fleet*, not the thread.
+    WHY A PER-WORKER RETRY IS NOT ENOUGH, and this is the whole point. Every thread in this process
+    presents the same credential to the same metered endpoint, so a worker that backs off privately
+    while fifteen others keep hammering has changed nothing: the quota is a property of the *fleet*,
+    not the thread.
+
+    ⚠️ The bucket is shared, but **not because "the HF rate limit is per IP"**. That phrasing came
+    from Phase 0 (`PLAN-CORRECTIONS.md` §6) where it was measured on `datasets-server`, and it was
+    then over-generalised to all of HF. Measured 2026-08-01: the **resolver** meters authenticated
+    traffic on a *separate and larger* counter than the anonymous per-IP one (`q=5000;w=300` authed
+    vs `q=3000` anon, depleting independently from one IP), and the **CDN data plane is unmetered**.
+    This gate is now a backstop; the actual fix was `_cdn_url` — stop hitting the metered endpoint
+    ~70× per file.
 
     So a 429 anywhere pauses everywhere. `penalise()` sets a shared deadline; `wait()` blocks any
     thread about to start new work until that deadline passes. The effect is that the whole scan
@@ -302,12 +309,29 @@ class _RangeFile(io.RawIOBase):
         Resolving once and reusing the signed URL costs **1** request per file. Verified: 12 range
         reads against a signed URL consumed 0 resolver units.
 
-        ⚠️ **RESOLVE WITH NO `Range` HEADER.** If a `Range` is sent to the resolve URL, the signed
-        URL comes back valid for *that exact range only*, and reusing it returns
-        `403 Auth failed: invalid range` — which would silently force us straight back to one
-        resolve per read. The whole point is a URL that accepts arbitrary ranges.
+        **RESOLVE WITH NO `Range` HEADER.** Kept as policy, but the stated reason was wrong.
+        This used to warn that a `Range` on the resolve URL signs the CDN URL for *that exact range
+        only*, so reuse returns `403 Auth failed: invalid range`. **Re-tested 2026-08-01 across five
+        repos (Xet- and LFS-backed): it does not reproduce — reuse for a different range returns
+        206 with correct bytes.** The decoded CloudFront policy has exactly two conditions,
+        ``Resource`` and ``DateLessThan``; there is no byte-range condition for a range to bind to.
+        (Ranged and unranged resolves do return different signatures, which is probably what was
+        observed, but the difference is query-parameter ordering inside ``Resource``.) Sending no
+        ``Range`` costs nothing, so we still don't — it just isn't what protects us.
 
-        Signed URLs last 1 hour; `_CDN_TTL_S` re-resolves well inside that.
+        ⚠️ **THE REAL EXPIRY TRAP.** Signed URLs last exactly 3600 s, and on expiry the CDN 403s.
+        ``_CDN_TTL_S`` re-resolving well inside the hour is the thing actually keeping this correct
+        — not the absent ``Range`` header. Note that ``huggingface_hub`` misreports this specific
+        403 as "Make sure your token has the correct permissions", never retries it (403 is not in
+        its default retry set), and has no re-resolve path.
+
+        ⚠️ **DO NOT REACH FOR ``HfFileSystem``.** Its ``_fetch_range`` calls ``self.url()`` on every
+        block, i.e. one metered resolve per 5 MiB — precisely the amplification this method exists
+        to remove.
+
+        A separate endpoint, Xet CAS reconstruction (``cas-server.xethub.hf.co``), *does* hand out
+        range-bounded content-addressed chunk URLs and *is* documented as rate-limited. The
+        unmetered-CDN property below does not extend to it.
         """
         now = time.monotonic()
         if self._cdn and now < self._cdn_deadline:
@@ -644,8 +668,8 @@ def _scan_ids(
 
     res = FileResult(path=entry["path"])
     try:
-        # Block here, before opening a new file, if any worker has recently been 429'd. The limit
-        # is per-IP so it belongs to the whole process, not to this thread.
+        # Block here, before opening a new file, if any worker has recently been 429'd. Every
+        # worker shares one resolver quota, so the brake belongs to the process, not the thread.
         _RATE_GATE.wait()
         rf = _RangeFile(_resolve_url(repo, entry["path"]), entry["size"], headers)
         pf = pq.ParquetFile(rf, pre_buffer=False)
@@ -844,8 +868,9 @@ def _cmd_ids(args) -> int:
                 f"{len(errors)} of {len(tree)} {config} files failed and --tolerate-errors was "
                 f"not set. An incomplete id set makes the anti-join silently incomplete, which is "
                 f"worse than a failed job. {n_429} requests were rate-limited — if that number is "
-                f"large, LOWER --workers rather than raising it; the HF limit is per-IP, so more "
-                f"parallelism makes this worse. First error: {errors[0]}"
+                f"large, first check that _cdn_url is resolving ONCE PER FILE and reusing the "
+                f"signed CDN URL — resolving per range read costs ~70x the quota. Only then LOWER "
+                f"--workers rather than raising it. First error: {errors[0]}"
             )
         id_set = IdSet.from_digest_chunks(chunks)
         del chunks
@@ -881,8 +906,8 @@ def _cmd_ids(args) -> int:
     print(f"wrote s3://{args.bucket}/{ikey}")
     if _RATE_GATE.total_penalties:
         print(
-            f"NOTE: {_RATE_GATE.total_penalties} rate-limit pauses. The HF limit is per-IP, so if "
-            f"this run was slow, use FEWER concurrent shards — not more.",
+            f"NOTE: {_RATE_GATE.total_penalties} rate-limit pauses. Every worker shares one "
+            f"resolver quota, so if this run was slow, use FEWER concurrent shards — not more.",
             flush=True,
         )
     return 0

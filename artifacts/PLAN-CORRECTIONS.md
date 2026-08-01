@@ -258,10 +258,48 @@ reads at the metered hop. Fixed in `0.6.2`/`0.6.3`; see `ingest_reservoir._cdn_u
 **Consequence for planning:** an "HF is rate-limited, so a big fetch takes weeks" estimate is wrong
 if the fetch goes to the data plane. The bulk transfer is unmetered and in-region.
 
-⚠️ **One caveat, flagged rather than asserted.** `ingest_reservoir._cdn_url`'s docstring warns that
-resolving *with* a `Range` header signs the URL for that range only, so reuse returns
-`403 Auth failed: invalid range`. That warning was written from a live failure during the ingest
-work. **I could not reproduce it on 2026-08-01**: resolving with `Range: bytes=0-15` and then
-reusing the returned URL for `bytes=5000-5031` returned `206` with correct data, on both a
-Xet-backed and an LFS-backed file. It may be backend- or date-dependent. Treat it as **unconfirmed
-but cheap to respect** — resolving without a `Range` header costs nothing and removes the question.
+### The trap warning was real, but it is attached to the wrong endpoint
+
+`ingest_reservoir._cdn_url`'s docstring warns that resolving *with* a `Range` header signs the URL
+for that range only, so reuse returns `403 Auth failed: invalid range`. **That does not reproduce
+on the resolve→CDN path.** Tested 2026-08-01 across five repos by two independent probes
+(`HuggingFaceFW/fineweb-edu`, `Salesforce/wikitext`, `openai/gsm8k`, `stanfordnlp/imdb`,
+`google-bert/bert-base-uncased`): send `Range: bytes=0-99` to `/resolve/`, reuse the returned signed
+URL for a different range, get **206 with correct bytes**, never 403.
+
+The decoded CloudFront policy says why it *cannot* be range-scoped — the entire condition set is:
+
+```json
+{"Statement":[{"Resource":"https://us.aws.cdn.hf.co/xet-bridge-us/...",
+               "Condition":{"DateLessThan":{"EpochTime":...}}}]}
+```
+
+`Resource` + `DateLessThan`, nothing else. There is no byte/offset condition for a range to bind to.
+(A ranged and an unranged resolve *do* return different `Policy`/`Signature` strings — probably what
+was originally observed — but the difference is only query-parameter ordering inside `Resource`.)
+
+**The two real traps, which the old warning was masking:**
+
+1. **Expiry, measured at exactly 3600 s.** After that the signed URL 403s — and `huggingface_hub`
+   misreports that 403 as *"Make sure your token has the correct permissions"*, does not retry it
+   (403 is not in `_DEFAULT_RETRY_ON_STATUS_CODES`), and has no re-resolve path. `_CDN_TTL_S`
+   re-resolving well inside the hour is the thing that matters, not the `Range` header.
+2. **Xet CAS reconstruction** (`cas-server.xethub.hf.co`) is a *different* endpoint that genuinely
+   does hand out content-addressed, range-bounded chunk URLs, and HF documents it as rate-limited
+   ("Assume all APIs are rate limited"). The range-scoping behaviour almost certainly came from
+   there. CDN-unmetered does **not** generalize to Xet protocol APIs.
+
+Resolving without a `Range` header still costs nothing, so keep doing it — just don't believe it is
+what protects you.
+
+**One more measured trap, in the opposite direction:** `huggingface_hub`'s `HfFileSystem._fetch_range`
+calls `self.url()` on **every block**, so ranged reads through fsspec pay one metered resolve per
+5 MiB. Reaching for `HfFileSystem` re-creates the exact amplification `_cdn_url` was written to
+eliminate.
+
+*(Documentation note: HF's official rate-limit page labels only the **Anonymous** tier "(per IP
+address)". It does not state what authenticated requests are keyed on. Our measurement shows the
+anonymous and authenticated counters on one IP deplete independently — 2302/3000 anon vs 4994/5000
+authed at the same moment — which rules out a shared per-IP bucket but cannot distinguish per-token
+from per-user. An HF engineer said "per IP even with a token" in Sept 2025, predating that docs page;
+the measurement contradicts it. The CDN exemption is measured only — HF documents it nowhere.)*

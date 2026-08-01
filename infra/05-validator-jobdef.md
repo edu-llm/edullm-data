@@ -1,9 +1,40 @@
 # Step: the validator job definition + container image
 
-**Status: BLOCKED on one external step — everything else is ready.**
+> ## ✅ STATUS: DONE. THIS RUNBOOK IS HISTORY, NOT INSTRUCTIONS. (2026-08-01)
+>
+> **Everything below describes a problem that was solved several versions ago.** It is the origin
+> of the `0.2.0` / "revision 2" fossil that spread into `CLAUDE.md` and elsewhere, so it is kept —
+> but do not follow it, and do not cite its version numbers.
+>
+> Live state, verified by `batch describe-job-definitions --status ACTIVE`:
+>
+> | job def | top ACTIVE rev | how code gets in | timeout |
+> |---|---|---|---|
+> | `edullm-validator` | **10** | **image, digest-pinned (`sbsandbox-intern-edullm-data@sha256:339c2b6b…`) — no wheel, no bootstrap** | 7200 s |
+> | `edullm-fsck` | **6** | wheel `0.6.0` | 3600 s |
+> | `edullm-reservoir-ingest` | **7** | wheel `0.6.3` | 7200 s |
+>
+> - **"BLOCKED on one external step"** — not blocked. The validator has been running in-cluster
+>   for days and has promoted live corpora. The stated blocker (no Docker host, no git remote to
+>   pip from) is doubly dead: the repo is **public**, and a concurrent session did the ECR path
+>   anyway, which is what rev 9/10 is.
+> - **"352 tests"** — the suite is **786**.
+> - **`0.2.0` everywhere below** — the package is at **0.6.3** (tags `v0.6.0`…`v0.6.3`).
+> - **"The live job defs are at revision 2"** (line ~98) — flatly false, and the single most-copied
+>   error in this repo's docs. The chain went rev 6 (`0.5.1`) → 7 (first with a 7200 s timeout) →
+>   8 (`0.6.0`) → **9/10 (digest-pinned image, no wheel)**.
+> - **"Recommendation: do Path B now, move to Path A later"** — **Path A was done.** Rev 9/10 bakes
+>   code into a digest-pinned image, which is better provenance than a wheel in `_dist/`: the digest
+>   pins the whole dependency tree, and `_dist/` has **no lifecycle expiration**, so a wheel sitting
+>   there is mutable-by-overwrite indefinitely.
+> - ⚠️ **Auto-promotion is currently DISABLED** — the `edullm-landing-manifest-created` EventBridge
+>   rule is `DISABLED`, so landing a `manifest.json` fires nothing. Re-enable it or submit the
+>   validator job by hand.
 
-The validator code is done, committed, and tested (352 tests). The airlock is proven in both
-directions. What remains is packaging the validator so a Batch job can *run* it, and
+~~**Status: BLOCKED on one external step — everything else is ready.**~~
+
+The validator code is done, committed, and tested (~~352~~ **786** tests). The airlock is proven in
+both directions. What remains is packaging the validator so a Batch job can *run* it, and
 registering a job definition that points at that image.
 
 ## The one blocker
@@ -95,12 +126,18 @@ command: ["sh","-lc",
   "pip install -q boto3 numpy && aws s3 cp s3://edullm-landing/_dist/edullm_data-0.2.0-py3-none-any.whl /tmp/ && pip install -q /tmp/edullm_data-0.2.0-py3-none-any.whl && python -m edullm_data.validate --promote"]
 ```
 
-> **The live job defs are at revision 2 and bootstrap `0.2.0` (cut over 2026-07-30).** Both
-> `edullm-validator:2` and `edullm-fsck:2` also assert the version and the presence of
-> `families/` immediately after install, and exit non-zero if either is wrong — a silent
-> fallback to an old wheel is what let the live corpus be validated against the wrong bounds
-> once already. The image has no `aws` CLI, so the deployed command downloads with boto3
-> rather than `aws s3 cp` as sketched above.
+> ❌ ~~**The live job defs are at revision 2 and bootstrap `0.2.0` (cut over 2026-07-30).** Both
+> `edullm-validator:2` and `edullm-fsck:2`~~ — **FALSE since long before 2026-08-01; see the banner
+> at the top.** Live: `edullm-validator:10` (digest-pinned image, **no wheel at all**),
+> `edullm-fsck:6` (wheel `0.6.0`), `edullm-reservoir-ingest:7` (wheel `0.6.3`). This sentence is
+> where `CLAUDE.md` picked up the same error.
+>
+> The rest of the paragraph is still the right lesson: a wheel-bootstrapping job def should
+> assert the version and the presence of `families/` immediately after install and exit non-zero
+> if either is wrong — a silent fallback to an old wheel is what let the live corpus be validated
+> against the wrong bounds once already. (`edullm-reservoir-ingest:7` still does exactly this,
+> plus three source-inspection preflight asserts.) The image has no `aws` CLI, so a deployed
+> command downloads with boto3 rather than `aws s3 cp` as sketched above.
 >
 > Both EventBridge rules target the job definition by **unversioned name**
 > (`edullm-validator`, `edullm-fsck`), so registering a new revision cuts traffic over with no

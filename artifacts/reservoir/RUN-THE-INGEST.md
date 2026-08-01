@@ -21,18 +21,22 @@ cannot be retrofitted — redoing it means re-tokenizing the synthetic half.
 | piece | name |
 |---|---|
 | role | `edullm-reservoir-ingest` — cannot write `edullm-data` |
-| job def | `edullm-reservoir-ingest:3` — bootstraps `0.6.1`, 2 vCPU / 8 GB / 7200 s |
+| job def | **`edullm-reservoir-ingest:7`** — bootstraps **`0.6.3`**, 2 vCPU / 8 GB / 7200 s (verified live 2026-08-01; ~~`:3` / `0.6.1`~~ was 4 revisions stale) |
 | queue | `sbsandbox-intern-edullm-cpu` |
 | lifecycle | `expire-ingest-30d` on `_ingest/` — the driver refuses to start without it |
 
 ## The run
 
-**Sizing is limited by requests-per-IP, not by CPU.** 16 concurrent workers produced 8/20 failures
-at HTTP 429. Start at **10 shards × 4 workers = 40 concurrent** and only widen if a wave reports
-zero 429s. `ids` prints a running 429 count.
+~~**Sizing is limited by requests-per-IP, not by CPU.**~~ ⚠️ **Superseded 2026-08-01.** 16 concurrent
+workers did produce 8/20 failures at HTTP 429 — but the cause was **our own 70× amplification**
+(one metered resolve per range read instead of per file), not a per-IP ceiling. Fixed in `0.6.2`;
+the real 4-shard run logged **zero 429 pauses in 67 s**. The conservative shape below is still a
+safe way to start and costs nothing, but the *reason* has changed: widen on evidence, and if 429s
+appear in volume, check `_cdn_url` before blaming concurrency. `ids` prints a running 429 count.
 
 ```bash
-# One wave of 10 shards. ~25 min per child, well inside the 7200 s timeout.
+# One wave of 10 shards. (The "~25 min per child" this comment used to give came from a 16x unit
+# error in INGEST-CALIBRATION.md; the fixed run does all four configs in about a minute.)
 aws batch submit-job \
   --job-name reservoir-ingest-w1 \
   --job-queue sbsandbox-intern-edullm-cpu \
@@ -83,12 +87,18 @@ tightest one.
 
 | symptom | cause | fix |
 |---|---|---|
-| `HTTP Error 429` | per-IP rate limit | **lower** shard count or workers; never raise |
+| `HTTP Error 429` | the **resolver** quota (metered per *token*, not per IP). In volume, suspect one resolve per *range read* instead of per *file* | confirm `_cdn_url` resolves once and reuses the signed CDN URL (`0.6.2`+); only then lower shard count or workers. Never raise. |
 | `ImportError: cannot import name …` | job def bootstraps an older wheel | re-register against the current version |
 | `no enabled Expiration lifecycle rule` | `expire-ingest-30d` missing | deploy `infra/07-landing-ingest-lifecycle.json` (merge, don't replace) |
 | `AccessDenied … GetLifecycleConfiguration` | policy predates the guard | re-apply `infra/08-reservoir-ingest-policy.json` |
-| **exit 139, `Segmentation fault`** | **short HTTP read handed to pyarrow** | fixed in `0.6.2`; if it recurs, the read loop is gone |
+| **exit 139, `Segmentation fault`** | **pyarrow's `pre_buffer=True` default** dispatching range reads onto Arrow's native C++ IO thread pool | `pq.ParquetFile(rf, pre_buffer=False)`, shipped in **`0.6.3`**. If it recurs, that keyword is gone. |
 | `shard parts are missing` | a child failed | re-run those indices, then merge again |
+
+⚠️ **The exit-139 row was wrong until 2026-08-01** and would have sent you to the wrong fix. It read:
+*"short HTTP read handed to pyarrow — fixed in `0.6.2`; if it recurs, the read loop is gone."* The
+short-read fix was **hypothesis 1** of ten and is recorded as **"✗ still crashed"** in
+`SEGFAULT-INVESTIGATION.md:101`. The read loop is still worth keeping (it is a real bug, and
+`test_range_file_read_returns_exactly_n_bytes` guards it), but it is not what stopped the SIGSEGV.
 
 Every row has actually happened, in that order.
 
