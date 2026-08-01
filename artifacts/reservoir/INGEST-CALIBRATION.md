@@ -1,5 +1,35 @@
 # Ingest throughput, measured — and why the full pass cannot run as one job
 
+> ## ⚠️ THE MEASUREMENT STANDS; EVERY SIZING RECOMMENDATION BELOW IS OBSOLETE (2026-08-01)
+>
+> **Still true:** the number. **0.44 files/s at 16 workers**, 20 files in 45.0 s, and the per-file
+> cost breakdown. That was measured and nothing since has contradicted it.
+>
+> **No longer true:** everything this file *concluded* from it. Two premises it reasons from have
+> since been falsified:
+>
+> 1. **"The binding constraint is requests per IP."** FALSE — it was **our own 70× quota
+>    amplification**. `_RangeFile` sent every one of pyarrow's ~70 per-file range reads to the
+>    *metered* resolver instead of resolving once and reusing the signed **CDN** URL. The CDN is
+>    unmetered (measured: no `ratelimit` header at all, no auth, `x-hf-cdn-pop: aws-us-east-1`).
+>    Fixed in `0.6.2`/`0.6.3` — one resolve per file. See `PLAN-CORRECTIONS.md` §6 and
+>    `ingest_reservoir._cdn_url`. **So "if a wave reports 429s, lower the shard count" was
+>    treating a symptom of our bug as a property of the platform**, and the whole "revised sizing"
+>    table below is calibrated against a ceiling that no longer exists.
+> 2. **"The 7200 s job-definition timeout"** as a wall to fit inside. There is **no maximum Batch
+>    timeout** — AWS: "There's no maximum timeout value for an AWS Batch job." 7200 s was a value
+>    *we* set. "A single job cannot finish the pass" was therefore never a platform fact; it was a
+>    consequence of our own job def, changeable with one `register-job-definition`.
+>
+> **What actually happened:** the ingest was proven on Batch at `edullm-reservoir-ingest:7` /
+> wheel `0.6.3`, and the full fetch is now estimated at **~1–3 hours for about $1**, not 16.9 h
+> against a rate limit. Do not size a new run from the tables below.
+>
+> Kept in full because the reasoning is instructive twice over — once for the throughput method,
+> and once as a case of measuring a real number and drawing a confident wrong conclusion from it
+> (which the "lesson worth keeping" section at the bottom already says, about a *different* wrong
+> conclusion than the one it turned out to be).
+
 2026-07-31. Job `reservoir-ingest-calibrate-20b` (`edullm-reservoir-ingest:1`), 4 vCPU / 16 GB,
 16 workers, 20 files per config.
 
@@ -24,6 +54,10 @@ faq: 1,346,000 distinct ids  t = 1785533873.646
 **The 7200 s job-definition timeout is 2.00 h.** Even assuming perfectly linear scaling — which
 network-bound work does not deliver, and the compute environment caps at 128 vCPU on one
 `c7i.8xlarge` type — a single job cannot finish the pass.
+
+> ⚠️ 2026-08-01: 7200 s is **our** setting, not a Batch maximum (AWS: "There's no maximum timeout
+> value for an AWS Batch job"). The "✗ over" verdicts in the table above measure work against a
+> number we chose and can change. The 128 vCPU compute-environment cap *is* real.
 
 This is the same wall the 218-shard olmo publish hit (`CLAUDE.md` gotcha 4), reached from the other
 direction: that one was single-threaded and slow; this one is parallel and simply has 27,104 units
@@ -78,6 +112,11 @@ First: table/000_00000_13.parquet: HTTP Error 429: Too Many Requests
 **The per-IP Hugging Face rate limit again** — the same one that stalled Phase 0
 (`PLAN-CORRECTIONS.md` §6), now reached from Batch at 16 workers.
 
+> ⚠️ **This diagnosis is wrong, and it took until 2026-08-01 to see it.** Phase 0's limit was
+> `datasets-server`, which *is* per-IP. This one was the **resolver**, which is metered
+> **per token** — and we were hitting it ~70× per file by resolving on every range read instead of
+> once. Same HTTP status, different service, different fix. The 429s were ours.
+
 ## Two consequences
 
 **1. I had reintroduced a bug this repo already documented.** The Range reader's retry was
@@ -109,6 +148,13 @@ Revised sizing, same 2.25 worker-seconds/file:
 Each child is far inside the 7200 s timeout even at 10 × 4, so there is no reason to push
 concurrency for its own sake. **If a wave reports 429s, lower the shard count — never raise it.**
 `ids` now prints a running 429 count and says exactly that on failure.
+
+> ⚠️ **SUPERSEDED 2026-08-01.** The advice in bold is right *only while every range read hits the
+> metered resolver*. Once `_cdn_url` resolves once per file and reuses the signed CDN URL
+> (`0.6.2`+), the per-file request cost drops ~70× and the 429 ceiling this table is calibrated
+> against stops binding. The table's shapes are not wrong so much as answering a question that no
+> longer applies. The runtime guidance in `ingest_reservoir` still says "lower, never raise",
+> which remains a safe default — but it is no longer the *reason* the pass is slow.
 
 ## The lesson worth keeping
 

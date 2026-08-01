@@ -233,3 +233,35 @@ never outlast the limit. Affected agents were told to re-run and to serialize.
 
 Worth keeping in the record because the failure mode is **indistinguishable from a broken corpus**
 in the artifact, and a future run at higher fan-out will hit it again.
+
+### ⚠️ CORRECTION 2026-08-01 — "per-IP, not per-account" is true of ONE service, and stating it as a general rule deters the fast path
+
+The finding above was scoped to **`datasets-server`** and it is correct *there*. It got repeated
+across this repo as a general fact about "the HF rate limit," and as a general fact it is **false**.
+HF runs (at least) three surfaces with three different metering rules. MEASURED live 2026-08-01 by
+`curl -I` against `HuggingFaceFW/fineweb-edu` and `Salesforce/wikitext`:
+
+| surface | metered by | measured |
+|---|---|---|
+| `datasets-server` (`/rows`, `/parquet`) | **per-IP** — a token does not help | authed and anon both 429 in 0.1 s (Phase 0) |
+| resolver (`huggingface.co/…/resolve/main/…`) | **per-token**, falling back to per-IP anonymously | `ratelimit-policy: "fixed window";"resolvers";q=3000;w=300` anonymous; `q=5000;w=300` authenticated. The header literally names the bucket `"resolvers"` and reports the remainder, e.g. `ratelimit: "resolvers";r=1652;t=207` |
+| CDN data plane (`us.aws.cdn.hf.co`) | **not metered at all** | 302 target of the resolver. **No `ratelimit` header of any kind** on a `206`; no auth needed; `x-hf-cdn-pop: aws-us-east-1` — same region as our buckets |
+
+**The operational rule that follows — RESOLVE ONCE, REUSE THE SIGNED URL MANY TIMES.** The resolver
+is the only metered hop, so it should be hit once per *file*, never once per *read*. MEASURED: after
+taking one signed CDN URL, three subsequent range reads at different offsets (`100-131`,
+`5000-5031`, and `2152819000-2152819031` of a 2.15 GB file) all returned `206`, and the resolver's
+own remaining-quota counter did **not** decrement for them. This is exactly the 70× amplification
+that caused the ingest's 429 storm — `_RangeFile` was pointing all ~70 of pyarrow's per-file range
+reads at the metered hop. Fixed in `0.6.2`/`0.6.3`; see `ingest_reservoir._cdn_url`.
+
+**Consequence for planning:** an "HF is rate-limited, so a big fetch takes weeks" estimate is wrong
+if the fetch goes to the data plane. The bulk transfer is unmetered and in-region.
+
+⚠️ **One caveat, flagged rather than asserted.** `ingest_reservoir._cdn_url`'s docstring warns that
+resolving *with* a `Range` header signs the URL for that range only, so reuse returns
+`403 Auth failed: invalid range`. That warning was written from a live failure during the ingest
+work. **I could not reproduce it on 2026-08-01**: resolving with `Range: bytes=0-15` and then
+reusing the returned URL for `bytes=5000-5031` returned `206` with correct data, on both a
+Xet-backed and an LFS-backed file. It may be backend- or date-dependent. Treat it as **unconfirmed
+but cheap to respect** — resolving without a `Range` header costs nothing and removes the question.

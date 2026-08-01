@@ -12,8 +12,21 @@ anonymous request from the same machine both returned 429 within 0.1s. So adding
 help, and running several counting jobs in parallel from one machine saturates a single shared
 quota for everyone on it.
 
-This implementation avoids that API entirely. It reads the parquet files directly over HTTPS range
-requests, which go to the CDN and are not governed by the same limit:
+⚠️ SCOPE CORRECTION 2026-08-01. The sentence above is true of **`datasets-server`** and of nothing
+else; elsewhere in this repo it got repeated as a general rule about "the HF rate limit," which is
+false and which deters the fast path. MEASURED live: the **resolver**
+(`huggingface.co/.../resolve/main/...`) is metered **per token** — `ratelimit-policy: "fixed
+window";"resolvers";q=3000;w=300` anonymous, `q=5000;w=300` authenticated — so there a token helps a
+great deal. The **CDN** it 302-redirects to (`us.aws.cdn.hf.co`, `x-hf-cdn-pop: aws-us-east-1`)
+carries **no rate-limit headers at all** and needs no auth. See `PLAN-CORRECTIONS.md` §6.
+
+The rule that follows, and the one this file's approach depends on: **resolve once per file, then
+reuse the signed CDN URL for every range read.** The resolver is the only metered hop. Pointing
+each of pyarrow's ~70 per-file range reads at it instead spends 70 units per file — that was a real
+bug in the reservoir ingest, fixed in 0.6.2 (`ingest_reservoir._cdn_url`).
+
+This implementation avoids the datasets-server API entirely. It reads the parquet files directly
+over HTTPS range requests, which go to the CDN and are not governed by the same limit:
 
     footer read  (a 507 MB FineMath shard)   ~1.1 s
     one row group, `text` column only        ~2.2 s   -> 1,000 documents

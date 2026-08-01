@@ -111,9 +111,20 @@ If you ship a wheel-from-S3 Batch job (validate/publish/backfill), all four bite
    own `about` names it). Recovered and tested in `0.6.0`. To audit a deployed wheel, download it
    and diff every `.py` against the tag — normalising line endings, since a Windows-built wheel
    differs from `main` on every line otherwise.
-4. Single-threaded publish **times out** on large corpora (the 218-shard/125GB olmo run hit the
-   60-min job-def limit). Use `hash_workers`/`copy_workers` and pass
+4. Single-threaded publish **times out** on large corpora — the 218-shard/125 GB olmo run was
+   killed at 3600 s. Use `hash_workers`/`copy_workers` and pass
    `--timeout attemptDurationSeconds=7200`.
+
+   ⚠️ ~~"the 60-min job-def limit"~~ — **corrected 2026-08-01. There is no such limit.** Per the
+   AWS Batch user guide (*Job timeouts*): "**There's no maximum timeout value for an AWS Batch
+   job**", `attemptDurationSeconds` "must be at least 60 seconds", and "**By default, AWS Batch
+   doesn't have a job timeout** — if you don't define a job timeout, the job runs until the
+   container exits." So 3600 s was **a value we set in our own job definition**, not a ceiling AWS
+   imposes, and raising it is a `register-job-definition` call rather than a constraint to design
+   around. (One real ceiling exists and does not apply to us: jobs on **Fargate** resources cannot
+   expect to run beyond **14 days**. Our defs are EC2.) The reason to shard work anyway is
+   blast radius — a long single-attempt job with `attempts: 1` loses everything to one transient
+   failure — not a platform maximum.
 
 ## Working style
 
