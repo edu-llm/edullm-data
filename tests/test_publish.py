@@ -461,3 +461,55 @@ def test_build_executor_aws_batch_captured():
 def test_build_executor_external_from_env():
     ex = P._build_executor_from_env({"EDULLM_CODE_SHA256": "a" * 64, "EDULLM_PACKAGES_LOCK_SHA256": "b" * 64})
     assert ex["kind"] == "external" and ex["code_sha256"] == "a" * 64
+
+
+# ---- put_file_verified: a recompute on the WRITE path ----
+
+def test_verified_upload_returns_the_local_digest():
+    import hashlib
+    import tempfile
+    from pathlib import Path
+
+    from edullm_data.s3 import FakeS3
+
+    body = b"token shard bytes" * 100
+    d = Path(tempfile.mkdtemp())
+    (d / "shard.bin").write_bytes(body)
+    s3 = FakeS3()
+    got = s3.put_file_verified("edullm-landing", "_dist/shard.bin", str(d / "shard.bin"))
+    assert got == hashlib.sha256(body).hexdigest()
+    assert s3.get("edullm-landing", "_dist/shard.bin") == body
+
+
+def test_verified_upload_refuses_a_multipart_sized_file():
+    """The guard is the interesting part, so the fake must enforce it too.
+
+    Above the single-PUT limit S3's ChecksumSHA256 is a COMPOSITE of per-part digests, not the
+    object's sha256 — comparing it to a local digest is meaningless. Refusing beats returning a
+    checksum that looks authoritative and is not.
+    """
+    import tempfile
+    from pathlib import Path
+
+    import pytest
+
+    from edullm_data.s3 import S3Error, FakeS3, _MULTIPART_COPY_THRESHOLD
+
+    d = Path(tempfile.mkdtemp())
+    big = d / "big.bin"
+    with open(big, "wb") as f:
+        f.truncate(_MULTIPART_COPY_THRESHOLD)  # sparse: no 5 GiB written to disk
+    with pytest.raises(S3Error, match="composite"):
+        FakeS3().put_file_verified("edullm-landing", "_dist/big.bin", str(big))
+
+
+def test_a_token_shard_is_under_the_single_put_limit():
+    """100 MB shards must take the verified path, or the port was pointless.
+
+    boto3's default multipart_threshold is 8 MiB — measured — so `upload_file` would silently go
+    multipart for a shard. That is exactly why put_file_verified uses a single put_object.
+    """
+    from edullm_data.corpus import DTYPE_SIZE, SHARD_TOKENS
+    from edullm_data.s3 import _MULTIPART_COPY_THRESHOLD
+
+    assert SHARD_TOKENS * DTYPE_SIZE < _MULTIPART_COPY_THRESHOLD

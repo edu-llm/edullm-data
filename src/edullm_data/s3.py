@@ -17,6 +17,7 @@ corpus size. ``get_range`` keeps it flat.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 from typing import Protocol, runtime_checkable
@@ -88,6 +89,14 @@ class S3(Protocol):
         """Delete one object (current version). Used for best-effort staging cleanup after a
         server-side copy to the final prefix. Not for the airlock-locked read bucket."""
         ...
+
+    # NOTE: ``put_file_verified`` is deliberately NOT a member of this Protocol, though both
+    # ``Boto3S3`` and ``FakeS3`` implement it. A Protocol member is REQUIRED of every
+    # implementation, and several test doubles implement this interface structurally (e.g.
+    # ``tests/test_ingest_reservoir.py:64``, ``tests/test_publish_streaming.py:25``) — adding a
+    # member would make each of them silently incomplete under a type checker for the sake of a
+    # method only the build tooling calls. It is an available capability, not part of the
+    # publish/validate contract; callers that want it should take a concrete ``Boto3S3``.
 
 
 # --------------------------------------------------------------------------------------
@@ -187,6 +196,68 @@ class Boto3S3:
             self._c.upload_file(local_path, bucket, key)
         except Exception as e:  # noqa: BLE001
             raise S3Error(str(e)) from e
+
+    def put_file_verified(self, bucket: str, key: str, local_path: str) -> str:
+        """Upload, and make S3 prove it received the bytes we hashed. Returns the sha256 hex.
+
+        The golden rule applied to the WRITE path. ``put_file`` above sends bytes and trusts a 200;
+        this computes the digest locally, declares it in the request, and lets S3 recompute it
+        server-side — a mismatch is rejected by S3 rather than discovered later by ``fsck``. That
+        turns "the upload returned success" into "the object holds exactly these bytes."
+
+        **Single-part on purpose, and this is the whole subtlety.** ``ChecksumSHA256`` means
+        different things depending on how the object was uploaded: for a single PUT it is a
+        ``FULL_OBJECT`` digest of the whole object, but for a multipart upload it is a *composite*
+        of per-part digests, which is NOT the sha256 of the file and cannot be compared to one.
+        ``boto3``'s default ``multipart_threshold`` is 8 MiB — measured — so ``upload_file`` would
+        silently take the multipart path for a 100 MB token shard and the checksum would stop
+        meaning what a caller assumes. A single ``put_object`` is legal up to 5 GiB, which every
+        shard is comfortably under, so this refuses anything larger rather than quietly degrading
+        to a composite digest.
+
+        Ported from a sibling repo's ``S3ArtifactStore.put_file`` (``artifacts.py:238-267``),
+        which is the one thing that implementation did better than this module. Its own version had
+        no size guard, because nothing it uploaded approached the limit.
+
+        **Verified live against S3, 2026-08-01**, because a checksum header the service ignores
+        would be exactly the decoration the golden rule forbids:
+
+        * correct digest -> 200, and the response echoes ``ChecksumType: FULL_OBJECT``, confirming
+          the digest covers the whole object rather than a part;
+        * digest deliberately corrupted -> ``BadDigest``, *"The SHA256 you specified did not match
+          the calculated checksum"*, and a subsequent listing showed **no object was created**.
+
+        So the rejection is real server-side enforcement: a corrupted body cannot become an object
+        that later passes ``fsck``.
+        """
+        import os
+
+        size = os.path.getsize(local_path)
+        if size >= _MULTIPART_COPY_THRESHOLD:
+            raise S3Error(
+                f"{local_path} is {size} bytes, at or over the {_MULTIPART_COPY_THRESHOLD}-byte "
+                f"single-PUT limit. A multipart ChecksumSHA256 is a COMPOSITE of per-part digests, "
+                f"not the object's sha256, so it cannot be compared against a local digest — "
+                f"use put_file() and verify with hash_object() instead of getting a checksum that "
+                f"looks authoritative and is not."
+            )
+        h = hashlib.sha256()
+        with open(local_path, "rb") as f:
+            while chunk := f.read(8 * 1024 * 1024):  # bounded RAM, matching hash_object
+                h.update(chunk)
+        digest = h.digest()
+        try:
+            with open(local_path, "rb") as f:
+                self._c.put_object(
+                    Bucket=bucket,
+                    Key=key,
+                    Body=f,
+                    ChecksumAlgorithm="SHA256",
+                    ChecksumSHA256=base64.b64encode(digest).decode("ascii"),
+                )
+        except Exception as e:  # noqa: BLE001
+            raise S3Error(f"verified upload of {key} failed: {e}") from e
+        return h.hexdigest()
 
     def copy(self, src_bucket: str, src_key: str, dst_bucket: str, dst_key: str) -> None:
         try:
@@ -333,6 +404,28 @@ class FakeS3:
     def put_file(self, bucket: str, key: str, local_path: str) -> None:
         with open(local_path, "rb") as fh:
             self._store[(bucket, key)] = fh.read()
+
+    def put_file_verified(self, bucket: str, key: str, local_path: str) -> str:
+        """Mirror the real client, INCLUDING its size refusal.
+
+        A fake that accepts an upload the real client rejects makes the guard untestable, and the
+        guard is the interesting part — a caller who oversteps the single-PUT limit would get a
+        composite checksum that looks authoritative and is not. So the limit is enforced here too,
+        against the same constant.
+        """
+        import os
+
+        size = os.path.getsize(local_path)
+        if size >= _MULTIPART_COPY_THRESHOLD:
+            raise S3Error(
+                f"{local_path} is {size} bytes, at or over the {_MULTIPART_COPY_THRESHOLD}-byte "
+                f"single-PUT limit; a multipart ChecksumSHA256 is a composite, not the object's "
+                f"sha256"
+            )
+        with open(local_path, "rb") as fh:
+            body = fh.read()
+        self._store[(bucket, key)] = body
+        return hashlib.sha256(body).hexdigest()
 
     def copy(self, src_bucket: str, src_key: str, dst_bucket: str, dst_key: str) -> None:
         try:
