@@ -252,3 +252,92 @@ def test_labels_are_inside_the_hash_chain_so_they_cannot_be_backfilled():
     a = manifest_sha256(build_manifest([bare], group_name="tokens"))
     b = manifest_sha256(build_manifest([with_labels], group_name="tokens"))
     assert a != b, "if these matched, labels could be backfilled and this would not be urgent"
+
+
+# ---- label-segment-unsafe: reject what BREAKS, not what looks unusual ----
+
+
+def test_the_hash_segment_loses_the_shard_name():
+    """The measured failure, and the reason this check exists at all.
+
+    A corpus with `tokens/stackv2-edu/C#/train-00000.u32le.bin` publishes clean and passes Gate A
+    with zero violations — verified live. Then urlparse puts everything after the '#' into
+    `fragment` and the shard name is gone from `path`.
+    """
+    from urllib.parse import urlparse
+
+    from edullm_data.validate import _segment_breakage
+
+    key = "tokens/stackv2-edu/C#/train-00000.u32le.bin"
+    parsed = urlparse(f"s3://edullm-data/pretrain/x/v1/{key}")
+    assert "train-00000" not in parsed.path, "the premise: the name really is lost"
+    assert parsed.fragment == "/train-00000.u32le.bin"
+    assert _segment_breakage("C#") is not None
+    assert "SHARD NAME DISAPPEARS" in _segment_breakage("C#")
+
+
+def test_a_bracket_segment_fails_to_match_its_own_glob():
+    from fnmatch import fnmatch
+
+    from edullm_data.validate import _segment_breakage
+
+    key = "tokens/src/a[b]/train-00000.u32le.bin"
+    assert not fnmatch(key, key), "the premise: a literal glob misses its own key"
+    assert _segment_breakage("a[b]") is not None
+
+
+def test_safe_but_unusual_segments_are_ACCEPTED():
+    """The false positives that a lowercase-kebab rule would reject.
+
+    `SAFE_SEGMENT_RE` is the right rule for a value this package GENERATES, and the wrong rule for
+    a validator: it conflates style with danger. `tokens/stack-edu/Python/...` is what the existing
+    label-selection fixtures use and it is entirely safe. Rejecting a legal corpus is the more
+    expensive error — the bytes are frozen and the fix is a full re-copy.
+    """
+    from fnmatch import fnmatch
+    from urllib.parse import urlparse
+
+    from edullm_data.validate import _segment_breakage
+
+    for seg in ("Python", "C++", "Jupyter Notebook", "MathOverflow", "3dprinting", "naïve"):
+        assert _segment_breakage(seg) is None, f"{seg!r} is safe and must be accepted"
+        key = f"tokens/src/{seg}/train-00000.u32le.bin"
+        assert "train-00000" in urlparse(f"s3://b/p/{key}").path
+        assert fnmatch(key, key)
+
+
+def test_gate_a_rejects_a_published_hash_segment():
+    """End to end: the corpus that used to pass with zero violations now fails."""
+    import tempfile
+    from pathlib import Path
+
+    import numpy as np
+
+    from edullm_data import publish as P
+    from edullm_data import validate as V
+    from edullm_data.s3 import FakeS3
+
+    s3 = FakeS3()
+    d = Path(tempfile.mkdtemp())
+    g = d / "tokens" / "stackv2-edu" / "C#"
+    g.mkdir(parents=True)
+    rng = np.random.default_rng(1)
+    for i, split in ((0, "train"), (1, "train"), (2, "val")):
+        (g / f"{split}-{i:05d}.u32le.bin").write_bytes(
+            rng.integers(1, 100278, size=40000, dtype=np.uint32).tobytes()
+        )
+    plan = P.publish(
+        d, dataset_id="pretrain/unsafe-segment-gate",
+        purpose="confirm Gate A now rejects an inherited domain value that breaks a consumer",
+        profile="pretrain-tokens/v1", s3=s3, created_at="2026-08-01T00:00:00Z",
+        group_meta={"tokens": {"tokenizer": {
+            "repo_id": "allenai/dolma2-tokenizer", "revision": "a",
+            "fingerprint_sha256": "c" * 64, "vocab_size": 100278, "eos_token_id": 100257}}},
+        env={"EDULLM_CODE_SHA256": "a" * 64, "EDULLM_PACKAGES_LOCK_SHA256": "b" * 64},
+    )
+    res = V.validate_dataset(
+        "edullm-landing", f"pretrain/unsafe-segment-gate/{plan.version}", s3,
+        data_bucket="edullm-data")
+    assert not res.ok
+    codes = [v.code for v in res.violations]
+    assert "label-segment-unsafe" in codes, codes

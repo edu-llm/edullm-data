@@ -26,7 +26,12 @@ from typing import Any, Mapping
 
 from .contracts import (
     CONTROL_BASENAMES,
-    CONTROL_PREFIXES,
+    # Ruff flags this as unused and it is NOT: `test_publish.py`'s
+    # `test_producer_and_validator_share_one_control_definition` asserts that this module and
+    # `publish.py` bind the SAME OBJECT, because both once carried their own identical literal copy
+    # of the allowlist — so a green suite proved only that the two agreed, never that there was one
+    # definition to change. Removing the import satisfies the linter and breaks that guarantee.
+    CONTROL_PREFIXES,  # noqa: F401
     FAMILIES,
     _resolve_families_dir,
     SPLITS,
@@ -768,6 +773,27 @@ def _check_split_matches_filename(
             ))
 
 
+def _segment_breakage(value: str) -> str | None:
+    """Why this path segment breaks a consumer, or ``None`` if it merely needs escaping.
+
+    Only the two measured failures, each phrased as the consequence rather than the character —
+    a message naming a rule the reader has to look up is a message they will ignore.
+    """
+    if "#" in value:
+        return (
+            "contains '#', the URI fragment delimiter: urlparse of the s3:// URI puts everything "
+            "after it into `fragment`, so the SHARD NAME DISAPPEARS from `path` and a consumer "
+            "resolves the URI to a directory. Verified live — such a corpus publishes clean and "
+            "passes Gate A with zero violations."
+        )
+    if "[" in value or "]" in value:
+        return (
+            "contains a bracket, which fnmatch reads as a character class: fnmatch(key, key) is "
+            "FALSE, so a literal glob built from this key does not match the key it came from."
+        )
+    return None
+
+
 def _check_labels_match_path(
     entries: list[Any], v: list[Violation], gname: str, *, profile_is_vendored: bool = False
 ) -> None:
@@ -783,6 +809,38 @@ def _check_labels_match_path(
     layout has no segments to describe, and v1 manifests predate the field. What is rejected
     is a label that CONTRADICTS the key, or a nested key whose labels were omitted — because
     then a reader partitioning on labels would drop the object from every slice.
+
+    It also rejects a label VALUE that **provably breaks a consumer**, which is a different failure
+    from disagreeing with the key. Verified live before adding it: a corpus with a real inherited
+    value at ``tokens/stackv2-edu/C#/train-00000.u32le.bin`` published clean and passed Gate A with
+    **zero** violations, and then ``urlparse`` of its ``s3://`` URI returned
+    ``path=/…/tokens/stackv2-edu/C`` with ``fragment=/train-00000.u32le.bin`` — **the shard name is
+    gone from the path.** ``labels_from_path`` accepts ``C#`` happily and ``fnmatch`` matches it, so
+    nothing else in the pipeline objects; it breaks in a consumer, on bytes frozen by then.
+    ``slug_path_segment`` exists to prevent this, but a producer must opt into calling it, and this
+    is the gate that does not depend on remembering to.
+
+    ⚠️ **This deliberately does NOT enforce** ``SAFE_SEGMENT_RE``, and the distinction cost 25 test
+    failures to learn. That pattern is lowercase-kebab only, which is the right rule for a value
+    this package *generates* — but as a validator it conflates style with danger and rejects real,
+    working corpora: ``tokens/stack-edu/Python/…`` is the layout the existing label-selection
+    fixtures use, and it is completely safe. Measured which characters actually break something:
+
+    ==================  ============  =================
+    segment             name in path?  ``fnmatch(k,k)``
+    ==================  ============  =================
+    ``Python``          yes            True
+    ``C++``             yes            True
+    ``Jupyter Notebook`` yes           True
+    ``C#``              **NO**         True
+    ``a[b]``            yes            **False**
+    ==================  ============  =================
+
+    So only two classes are genuinely broken: ``#`` (truncates the URI, losing the shard name) and
+    ``[``/``]`` (a literal glob built from the key fails to match that key). Everything else merely
+    needs escaping, which every consumer already does. A validator must reject what breaks, not what
+    it would not have written — rejecting a legal corpus is the more expensive error, because the
+    bytes are already frozen and the fix is a full re-copy.
     """
     if profile_is_vendored:
         return  # vendored trees keep upstream layout; segments imply nothing about slices
@@ -794,6 +852,17 @@ def _check_labels_match_path(
         except Exception as e:  # noqa: BLE001 - a deeper tree than we can name
             v.append(Violation("labels-unnameable-path", f"{entry.path}: {e}", path=entry.path))
             continue
+        for key, value in sorted(expected.items()):
+            broken = _segment_breakage(value)
+            if broken:
+                v.append(Violation(
+                    "label-segment-unsafe",
+                    f"{entry.path}: the {key!r} segment {value!r} {broken} Slug it with "
+                    f"manifest.slug_path_segment before publishing (e.g. 'C#' -> 'c-sharp') — the "
+                    f"key is inside manifest_sha256, so fixing it later means republishing every "
+                    f"payload byte.",
+                    path=entry.path,
+                ))
         declared = getattr(entry, "labels", None) or {}
         if not expected and not declared:
             continue
