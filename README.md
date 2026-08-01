@@ -48,7 +48,7 @@ Publishing a replacement corpus is the open work. See `HANDOFF.md`.
 Public repo — the `git+https` install needs no auth. Pin a tag so the publisher and validator agree:
 
 ```bash
-uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.2.0"
+uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.6.3"
 ```
 
 For local development, editable install with test extras:
@@ -113,16 +113,19 @@ edullm-data/                    ← git root
 │   ├── validate.py             Gate A + promote() (writes the generated README)  done
 │   ├── readme.py               render_readme() — README generated from dataset.json  done
 │   ├── fsck.py                 wu-fsck, Gate B, weekly integrity re-check        done
+│   ├── ingest_reservoir.py     HF → S3 ingest, array-sharded (Batch)             done
+│   ├── reservoir_ids.py        §9.7 id partition (key-derived, reproducible)     done
 │   └── profiles/
 │       ├── base.py             Violation / GroupContext / sample_offsets         done
 │       ├── registry.py         profile lookup by name                            done
 │       ├── pretrain_tokens_v1.py   tokenizer pin, vocab bound, alignment         done
 │       ├── eval_results_v1.py      model pin, decode params, failure accounting  done
 │       ├── token_order_v1.py       permutation/index-vector checks               done
+│       ├── tokenizer_v1.py         tokenizer-family checks                       done
 │       └── sft_conversations_v1.py messages[] schema, dedup + leakage report     done
 ├── infra/                      CloudFormation + policies + Dockerfile + runbooks done (deployed)
-├── families/                   the six family.json files                         done
-└── tests/                      541 passing                                       done
+├── families/                   the seven family.json files                       done
+└── tests/                      786 passing                                       done
 ```
 
 ## Build status (standard §13)
@@ -133,11 +136,11 @@ edullm-data/                    ← git root
 | 2 | infrastructure: `edullm-landing` / `edullm-data`, bucket policy, lifecycle, versioning | **done — deployed live** |
 | 3 | `contracts.py` + `manifest.py` | done |
 | 4 | validator (Gate A), Batch-only, profile-driven | done |
-| 5 | four v1 profiles + tests (`pretrain-tokens`, `eval-results`, `token-order`, `sft-conversations`) | done |
+| 5 | v1 profiles + tests — now **six**: `pretrain-tokens`, `eval-results`, `token-order`, `sft-conversations`, `tokenizer`, `vendored` (`registry.available()`, 2026-08-01) | done |
 | 6 | `publish()` | done |
 | 7 | `dataset_paths()` reader | done |
-| 8 | six `family.json` files | done |
-| 9 | event wiring (EventBridge on landing → Batch queue), deployed DISABLED | **done — deployed live** |
+| 8 | seven `family.json` files (`contracts.FAMILIES`) | done |
+| 9 | event wiring (EventBridge on landing → Batch queue) | **done — deployed live.** ⚠️ `edullm-landing-manifest-created` is **DISABLED** as of 2026-08-01, so auto-promotion is off; submit the validator job manually or re-enable the rule |
 | 10 | S3 Inventory on `edullm-data` | **done — deployed live** |
 | 11 | `wu-fsck` (Gate B), weekly, owner **Eric Wu** | done (code); re-scheduling TODO |
 | 12 | generate the agent skill from the profile registry | todo |

@@ -10,7 +10,48 @@ with what the repository or the API actually says, the disagreement is named in 
 
 ---
 
-> ## ⚠️ READ THIS FIRST — corrections dated 2026-07-30
+> ## ✅ READ THIS FIRST — this change request has been FULFILLED (2026-08-01)
+>
+> **Everything below was asked for, and it was built. A training run has read a published eduLLM
+> corpus end to end.** This document is kept as the record of what was requested and why; it is no
+> longer a list of things to do. Verified 2026-08-01 by read-only `batch describe-jobs` / `s3api`
+> and by reading `edu-llm/platform` and `edu-llm/OLMo-core` HEAD via `gh api`.
+>
+> **The proof.** Batch job `8fb0cd5c-5ea4-4936-a598-bf6daf79b724` on queue
+> `sbsandbox-intern-edullm-gpu` (4 vCPU / 15360 MB / **1 GPU**) **SUCCEEDED, exitCode 0**,
+> 15:09:30Z → 15:28:50Z, **150 steps, 3 checkpoints** (step0/75/150). Its
+> `checkpoints/step150/data_paths.txt` holds **41 paths, every one**
+> `s3://edullm-data/pretrain/regmix-10b/v1/tokens/<source>/train-*.u32le.bin`, covering **all 7
+> sources**. `config.json`: `NumpyFSLDatasetConfig`, `dtype uint32`, `expand_glob false`, tokenizer
+> `allenai/dolma2-tokenizer` vocab_size 100278, sequence_length 2048.
+> ⚠️ **No loss value was recovered** (W&B unreadable from here, CloudWatch stream unread). The
+> claim is "it trained 150 steps and checkpointed", **not** "it produced a loss curve."
+>
+> **Status of the four changes:**
+>
+> | # | Change | Status 2026-08-01 | Evidence |
+> |---|---|---|---|
+> | 1 | `s3:GetObject` + `s3:ListBucket` on `edullm-data` | ✅ **DONE** | `infra/iam/batch-gpu-roles.yaml` grants GetObject on `edullm-data/*` + ListBucket on the bucket; commit `c3d4ca0d` |
+> | 2 | Bind a `release_id` to a `uri` | ✅ **DONE** | `config/datasets.yaml` `published:` lists 6 corpora by URI + tokenizer, incl. `regmix-10b`; commit `45761849` |
+> | 3 | Workload profile + datamix fields | ✅ **exercised** | the run above submitted through it, with `EDULLM_DATASET_ID`/`_VERSION`/`_TOKENIZER` env |
+> | 4 | Real GPU + raise the 3600 s timeout | ⚠️ **PARTIAL — the only thing still open** | the run fit in 19.3 min inside 3600 s; capacity is still a single A10G. **This is now a budget decision, not an engineering blocker.** |
+>
+> **Banner item 5(b) is also closed:** `.edullm/Dockerfile` **does** exist on `edu-llm/OLMo-core`
+> `main` (12,957 B, commit `7eeba5af`), and `5358e521` installs the reader into it.
+>
+> **The consumer adapter exists and is not small.** `.edullm/train_on_corpus.py`, **746 lines**
+> (32,840 B), `edu-llm/OLMo-core` `main`, PRs #34–#38. It resolves via
+> `edullm_data.read.dataset_paths` + `resolve_latest` and contains **no path literal and no flag to
+> supply one** — deliberately, because a path typed on a command line is the "run reports corpus A,
+> reads corpus B" failure in disguise. It followed §6's advice exactly: plain
+> `NumpyFSLDatasetConfig`, explicit `dtype`, explicit path list.
+>
+> ---
+>
+> ### ⚠️ Superseded banner — corrections dated 2026-07-30, kept for the record
+>
+> *(Written when the four changes were still outstanding. Items 1–5 below were accurate then; read
+> them for the reasoning, not the status. Item 5(b) in particular is now false — see above.)*
 >
 > This document was written before the current corpus was published and before the reader could
 > build mixtures. Re-audited against live AWS and the platform repo; the four requested changes
@@ -67,9 +108,14 @@ s3://edullm-data/pretrain/olmo-150b-dolma2/v1/     157.467B tokens, 6,911 shards
 s3://edullm-data/tokenizer/dolma2-bpe/v1/          the tokenizer those tokens were made with
 ```
 
-**Today a training job on the platform cannot read either of them.** Not "has no convenient
+~~**Today a training job on the platform cannot read either of them.** Not "has no convenient
 helper" — cannot. The bytes are unreachable from inside the container, and the run's own lineage
-record cannot say which dataset it read even if they were.
+record cannot say which dataset it read even if they were.~~
+
+⚠️ **FALSE as of 2026-08-01 — this was the problem statement, and it has been solved.** A GPU Batch
+job read `pretrain/regmix-10b/v1` from inside the container and trained 150 steps on it; the IAM
+grant, the registry binding, and the image all landed (see the banner). The paragraph is kept
+because the rest of this document is written as an argument against it.
 
 Four changes close that. They are independent enough to land separately, and they are not equally
 hard: two are blockers with no container-side workaround, and two are things you *can* route

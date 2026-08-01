@@ -24,11 +24,11 @@ Install the package:
 
 ```bash
 # pinned git install (production) — pin a tag so the publisher and validator agree
-uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.2.0"
+uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.6.3"
 
 # editable (local dev)
 python3 -m pip install -e /path/to/edullm-data
-python3 -m pytest tests/ -q   # 380 passing
+python3 -m pytest tests/ -q   # 786 passing
 ```
 
 > The repo is public at [github.com/edu-llm/edullm-data](https://github.com/edu-llm/edullm-data);

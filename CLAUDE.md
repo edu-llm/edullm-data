@@ -73,12 +73,33 @@ If you ship a wheel-from-S3 Batch job (validate/publish/backfill), all four bite
    profile's laxer constant — so it fails **only in production**, which is how the live corpus
    came to be validated at 50% EOS instead of the declared 5%.
 3. **pip requires the PEP-427 wheel filename** — keep `edullm_data-<version>-py3-none-any.whl`
-   end-to-end; a renamed `w.whl` is rejected. The live job defs bootstrap a wheel **by exact
-   filename**, so shipping a new wheel changes nothing until those are re-registered. Both
+   end-to-end; a renamed `w.whl` is rejected. A wheel-bootstrapping job def names the wheel **by
+   exact filename**, so shipping a new wheel changes nothing until that def is re-registered. Both
    EventBridge rules target the job def by unversioned name, so a new revision cuts over
    immediately — for better and worse.
-   **Current: `edullm-validator:8` and `edullm-fsck:5` bootstrap `0.6.0`** (2026-07-31, tag
-   `v0.6.0`), timeouts 7200 s and 3600 s.
+
+   **Live state, verified by `batch describe-job-definitions --status ACTIVE` on 2026-08-01:**
+
+   | job def | top ACTIVE rev | how code gets in | timeout |
+   |---|---|---|---|
+   | `edullm-validator` | **10** | **image, digest-pinned — no wheel** | 7200 s |
+   | `edullm-fsck` | **6** | wheel `0.6.0` | 3600 s |
+   | `edullm-reservoir-ingest` | **7** | wheel `0.6.3` | 7200 s |
+
+   ~~`edullm-validator:8` and `edullm-fsck:5` bootstrap `0.6.0`~~ — **superseded 2026-08-01.**
+   `edullm-validator:9/10` no longer bootstrap a wheel at all: they run
+   `python -m edullm_data.validate …` directly out of `sbsandbox-intern-edullm-data@sha256:339c2b6b…`,
+   with code **baked into a digest-pinned image**. That is strictly better provenance than a wheel
+   dropped in `_dist/` — the image digest pins every byte of the dependency tree, and `_dist/` has
+   **no lifecycle expiration**, so a wheel there is mutable-by-overwrite forever. Registered by a
+   concurrent session; it wins. Revs 10 and 6 differ from 9 and 5 *only* in `jobRoleArn`
+   (`…-dataset-validator` / `…-batch-workload`) — the airlock-correct identity is the newer one, so
+   cite 10/6, not 9/5.
+
+   ⚠️ **Auto-promotion is OFF as of 2026-08-01.** The `edullm-landing-manifest-created` EventBridge
+   rule is `DISABLED` (verified via `events describe-rule`), so landing a `manifest.json` no longer
+   triggers a validator job. Re-enable it or `submit-job` by hand. `edullm-wu-fsck-nightly` is still
+   ENABLED — and is weekly, not nightly: `cron(6 9 ? * MON *)`.
 
    ⚠️ **NEVER TRUST A VERSION STRING AS A DEPLOYMENT CHECK — DIFF THE ARTIFACT.** The wheel
    deployed before this, `0.5.1`, contained a Gate A function
@@ -97,7 +118,8 @@ If you ship a wheel-from-S3 Batch job (validate/publish/backfill), all four bite
 ## Working style
 
 Tests mirror source modules (`test_manifest.py` ↔ `manifest.py`); every profile ships a passing **and**
-a failing fixture. Run `python -m pytest -q` (currently **380 passing**). Public repo — scrub internal
+a failing fixture. Run `python -m pytest -q` (currently **786 passing** on
+`agent/claude-01/reservoir-ingest`, measured 2026-08-01). Public repo — scrub internal
 AWS account IDs to placeholders in anything committed (bucket names are functional constants, keep
 them). Autonomous runs are fine; keep subagent fan-out ≤~16 in sequential waves and persist to disk
 continuously (this machine has died mid-run). Ship changes via a branch + PR, not a direct push to

@@ -243,9 +243,32 @@ unvalidated data into the read path. Motivating audit:
 `docs/dataset-creation/s3-dataset-audit-2026-07-28.md`. Full spec:
 `docs/dataset-creation/DATASET-STANDARD.md` + `...-DIAGRAMS.md`.
 
-**Status: CLOSED.** The produce → validate → publish → read loop works. Two corpora are published,
-sealed, and sliceable (157.2B and 126.7B tokens). What is still missing downstream is a *consumer* —
-no training run has read them, and the blockers live in `edu-llm/platform`, not here.
+**Status: CLOSED, and now closed end-to-end — a real training run has read a published corpus.**
+The produce → validate → publish → read loop works. Two corpora are published, sealed, and sliceable
+(157.2B and 126.7B tokens).
+
+~~What is still missing downstream is a *consumer* — no training run has read them, and the blockers
+live in `edu-llm/platform`, not here.~~ **SUPERSEDED 2026-08-01.** The consumer exists and ran.
+Verified live via `batch describe-jobs` and `s3api`:
+
+- Batch job `8fb0cd5c-5ea4-4936-a598-bf6daf79b724`, **SUCCEEDED, exitCode 0**, queue
+  `sbsandbox-intern-edullm-gpu`, 4 vCPU / 15360 MB / **1 GPU**, 2026-08-01 15:09:30Z → 15:28:50Z
+  (19.3 min). It **trained 150 steps and checkpointed 3× (step0, step75, step150)**.
+  ⚠️ **No loss value was recovered** — W&B was not readable from here and the CloudWatch stream
+  could not be read. Do not upgrade this to "produced a loss curve"; what is proven is that the
+  bytes were opened, consumed for 150 optimizer steps, and checkpointed.
+- It really read **our** corpus, not AI2's sample: `…/checkpoints/step150/data_paths.txt` (3137 B)
+  holds **41 paths, 100% of them**
+  `s3://edullm-data/pretrain/regmix-10b/v1/tokens/<source>/train-*.u32le.bin`, spanning **all 7
+  sources** of that corpus (dclm 14, arxiv 10, starcoder 6, pes2o 4, algebraic-stack 3,
+  open-web-math 3, wiki 1). The step0 copy has an identical ETag, so the list was stable.
+- Sibling `config.json`: `NumpyFSLDatasetConfig`, `dtype: "uint32"`, `expand_glob: false` (an
+  explicit path list — exactly what `docs/CONSUMER-CONTRACT.md` §6 demands), tokenizer
+  `allenai/dolma2-tokenizer` **vocab_size 100278**, sequence_length 2048, max_duration 150 steps.
+  (`model.vocab_size` is 100352 — the padded embedding width. Cite the *tokenizer* field.)
+
+So this repo's read path is no longer hypothetical. The remaining platform constraint is **a real
+GPU budget**, not an IAM grant — see "What is NOT done" and `docs/PLATFORM-INTEGRATION.md`.
 
 **The current goal:** build **`pretrain/reservoir-dolma2`** — a ~255B-token reservoir the team draws
 20B-token training mixes from, per `DATASET-DESIGN-reservoir.md`. Every run consumes exactly 20B, so
@@ -817,13 +840,34 @@ One item here IS now done: the `edullm-validator` job-def timeout, set to **7200
 
 Several older "not done" items below were fixed today. These are the ones that survive checking.
 
-### 1. Hand `docs/PLATFORM-INTEGRATION.md` to whoever owns `edu-llm/platform`
+### 1. ~~Hand `docs/PLATFORM-INTEGRATION.md` to whoever owns `edu-llm/platform`~~ — **DONE; the handoff landed and the blockers are closed (2026-08-01)**
 
-**The long pole, and not this repo's to fix.** A training run needs two things from that repo: the
+~~**The long pole, and not this repo's to fix.** A training run needs two things from that repo: the
 GPU workload role must be able to `s3:GetObject` on `edullm-data` (it is scoped to
 `outputs/teams/platform/runs/*` today), and the Batch attempt timeout must exceed 3600 s. Neither
-has a workaround from our side — the IAM grant is enforced outside the container. Everything else
-here is smaller than this.
+has a workaround from our side — the IAM grant is enforced outside the container.~~
+
+**Superseded 2026-08-01, verified by reading `edu-llm/platform` HEAD via `gh api`:**
+
+- **The IAM grant exists.** `infra/iam/batch-gpu-roles.yaml` now grants `s3:GetObject` on
+  `arn:${AWS::Partition}:s3:::edullm-data/*` and `s3:ListBucket` on the bucket, GetObject-only by
+  design so the airlock refusal stays a refusal (commit `c3d4ca0d`, 2026-08-01, "…let a training
+  run read the corpus"). This was the one item with no workaround from our side; it is closed.
+- **The registry entry exists.** `config/datasets.yaml` `published:` now lists **six** corpora by
+  `s3://edullm-data/...` URI + tokenizer, including `pretrain/regmix-10b/v1` (commit `45761849`,
+  2026-08-01). The old single `dolma-2026-07` entry is kept but `retired: true`, so historical
+  intent records still resolve — the same "don't delete history" discipline this file uses.
+  The seventh corpus, `lean4-mathlib-bytes`, is deliberately unlisted: it needs
+  `tokenizer/bytes-utf8` and OLMo-core has no byte tokenizer, so offering it would let a run
+  memmap `tokenizer.json` as uint16 tokens and train happily on garbage.
+- **The image exists.** `.edullm/Dockerfile` is present on `edu-llm/OLMo-core` `main`
+  (12,957 B, commit `7eeba5af`) and installs the reader (`5358e521`) — the "no image, no run"
+  blocker at banner item 5(b).
+- **The timeout was never the blocker** and the doc already said so; the run finished in 19.3 min
+  inside a 3600 s attempt.
+
+**What is genuinely still open: a real GPU, which is a budget call, not an engineering one.** The
+proving run used the single provisioned A10G on the `sbsandbox-intern-edullm-gpu` queue.
 
 ### 2. Deploy bucket-policy v2 — **now protecting 587 GiB, not an empty bucket**
 
@@ -849,7 +893,15 @@ instead of consulting `contracts.is_trainable`. The `SPLITS` docstring (`contrac
 cites this exact substring-matching as the problem the closed vocabulary fixed, so it **overstates
 the fix**: `trainval` is still classed held-out and `dev` still rejected, in that one function.
 
-### 5. Write the adapter, once #1 unblocks
+### 5. ~~Write the adapter, once #1 unblocks~~ — **WRITTEN AND RUN (2026-08-01)**
+
+**It is `.edullm/train_on_corpus.py` on `edu-llm/OLMo-core` `main` — 746 lines, not "small."**
+The estimate below was wrong about size and right about content: the adapter does use plain
+`NumpyFSLDatasetConfig` with an explicit `dtype` and an explicit path list (`expand_glob: false`),
+and it does avoid the sidecar trap. The 746 lines are the *surrounding* correctness — resolving the
+id through `edullm_data.read` so there is no path literal anywhere in the file, and no flag to
+supply one. Retained below because the reasoning about which OLMo-core classes to avoid is what
+made the run work on the first try.
 
 `docs/CONSUMER-CONTRACT.md` is the spec. It should be small — plain `NumpyFSLDatasetConfig`, an
 explicit `dtype` from `r.dtype`, an explicit path list from `dataset_paths` or `build_mixture`.
@@ -860,8 +912,17 @@ migrated; it is recorded in the dataset's own `limitations`.
 
 ## What is NOT done
 
-- **No training-side adapter has been written**, and **no training run has happened** against any
-  `edullm-data` dataset. See #1 and #5 above.
+- ~~**No training-side adapter has been written**, and **no training run has happened** against any
+  `edullm-data` dataset. See #1 and #5 above.~~ **BOTH FALSE as of 2026-08-01 — this is now DONE.**
+  The adapter is **`.edullm/train_on_corpus.py` on `main` of `edu-llm/OLMo-core`, 746 lines /
+  32,840 B** (read via `gh api`; landed in PRs #34–#38, 2026-08-01). It is emphatically *not* the
+  small mapping #5 predicted: it resolves through `edullm_data.read.dataset_paths` +
+  `resolve_latest` and carries **no path literal and deliberately no flag to supply one**, on the
+  stated grounds that a hand-typed path reproduces the exact failure it exists to prevent (a run
+  that reports the corpus it was asked for while reading AI2's C4 sample). It takes its inputs from
+  four `EDULLM_*` env vars set by the submission path. It did honour #5's core warning: plain
+  `NumpyFSLDatasetConfig` with an explicit `dtype` and an explicit path list.
+  Proof it ran: Batch job `8fb0cd5c-…`, SUCCEEDED exit 0, 150 steps, 3 checkpoints — see "Goal".
 - **The tokenizer's seal is pre-root.** `tokenizer/dolma2-bpe/v1`'s `_VALIDATED.json` carries no
   `dataset_sha256`, so `verify_seal` reports it *unverifiable* rather than invalid and
   `dataset_paths` lets it through. It stays that way until republished — and `promote()` refuses a
