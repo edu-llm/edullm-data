@@ -1,27 +1,40 @@
 # HANDOFF — eduLLM Dataset Standard
 
-Last updated: **2026-08-01**, after a session that (a) proved the reservoir ingest works end to end
-on Batch, and (b) discovered that the full-pipeline timeline is **weeks shorter** than believed
-because most of it is already built. The published 150B and 127B corpora are untouched and readable.
+Last updated: **2026-08-01 (late)**, after a session that proved the reservoir ingest on Batch and
+then **built the reader and the packer** — the two stages the plan called the riskiest. The published
+150B and 127B corpora are untouched and readable.
 
 > ## ▶️ START HERE
 >
 > 1. **This file's "Next Steps → THE CURRENT LIST"** — what to do next, in order.
 > 2. **`DATASET-DESIGN-reservoir.md`** — the plan. §5.6 is the build sequence; §4.1 the dedup
 >    pipeline; §2.1 the pool sizing.
-> 3. **`artifacts/reservoir/SEGFAULT-INVESTIGATION.md`** — 10 hypotheses, 9 refuted, 1 correct.
+> 3. **`src/edullm_data/corpus.py`** — the build-time CONTRACT. Read it before touching any build
+>    stage; the shard geometry, the ordinal allocator, the held-out predicate and the EOS floor all
+>    live there, each with the citation to the code that enforces it.
+> 4. **`artifacts/reservoir/WEEK1-CORPUS-SURVEY.md`** — what to reuse from the sibling repo, and
+>    **two claims in this file that were wrong** about it.
+> 5. **`artifacts/reservoir/SEGFAULT-INVESTIGATION.md`** — 10 hypotheses, 9 refuted, 1 correct.
 >    Read before touching the ingest transport.
-> 4. **`artifacts/reservoir/RUN-THE-INGEST.md`** — the operational runbook + a failure table where
+> 6. **`artifacts/reservoir/RUN-THE-INGEST.md`** — the operational runbook + a failure table where
 >    every row has actually happened.
 >
-> ## ✅ THE INGEST WORKS. THE ARRAY IS PROVEN.
+> ## ✅ INGEST PROVEN · READER AND PACKER BUILT
 >
 > `reservoir-ingest-v063-smoke`, job def `edullm-reservoir-ingest:7`, wheel `0.6.3`:
 > **4 of 4 children SUCCEEDED**, all four configs, **zero 429 pauses**, **67 seconds** — on the same
 > shard that segfaulted twice. 16 `.u64` parts in
 > `s3://edullm-landing/_ingest/reservoir-dolma2/_ids/parts/`.
->
 > Everything below about the ingest being blocked is HISTORY. It is not blocked.
+>
+> **Phase 1 items 1 and 2 are now DONE**, including the one this file called "most likely to break
+> the estimate." `corpus.py` (contract) + `corpus_read.py` (parquet **and** `.json.gz`) +
+> `corpus_pack.py` (exact 25,001,984-token shards, conservation asserted at runtime).
+> **967 tests passing**, up from 790; ruff clean. Remaining: **~1–2 weeks**, not 2–3.
+>
+> Also closed: the eval decontamination bundle is **authentic** (recomputed sha256 equals its
+> manifest's claim) and was on the laptop only — now at
+> `s3://edullm-landing/_dist/eval-decontamination.bin`, a prefix with no expiry rule.
 >
 > ## 🎯 THE DECISION OF RECORD — **FULL PIPELINE** (owner, reconfirmed 2026-08-01)
 >
@@ -85,17 +98,34 @@ because most of it is already built. The published 150B and 127B corpora are unt
 ## THIS SESSION IN ONE PARAGRAPH
 
 Every timeline estimate I gave was too pessimistic, and each revision came from finding something
-already built rather than from building it. The day started with the reservoir ingest crashing
-(exit 139) and a belief that the full pipeline was 6–10 weeks away. It ends with the ingest proven
-on Batch and the pipeline at 2–3 weeks. Three findings did that: the SIGSEGV was **pyarrow's
-`pre_buffer=True` default** dispatching range reads into a C++ thread pool, not anything in our
-code; the HTTP 429 storm was **our own 70× quota amplification** (one metered resolve per range read
-instead of per file), not a platform ceiling; and the "2.5 TB ingest = 2–4 weeks" premise was false
-because HF's **data plane is unmetered and sits in us-east-1** — the whole fetch is ~1–3 hours for
-about $1. Separately, a sibling checkout (`pipelines/week1_corpus`) turned out to contain working
-tokenize/pack/val-carve/dedup/decontam code **with a complete, already-exercised S3 backend**, and
-`s3://edullm-datasets/datamix1-jul22/` holds a 96-object release it produced, decontamination bundle
-included. Four wrong diagnoses were shipped and retracted along the way; all are recorded below.
+already built rather than from building it — until the end of the day, when the last revision came
+from actually building it. The day started with the reservoir ingest crashing (exit 139) and a belief
+that the full pipeline was 6–10 weeks away. It ends with the ingest proven on Batch, **the reader and
+the packer written and verified**, and the pipeline at **~1–2 weeks**. Three findings drove the early
+revisions: the SIGSEGV was **pyarrow's `pre_buffer=True` default** dispatching range reads into a C++
+thread pool, not anything in our code; the HTTP 429 storm was **our own 70× quota amplification** (one
+metered resolve per range read instead of per file), not a platform ceiling; and the "2.5 TB ingest =
+2–4 weeks" premise was false because HF's **data plane is unmetered and sits in us-east-1** — the whole
+fetch is ~1–3 hours for about $1.
+
+Then the two riskiest stages got built: `corpus.py` pins the build contract, `corpus_read.py` reads
+parquet **and** the `.json.gz` path that did not exist, and `corpus_pack.py` emits exact
+25,001,984-token shards with token conservation asserted at runtime — an assertion that caught a real
+double-counting bug on its first run. 790 → **967 tests**.
+
+⚠️ **A claim this paragraph used to make is FALSE and was corrected the same day.** It said the
+sibling checkout `pipelines/week1_corpus` had "a complete, already-exercised S3 backend." Its
+`S3ArtifactStore` has **no multipart** (single PUT, capped at 5 GB), **zero test coverage** (grepping
+`tests/` for `boto3|moto|S3ArtifactStore` returns no files), and **never ran** — its only callers are
+CLI commands no deployment script invokes; the released 96 objects were written by a standalone script
+that never imports it. Two behaviours from it were genuinely worth porting and now are. Its *packer*
+was likewise the wrong one to copy. See `artifacts/reservoir/WEEK1-CORPUS-SURVEY.md`. What the
+checkout does hold is a real, verified decontamination bundle.
+
+Five wrong diagnoses were shipped and retracted across the day; all are recorded below. The fifth was
+mine today: I told the packer implementer to copy `pack_category_globally`'s shape, which computes its
+aligned size by summing a *materialized* list — it cannot stream, and adopting it would have forced a
+pre-pass over 255B tokens. The streaming version was measured to produce byte-identical output.
 
 ## THE 2026-08-01 SESSION
 
@@ -1067,6 +1097,28 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## What Worked
 
+### 2026-08-01 (night) — pinning the interface BEFORE fanning out, and an assertion that runs in production
+
+Two stages were built in parallel by separate agents and merged with no interface conflicts. What made
+that work was writing `corpus.py` first — shard geometry, the ordinal allocator, the held-out
+predicate, the EOS floor — and declaring it frozen. Parallel implementers against an *unspecified*
+boundary produce code that compiles separately and disagrees on the thing that matters; the ordinal
+allocator is the concrete case, since `parse_shard_name` returns `('train', 0)` for two different
+sources' shards and nothing downstream objects.
+
+**The single highest-value line of the day is a runtime assertion, not a test.**
+`PackResult.__post_init__` checks `tokens_in == tokens_out + tail_dropped + surplus_dropped` on every
+stream in production, and it found a real bug the first time it ran (`tokens_in` double-counted the
+unconsumed remainder of a half-consumed document). A test would have caught that case only if someone
+had thought to write it; the assertion catches every case forever. Mutation-checked: losing **one**
+token out of 25 million fails 24 tests.
+
+**Verifying agent reports instead of relaying them** caught three things: a claim that pyarrow 24
+defaults `pre_buffer=False` (true, and a *per-API* accident — `read_table` defaults `True`, so writing
+the keyword is not redundant); the correction to my own bad intel below; and 12 failing tests in a
+module whose author had reported it green, which turned out to be a mid-write race rather than a
+defect. Waiting for file mtimes to settle before judging was the fix.
+
 ### 2026-08-01 (late) — establishing what the code PERMITS before enumerating options
 
 The decision memo's most valuable output was six *impossibility* findings, each pinned to a line.
@@ -1218,6 +1270,47 @@ shards have odd token counts — a filename tells you nothing; `size % 4` and a 
   reading `pyproject.toml` both said `families/` shipped. Installing proved it did not.
 
 ## What Didn't Work (and the fix)
+
+### 2026-08-01 (night) — I handed an implementer a shape that cannot stream
+
+I told the packer implementer to copy `pack_category_globally`'s shape
+(`week1_corpus/validation.py:846`), and wrote the same recommendation into
+`WEEK1-CORPUS-SURVEY.md`. It computes its aligned size as
+`token_plus_eos = sum(len(item.tokens) + 1 for item in ordered)` — **a sum over a materialized list.**
+Following it literally means holding every document of a category in memory, i.e. a full pre-pass over
+255B tokens before the first shard can be written.
+
+The implementer noticed and streamed instead, truncating at exhaustion. **Measured equivalent, not
+argued:** over 5 randomized trials the streaming packer's `tokens_out` equalled
+`total - (total % SEQ_LEN)` — exactly what the materializing algorithm would have produced — every
+time. So the pre-pass buys nothing except the memory it costs. Survey corrected.
+
+The lesson is narrower than "verify claims": I *had* read that function, and the defect was in the one
+expression I skimmed because the surrounding logic was obviously right. A shape that is correct at test
+scale and impossible at production scale looks identical in a code review.
+
+### 2026-08-01 (night) — my first version of the label-segment gate rejected legal corpora
+
+Adding a Gate A check for unsafe path segments, I enforced `SAFE_SEGMENT_RE` — and broke **25 tests**.
+That pattern is lowercase-kebab-only, which is right for a value this package *generates* and wrong for
+a validator: it conflates style with danger. `tokens/stack-edu/Python/…` is what the existing
+label-selection fixtures use and it is completely safe. Measured which characters actually break
+something rather than assuming:
+
+| segment | shard name in `path`? | `fnmatch(k, k)` |
+|---|---|---|
+| `Python`, `C++`, `Jupyter Notebook`, `naïve` | yes | True |
+| `C#` | **NO** | True |
+| `a[b]` | yes | **False** |
+
+Only two classes are genuinely broken. The gate now rejects those and nothing else. **Rejecting a legal
+corpus is the more expensive error** — the bytes are frozen by then and the fix is a full re-copy — so
+a validator must reject what breaks, not what it would not have written.
+
+Related, same session: ruff flagged `CONTROL_PREFIXES` in `validate.py` as an unused import. Removing
+it passed the linter and **failed a test** asserting that `validate.py` and `publish.py` bind the *same
+object* — the two once carried identical literal copies, so a green suite proved they agreed, never
+that there was one definition to change. Now annotated with the reason so nobody "cleans it up."
 
 ### 2026-08-01 (late) — I asserted a mechanism I had not measured, and an agent refuted it
 
@@ -1637,37 +1730,102 @@ not open.
 
 ## Next Steps (priority order)
 
-### THE CURRENT LIST — 2026-08-01. Decision of record: FULL PIPELINE, MinHash deferred.
+### THE CURRENT LIST — updated 2026-08-01 (late). Decision of record: FULL PIPELINE, MinHash deferred.
 
-Total remaining: **2–3 weeks**. Compute across every stage is ~12 hours and ~$20; the calendar is
-sequential Batch stages and per-corpus verification, not throughput.
+Remaining: **~1–2 weeks**, down from 2–3. Items 1 and 2 are **DONE** — including the item this list
+called "most likely to break the estimate" — and item 4's decontamination half is answered. Compute
+is still ~12 hours and ~$20; the calendar is sequential Batch stages and per-corpus verification.
 
-**1. Per-corpus readers — ~1 week. THE ITEM MOST LIKELY TO BREAK THE ESTIMATE. Start here.**
-Ten to thirteen corpora, each a different schema. The parquet path exists (`_scan_ids` generalises);
-the Common Pile `.json.gz` path does **not**. Each reader needs verification that it pulls the right
-column, because getting it wrong is silent — FinePhrase's `text` holds the ORIGINAL FineWeb-Edu
-document and the rewrite is at `rollout_results.list.element.text`; a flat leaf list contains `text`
-twice and `.names.index("text")` returns the original. Match on exact `path_in_schema`.
+**Suite 967 passing** (was 790 at the start of the session), ruff clean. New modules:
+`corpus.py` (440), `corpus_read.py` (890), `corpus_pack.py` (809), plus 2,451 lines of tests.
 
-Per-corpus specs (repo, revision sha, text column, rows, tok/byte, mean doc length, license, traps)
-were measured this session and are in the agent findings; re-derive from `artifacts/sizing-revised.md`
-and `artifacts/recount/*.json` if needed. `.json.gz` needs
-`zlib.decompressobj(16 + zlib.MAX_WBITS)`; carry the partial last line of every range, never
-`json.loads` it; check `do.eof` at end-of-object or a truncated stream reads as a short corpus.
+**1. ~~Per-corpus readers~~ — ✅ DONE. `src/edullm_data/corpus_read.py`, 890 lines, 61 tests.**
+Both paths exist: parquet over the proven `_RangeFile` transport, and the Common Pile `.json.gz`
+path that previously did not. Every column resolves by exact `path_in_schema`.
 
-**2. Tokenize + exact shard — 2–3 days, ~400–800 lines.** Write fresh; do not port and do not adopt a
-tool (reasons above). Seven small modules: stream documents, val carve, tokenize+EOS, pack, route,
-drive, finalize. Steal the ~80 lines of non-obvious correctness from `week1_corpus` with attribution.
+**The duplicate-leaf trap was re-verified against real FinePhrase-shaped bytes**, and it is worse
+than the note above said. `pf.schema.names` is `['id','text','text']` so `.index("text")` returns the
+top-level ORIGINAL — but the near-miss selectors do not *fail* either: `columns=["rollout_results.text"]`
+returns a table with **zero columns** and `to_pylist()` of `[{}]`, i.e. a silently empty corpus.
+Measured through the finished reader:
 
-**3. Bundling + receipts + resumability — 3–4 days.** ~420 Batch array children. Reuse
-`ingest_reservoir`'s `_shard_slice` striding, `_assert_safe_key`, `_assert_lifecycle_covers`, and the
-`_cmd_merge` refuses-incomplete pattern. Resumability is at **bundle** granularity — you cannot skip
-shard *k* of a stream without re-reading the documents that produced it.
+| selector | result |
+|---|---|
+| `rollout_results.list.element.text` | REWRITE ✅ |
+| `rollout_results.text` | REJECTED (was silent-empty) |
+| `rollout_results.list.item.text` | REJECTED (legacy spelling) |
+| `text` | ORIGINAL — the trap |
 
-**4. Dedup + decontamination.** Exact content-hash dedup (Bloom, ~$3) delivers the entire measured
-quality gain. For decontamination, **first check whether
-`s3://edullm-datasets/datamix1-jul22/validation/` is reusable** before porting
-`week1_corpus/decontamination.py` (~125 lines) — a real bundle already exists.
+All three `.json.gz` silent-loss modes are handled and each was re-verified by execution: a truncated
+stream decompresses to complete-looking JSON with **`eof=False` as the only signal**; multi-member
+gzip stops after member 1 with member 2 in `unused_data`; a range boundary lands mid-line, so the
+partial trailing line is carried and never parsed.
+
+⚠️ **`.json.zst` is refused, not supported** — needs a `zstandard` dependency this package does not
+declare. Two `UNVERIFIED` markers remain in-code (the `_filtered` repos' `id`/metadata key names —
+only `text` is confirmed against real peS2o bytes), each carrying the exact command to settle it.
+
+⚠️ **The domain slug map is a reader ARGUMENT, not a `CorpusSpec` field.** A streaming pass cannot
+know the top-20 values, so whoever writes the build driver must thread it from the counting pass.
+Publishing without it commits one permanent directory per distinct upstream value — 73 for
+`stackv2-edu`, ~180 for StackExchange — inside `manifest_sha256`.
+
+**2. ~~Tokenize + exact shard~~ — ✅ DONE. `src/edullm_data/corpus_pack.py`, 809 lines, 66 tests.**
+Written fresh, as planned. Conservation is asserted at **runtime**, not only in tests:
+`tokens_in == tokens_out + tail_dropped + surplus_dropped`. It caught a real bug on its first run
+(double-counting the remainder of a half-consumed document). Verified over 6 randomized trials with
+document lengths spanning shard boundaries — conserved every time, every shard a whole multiple of
+`4 × 8192` bytes. **Mutation-checked: losing ONE token in 25 million fails 24 tests.**
+
+The tail truncates to a whole sequence rather than padding — zero-padding trips `zero_run_max` 256
+and invents tokens the tokenizer never emitted. Worst case 8,191 tokens per stream; a tail
+`>= SEQ_LEN` raises as a packer bug.
+
+**⚠️ The `week1_corpus` packer named in this file was the WRONG one** — see
+`artifacts/reservoir/WEEK1-CORPUS-SURVEY.md`. `packing.py:68` drops its tail remainder per
+(hash-bucket, category) partition, ~8.4M tokens per tier, and nothing in the training path reads the
+field. The correct shape is `validation.py:846` / `quick_validation.py:718`.
+
+**3. Bundling + receipts + resumability — 3–4 days. NOW THE LONGEST REMAINING ITEM.**
+~420 Batch array children. Reuse `ingest_reservoir`'s `_shard_slice` striding, `_assert_safe_key`,
+`_assert_lifecycle_covers`, and the `_cmd_merge` refuses-incomplete pattern. Resumability is at
+**bundle** granularity — you cannot skip shard *k* of a stream without re-reading the documents that
+produced it. From the survey: check *outputs* not just the commit marker (`task_runtime.py:42-48` — a
+worker that commits then dies leaves missing shards that every later run declares done).
+
+🛑 **THREE OBLIGATIONS THE DRIVER MUST DISCHARGE.** Each is deliberately left to the driver by a
+library that could not decide it correctly, so each is a silent failure if forgotten:
+
+1. **Set `TOKENIZERS_PARALLELISM` explicitly.** Not set by the library on purpose: a library module
+   setting it mutates every importer including the validator, and `"false"` is the *wrong* value for
+   the tokenize driver — it kills the rayon parallelism that makes a 255B-token run affordable. It is
+   only needed as `"false"` in a process that forks *after* encoding. `corpus_pack` warns once and
+   names both values. `week1_corpus` never sets it anywhere while forking workers via
+   `multiprocessing`, which is how this became a known trap.
+2. **Thread the domain slug map from the counting pass into the reader.** It is a reader ARGUMENT,
+   not a `CorpusSpec` field, because a streaming pass cannot know the top-20 values. Forget it and
+   you commit one permanent directory per distinct upstream value — 73 for `stackv2-edu`, ~180 for
+   StackExchange — inside `manifest_sha256`, where it cannot be fixed without a full re-copy.
+3. **Stage `families/` where the job can read it, or the pack refuses to start.** That refusal is
+   the correct behaviour and is the reverse of Gate A's: verified by execution that
+   `_family_decode_bounds()` returns `(0.05, 256, 256)` from a checkout and raises `BuildError` when
+   the directory is unresolvable. Degrading to the profile's laxer 0.5 EOS would make the packer
+   report every shard clean while writing shards Gate A rejects — `CLAUDE.md` gotcha 2 inverted.
+
+**4. Dedup + decontamination — the decontamination half is ANSWERED.**
+Exact content-hash dedup (Bloom, ~$3) still delivers the entire measured quality gain.
+
+✅ **The bundle is reusable and authentic, and is now backed up.** Recomputed its sha256 —
+`04aa8fe5…50bfd7` — and it equals the `index.sha256` its manifest claims; the header parses
+(`W1DCI001`, ngram 13, min_hits 2) and `32 + 149777*32 + 3097372*16 == 54,350,848` exactly matches the
+file size. Contents: 9 OE-eval families, MMLU all 57 subjects × {dev,validation,test} with the real
+5-shot template, GSM8K. Reader is `week1_corpus/decontamination.py`, 125 lines, one dependency.
+
+⚠️ **It was on the laptop ONLY** — `datamix1-jul22/validation/audits/` holds the *manifest describing*
+the `.bin`, not the `.bin`. Now at **`s3://edullm-landing/_dist/eval-decontamination.bin`**, chosen
+because `_dist/` carries **no expiry rule** while `_ingest/` expires at 30 d. Two limits: matching is
+word-level 13-gram and casefolded, so it does **nothing** for rephrased text (the FinePhrase half is
+unchanged), and it holds ~250 MB resident — budget it on Batch.
 
 **5. Publish (§5.6 phase 2) on Batch, in-region.** `publish()` GETs every byte to hash it;
 `hash_workers`/`copy_workers=16`, timeout 7200. ⚠️ Auto-promotion is currently **disabled** — the

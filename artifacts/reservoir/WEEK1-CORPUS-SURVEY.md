@@ -38,8 +38,23 @@ reachable by a packer that drops an arbitrary remainder per partition.
 | `validation.py:846` `pack_category_globally` | Computes the exact aligned size up front (`packed_tokens = token_plus_eos - token_plus_eos % sequence_length`), then splits mid-document: `count = min(len(values), packed_tokens - cursor)` (`:888`). One bounded remainder for the whole category, not one per partition. |
 | `quick_validation.py:718` `_pack_category` | Pre-allocates the exact size, truncates mid-document, records per-document `boundary_truncated` provenance (`:756`), and **hard-fails if `cursor != quota`** (`:759-760`). |
 
-That last assertion is the runtime counterpart to a token-conservation test. `corpus_pack.py`
-implements this shape.
+⚠️ **BUT DO NOT COPY THE FIRST ONE LITERALLY — it cannot stream, and an earlier version of this
+section recommended it without noticing.** `token_plus_eos = sum(len(item.tokens) + 1 for item in
+ordered)` (`validation.py:864`) sums over a materialized list, so computing the aligned size up front
+requires holding every document of a category in memory. At 255B tokens that is not available, and
+adopting the shape as written would have forced a full pre-pass over the corpus before a single shard
+could be written.
+
+`corpus_pack.py` streams instead and truncates at exhaustion. **Verified equivalent, not assumed:**
+across 5 randomized trials the streaming packer's `tokens_out` equalled
+`total - (total % SEQ_LEN)` — what the materializing algorithm would have produced — in every case.
+So the pre-pass buys nothing except the memory it costs.
+
+What *is* worth taking is `quick_validation.py`'s `cursor != quota → raise`. `corpus_pack.py`
+generalises it into the conservation identity `tokens_in == tokens_out + tail_dropped +
+surplus_dropped`, which is strictly stronger: it also accounts for the tail and the surplus rather
+than only detecting a shortfall. It is asserted at runtime in `PackResult.__post_init__`, not only in
+tests, and it caught a real double-counting bug on its first run.
 
 ## 🛑 Correction 2: the S3 backend is neither complete nor exercised
 
