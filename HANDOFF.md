@@ -23,17 +23,35 @@ because most of it is already built. The published 150B and 127B corpora are unt
 >
 > Everything below about the ingest being blocked is HISTORY. It is not blocked.
 >
-> ## 🎯 THE DECISION OF RECORD (owner, 2026-08-01)
+> ## 🎯 THE DECISION OF RECORD — **FULL PIPELINE** (owner, reconfirmed 2026-08-01)
 >
-> **Build the FULL PIPELINE. Not the merge, not the hybrid. MinHash is DEFERRED.**
+> **Build the corpus from documents, per `DATASET-DESIGN-reservoir.md`. MinHash DEFERRED.**
 >
-> The owner considered and declined: publishing the existing `datamix1-jul22`, merging the two
-> published corpora (283.7B / 12 sources, ~4h), and a hybrid that tokenizes only the 3 missing
-> categories. **Do not re-propose these** — they were evaluated in detail and rejected in favour of
-> a corpus the team designs. The analysis is preserved under "Key Decisions" because the numbers are
-> still useful, not because the choice is open.
+> Reconfirmed against all five options after each was costed. **Do not re-propose A–D**; they were
+> evaluated in detail and declined in favour of a corpus the team designs. Numbers kept because they
+> are useful context, not because the choice is open:
 >
-> **Estimate: 2–3 weeks.** MinHash adds 1–2 more and is deferred on §4.1's own evidence.
+> | | option | cost | why declined |
+> |---|---|---|---|
+> | A | publish `datamix1-jul22` as-is | hours | 20B total — one run consumes all of it, so no reservoir and nothing to re-weight |
+> | B | merge `olmo-150b-dolma2` + `olmo-127b` | ~4 h Batch | 283.7B / 12 sources, verified mergeable (same tokenizer, byte-identical `manifest_sha256`, 7,392/7,392 distinct digests). Missing edu-web, QA/forum, synthetic outright |
+> | C | B + tokenize the 3 missing categories | 2–3 d | 76.4B to build, 169 GB fetch, 6–11 h compute. All 15 sources, but the mix is AI2's for the copied 250B |
+> | D | re-cut AI2's `s3://ai2-llm-public` shards | 1–2 wk | Skips fetching/tokenizing 3.45 TB but still needs packer + sharder + val carve, still needs FinePhrase tokenized, and adopts AI2's topic/quality slicing as the category structure |
+> | **E** | **full pipeline from documents** | **2–3 wk** | **CHOSEN** |
+>
+> **Why E despite D being cheaper:** the reservoir exists so the team controls the mix. D's saving is
+> real but narrower than it first looks — the ingest is now 1–3 hours (not 2–4 weeks), so the
+> remaining cost is writing the packer/sharder either way, and D additionally inherits a category
+> structure nobody here chose. The build is code-bound, not byte-bound.
+>
+> **MinHash deferred on §4.1's own evidence**, not to trim scope: DCLM measured Bloom-filter-alone at
+> **+1.6 CORE, equal to the full Exact+MinHash+SuffixArray stack**, and FineWeb found the *removed*
+> data scored better than the kept. It is annotate-only, so it lands later as
+> `_dedup/clusters.parquet` — a control file outside the hash chain, no rebuild. Adds 1–2 weeks.
+>
+> **AI2's store is still worth reading** even under E: `s3://ai2-llm-public` is anonymously listable,
+> pre-tokenized with `allenai/dolma2-tokenizer`, and its `.csv.gz` sidecars carry verified document
+> boundaries. Use it to cross-check our own tokenization, not as a source of shards.
 >
 > ## ⚠️ BRANCH STATE
 >
@@ -300,7 +318,7 @@ GPU budget**, not an IAM grant — see "What is NOT done" and `docs/PLATFORM-INT
 the reservoir must hold ≥3× peak plausible demand per category and let a teammate re-weight sources
 at read time via `build_mixture`.
 
-**Status: the ingest is proven; the corpus-construction pipeline is ~2–3 weeks of work.** Everything
+**Status: the ingest is proven. Option E (full pipeline from documents) is CONFIRMED, and the corpus-construction pipeline is ~2–3 weeks of work.** Everything
 between "documents exist upstream" and "shards exist in S3" is what remains — see "Next Steps".
 The owner has chosen the **full pipeline** over three faster alternatives, with MinHash deferred.
 
@@ -1049,6 +1067,37 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## What Worked
 
+### 2026-08-01 (late) — establishing what the code PERMITS before enumerating options
+
+The decision memo's most valuable output was six *impossibility* findings, each pinned to a line.
+Five of six candidate label encodings cannot work, and an impossible option presented as a live
+choice is worse than no memo — it invites a decision that produces a rejected dataset weeks later.
+Briefing the team to read `validate.py` and `read.py` **first** and enumerate **second** is what
+produced that.
+
+### Orchestrators told to attack a BELIEF, not a task
+
+Every large win today came from pointing an agent at something I was treating as settled: "is the
+rate limit even what I think it is," "does it have to be ingested that way," "is porting the only
+option." Agents pointed at *tasks* mostly confirmed what I already thought. Three beliefs fell:
+the per-IP limit (ours, 70× amplification), the 2–4 week ingest (1–3 hours), and "tokenization was
+never written here" (it exists, with a working S3 backend).
+
+### Reverting a fix to prove its test fails — used five times, caught two decorations
+
+A test that has never failed is not a test. This caught (a) an IAM policy test whose regex required a
+receiver named `s3.` while the real call site used `s3_client.`, so it passed against the very policy
+that had just failed in production, and (b) confirmed the three `RatioOvershoot` tests genuinely fail
+without the warning.
+
+### Reading the artifact instead of the version string
+
+`WHEEL_VERSION` said "stale but equivalent" while a Gate A function existed only in S3, in no commit.
+Diffing the deployed wheel against the tag is what found it. The same habit found that 3 of 5 AI2
+shards have odd token counts — a filename tells you nothing; `size % 4` and a range read do.
+
+### Earlier sessions
+
 ### From the 2026-08-01 session
 
 - **Fanning subagents at ASSUMPTIONS, not at tasks.** The three biggest wins all came from telling an
@@ -1169,6 +1218,36 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
   reading `pyproject.toml` both said `families/` shipped. Installing proved it did not.
 
 ## What Didn't Work (and the fix)
+
+### 2026-08-01 (late) — I asserted a mechanism I had not measured, and an agent refuted it
+
+I wrote, in a code comment and a commit message, that resolving **with** a `Range` header signs the
+CDN URL for that range only, so reuse returns `403 invalid range`. **It does not reproduce.** I
+re-tested it myself: reuse for a *different* range returns **206**, and the decoded CloudFront policy
+contains only `Resource` and `DateLessThan` — there is no range condition that could bind. I inferred
+a mechanism from a single 403 and stated it as measured.
+
+The resolve-once fix stands on its own arithmetic (70 metered requests → 1). Only my *reason* for the
+no-`Range` rule was fiction. The real traps are the 3600 s expiry (which `huggingface_hub` misreports
+as a token error and never retries) and `HfFileSystem._fetch_range` re-resolving per 5 MiB block.
+
+### The estimate moved 6–10 wk → 1.5–3 → 2–3, always downward
+
+Every revision came from finding something already built, never from building it. I described
+tokenization as "never written" while a sibling checkout had it working *with a complete S3 backend*,
+and I estimated a 2–4 day port of code whose abstraction seam already existed. **Inventory what
+exists before estimating what is missing.**
+
+### A doc sweep found claims that would have caused real errors
+
+Not cosmetic staleness: `PLATFORM-INTEGRATION.md` told another team "the validator re-hashes every
+file" — the exact overclaim `CLAUDE.md` forbids, and another team was building on a false integrity
+guarantee. `RUN-THE-INGEST`'s exit-139 row named a fix its own sibling document records as refuted.
+Install pins said `@v0.2.0` in both auto-loading `SKILL.md` files, so every agent launching in this
+repo installed a pre-Gate-A-fix build. And `INGEST-CALIBRATION`'s "2.25 worker-seconds/file" was 16×
+wrong, making its own recommendation self-refuting.
+
+### Earlier sessions
 
 ### From the 2026-08-01 session — four wrong diagnoses of one bug
 
@@ -1364,6 +1443,63 @@ Other misses this session:
   are allowed; only the merge is gated.
 
 ## Key Decisions
+
+### 2026-08-01 (late) — the three irreversible label decisions, SETTLED and SHIPPED (`6eff578`)
+
+Owner approved all three. Each was gated on establishing what the code *permits*, not what sounds
+reasonable — five of six candidate encodings turned out to be mechanically impossible.
+
+**A. Labels stay NAME-LEVEL: `source` + `domain`, nothing else.** There is no third slot. Verified
+line by line: a third `entry.labels` key fails `declared != expected` (**full dict** equality,
+`validate.py:800`); a third path level raises in `labels_from_path`; a new per-entry field hits a
+closed key set; a label-glob `partitions[]` entry is an unconditional `empty-split` unless its name is
+in `SPLITS`; and `labels_from_path(keys=…)` has **no production caller**, so the validator recomputes
+with the default and rejects anything else. `_licenses/sources.parquet` is allowlisted and useful, but
+`read.py` never opens it — it informs a human, it cannot drive a call.
+
+So `share_alike` and `synthetic` are facts about a **source name** or they do not exist. Two fixes
+shipped: `manifest.py`'s docstring told producers to use `keys=` for exactly this (producing a
+REJECTED dataset — a live trap), and the raise message now says *flatten into `source`* where someone
+actually meets the problem.
+
+**B. SUFFIX, not prefix — and a new warning that matters more than the naming.** `MixtureSource.name`
+sorts its labels, and `domain` < `source`, so a domained synthetic source renders
+`domain=science,source=synthetic-…` and every `startswith("source=synthetic-")` check silently misses
+it. Measured: a **25% undercount** on a cap. `-synthetic` is immune because `source` sorts last.
+
+The larger defect found underneath it: **`ratio` is a TARGET, not a cap.** `want = int(total * ratio)`
+is per-component but `actual_ratios` divides by what everyone *actually* got, so a starved component
+shrinks the denominator and inflates every other share without bound. Requesting 0.30 measured
+**0.3333 / 0.4000 / 0.9375**, and in two of those `shortfall` was **empty** — it names the component
+that came up short and cannot name the ones that came up long. Shipped `RatioOvershoot` +
+`_warn_ratio_overshoot` (5pp tolerance, above whole-shard granularity which §2.2 makes deliberate).
+It fires on the **pre-existing** fixtures at 50% requested / 62.5% delivered — a real silent overshoot
+that had been in the suite all along. Fatal in one line via `simplefilter`.
+
+**C. ACCEPT the FineWeb-Edu / FinePhrase overlap (option C4).** The previously-approved anti-join was
+**set-theoretically identical to deleting `fineweb-edu`**: FinePhrase's parent is `sample-350BT`,
+`sample-100BT` is a subset, the four formats' union covers essentially the whole id space — so it drops
+**97,270,686 of 97,270,686** documents, **100.24B tokens, 38.4% of edu-web**. The design justified it
+using edu-web's size *before* that deletion, and never stated which config it runs against (§3.2 says
+`sample-100BT`; `sample-350BT` appears nowhere in the doc).
+
+Accepted because the numbers are unambiguous: **0.048 exposures** at default weights — 2,067× under
+§4.1's own threshold, 723× under the scale-adjusted Hernandez band, P(both forms in one run) **≈1 in
+1,800**. And that threshold measures *exact* repeats; the paraphrase literature ships co-presence
+deliberately (REWIRE measures 18.3% as beneficial, ~10× our rate). **"100% sibling rate" is a property
+of the POOL, not of any RUN.** If separation is ever wanted, **C1 dominates C3**: filter the synthetic
+side instead — same Bloom filter, keeps the 100.24B, keeps the best-measured edu-web blend, and makes
+the anti-join unnecessary by construction. Also recorded: the "free Bloom filter" claim is false (step 0
+precedes step 2, and they key `id` vs text hash).
+
+### 2026-08-01 — FULL PIPELINE confirmed against all five costed options
+
+See the decision banner at the top for the table. The short version: the ingest collapsing from 2–4
+weeks to 1–3 hours is what made E affordable, and it also shrank D's advantage — the build is
+code-bound, not byte-bound, so the packer and sharder get written either way. A/B/C/D are declined,
+not open.
+
+### Earlier sessions
 
 ### From the 2026-08-01 session
 
