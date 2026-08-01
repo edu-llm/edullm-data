@@ -100,8 +100,10 @@ Training runs are launched through `.github/workflows/submit-run.yml` — a `wor
 form → the compile job → an environment approval gate → admission (Step Functions) → AWS Batch.
 That path works; four GPU runs have gone down it.
 
-The eduLLM datasets live at `s3://edullm-data/<family>/<name>/<version>/`. Two are published
-today, both frozen and validator-sealed:
+The eduLLM datasets live at `s3://edullm-data/<family>/<name>/<version>/`. ~~Two are published
+today~~ — **ten are, as of 2026-08-01** (`aws s3 ls s3://edullm-data/_catalog/ --recursive`), all
+frozen and validator-sealed; six of them are registered on the platform side in
+`config/datasets.yaml`. The two named below are the two this document was written around:
 
 ```
 s3://edullm-data/pretrain/olmo-150b-dolma2/v1/     157.467B tokens, 6,911 shards, 629,868,811,532 B

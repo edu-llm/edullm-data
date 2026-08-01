@@ -35,13 +35,29 @@ r.numpy_dtype  # "<u4"      -> little-endian is explicit; np.dtype("uint32") is 
 r.train, r.val # 6,851 and 60 shards, disjoint
 ```
 
+⚠️ **"Two datasets" is stale — there are TEN as of 2026-08-01.** Verified live by
+`aws s3 ls s3://edullm-data/_catalog/ --recursive`:
+
+```
+pretrain/lean4-mathlib-bytes/v3      pretrain/olmo-original-30b/v1    tokenizer/bytes-utf8/v1
+pretrain/math-memory-full/v1         pretrain/refhq-regmix-5p5b/v2    tokenizer/dolma2-bpe/v1
+pretrain/olmo-127b/v1                pretrain/regmix-10b/v1           vendor/openai-prm800k/v1
+pretrain/olmo-150b-dolma2/v1
+```
+
+`_catalog/` is the authoritative list; never this file. `pretrain/regmix-10b/v1` is the one a real
+training run has read end to end (see `HANDOFF.md`). The object/byte totals quoted above cover only
+the two originally-listed datasets and are correspondingly low.
+
 An earlier corpus, `pretrain/olmo-mix-1124-31b/v1` (31.3B tokens, 218 shards), was deleted on
 2026-07-29: it had no `val` split and, being frozen, could not gain one, so under
 validation-required-by-default it failed permanently. Its bytes remain recoverable two ways — a
 byte-identical legacy copy at `s3://edullm-datasets/olmo30b/` (218 `.npy` shards,
 125,336,003,336 bytes) and 342 noncurrent versions in the bucket itself.
 
-Publishing a replacement corpus is the open work. See `HANDOFF.md`.
+~~Publishing a replacement corpus is the open work.~~ Replacements were published (see the ten-dataset
+list above) and one has been consumed by a real training run. The open work is now
+`pretrain/reservoir-dolma2`. See `HANDOFF.md`.
 
 ## Install
 
@@ -141,14 +157,16 @@ edullm-data/                    ← git root
 | 7 | `dataset_paths()` reader | done |
 | 8 | seven `family.json` files (`contracts.FAMILIES`) | done |
 | 9 | event wiring (EventBridge on landing → Batch queue) | **done — deployed live.** ⚠️ `edullm-landing-manifest-created` is **DISABLED** as of 2026-08-01, so auto-promotion is off; submit the validator job manually or re-enable the rule |
-| 10 | S3 Inventory on `edullm-data` | **done — deployed live** |
-| 11 | `wu-fsck` (Gate B), weekly, owner **Eric Wu** | done (code); re-scheduling TODO |
-| 12 | generate the agent skill from the profile registry | todo |
+| 10 | S3 Inventory on `edullm-data` | **done — deployed live** (`edullm-data-weekly`, Enabled, Weekly — verified 2026-08-01) |
+| 11 | `wu-fsck` (Gate B), weekly, owner **Eric Wu** | **done — code AND schedule.** ~~re-scheduling TODO~~: the live rule is ENABLED at `cron(6 9 ? * MON *)`, i.e. Mondays (verified 2026-08-01). Only its *name*, `edullm-wu-fsck-nightly`, is still wrong |
+| 12 | generate the agent skill from the profile registry | partly — `.claude/skills/edullm-datasets/` and `edullm-dataset-design/` exist; whether they are *generated from the registry* rather than hand-written is the open part |
 
-**One packaging step remains before the validator runs in-cluster** (`infra/05-validator-jobdef.md`):
-the container needs the package, which requires either a Docker host + ECR push, or a git remote to
-`pip install` from — neither available from the build workstation. The wheel builds cleanly; two deploy
-paths are documented. The airlock itself is proven end-to-end (live promotion test).
+~~**One packaging step remains before the validator runs in-cluster**~~ — **DONE (2026-08-01).** The
+validator has been running in-cluster for days and has promoted the ten datasets listed above. The
+stated obstacle was doubly dead: this repo is **public**, so a git remote to `pip install` from
+always existed, and the ECR path was taken anyway — `edullm-validator:10` runs code **baked into a
+digest-pinned image** with no wheel bootstrap at all. `infra/05-validator-jobdef.md` is now history
+rather than instructions. The airlock is proven end-to-end (live promotion test).
 
 `wu-fsck` is named for its owner deliberately — an unowned recurring job gets muted after its first
 false alarm. Ownership transfers by renaming the job, not by editing a config field.
