@@ -64,6 +64,11 @@ wu-fsck = "edullm_data.fsck:main"
 # not part of the publishing library: it writes no manifest, and its IAM role cannot write
 # edullm-data.
 edullm-ingest-reservoir = "edullm_data.ingest_reservoir:main"
+# The §5.6 phase-1 build driver: plan -> run (a Batch array child) -> verify. Same class of tool as
+# the one above and the same reason for declaring it: it announces this prog= in its own --help, so
+# the name is either on the PATH or the build is broken. It writes shards and receipts to
+# edullm-landing only; its role cannot write edullm-data at all.
+edullm-corpus-build = "edullm_data.corpus_build:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/edullm_data"]
