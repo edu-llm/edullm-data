@@ -528,7 +528,9 @@ mcp__sb-aws__aws(account="sbsandbox", command=[
 > and cannot be installed, use `boto3` instead — swap the command body for
 > `import boto3; boto3.client('s3').put_object(Bucket='edullm-data', Key='_smoke/airlock-write-check.txt', Body=b'ok\n')`.
 > This is the same fetch-at-start pattern §1 endorses for the validator itself
-> (`uv pip install "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.2.0"`).
+> (`uv pip install "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.6.3"` — was
+> `@v0.2.0` here until 2026-08-01; the package is at 0.6.3, and the live validator no longer
+> installs a wheel at all, it runs from a digest-pinned image).
 
 Poll it (note the returned `jobId`):
 

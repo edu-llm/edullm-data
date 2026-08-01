@@ -42,10 +42,12 @@ registering a job definition that points at that image.
 The validator must reach the `edullm-data` package inside the container. Two ways, both
 needing something this workstation does not have:
 
-1. **Bake it into an image** (`infra/Dockerfile.validator`) and push to ECR. Needs Docker
-   (not installed here) and `ecr:PutImage` (untested).
-2. **`pip install "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.2.0"`** at
-   container start (the repo is public, so no auth needed).
+1. **Bake it into an image** (`infra/Dockerfile.validator`) and push to ECR. ~~Needs Docker
+   (not installed here) and `ecr:PutImage` (untested).~~ ← **this is what shipped.**
+   `edullm-validator:10` runs from a digest-pinned ECR image with the code baked in.
+2. **`pip install "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.6.3"`** at
+   container start (the repo is public, so no auth needed). Still how `edullm-fsck:6` and
+   `edullm-reservoir-ingest:7` work. (Pin was `@v0.2.0` here until 2026-08-01.)
 
 The wheel itself builds cleanly (`python -m pip wheel . --no-deps` →
 `edullm_data-0.2.0-py3-none-any.whl`, ~115 KB), so nothing about the package blocks this.
