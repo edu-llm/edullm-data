@@ -1585,9 +1585,30 @@ Each is inside `manifest_sha256` or destroyed by tokenization. Getting one wrong
   ours. (Fargate's 14-day ceiling exists but we run on EC2.)
 - ~~**`artifacts/reservoir/INGEST-CALIBRATION.md`** still recommends sizing that the 429 fix
   obsoletes.~~ **DONE.** Measurement kept, recommendations banner-marked obsolete.
-- **STILL OPEN — Deregister three diagnostic job defs**: `edullm-reservoir-diag` (rev 2),
-  `-diag2` (rev 1), `-shim` (rev 1). All confirmed still ACTIVE 2026-08-01. Needs a write call;
-  not done from a read-only session.
+- **DECIDED 2026-08-01 (owner): LEAVE the diagnostic job defs registered.** Four ACTIVE revisions
+  exist in Batch and **nowhere in this repo** — the segfault investigation registered them live, and
+  `register-job-definition` leaves no committed trace, which is why they are recorded here:
+
+  | job def | revs | role |
+  |---|---|---|
+  | `edullm-reservoir-diag` | 1, 2 | `edullm-reservoir-ingest` |
+  | `edullm-reservoir-diag2` | 1 | `edullm-reservoir-ingest` |
+  | `edullm-reservoir-shim` | 1 | `edullm-reservoir-ingest` |
+
+  Verified 2026-08-01: **no running or queued jobs reference any of them**, all four carry the
+  `edullm-reservoir-ingest` role (which cannot write `edullm-data`, so the airlock is unaffected),
+  and an idle job definition costs nothing — it is a stored config, not a reservation.
+
+  Their scratch output is in landing under three sibling prefixes and **self-expires**, because
+  `expire-ingest-30d` covers `_ingest/`: `_diag/` ~28 MB, `_diag2/` ~55 MB, `_shim/` ~110 MB
+  (that one holds both a 4-shard and an 8-shard run), against `_ids/` ~63 MB which is the REAL
+  output. 114 objects / 240.7 MiB total, gone ≈ 2026-08-30 with no action.
+
+  ⚠️ **The reason to keep them until the fix is trusted:** `_diag*`/`_shim` is the raw evidence
+  behind the `pre_buffer=False` A/B. `SEGFAULT-INVESTIGATION.md` records the 3/4-vs-0/4 tally as a
+  conclusion; that data is what would let someone re-derive it. The only real cost of leaving them
+  is confusion — someone listing job defs later sees four undocumented ones beside the live
+  `edullm-reservoir-ingest:7`, which is exactly what this table is for.
 
 ### Cheap, not blocking, do whenever
 - ~~**Scrub `tests/test_publish.py:517`** — real AWS account ID in a Batch ARN, in the concurrent
