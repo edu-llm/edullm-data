@@ -513,3 +513,91 @@ def test_a_token_shard_is_under_the_single_put_limit():
     from edullm_data.s3 import _MULTIPART_COPY_THRESHOLD
 
     assert SHARD_TOKENS * DTYPE_SIZE < _MULTIPART_COPY_THRESHOLD
+
+
+# ---- ControlFileSkipped: skipping is right, silence was not ----
+
+def _tiny_corpus(with_sidecar: bool):
+    import tempfile
+    from pathlib import Path
+
+    import numpy as np
+
+    d = Path(tempfile.mkdtemp())
+    g = d / "tokens"
+    g.mkdir(parents=True)
+    rng = np.random.default_rng(1)
+    for i, split in ((0, "train"), (1, "train"), (2, "val")):
+        (g / f"{split}-{i:05d}.u32le.bin").write_bytes(
+            rng.integers(1, 100278, size=40000, dtype=np.uint32).tobytes()
+        )
+    if with_sidecar:
+        (d / "_dedup").mkdir()
+        (d / "_dedup" / "clusters.parquet").write_bytes(b"PAR1fake-cluster-table")
+    return d
+
+
+def _publish_tiny(s3, d, dsid):
+    from edullm_data import publish as _P
+
+    return _P.publish(
+        d, dataset_id=dsid,
+        purpose="probe whether a staged control-prefix sidecar is reported to the producer",
+        profile="pretrain-tokens/v1", s3=s3, created_at="2026-08-01T00:00:00Z",
+        group_meta={"tokens": {"tokenizer": {
+            "repo_id": "allenai/dolma2-tokenizer", "revision": "abc",
+            "fingerprint_sha256": "c" * 64, "vocab_size": 100278, "eos_token_id": 100257}}},
+        env={"EDULLM_CODE_SHA256": "a" * 64, "EDULLM_PACKAGES_LOCK_SHA256": "b" * 64},
+    )
+
+
+def test_a_staged_sidecar_is_reported_not_silently_dropped():
+    """The §5.6 phase-2b hazard, made visible.
+
+    Verified by execution that without this warning EVERY step reports success: the sidecar never
+    reaches landing, Gate A passes with zero violations, and the promoted key set has no `_dedup/`
+    object. A producer had no way to learn the sidecar did not ship.
+    """
+    import warnings as _w
+
+    from edullm_data import publish as _P
+    from edullm_data.s3 import FakeS3
+
+    s3 = FakeS3()
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        _publish_tiny(s3, _tiny_corpus(True), "pretrain/sidecar-warned")
+    msgs = [str(x.message) for x in caught if x.category is _P.ControlFileSkipped]
+    assert msgs, "a staged control file must be reported"
+    assert "_dedup/clusters.parquet" in msgs[0]
+    assert "IN PLACE" in msgs[0], "the warning must carry the recourse, not just the fact"
+
+
+def test_no_warning_when_the_tree_has_no_control_files():
+    """The common case stays quiet, or the warning trains people to ignore it."""
+    import warnings as _w
+
+    from edullm_data import publish as _P
+    from edullm_data.s3 import FakeS3
+
+    s3 = FakeS3()
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        _publish_tiny(s3, _tiny_corpus(False), "pretrain/sidecar-absent")
+    assert not [x for x in caught if x.category is _P.ControlFileSkipped]
+
+
+def test_the_sidecar_is_still_skipped_and_the_publish_still_passes():
+    """The behaviour is unchanged — this adds a signal, not a policy."""
+    from edullm_data import validate as _V
+    from edullm_data.s3 import FakeS3
+
+    s3 = FakeS3()
+    plan = _publish_tiny(s3, _tiny_corpus(True), "pretrain/sidecar-behaviour")
+    assert not [k for (b, k) in s3._store if b == "edullm-landing" and "_dedup" in k]
+    res = _V.validate_dataset(
+        "edullm-landing", f"pretrain/sidecar-behaviour/{plan.version}", s3,
+        data_bucket="edullm-data")
+    assert res.ok, [str(v) for v in res.violations]
+    _V.promote(res, s3, data_bucket="edullm-data", landing_bucket="edullm-landing")
+    assert not [k for (b, k) in s3._store if b == "edullm-data" and "_dedup" in k]

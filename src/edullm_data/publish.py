@@ -74,6 +74,26 @@ class VersionConflict(PublishError):
     """The reserved version was taken between the read and the create-only write."""
 
 
+class ControlFileSkipped(UserWarning):
+    """A control file was present in the source tree and was NOT staged.
+
+    Skipping is correct — see :func:`_is_control_source`. What was missing is any *signal* that it
+    happened. A producer who builds ``_dedup/clusters.parquet`` into the source tree, runs
+    ``publish()``, then sees a clean Gate A pass and a successful promotion has every reason to
+    believe the sidecar shipped. It did not, and the next discovery is a reader finding nothing,
+    months later.
+
+    Verified by execution: a staged ``_dedup/clusters.parquet`` never reaches landing at all, Gate A
+    passes with **zero** violations, and the promoted key set contains no ``_dedup/`` object. Every
+    step reports success.
+
+    So the warning carries the recourse, not just the fact: sidecars are written **in place under
+    the published prefix, after promotion** — the same route the generated ``README.md`` takes
+    (§5.6 phase 2b). A ``UserWarning`` rather than an error, because the publish is genuinely
+    correct and complete; only the producer's belief about the sidecar is wrong.
+    """
+
+
 @dataclass
 class PublishPlan:
     """What a publish will write, computed before anything hits S3 so a dry run is real."""
@@ -219,13 +239,31 @@ def _stage_local_to_landing(source: Path, s3: S3, landing_bucket: str, staging_p
     ever works with objects already in S3 — payload bytes are never held whole in the
     caller. For anything but a laptop-scale dataset you should stage on Batch, not here;
     this path exists for small local publishes and dev."""
+    skipped: list[str] = []
     for p in sorted(source.rglob("*")):
         if not p.is_file():
             continue
         rel = p.relative_to(source).as_posix()
         if _is_control_source(rel):
+            skipped.append(rel)
             continue
         s3.put_file(landing_bucket, f"{staging_prefix}/{rel}", str(p))
+    if skipped:
+        # Say so ONCE, listing what was skipped. Silence here is what makes the phase-2b hazard
+        # invisible: skipping is right, but every subsequent step reports success, so a producer
+        # has no way to learn the sidecar did not ship.
+        import warnings
+
+        warnings.warn(
+            f"{len(skipped)} control file(s) in the source tree were NOT staged and will NOT be "
+            f"published: {', '.join(sorted(skipped)[:8])}"
+            f"{'…' if len(skipped) > 8 else ''}. This is correct — control files are not manifest "
+            f"entries and are not in the hash chain — but it means they do not arrive by "
+            f"publishing. Write them IN PLACE under the published prefix after promotion, the way "
+            f"the generated README.md is written.",
+            ControlFileSkipped,
+            stacklevel=3,
+        )
 
 
 def _enumerate_s3(s3: S3, bucket: str, prefix: str) -> list[tuple[str, int]]:
@@ -812,4 +850,11 @@ def _put_idempotent(s3: S3, bucket: str, key: str, body: bytes) -> None:
     s3.put(bucket, key, body, content_type=ct)
 
 
-__all__ = ["publish", "build_plan", "PublishPlan", "PublishError", "VersionConflict"]
+__all__ = [
+    "publish",
+    "build_plan",
+    "PublishPlan",
+    "PublishError",
+    "VersionConflict",
+    "ControlFileSkipped",
+]
