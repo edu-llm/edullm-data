@@ -27,10 +27,11 @@ then **built the reader and the packer** — the two stages the plan called the 
 > `s3://edullm-landing/_ingest/reservoir-dolma2/_ids/parts/`.
 > Everything below about the ingest being blocked is HISTORY. It is not blocked.
 >
-> **Phase 1 items 1 and 2 are now DONE**, including the one this file called "most likely to break
-> the estimate." `corpus.py` (contract) + `corpus_read.py` (parquet **and** `.json.gz`) +
-> `corpus_pack.py` (exact 25,001,984-token shards, conservation asserted at runtime).
-> **967 tests passing**, up from 790; ruff clean. Remaining: **~1–2 weeks**, not 2–3.
+> **Phase 1 items 1, 2 and the source registry are now DONE**, including the one this file called
+> "most likely to break the estimate." `corpus.py` (contract) + `corpus_read.py` (parquet **and**
+> `.json.gz`) + `corpus_pack.py` (exact 25,001,984-token shards, conservation asserted at runtime) +
+> `artifacts/reservoir/corpus-registry.json` (17 sources, generated).
+> **974 tests passing**, up from 790; ruff clean. Remaining: **~1–2 weeks**, not 2–3.
 >
 > Also closed: the eval decontamination bundle is **authentic** (recomputed sha256 equals its
 > manifest's claim) and was on the laptop only — now at
@@ -1271,6 +1272,23 @@ shards have odd token counts — a filename tells you nothing; `size % 4` and a 
 
 ## What Didn't Work (and the fix)
 
+### 2026-08-01 (night) — I read a percentage as a fraction of the wrong denominator
+
+Sizing the registry, a no-slack warning fired on `math` and `reference`, and I reached for
+`datamix1-jul22`'s `leakage-summary.json` to estimate what decontamination would cost them. Its
+`category_attrition` block gives `math 0.543`, `code 0.797`. Propagated as pool fractions those say
+math loses 54% of 34.69 B and comes up **18 B short** — a headline finding, and complete fiction.
+
+They are **excluded ÷ candidates within a category.** Math had **3,926 candidate documents**; the
+whole 20 B build excluded **10,239 documents, ≈0.026% of tokens.** I was wrong by four orders of
+magnitude, and the only reason it did not ship is that the number was *too dramatic to believe* — so I
+checked what the denominator was before writing it down.
+
+The general form: a field named like a rate tells you the numerator's units, never the denominator's.
+`provenance_coverage` in the same file gives per-category document counts and settles it in one read.
+Both the script and `CORPUS-REGISTRY.md` now carry the correction, because the next person sizing a
+pool will find that same block and it reads exactly like a pool fraction.
+
 ### 2026-08-01 (night) — I handed an implementer a shape that cannot stream
 
 I told the packer implementer to copy `pack_category_globally`'s shape
@@ -1785,6 +1803,31 @@ and invents tokens the tokenizer never emitted. Worst case 8,191 tokens per stre
 `artifacts/reservoir/WEEK1-CORPUS-SURVEY.md`. `packing.py:68` drops its tail remainder per
 (hash-bucket, category) partition, ~8.4M tokens per tier, and nothing in the training path reads the
 field. The correct shape is `validation.py:846` / `quick_validation.py:718`.
+
+**2b. The source registry — ✅ DONE. `artifacts/reservoir/corpus-registry.json` (+ `CORPUS-REGISTRY.md`).**
+17 corpora, 14 drawn in v1, 3 reserve, 252.6 B target. **Generated** by `build_registry.py`, not
+hand-written, so a card figure cannot sit next to a footer-exact measurement looking identical — edit
+the script, never the JSON. Seven tests assert every row loads into `CorpusSpec`, labels are unique
+and safe, and an `UNVERIFIED` row carries the command that settles it.
+
+`text_column` is verified from real bytes for **9 of 17**; the rest say the literal `"UNVERIFIED"`.
+`revision` is `null` on every row — **pin the shas before the real build** or a re-download can
+silently return different bytes for the same corpus.
+
+⚠️ **Two category pools are reported twice, deliberately.** Summing the rows overstates `academic` by
+20.1 B and `math` by everything that looks like a second source, so the JSON carries
+`naive_sum_pool_tokens` **and** `non_overlapping_pool_tokens` with a `_pool_note`. Both, because the
+naive sum is what a reader recomputes from the rows; substituting the adjusted figure silently would
+make the arithmetic unreproducible.
+
+🛑 **`math` (1.02×) and `reference` (1.01×) have NO SLACK — and decontamination is not the reason.**
+This trap is worth reading before anyone sizes anything from `leakage-summary.json`: its
+`category_attrition` block reads like a pool fraction (`math 0.543`, `code 0.797`) and is actually
+**excluded ÷ candidates within a category**. Math had **3,926 candidate documents**, not 34.69 B
+tokens. Propagating it as a pool fraction says math comes up 18 B short; the truth is the whole 20 B
+build excluded **10,239 documents ≈ 0.026% of tokens** — wrong by four orders of magnitude. What those
+two categories genuinely cannot absorb is a *sourcing* surprise: `reference` was already resized
+14 B → 9 B when `finewiki/en` measured 8.87 B, and QA/forum drops to 1.87 B if share-alike is excluded.
 
 **3. Bundling + receipts + resumability — 3–4 days. NOW THE LONGEST REMAINING ITEM.**
 ~420 Batch array children. Reuse `ingest_reservoir`'s `_shard_slice` striding, `_assert_safe_key`,
