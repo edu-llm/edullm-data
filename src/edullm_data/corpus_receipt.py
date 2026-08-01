@@ -943,13 +943,18 @@ def _check_set_provenance(receipts: Sequence[Receipt]) -> list[Violation]:
             revisions.setdefault(pin.key, {}).setdefault(pin.revision, []).append(r.bundle_id)
     for key, seen in sorted(revisions.items()):
         if len(seen) > 1:
+            # Name the bundles per revision, not just the count: the actionable question is "which
+            # half do I rebuild", and a bare "2 revisions" makes the reader go and find out.
+            detail = "; ".join(
+                f"{rev or 'unpinned'} -> {sorted(ids)}"
+                for rev, ids in sorted(seen.items(), key=lambda kv: str(kv[0]))
+            )
             v.append(
                 Violation(
                     "bundle-set-source-revision-conflict",
                     f"upstream {key!r} is pinned to {len(seen)} different revisions across bundles "
-                    f"({ {rev: sorted(ids) for rev, ids in sorted(seen.items(), key=lambda kv: str(kv[0]))} }). "
-                    f"Half the corpus was read from a different snapshot than the other half, and "
-                    f"the finished shards carry no trace of which.",
+                    f"({detail}). Half the corpus was read from a different snapshot than the "
+                    f"other half, and the finished shards carry no trace of which.",
                 )
             )
     return v

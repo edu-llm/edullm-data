@@ -717,9 +717,15 @@ def test_one_upstream_pinned_to_two_revisions_is_reported():
     ]
     receipts[1] = Receipt.from_dict(other)
 
-    codes = _codes(verify_bundle_set(receipts, STREAMS))
+    violations = verify_bundle_set(receipts, STREAMS)
 
-    assert "bundle-set-source-revision-conflict" in codes
+    conflicts = [v for v in violations if v.code == "bundle-set-source-revision-conflict"]
+    assert len(conflicts) == 1
+    # The message must name WHICH bundles sit on which revision — "2 revisions" alone makes the
+    # reader go and find out which half to rebuild.
+    assert receipts[0].bundle_id in conflicts[0].message
+    assert receipts[1].bundle_id in conflicts[0].message
+    assert DCLM_SHA in conflicts[0].message
 
 
 def test_two_bundles_claiming_one_key_are_reported():
