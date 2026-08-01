@@ -78,6 +78,74 @@ class PartialLabelCoverage(UserWarning):
     """
 
 
+class RatioOvershoot(UserWarning):
+    """A component got a LARGER share of the mixture than was requested.
+
+    ``ratio`` is a target, not a cap, and that asymmetry is invisible without this warning.
+    ``want = int(total * ratio)`` is computed per component, but ``actual_ratios`` divides by
+    ``grand`` — what every component *actually* got. So when one component is starved (its pool
+    is too small, or a whole-shard step overshot the remainder), the denominator shrinks and
+    every other component's realised share rises. Nothing caps it.
+
+    Measured on real fixtures: requesting ``0.30`` returned realised **0.3333, 0.4000, and
+    0.9375** — and in two of those ``shortfall`` was EMPTY, so the existing signal said nothing
+    was wrong. ``shortfall`` reports the component that came up short; it cannot report the
+    components that consequently came up long.
+
+    This matters most for a share someone is trying to BOUND rather than hit. The reservoir
+    design caps synthetic data at 30% of a run on published evidence (§3.3); without this
+    warning, asking for 30% and silently training on 94% is a normal outcome of the API.
+
+    A WARNING, not an error, and for the same reason as :class:`PartialLabelCoverage`: the
+    result is real data and exactly what the arithmetic produces, so there is something honest
+    to return. What is wrong is the caller's belief about what they asked for.
+    ``warnings.simplefilter("error", RatioOvershoot)`` makes it fatal in one line, which is the
+    right dial for a training entrypoint that treats the synthetic cap as a hard bound.
+    """
+
+
+#: How far a realised share may exceed its requested share before warning. Whole-shard selection
+#: cannot hit a ratio exactly (§2.2 — that is deliberate; sub-shard takes introduce positional
+#: bias), so a small overshoot is the normal, correct behaviour and warning on it would train
+#: people to ignore the warning. 5 percentage points is well above shard granularity for any
+#: component with ~100 shards and well below the 3.3pp-to-64pp overshoots measured above.
+_RATIO_OVERSHOOT_TOLERANCE = 0.05
+
+
+def _warn_ratio_overshoot(
+    actual: dict[str, float],
+    requested: dict[str, float],
+    shortfall: dict[str, int],
+) -> None:
+    """Warn when any component's realised share exceeds its requested share beyond tolerance."""
+    import warnings
+
+    over = {
+        name: (actual[name], requested[name])
+        for name in sorted(requested)
+        if name in actual and actual[name] - requested[name] > _RATIO_OVERSHOOT_TOLERANCE
+    }
+    if not over:
+        return
+    detail = ", ".join(
+        f"{n} requested {r:.1%} but got {a:.1%}" for n, (a, r) in over.items()
+    )
+    cause = (
+        f" Caused by shortfall in {sorted(shortfall)}: a starved component shrinks the "
+        f"denominator, so the others' shares rise."
+        if shortfall
+        else " No component reported a shortfall, so this is whole-shard granularity alone."
+    )
+    warnings.warn(
+        f"mixture ratios overshot the request by more than "
+        f"{_RATIO_OVERSHOOT_TOLERANCE:.0%}: {detail}.{cause} `ratio` is a TARGET, not a cap — "
+        f"if you need a hard upper bound, check ResolvedMixture.actual_ratios yourself, or "
+        f"warnings.simplefilter('error', RatioOvershoot) to make this fatal.",
+        RatioOvershoot,
+        stacklevel=3,
+    )
+
+
 class MixedFormat(ReadError):
     """A group's fixed-width shards do not agree on how to decode them.
 
@@ -972,6 +1040,9 @@ def build_mixture(
             shortfall[src.name] = want - got
 
     grand = sum(counts.values())
+    actual = {k: (v / grand if grand else 0.0) for k, v in counts.items()}
+    requested = {s.name: s.ratio for s in sources}
+    _warn_ratio_overshoot(actual, requested, shortfall)
     return ResolvedMixture(
         dataset_id=dataset_id,
         version=version,
@@ -983,8 +1054,8 @@ def build_mixture(
         unit=unit,
         total=grand,
         counts_by_source=counts,
-        actual_ratios={k: (v / grand if grand else 0.0) for k, v in counts.items()},
-        requested_ratios={s.name: s.ratio for s in sources},
+        actual_ratios=actual,
+        requested_ratios=requested,
         shortfall=shortfall,
     )
 
@@ -1039,6 +1110,7 @@ __all__ = [
     "ResolvedMixture",
     "MixedFormat",
     "PartialLabelCoverage",
+    "RatioOvershoot",
     "SealMismatch",
     "resolve_latest",
     "verify_seal",

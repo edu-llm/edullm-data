@@ -711,6 +711,18 @@ def labels_from_path(rel_path: str, *, keys: Sequence[str] = PATH_LABEL_KEYS) ->
     the extra segment would publish a label that is true but incomplete, and silently
     inventing ``level_3`` would put an unnamed dimension in the hash chain forever — labels
     live inside ``manifest_sha256`` and cannot be corrected without republishing.
+
+    ⚠️ **``keys`` IS NOT A USABLE ESCAPE HATCH, and this docstring used to say it was.** The
+    parameter exists, but **no production caller passes it**: ``publish.py`` and ``validate.py``
+    both call with the default, and Gate A's ``_check_labels_match_path`` recomputes labels with
+    ``PATH_LABEL_KEYS`` and compares by **full dict equality** (``validate.py``, ``declared !=
+    expected``). So a producer who names a third level via ``keys=`` publishes a manifest the
+    validator then rejects as ``labels-contradict-path``. The only ``keys=`` caller in the repo is
+    ``tests/test_labels_from_path.py``.
+
+    **Two levels is the whole budget. A third dimension must be FLATTENED into the ``source``
+    segment** — ``stackexchange-sa``, ``finephrase-faq-synthetic``. That is not a stylistic
+    preference; it is the only encoding the gates accept.
     """
     parts = rel_path.split("/")
     middle = parts[1:-1]  # drop the group segment and the basename
@@ -719,9 +731,12 @@ def labels_from_path(rel_path: str, *, keys: Sequence[str] = PATH_LABEL_KEYS) ->
     if len(middle) > len(keys):
         raise ValueError(
             f"payload key {rel_path!r} nests {len(middle)} levels under its group "
-            f"({'/'.join(middle)}), but only {len(keys)} are named {tuple(keys)!r}. Name the "
-            f"extra level explicitly via labels_from_path(keys=…) rather than shipping an "
-            f"unlabelled dimension — entry.labels is inside manifest_sha256, so a label that "
+            f"({'/'.join(middle)}), but only {len(keys)} are named {tuple(keys)!r}. FLATTEN the "
+            f"extra dimension into the {keys[0]!r} segment (e.g. 'stackexchange-sa', "
+            f"'finephrase-faq-synthetic'). Do NOT reach for labels_from_path(keys=…): no "
+            f"production caller passes it, and Gate A recomputes labels with the default and "
+            f"compares by full dict equality, so a third named level is rejected as "
+            f"labels-contradict-path. entry.labels is inside manifest_sha256, so a label that "
             f"is wrong today cannot be fixed without republishing the payload."
         )
     return {key: seg for key, seg in zip(keys, middle)}

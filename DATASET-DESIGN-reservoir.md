@@ -1549,7 +1549,53 @@ upstream document any of them was.
 
 ---
 
-**4. 🛑 DECIDED 2026-07-31 — PARTITION THE SYNTHETIC `id` SPACE, AND ANTI-JOIN IT AGAINST EDU-WEB.
+**4. ⚠️ SUPERSEDED 2026-08-01 — THE ANTI-JOIN IS SET-THEORETICALLY IDENTICAL TO DELETING
+`fineweb-edu`. THE OWNER'S REVISED DECISION IS TO ACCEPT THE OVERLAP AND DOCUMENT IT (option C4);
+IF STRUCTURAL SEPARATION IS EVER WANTED, FILTER THE SYNTHETIC SIDE (C1), NOT EDU-WEB (C3).**
+
+The arithmetic nobody had written down. FinePhrase's parent is `sample-350BT` (its card states the
+input split, 339,347,842 rows); `sample-100BT ⊂ sample-350BT` (also the card: *"sample-10BT was
+sampled from sample-100BT which in turn was sampled from sample-350BT"*); and the four formats'
+union covers essentially the whole id space. So "drop every FinePhrase id from the FineWeb-Edu draw"
+drops **97,270,686 of 97,270,686** documents — **all of `sample-100BT`, 100.24B tokens, 38.4% of the
+edu-web pool.** Note §3.2 names `sample-100BT` and `sample-350BT` appears nowhere in this document,
+so the config the anti-join runs against was never stated.
+
+The justification below reads *"edu-web has 261.3B against a 48B pool, so removing every
+synthetic-source id leaves it far above 3×."* **261.3B is the figure BEFORE the removal it is being
+used to justify.** The conclusion survives (161.1/37.2 = 4.33×) but by luck, not by the argument given.
+
+**Why C4 (accept) is defensible, using this document's own §4.1 arithmetic.** Worst case — a
+`sample-100BT` document rephrased four ways, N=20B, default weights — total exposures are **0.048**;
+at max shares, 0.101. Against §4.1's threshold of 100 that is **2,067×** margin; against the
+correctly scale-adjusted Hernandez band for 1.2B params it is **723×** below even the left edge.
+P(both the real form and any sibling appear in one run) ≈ **1 in 1,800**. And the threshold is
+pointed at the wrong phenomenon: Hernandez studied *exact* repeats and explicitly lists
+near-duplicates as not studied. The paraphrase literature runs the other way — WRAP ships
+real+rephrase 1:1 deliberately, Nemotron-CC concatenates them in one document (+0.9pp), and REWIRE
+measures 18.3% co-presence as *beneficial*, roughly 10× our ~1.8% rate. **"100% sibling rate" is a
+property of the POOL, not of any RUN.**
+
+**If separation is wanted anyway, C1 strictly dominates C3.** Draw synthetic only from the 242.08M
+ids NOT in `sample-100BT` (71.3% of the id space by document count). Same engineering — one Bloom
+filter over the same ids, membership test negated — but edu-web stays at **261.3B** and the
+FineWeb-Edu/FinePDFs blend survives, which is the best-measured edu-web config (0.1541 vs 0.1472 for
+PDF-only). Synthetic drops to 86.18B, still 4.1–7.1× the 15B-per-format target; `table` is the
+binding case at ~93% of its quarter. C1 also makes the anti-join *unnecessary by construction*.
+
+⚠️ **And the "free Bloom filter" claim is false.** Step 0 runs before step 2 by this document's own
+ordering, so step 2's filter does not exist yet — and they key different things: step 0 keys the `id`
+UUID, step 2 keys the document text hash. A rephrasing hashing differently from its source is the
+entire reason step 0 exists. Still cheap (~400 MB for 339M ids), but it is a new pass.
+
+**One second-order effect against C3:** if a benchmark item leaked into a `sample-100BT` document,
+C3 removes that vector from edu-web while leaving all four rephrasings in synthetic, where n-gram
+decontamination cannot see them. C3 marginally *worsens* the contamination picture.
+
+The original text follows, kept because its measurement of the collision is correct and only its
+remedy was wrong.
+
+**4. ~~DECIDED 2026-07-31~~ — PARTITION THE SYNTHETIC `id` SPACE, AND ANTI-JOIN IT AGAINST EDU-WEB.
 This is the one item with a BUILD-TIME deadline, and it is the only §9.7 entry still owed.**
 
 The owner chose **option D** of four. It is not irreversible in the manifest sense — `id` never enters

@@ -284,3 +284,70 @@ def test_ratios_must_sum_to_one_because_a_remainder_would_be_silent():
 def test_source_names_are_stable_and_readable():
     src = MixtureSource({"domain": "Python", "source": "stack-edu"}, 1.0)
     assert src.name == "domain=Python,source=stack-edu"  # sorted, so order-independent
+
+
+# --------------------------------------------------------------------------------------
+# RatioOvershoot — `ratio` is a target, not a cap
+# --------------------------------------------------------------------------------------
+
+
+def test_a_component_that_overshoots_its_requested_share_warns():
+    """THE gap this closes. `want = int(total * ratio)` is per-component, but `actual_ratios`
+    divides by what everyone ACTUALLY got — so a starved component shrinks the denominator and
+    inflates everyone else's realised share, with nothing capping it.
+
+    Measured on real fixtures before this warning existed: requesting 0.30 returned 0.3333,
+    0.4000, and 0.9375, and in two of those `shortfall` was EMPTY. `shortfall` names the component
+    that came up short; it cannot name the ones that consequently came up long.
+    """
+    s3 = FakeS3()
+    ver = _publish_promote(s3)
+    with pytest.warns(R.RatioOvershoot, match="requested"):
+        m = build_mixture(DSID, ver, s3=s3, seed=1, total=100_000, sources=[
+            MixtureSource({"source": "big"}, 0.5), MixtureSource({"source": "tiny"}, 0.5)])
+    # The warning is about a REAL overshoot, not a spurious one.
+    over = [n for n in m.actual_ratios
+            if m.actual_ratios[n] - m.requested_ratios[n] > R._RATIO_OVERSHOOT_TOLERANCE]
+    assert over, m.actual_ratios
+
+
+def test_the_warning_names_the_shortfall_when_there_is_one():
+    """A starved component is the usual CAUSE, so the message should point at it rather than
+    leaving the reader to infer why a share rose."""
+    s3 = FakeS3()
+    ver = _publish_promote(s3)
+    import warnings as _w
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        m = build_mixture(DSID, ver, s3=s3, seed=1, total=10_000_000, sources=[
+            MixtureSource({"source": "big"}, 0.5), MixtureSource({"source": "tiny"}, 0.5)])
+    msgs = [str(x.message) for x in caught if x.category is R.RatioOvershoot]
+    if m.shortfall:
+        assert msgs and "shrinks the denominator" in msgs[0]
+    else:
+        assert msgs and "whole-shard granularity alone" in msgs[0]
+
+
+def test_a_ratio_hit_within_tolerance_does_not_warn():
+    """Whole-shard selection cannot hit a ratio exactly and that is DELIBERATE (§2.2) — warning on
+    normal granularity error would train people to ignore the warning."""
+    s3 = FakeS3()
+    ver = _publish_promote(s3)
+    import warnings as _w
+    with _w.catch_warnings(record=True) as caught:
+        _w.simplefilter("always")
+        build_mixture(DSID, ver, s3=s3, seed=1, total=100_000,
+                      sources=[MixtureSource({"source": "big"}, 1.0)])
+    assert not [x for x in caught if x.category is R.RatioOvershoot]
+
+
+def test_the_warning_can_be_made_fatal_in_one_line():
+    """A training entrypoint treating the synthetic cap as a hard bound needs exactly this."""
+    s3 = FakeS3()
+    ver = _publish_promote(s3)
+    import warnings as _w
+    with _w.catch_warnings():
+        _w.simplefilter("error", R.RatioOvershoot)
+        with pytest.raises(R.RatioOvershoot):
+            build_mixture(DSID, ver, s3=s3, seed=1, total=100_000, sources=[
+                MixtureSource({"source": "big"}, 0.5), MixtureSource({"source": "tiny"}, 0.5)])
