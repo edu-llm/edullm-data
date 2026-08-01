@@ -27,11 +27,16 @@ then **built the reader and the packer** — the two stages the plan called the 
 > `s3://edullm-landing/_ingest/reservoir-dolma2/_ids/parts/`.
 > Everything below about the ingest being blocked is HISTORY. It is not blocked.
 >
-> **Phase 1 items 1, 2 and the source registry are now DONE**, including the one this file called
-> "most likely to break the estimate." `corpus.py` (contract) + `corpus_read.py` (parquet **and**
-> `.json.gz`) + `corpus_pack.py` (exact 25,001,984-token shards, conservation asserted at runtime) +
-> `artifacts/reservoir/corpus-registry.json` (17 sources, generated).
-> **974 tests passing**, up from 790; ruff clean. Remaining: **~1–2 weeks**, not 2–3.
+> **Phase 1 items 1, 2, 3 and the source registry are now DONE**, including the one this file
+> called "most likely to break the estimate." `corpus.py` (contract) + `corpus_read.py` (parquet
+> **and** `.json.gz`) + `corpus_pack.py` (exact 25,001,984-token shards, conservation asserted at
+> runtime) + `corpus_build.py` (plan / run / verify, resume that re-heads every shard) +
+> `corpus_receipt.py` (the only payload re-hash in the pipeline) +
+> `artifacts/reservoir/corpus-registry.json` (17 sources, generated, all revisions pinned).
+> **1,058 tests passing**, up from 790; ruff clean. Remaining: **~3–5 days**, not 2–3 weeks.
+>
+> 🛑 **One decision blocks the build:** DCLM-baseline is `.jsonl.zst` and the reader refuses zstd —
+> 30 B of the 252.6 B target. Add a `zstandard` dependency, or source diverse web elsewhere.
 >
 > Also closed: the eval decontamination bundle is **authentic** (recomputed sha256 equals its
 > manifest's claim) and was on the laptop only — now at
@@ -1272,6 +1277,29 @@ shards have odd token counts — a filename tells you nothing; `size % 4` and a 
 
 ## What Didn't Work (and the fix)
 
+### 2026-08-01 (night) — two subagents died mid-task and one lost everything
+
+Three long-running agents hit the same API stall this session. The difference in outcome was
+entirely whether they had written to disk:
+
+- The registry agent ran 3.5 h, reported *"every text column is now verified from real bytes. Now
+  writing the registry,"* and died. **Nothing was on disk.** All of its verification was lost and I
+  rebuilt the registry from `artifacts/recount/` instead.
+- The build-driver agent died the same way — but after I had told both remaining agents to write
+  skeletons first. It left a 165-line file: full module docstring, the CLI shape, and every body as
+  `NotImplementedError`. **The docstring was the expensive part** (why a plan artifact, why bundle
+  granularity, why `verify` refuses) and it survived, so I implemented the bodies against it rather
+  than re-deriving the design.
+
+The fix is the one `CLAUDE.md` already states — persist continuously — but the specific form matters
+for agents: **write the skeleton with real docstrings before writing any implementation.** A partial
+file on disk is recoverable; a complete file in a context window is not. Composing the whole thing
+and writing at the end is the natural way to work and the one that loses everything.
+
+Also worth knowing for judging agent reports: an agent that says a file is done may be mid-write.
+Twelve tests were failing in a module whose author had reported it green, and it was a race, not a
+defect — waiting for file mtimes to settle before judging resolved it.
+
 ### 2026-08-01 (night) — the registry asserted three things about repos it had never resolved
 
 Pinning the revisions read like bookkeeping — turn `revision: null` into a sha, tick the box. It
@@ -1773,12 +1801,20 @@ not open.
 
 ### THE CURRENT LIST — updated 2026-08-01 (late). Decision of record: FULL PIPELINE, MinHash deferred.
 
-Remaining: **~1–2 weeks**, down from 2–3. Items 1 and 2 are **DONE** — including the item this list
-called "most likely to break the estimate" — and item 4's decontamination half is answered. Compute
-is still ~12 hours and ~$20; the calendar is sequential Batch stages and per-corpus verification.
+Remaining: **~3–5 days**, down from 2–3 weeks. **Items 1, 2, 3 and the registry are DONE** —
+including the one this list called "most likely to break the estimate" — and item 4's
+decontamination half is answered. Compute is still ~12 hours and ~$20.
 
-**Suite 967 passing** (was 790 at the start of the session), ruff clean. New modules:
-`corpus.py` (440), `corpus_read.py` (890), `corpus_pack.py` (809), plus 2,451 lines of tests.
+**Suite 1,058 passing** (was 790 at the start of the session), ruff clean. New modules:
+`corpus.py` (440), `corpus_read.py` (890), `corpus_pack.py` (809), `corpus_build.py` (780),
+`corpus_receipt.py` (1,043), plus ~4,800 lines of tests and a generated 17-source registry.
+
+🛑 **ONE DECISION BLOCKS THE BUILD: DCLM-baseline is `.jsonl.zst` and the reader refuses zstd.**
+That is 30 B of the 252.6 B target, and the plan currently excludes it (222.1 B over 25 bundles).
+Either add a `zstandard` dependency plus a decompression branch — the streaming shape mirrors the
+existing `zlib.decompressobj` path, `eof` check included — or source diverse web elsewhere. Nothing
+downstream is blocked on it; the corpus is just missing its diversity counterweight until it is
+settled.
 
 **1. ~~Per-corpus readers~~ — ✅ DONE. `src/edullm_data/corpus_read.py`, 890 lines, 61 tests.**
 Both paths exist: parquet over the proven `_RangeFile` transport, and the Common Pile `.json.gz`
@@ -1879,31 +1915,49 @@ build excluded **10,239 documents ≈ 0.026% of tokens** — wrong by four order
 two categories genuinely cannot absorb is a *sourcing* surprise: `reference` was already resized
 14 B → 9 B when `finewiki/en` measured 8.87 B, and QA/forum drops to 1.87 B if share-alike is excluded.
 
-**3. Bundling + receipts + resumability — 3–4 days. NOW THE LONGEST REMAINING ITEM.**
-~420 Batch array children. Reuse `ingest_reservoir`'s `_shard_slice` striding, `_assert_safe_key`,
-`_assert_lifecycle_covers`, and the `_cmd_merge` refuses-incomplete pattern. Resumability is at
-**bundle** granularity — you cannot skip shard *k* of a stream without re-reading the documents that
-produced it. From the survey: check *outputs* not just the commit marker (`task_runtime.py:42-48` — a
-worker that commits then dies leaves missing shards that every later run declares done).
+**3. ~~Bundling + receipts + resumability~~ — ✅ DONE.** `corpus_build.py` (780) +
+`corpus_receipt.py` (1,043), 82 tests.
 
-🛑 **THREE OBLIGATIONS THE DRIVER MUST DISCHARGE.** Each is deliberately left to the driver by a
-library that could not decide it correctly, so each is a silent failure if forgotten:
+`edullm-corpus-build {plan,run,verify}`. **Ordinals are allocated ONCE** over the whole plan, never
+by a child. `plan_document` is pure — no clock, no S3 — so `plan_id` is a content address; verified
+byte-identical across regenerations and independent of input order. Against the real registry:
+**25 bundles, 8,884 shards, 222.1 B tokens**, ordinals dense and globally unique.
 
-1. **Set `TOKENIZERS_PARALLELISM` explicitly.** Not set by the library on purpose: a library module
-   setting it mutates every importer including the validator, and `"false"` is the *wrong* value for
-   the tokenize driver — it kills the rayon parallelism that makes a 255B-token run affordable. It is
-   only needed as `"false"` in a process that forks *after* encoding. `corpus_pack` warns once and
-   names both values. `week1_corpus` never sets it anywhere while forking workers via
-   `multiprocessing`, which is how this became a known trap.
-2. **Thread the domain slug map from the counting pass into the reader.** It is a reader ARGUMENT,
-   not a `CorpusSpec` field, because a streaming pass cannot know the top-20 values. Forget it and
-   you commit one permanent directory per distinct upstream value — 73 for `stackv2-edu`, ~180 for
-   StackExchange — inside `manifest_sha256`, where it cannot be fixed without a full re-copy.
-3. **Stage `families/` where the job can read it, or the pack refuses to start.** That refusal is
-   the correct behaviour and is the reverse of Gate A's: verified by execution that
-   `_family_decode_bounds()` returns `(0.05, 256, 256)` from a checkout and raises `BuildError` when
-   the directory is unresolvable. Degrading to the profile's laxer 0.5 EOS would make the packer
-   report every shard clean while writing shards Gate A rejects — `CLAUDE.md` gotcha 2 inverted.
+**Resume re-heads every key and compares SIZES**, not just presence: an interrupted PUT leaves a key
+at the wrong length, and `head` returns the size anyway, so it is strictly stronger for free. Tested
+in four states — intact True, deleted False, **truncated** False, restored True — plus a receipt from
+a different `plan_id` being ignored. The receipt is written only *after* `verify_receipt` passes,
+tested with an S3 that silently drops one object.
+
+**Receipts are the one place this pipeline re-hashes payload.** Cheap tier (always): existence, real
+`ContentLength` vs recorded, `tokens*4 == bytes`, `bytes % (4*8192) == 0`. Deep tier (`--deep`): a
+full GET per shard. Verified that the tiers differ where it matters — corrupting a shard while
+keeping its **length identical** passes every cheap check and is caught only by deep. That is the
+`CLAUDE.md` KNOWN GAP, closed on the build side. `verify` refuses an incomplete set, and catches
+cross-bundle failures a per-receipt check cannot see: duplicate streams, shard path collisions,
+conflicting source revisions between bundles, mixed wheel versions.
+
+**Two findings from wiring it up:**
+
+- 🛑 **`ubuntu-irc` gets NO val split, and the plan records it.** At `VAL_FRACTION` 0.005 the
+  break-even for one whole shard is **5,000,396,800 tokens**; ubuntu-irc's 1.8 B target yields 0.36
+  of a shard, and `shard_plan` correctly refuses a stream it cannot give ordinals to. Its documents
+  all go to train — nothing lost, nothing leaked — but there is no per-source held-out set for it,
+  so a category-level val split must come from its siblings. Everything else clears the bar (pubmed
+  next-lowest at 1.20 shards). Recorded in the plan as `no_val_split` rather than warned about, so
+  the omission is auditable afterwards.
+- **An unreadable source is now a PLAN-time failure**, not a run-time one. Discovering it mid-run
+  means other bundles are already built and paid for. `--allow-unreadable` excludes it deliberately.
+
+**Obligation 1 is now enforced, not documented:** the driver **refuses to start** unless
+`TOKENIZERS_PARALLELISM` is set. Neither default is safe — a library setting it mutates every
+importer including the validator; `"false"` throws away the rayon parallelism that makes a 255B-token
+tokenize affordable; unset in a forking driver is the documented HF deadlock. So the operator chooses.
+
+**Obligations 2 and 3 remain the operator's**, unchanged: thread the domain slug map from the
+counting pass into the reader (a reader ARGUMENT, not a spec field — forget it and you commit ~180
+permanent directories inside `manifest_sha256`), and stage `families/` where the job can read it or
+`corpus_pack` refuses to start rather than degrading to the profile's laxer 0.5 EOS.
 
 **4. Dedup + decontamination — the decontamination half is ANSWERED.**
 Exact content-hash dedup (Bloom, ~$3) still delivers the entire measured quality gain.
