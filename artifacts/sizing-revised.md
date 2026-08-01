@@ -143,10 +143,36 @@ scaled raw one.
 
 ## Done — and what the method cost
 
-**Every category is measured. `needs_streaming_count` is empty across all eight artifacts**, so the
+**Every category is measured.** ~~`needs_streaming_count` is empty across all eight artifacts~~, so the
 Batch streaming job this section used to call for is unnecessary. The parquet-footer / gzip-ISIZE route
 did it from a laptop in metadata-scale traffic: the qa-forum agent moved **1.6 GB against 365 GB of
 text**, and the academic agent 7.1 MB of footers for three corpora.
+
+❌ **CORRECTION 2026-08-01 — `needs_streaming_count` is NOT empty. It is empty in 3 of 8.** Measured
+by loading each artifact and taking `len()`:
+
+| artifact | `needs_streaming_count` |
+|---|---|
+| `academic.json`, `code.json`, `synthetic.json` | **0** — genuinely clear |
+| `qa-forum.json` | **2** |
+| `edu-web.json` | **3** |
+| `math.json` | **5** |
+| `web.json` | **5** |
+| `reference.json` | **8** |
+
+(`edu-web-essential-web.json` carries the key as a bare `true` rather than a list — a schema
+inconsistency worth knowing if you script over these.)
+
+The category *totals* are measured, which is what "every category is measured" was reaching for, and
+that half stands. But the residual items are not cosmetic. `math.json`'s entry 4 is flagged
+**"priority: HIGHEST — it is the 1.31B gap to the 36B pool"**: the one open measurement that decides
+whether the math pool clears its floor. Two others are structural rather than merely skipped —
+`algebraic-stack`'s canonical repo has **no viewer at all** (HTTP 501, loading-script dataset), so it
+can never be counted that way, and `swallow-math-v2`'s viewer converted only 2.63 M of ~17.4 M rows.
+
+**The same false claim is repeated at `DATASET-DESIGN-reservoir.md:1620-1621`**, which cites this
+line as its authority. Do not treat "all eight clear" as settled without reading the five non-empty
+lists.
 
 That is the durable lesson from Phase 0c. Phase 0 stalled because it used datasets-server, whose quota
 is **per-IP, not per-account** — so parallel agents starve each other and the failures look exactly like

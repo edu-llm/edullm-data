@@ -17,9 +17,17 @@ it is a check.
 ## Adding a profile
 
 Adding a profile is the **expected** path when nothing fits — not an exception to request permission
-for. The registry is expected to keep growing. Reach for `experimental/v1` only when you must ship
+for. The registry is expected to keep growing. ~~Reach for `experimental/v1` only when you must ship
 *today* and the shape isn't known yet; it's capped at 2 live datasets per family, so it isn't meant to
-be where a recurring shape lives.
+be where a recurring shape lives.~~
+
+⚠️ **`experimental/v1` DOES NOT EXIST (verified 2026-08-01).** It is a decision
+(`docs/DECISIONS.md` "experimental capped by quota") that was never implemented: grep finds no
+`experimental` anywhere in `src/` or `families/`, and there is no quota mechanism of any kind.
+`registry.available()` ships six profiles: `pretrain-tokens/v1`, `eval-results/v1`,
+`token-order/v1`, `sft-conversations/v1`, `tokenizer/v1`, `vendored/v1`. Publishing into
+`experimental/v1` raises `ProfileError`. **Add a real profile instead** — that is what the rest of
+this document tells you how to do, and it is now the only path.
 
 A profile is four small things:
 

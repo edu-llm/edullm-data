@@ -107,7 +107,8 @@ artifacts/public/
 
 ### Naming rules (the user manually reviews names — get them right)
 
-`<family>/<name>` where family ∈ `pretrain curriculum sft eval probe vendor`, and name is
+`<family>/<name>` where family ∈ `pretrain curriculum sft eval probe vendor tokenizer` (seven —
+`contracts.FAMILIES`; `tokenizer` was missing from this list until 2026-08-01), and name is
 kebab-case, 2–5 words, no dates, no version tokens, no person names, no relative words. State
 **what it is + the axis that distinguishes it from siblings**. See the skill or §2 of the spec
 for the full good/bad tables. Quick examples: `pretrain/dolma2-150b`, `curriculum/flesch-linear-370m`,
@@ -172,13 +173,24 @@ from edullm_data.read import dataset_paths, resolve_latest
 from edullm_data.s3 import Boto3S3
 
 s3 = Boto3S3.default()
-version = resolve_latest("pretrain/dolma2-150b", s3=s3)            # -> "v3"
-r = dataset_paths("pretrain/dolma2-150b", version, split="train", s3=s3)
+version = resolve_latest("pretrain/olmo-150b-dolma2", s3=s3)       # -> "v1"
+r = dataset_paths("pretrain/olmo-150b-dolma2", version, split="train", s3=s3)
 
-# r.paths : list of s3:// URIs
-# r.dtype : "uint32"  ← feed to your loader; do not let it default to uint16
-# r.rows  : declared token/row count for the split
+# r.paths       : list of s3:// URIs
+# r.numpy_dtype : "<u4"  ← FEED THIS ONE to your loader
+# r.dtype       : "uint32" — the declared name; np.dtype("uint32") is HOST byte order
+# r.rows        : declared token/row count for the split
 ```
+
+⚠️ **Pass `r.numpy_dtype`, not `r.dtype`** (corrected 2026-08-01). `r.dtype` is the declared type
+*name*; `np.dtype("uint32")` resolves to host byte order, which silently misreads the shards on a
+big-endian host. `r.numpy_dtype` carries the explicit little-endian `<u4`. See
+`docs/CONSUMER-CONTRACT.md` §3. And do not let the loader default to uint16: OLMo-core's dataset
+classes default to `np.uint16` in eight places, and reading uint32 shards as uint16 does not raise
+— it silently **doubles** the element count and yields garbage tokens.
+
+~~`resolve_latest("pretrain/dolma2-150b") -> "v3"`~~ — that dataset id and version never existed;
+the live corpus is `pretrain/olmo-150b-dolma2` at **v1**.
 
 `dataset_paths` refuses a dataset with no `_VALIDATED.json` — unvalidated data is not readable.
 
@@ -280,5 +292,8 @@ that *recompute* something, and two fixtures (one passing, one deliberately brok
 
 - One region: **us-east-1**. Keep compute there.
 - `edullm-data` is versioned + deny-delete; deletions need the break-glass role.
-- Weekly S3 Inventory + nightly `wu-fsck` (owner: **Eric Wu**) catch post-publish decay.
+- Weekly S3 Inventory + **weekly** `wu-fsck` (owner: **Eric Wu**) catch post-publish decay.
+  (~~nightly~~ — corrected 2026-08-01: `fsck.py:8` says "**WEEKLY, not nightly**", and the live
+  rule `edullm-wu-fsck-nightly` is `cron(6 9 ? * MON *)`, i.e. Mondays. The rule's *name* is stale,
+  not its schedule.)
 - **No PII in scope.** If you are handling personal data, stop — this standard doesn't cover it.

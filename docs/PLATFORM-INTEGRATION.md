@@ -769,10 +769,23 @@ re-verifying:
 - **Nothing unvalidated is in the bucket.** Producers write only to `s3://edullm-landing`; a
   validator role that no human session can assume is the only principal that can `PutObject` to
   `s3://edullm-data`. That is an IAM Deny, not a convention.
-- **Every claimed number was recomputed from the bytes.** The validator re-hashes every file
-  against the manifest, both directions — no missing files, no stray unlisted ones — and derives
-  token counts from file sizes rather than believing a field. This exists because an
-  `inventory.json` once claimed 98 files / 172 GB in a folder holding 10 files / 31 GB.
+- **Every claimed number was recomputed from the bytes** — but be precise about which bytes.
+  ❌ **CORRECTED 2026-08-01.** This bullet used to say *"The validator re-hashes every file against
+  the manifest, both directions."* **It does not re-hash payload bytes, and no gate does.** What
+  Gate A actually recomputes per entry (`validate.py:393-421`) is: a `s3.head` for the real
+  **size** vs the declared `bytes` (`head-size-mismatch`), the count arithmetic
+  (`tokens × dtype_size == bytes`), the extension against the declared format, and set-membership
+  of the *declared* digest to catch duplicates. `s3.hash_object` has exactly one non-definition
+  caller — `publish.py:333`, the **producer**. `fsck.py:32` says it outright: "LIST and HEAD,
+  never a payload byte."
+
+  So a manifest `sha256` is a **producer assertion that no gate falsifies**. The "both directions"
+  part is true and worth relying on, but it is about **path-set equality** — no missing files, no
+  stray unlisted ones (`missing-object` / `unlisted-object`, `validate.py:434-441`) — not about
+  hashes. What defends integrity instead: the airlock's IAM Deny, S3 durability and versioning,
+  and CRC64NVME on every object. Token counts *are* derived from real file sizes rather than a
+  believed field. This all exists because an `inventory.json` once claimed 98 files / 172 GB in a
+  folder holding 10 files / 31 GB.
 - **`tokens × dtype_size == file bytes`, exactly**, and the extension matches the real bytes.
   Token shards are `.u32le.bin`, never `.npy`. Legacy `.npy` files in the old bucket were
   headerless raw uint32 — the extension lied, and reading them as `.npy` silently corrupted

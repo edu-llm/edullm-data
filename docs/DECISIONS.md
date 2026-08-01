@@ -162,3 +162,14 @@ two datasets blocking it, with no meeting to schedule and no discretion to route
 pressure.
 
 **Rejected:** Require sign-off from an approver before publishing an `experimental` dataset.
+
+⚠️ **STATUS 2026-08-01 — DECIDED BUT NOT IMPLEMENTED. Do not read this entry as describing
+behaviour that exists.** Verified by grep: `experimental` appears **nowhere** in `src/` or
+`families/`. There is no quota counter, no per-family live-dataset count, and no error that "names
+the two datasets blocking it." `registry.available()` ships six profiles — `pretrain-tokens/v1`,
+`eval-results/v1`, `token-order/v1`, `sft-conversations/v1`, `tokenizer/v1`, `vendored/v1` — and
+`experimental/v1` is not among them. Publishing into it today raises `ProfileError` (unregistered
+profile), which is a refusal but *not* the designed one: it fails for the wrong reason and gives
+the wrong message, and it would keep failing after a second dataset just as it does before the
+first. `docs/DESIGN-A-DATASET.md:180-181` already flags this; `CONTRIBUTING.md` repeats the claim.
+The decision stands as a decision — this note records that the mechanism is unbuilt.

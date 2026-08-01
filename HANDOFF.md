@@ -794,8 +794,10 @@ Do not relitigate these; they were decided. Do not act on them without re-asking
    source.** Reason: a group is a unit of **validation**, not of selection. Six sources with identical
    checks and one tokenizer pay six manifests and buy nothing — and six groups **permanently loses the
    24 domain labels**, which `entry.labels` (schema v2) is exactly the right carrier for.
-   Carrying `labels` on manifest entries needs `publish()` to populate them; it currently does not
-   (see "What is NOT done"), so that is real work, not a config flag.
+   ~~Carrying `labels` on manifest entries needs `publish()` to populate them; it currently does not
+   (see "What is NOT done"), so that is real work, not a config flag.~~ **DONE — verified in code
+   2026-08-01.** `publish.py:352-353` sets both `split=` and `labels=`, derived from the key itself
+   and recomputed by Gate A from that same key, so neither can drift. Landed in `aa4d509`.
 2. **Slurm/ORCD is OUT OF SCOPE entirely.** Training goes through `edu-llm/platform` → AWS Batch.
    Do not write Slurm submission scripts, sbatch wrappers, or ORCD docs.
 3. ~~**The 31B corpus is EXPECTED to fail `missing-required-split`**, slated for deletion.~~
@@ -830,13 +832,23 @@ Do not relitigate these; they were decided. Do not act on them without re-asking
 
 ## WHAT IS ACTUALLY LEFT — verified against live state 2026-07-30, in priority order
 
-⚠️ **SUPERSEDED for the reservoir work by "Next Steps → THE CURRENT LIST" (2026-07-31).** This section is
-still correct about the *150B corpus and the deployed pipeline*, and items 1–2 below (the platform
-handoff, bucket-policy v2) are genuinely still open. But it predates the reservoir execution session, so
-it says nothing about §9.7 item 4 or Phase 1. Read the newer list first.
+⚠️ **SUPERSEDED for the reservoir work by "Next Steps → THE CURRENT LIST" (2026-07-31).** It predates
+the reservoir execution session, so it says nothing about §9.7 item 4 or Phase 1. Read the newer list
+first.
 
-One item here IS now done: the `edullm-validator` job-def timeout, set to **7200 s** as
-`edullm-validator:7` (revisions 1–6 all had `timeout: null`).
+🛑 **AND SUPERSEDED AGAIN 2026-08-01 — this banner's own claim is now false.** It used to read:
+*"items 1–2 below (the platform handoff, bucket-policy v2) are genuinely still open."* **Both are
+closed**, each verified this session:
+
+- **Item 1, the platform handoff** — the IAM grant, the registry entry, and the image all landed in
+  `edu-llm/platform` / `edu-llm/OLMo-core`, and a training run has read
+  `pretrain/regmix-10b/v1` end to end (Batch job `8fb0cd5c-…`, SUCCEEDED, 150 steps, 3 checkpoints).
+- **Item 2, bucket-policy v2** — live policy is `Id: edullm-data-airlock-v2` with Put and Delete
+  Denies split and nobody exempt from Delete (`s3api get-bucket-policy`).
+
+Item 3 (the validator timeout) was already done: **7200 s**, now on `edullm-validator:10`.
+**Of the five numbered items in this section, only #4 (`sft_conversations_v1` substring matching)
+is still open** — verified still present at `profiles/sft_conversations_v1.py:113`.
 
 Several older "not done" items below were fixed today. These are the ones that survive checking.
 
@@ -869,22 +881,41 @@ has a workaround from our side — the IAM grant is enforced outside the contain
 **What is genuinely still open: a real GPU, which is a budget call, not an engineering one.** The
 proving run used the single provisioned A10G on the `sbsandbox-intern-edullm-gpu` queue.
 
-### 2. Deploy bucket-policy v2 — **now protecting 587 GiB, not an empty bucket**
+### 2. ~~Deploy bucket-policy v2~~ — **DEPLOYED. Verified live 2026-08-01.**
 
-Confirmed live this session: the policy is still `edullm-data-airlock-v1`, a single Deny covering
+`s3api get-bucket-policy --bucket edullm-data` returns **`Id: edullm-data-airlock-v2`** with the
+Put and Delete Denies **split**, exactly as the repo's `infra/02-bucket-policy.json` specifies:
+
+- `OnlyValidatorWrites` — Deny `PutObject`/`PutObjectTagging`/`AbortMultipartUpload`, exempting only
+  the infra-deployer and dataset-validator roles.
+- `NobodyDeletesPublishedData` — Deny `DeleteObject`/`DeleteObjectVersion` with **no principal
+  exemption at all**. This is the whole point of v2: the validator role can no longer delete
+  published data, so widening its identity policy cannot reach the corpus.
+- `AllowS3InventoryDelivery` — the S3 Inventory service carve-out.
+
+`infra/DEPLOY.md:256` already recorded this as deployed 2026-07-31 with four passing probes; the
+three places in this file that still said otherwise were stale. Everything below is the superseded
+text, kept for the risk argument it makes.
+
+~~Confirmed live this session: the policy is still `edullm-data-airlock-v1`, a single Deny covering
 `PutObject` AND `Delete*`, exempting `<BATCH_JOB_ROLE>` and `<INFRA_DEPLOYER_ROLE>` from all five
 actions. So the only thing stopping the validator role from deleting the published corpus is an
 identity policy that `iam:PutRolePolicy` can widen — and the intern session holds that permission.
 `infra/02-bucket-policy.json` is already v2 in the repo (Put and Delete split, **nobody** exempt
-from Delete). Runbook: `infra/DEPLOY.md:256+`. This mattered less when the bucket held 11 objects.
+from Delete). Runbook: `infra/DEPLOY.md:256+`. This mattered less when the bucket held 11 objects.~~
 
-### 3. Set a timeout on the `edullm-validator` job definition
+### 3. ~~Set a timeout on the `edullm-validator` job definition~~ — **DONE**
 
-It has **none** (`timeout: null` on both the job and the job def, verified). The publish jobs only
+**Verified live 2026-08-01:** `edullm-validator` top ACTIVE revision is **10**, with
+`timeout.attemptDurationSeconds = 7200`. (Revisions 1–6 had `timeout: null`; 7 first set 7200.)
+`edullm-fsck:6` is at 3600 s and `edullm-reservoir-ingest:7` at 7200 s. Superseded text follows.
+
+~~It has **none** (`timeout: null` on both the job and the job def, verified). The publish jobs only
 get one because it is passed at submit time; the EventBridge-triggered validation inherits nothing,
 so a wedged auto-promote sits `RUNNING` forever holding queue capacity. 7200 s matches the publish
-path. Related: that job runs `discover_pending`, which LISTs the whole landing bucket and validates
-every unsealed dataset — so its runtime is not bounded by the dataset that triggered it.
+path.~~ Related, and still true: that job runs `discover_pending`, which LISTs the whole landing
+bucket and validates every unsealed dataset — so its runtime is not bounded by the dataset that
+triggered it.
 
 ### 4. `sft_conversations_v1` still substring-matches split names
 
@@ -1514,22 +1545,34 @@ Each is inside `manifest_sha256` or destroyed by tokenization. Getting one wrong
    synthetic from the ~242M `sample-350BT` ids NOT in `sample-100BT`. Same join key, one pass. This is
    the §9.7-item-4 collision reappearing in a category the plan never checked.
 
-### Owed doc corrections (cheap, do whenever)
+### Owed doc corrections — **three of four DONE 2026-08-01**
 
-- **`artifacts/PLAN-CORRECTIONS.md` §6 and `artifacts/smoke/harvest_parquet.py:9-13`** state the
-  per-IP rate limit as a general rule. True for `datasets-server`, **false for resolvers and the
-  CDN**. As written they deter the fast path.
-- **`CLAUDE.md`'s "60-min job-def limit"** — Batch has **no** maximum timeout; that was a value we set.
-- **Deregister three diagnostic job defs**: `edullm-reservoir-diag`, `-diag2`, `-shim`.
-- **`artifacts/reservoir/INGEST-CALIBRATION.md`** still recommends sizing that the 429 fix obsoletes.
+- ~~**`artifacts/PLAN-CORRECTIONS.md` §6 and `artifacts/smoke/harvest_parquet.py:9-13`** state the
+  per-IP rate limit as a general rule.~~ **DONE.** Both corrected with the measured three-surface
+  table (datasets-server per-IP; resolver per-token, `q=3000` anon / `q=5000` authed; CDN
+  unmetered) plus the resolve-once-reuse-many rule. Note the citation was slightly off: the per-IP
+  *general* wording lived in §6's neighbours, not §6's own body — the correction was appended to §6
+  anyway, since that is where every other doc points.
+- ~~**`CLAUDE.md`'s "60-min job-def limit"**~~ **DONE.** Confirmed against the AWS Batch user guide:
+  "There's no maximum timeout value for an AWS Batch job"; minimum 60 s; no default. 3600 s was
+  ours. (Fargate's 14-day ceiling exists but we run on EC2.)
+- ~~**`artifacts/reservoir/INGEST-CALIBRATION.md`** still recommends sizing that the 429 fix
+  obsoletes.~~ **DONE.** Measurement kept, recommendations banner-marked obsolete.
+- **STILL OPEN — Deregister three diagnostic job defs**: `edullm-reservoir-diag` (rev 2),
+  `-diag2` (rev 1), `-shim` (rev 1). All confirmed still ACTIVE 2026-08-01. Needs a write call;
+  not done from a read-only session.
 
 ### Cheap, not blocking, do whenever
-- **Scrub `tests/test_publish.py:517`** — real AWS account ID in a Batch ARN, in the concurrent session's
-  uncommitted work. Public repo.
-- **Deploy bucket-policy v2** (`infra/DEPLOY.md:256+`). Still NOT deployed; the live policy is
+- ~~**Scrub `tests/test_publish.py:517`** — real AWS account ID in a Batch ARN, in the concurrent
+  session's uncommitted work.~~ **Not reproducible on this branch 2026-08-01:** `test_publish.py`
+  is 463 lines (no `:517`), and a repo-wide grep for the 12-digit account ID returns **zero** hits
+  in tracked files. Either it was fixed or it never landed here. Re-check before assuming it is
+  gone from other branches.
+- ~~**Deploy bucket-policy v2** (`infra/DEPLOY.md:256+`). Still NOT deployed; the live policy is
   `edullm-data-airlock-v1`, where one Deny covers Put *and* Delete and exempts the validator from all
-  five actions. Reported only, per Phase 0's instructions. This will soon protect ~1 TB rather than 11
-  objects.
+  five actions.~~ **DEPLOYED — verified live 2026-08-01**, `Id: edullm-data-airlock-v2`, Put and
+  Delete split, nobody exempt from Delete. `infra/DEPLOY.md:256` had already recorded this on
+  2026-07-31; this file was the stale one.
 - **A `share_alike` selector** if surgical SA exclusion is ever wanted. Cannot live in `entry.labels`,
   and the path's two levels are spent — so it would be a `source`-name convention (`stackexchange-sa`),
   decided before publish.
@@ -1538,13 +1581,21 @@ Each is inside `manifest_sha256` or destroyed by tokenization. Getting one wrong
 
 > **Everything below is a historical log of previous sessions**, kept for the reasoning it records.
 > Several entries describe work already finished; each is struck through where that is the case.
+>
+> 🛑 **2026-08-01: items 1, 2 and 3 in this list are DONE.** They are left unstruck-through below
+> only because the list is a historical snapshot; do not read them as open work. 1 — the platform
+> handoff landed and a training run has read the corpus. 2 — bucket-policy v2 is live
+> (`edullm-data-airlock-v2`). 3 — the validator timeout is 7200 s on `edullm-validator:10`.
+> Item 5's "15 lines" is also wrong: the adapter shipped at **746 lines**.
+>
 > ~~0. COMMIT `DATASET-DESIGN-reservoir.md`~~ — **DONE**, `84eef1c`.
-> 1. **Hand `docs/PLATFORM-INTEGRATION.md` to whoever owns `edu-llm/platform`** — the four
+> 1. ~~**Hand `docs/PLATFORM-INTEGRATION.md` to whoever owns `edu-llm/platform`** — the four
 >    blockers to a training run all live there, and its banner is now re-audited against live
->    state. Not this repo's to fix, and the long pole.
-> 2. **Deploy bucket-policy v2** (`infra/DEPLOY.md:256+`) — the live policy is still
+>    state. Not this repo's to fix, and the long pole.~~ **DONE — all four closed.**
+> 2. ~~**Deploy bucket-policy v2** (`infra/DEPLOY.md:256+`) — the live policy is still
 >    `airlock-v1`, one Deny covering Put *and* Delete with the validator exempt from both. That
->    was a small risk over 11 objects; it now guards 587 GiB, and the reservoir would take it past 1.5 TB.
+>    was a small risk over 11 objects; it now guards 587 GiB, and the reservoir would take it past 1.5 TB.~~
+>    **DONE — deployed 2026-07-31, verified live 2026-08-01.**
 > 3. **Set a timeout on the `edullm-validator` job def** — it has none, so a wedged auto-promote
 >    holds the queue forever. 7200 s. **This is also a Phase-0 task in the reservoir runbook**
 >    (`DATASET-DESIGN-reservoir.md` §9.3 task C), so it gets done either way.
@@ -1607,9 +1658,10 @@ outstanding to commit for this feature.
       That is what makes OLMo-core's VSL/packed/padded classes unusable on these shards
       (`docs/CONSUMER-CONTRACT.md`). Excluding is defensible for plain FSL training; inheriting the
       decision by accident is not.
-   3. **`publish()` does not populate `entry.split` or `entry.labels`** (see "What is NOT done"). The
+   3. ~~**`publish()` does not populate `entry.split` or `entry.labels`** (see "What is NOT done"). The
       one-group-plus-labels structure REQUIRES labels, so this is a code change on the write path
-      before the real copy — not a publish-time argument.
+      before the real copy — not a publish-time argument.~~ **DONE (`aa4d509`), verified in code
+      2026-08-01: `publish.py:352-353` sets both.**
    4. Then the copy + publish on Batch, with `hash_workers`/`copy_workers` and
       `--timeout attemptDurationSeconds=7200`; a 633 GB single-threaded publish times out.
    5. Re-verify the airlock afterwards (intern `PutObject` → `AccessDenied`), per CLAUDE.md.
@@ -1661,9 +1713,11 @@ outstanding to commit for this feature.
    first bytes ≠ `\x93NUMPY` and `tokens×dtype_size == bytes`.) **The 150B corpus is Next Step #0's
    restart, not a "more legacy dataset" — see DEFERRED DECISIONS #1 for the one-group-not-six
    decision, and note the deleted first attempt's driver is gone, so the copy plan is rebuilt.**
-8. **Populate `entry.split` in `publish()`.** The v2 field, its validation, and the
+8. ~~**Populate `entry.split` in `publish()`.** The v2 field, its validation, and the
    `split-contradicts-filename` gate all exist; the producer never writes it, so the gate is
-   unreachable in production. See "What is NOT done".
+   unreachable in production.~~ **DONE (`aa4d509`), verified in code 2026-08-01.**
+   `publish.py:352-353` writes `split=` and `labels=`, both derived from the key, so the
+   `split-contradicts-filename` gate is now reachable in production.
 9. **Make `sft_conversations_v1._partition_globs` use `contracts.is_trainable`** instead of substring
    matching. Until then the `SPLITS` docstring overstates the fix. See "What is NOT done".
 10. **Deploy bucket-policy v2** — DEFERRED DECISIONS #4, runbook at `infra/DEPLOY.md:256+`.

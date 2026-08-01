@@ -16,17 +16,23 @@ TWO BUCKETS, A ONE-WAY DOOR
   (blocked at the AWS level). So anything in there is already trustworthy.
 
 
-WHAT edullm-data LOOKS LIKE NOW
+WHAT edullm-data LOOKS LIKE NOW            (refreshed 2026-08-01)
   s3://edullm-data/
-  ├── pretrain/olmo-mix-1124-31b/v1/     ← 31.3B tokens, 218 files, ~125 GB
+  ├── pretrain/olmo-150b-dolma2/v1/      ← 157.5B tokens, 6,911 shards, 586.6 GiB
   │   ├── dataset.json      the metadata "index card"
   │   ├── README.md         human-readable, auto-generated
   │   ├── _VALIDATED.json    "passed the validator" seal
-  │   └── tokens/           the payload
+  │   └── tokens/           the payload — NESTED: tokens/<source>/<domain>/
   │       ├── manifest.json  lists every file + size + checksum
-  │       └── train-00000.u32le.bin ... train-00217.u32le.bin
+  │       └── dclm/.../train-00000.u32le.bin ...   (6,851 train + 60 val)
+  ├── pretrain/regmix-10b/v1/            ← 7 sources; the corpus a real training run read
   ├── tokenizer/dolma2-bpe/v1/           ← the tokenizer those tokens were made with
   └── _catalog/             one tiny JSON per dataset (the card catalog)
+
+  ~~pretrain/olmo-mix-1124-31b/v1 — 31.3B tokens, 218 files, ~125 GB, flat tokens/~~
+  DELETED 2026-07-29 (no val split, and frozen means it could never gain one). It was this
+  file's running example; both the id and the flat layout are gone. More than two datasets
+  are published now — `_catalog/` is the list, never this diagram.
 
 
 EVERY DATASET HAS THE SAME ADDRESS SHAPE
@@ -62,9 +68,11 @@ USING IT
 
   # read into training (gives file URIs AND the correct dtype)
   from edullm_data.read import dataset_paths, resolve_latest
-  ver = resolve_latest("pretrain/olmo-mix-1124-31b", s3=s3)
-  r   = dataset_paths("pretrain/olmo-mix-1124-31b", ver, split="train", s3=s3)
-  # r.paths -> the 218 URIs   r.dtype -> "uint32" (feed this to the loader!)
+  ver = resolve_latest("pretrain/olmo-150b-dolma2", s3=s3)
+  r   = dataset_paths("pretrain/olmo-150b-dolma2", ver, split="train", s3=s3)
+  # r.paths -> the 6,851 train URIs
+  # r.numpy_dtype -> "<u4"  ← FEED THIS ONE to the loader
+  # r.dtype -> "uint32"  (the declared NAME; np.dtype("uint32") is host byte order)
 
   # publish: you type 4 things, the validator does the rest
   publish(source, dataset_id="pretrain/my-corpus-10b",
