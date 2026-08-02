@@ -1281,6 +1281,27 @@ shards have odd token counts — a filename tells you nothing; `size % 4` and a 
 
 ## What Didn't Work (and the fix)
 
+### 2026-08-01 (night) — four registry rows were unreadable, and only real bytes could tell
+
+The registry passed 44 tests, loaded into `CorpusSpec`, and had every revision pinned and
+tree-verified. Then I pointed the actual reader at it and **4 of 14 drawn sources could not be read
+at all** — three had a `config` that 404'd, one named a column that does not exist. A fifth defect
+was worse: both readers fetched bytes from `resolve/main` while listing files at the pinned sha, so
+the pinning was decorative.
+
+Every one of these is a fact about *remote data*, which is precisely the class no amount of local
+testing reaches. The registry was internally consistent throughout.
+
+The cheap generalisation: **verifying that a config/path/column string is well-formed, or even that
+its parent directory exists, is not verifying that it names data.** The only check that counts is
+reading a record and looking at it. That took about ten minutes and would have cost a multi-hour
+Batch array plus the time to work out why a corpus came back empty.
+
+Worth noting what the *reader* got right: parquet raised loudly on the bad column, because
+`_leaf_index` refuses a bare-name fallback. The json.gz path silently returned zero documents for
+the identical mistake. Same registry error, one loud and one silent — the difference was a `continue`
+where there should have been a raise.
+
 ### 2026-08-01 (night) — two subagents died mid-task and one lost everything
 
 Three long-running agents hit the same API stall this session. The difference in outcome was
@@ -1805,9 +1826,13 @@ not open.
 
 ### THE CURRENT LIST — updated 2026-08-01 (late). Decision of record: FULL PIPELINE, MinHash deferred.
 
-Remaining: **~2–3 days**, down from 2–3 weeks. **Items 1–4 and the registry are DONE** — including
-the one this list called "most likely to break the estimate". What is left is items 5–7: run the
-build on Batch, publish, backfill sidecars, verify. Compute is still ~12 hours and ~$20.
+Remaining: **~2–3 days**, down from 2–3 weeks. **Items 1–4 and the registry are DONE**, and the
+reader is proven against real bytes for all 14 drawn sources. What is left is **execution**: register
+a job def, run the array, publish, backfill sidecars, verify. Compute is ~12 hours and ~$20.
+
+🛑 **The next step spends money and writes to landing.** Everything up to here has been free and
+reversible; `run` fetches ~4 TB and `publish` copies ~1 TB. Worth a deliberate go/no-go rather than
+drifting into it.
 
 **Suite 1,085 passing** (was 790 at the start of the session), ruff clean. New modules:
 `corpus.py` (440), `corpus_read.py` (890), `corpus_pack.py` (809), `corpus_build.py` (~800),
@@ -2006,6 +2031,35 @@ the `.bin`, not the `.bin`. Now at **`s3://edullm-landing/_dist/eval-decontamina
 because `_dist/` carries **no expiry rule** while `_ingest/` expires at 30 d. Two limits: matching is
 word-level 13-gram and casefolded, so it does **nothing** for rephrased text (the FinePhrase half is
 unchanged), and it holds ~250 MB resident — budget it on Batch.
+
+### ✅ THE READER IS PROVEN AGAINST REAL BYTES — 14/14 sources, and it found 5 defects
+
+Before committing Batch compute I ran the reader against every drawn source at its pinned revision.
+**All 14 now yield real documents** (verified by eye: IRC logs, PubMed abstracts, JEE problems,
+Wikipedia articles, DCLM web prose). Getting there exposed five defects, none catchable offline —
+every bad row was internally consistent and externally wrong:
+
+1. 🛑 **The pins were defeated at READ time.** Both readers called
+   `ingest_reservoir._resolve_url`, which hardcodes `resolve/main`. So the build would LIST files at
+   the pinned sha and then fetch their **bytes from HEAD** — and nothing downstream would notice,
+   because the manifest hashes whatever arrived and Gate A passes it. Fixed with `_pinned_url`;
+   `ingest_reservoir` keeps its own version because its one caller genuinely wants HEAD.
+2. 🛑 **A wrong `text_column` on `.json.gz` yielded an EMPTY corpus, silently.** The per-record path
+   did `continue` on a missing key, so a typo skipped every record and returned zero documents with
+   no error. Measured: `ubuntu_irc_filtered` returned 0 documents and raised nothing. This is the
+   json.gz twin of the zero-columns parquet trap the module already warned about.
+3. **`config` is a PATH PREFIX, not an HF config name** — 3 of 14 rows 404'd. `finewiki`'s config is
+   `en` but its files are at `data/enwiki`; `fineweb-edu`'s is `sample-100BT` but the path is
+   `sample/100BT`; `finepdfs-edu`'s payload is deeper still at `data/eng_Latn/train`.
+4. **FineMath has no `id` column** — 16 leaves, none an id. Its identity is `url`, which matters
+   because the id is the join key for the §9.7 item 4 partition and the FineWeb-Edu anti-join.
+5. **`text_column` was `UNVERIFIED` on 8 of 17 rows** and is now verified on **17 of 17**, read from
+   each source's first record at its pinned revision. A test enforces that no *drawn* row is
+   unverified.
+
+Also confirmed §3.3's FinePhrase quality trap is real rather than theoretical: sampled rewrites are
+`"No answer"` (9 chars) and `"No table\nNo question-answer pair"` (32). `MIN_DOC_TOKENS` is what
+keeps them out, and without it those shards would fail Gate A's EOS bound after the upload.
 
 **5. Publish (§5.6 phase 2) on Batch, in-region.** `publish()` GETs every byte to hash it;
 `hash_workers`/`copy_workers=16`, timeout 7200. ⚠️ Auto-promotion is currently **disabled** — the
