@@ -1,0 +1,27 @@
+name: Build eduLLM data image
+
+# Publishing requires an intentional action.  The branch namespace permits a
+# reviewed, opt-in push to build an immutable image, while workflow_dispatch
+# supports a deliberate rerun for that exact source revision.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "edullm/**"
+
+jobs:
+  publish:
+    permissions:
+      contents: read
+      id-token: write
+    uses: edu-llm/platform/.github/workflows/build-research-image.yml@main
+    with:
+      repository: edullm-data
+      publisher_role_arn: ${{ vars.AWS_ECR_PUBLISHER_ROLE_ARN }}
+      # This runs in the credential-free gate before the publisher role is
+      # assumed.  It proves the source package and PRM ingress path together.
+      test_command: |
+        test_venv="$(mktemp -d)/edullm-data"
+        python3 -m venv "${test_venv}"
+        "${test_venv}/bin/pip" install --quiet --disable-pip-version-check ".[test]"
+        "${test_venv}/bin/python" -m pytest -q

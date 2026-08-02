@@ -1,0 +1,14 @@
+# The platform build context is the repository root.  Keep source-control state,
+# local test caches, and researcher artifacts out of the build transfer and image.
+.git
+.github
+.claude
+.DS_Store
+.pytest_cache
+.ruff_cache
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+artifacts/
