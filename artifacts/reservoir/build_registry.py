@@ -30,6 +30,13 @@ from edullm_data.corpus import CorpusSpec  # noqa: E402
 #: (`artifacts/reservoir/id-partition-verification.json` -> `rewrite_leaf`). Re-verified through the
 #: finished reader: the correct selector returns REWRITE, `rollout_results.text` and the legacy
 #: `list.item` spelling are REJECTED, and plain `text` returns ORIGINAL.
+#: ⚠️ Re-verified 2026-08-01 by reading the FIRST RECORD of every drawn source at its pinned
+#: revision, not by trusting a card. Two rows were wrong and one was underspecified:
+#:   * `finemath` has NO `id` column at all — 16 leaves and none of them an id. Its stable
+#:     identity is `url`, which is what the id partition and the anti-join must join on.
+#:   * `essential-web` is Hive-partitioned (`data/crawl=CC-MAIN-2013-20/...`), so its config is a
+#:     partition root rather than a leaf directory.
+#: Everything else carries a literal `text` + `id`.
 VERIFIED_TEXT_COLUMN = {
     "peS2o_filtered": ("text", "artifacts/recount/_footer-academic-peS2o.json"),
     "pubmed_filtered": ("text", "artifacts/recount/_footer-academic-pubmed.json"),
@@ -44,6 +51,14 @@ VERIFIED_TEXT_COLUMN = {
         "rollout_results.list.element.text",
         "artifacts/reservoir/id-partition-verification.json",
     ),
+    # Read from the first record / footer at each pinned revision, 2026-08-01.
+    "finewiki": ("text", "bytes @ HuggingFaceFW/finewiki@8bd13e72e6 data/enwiki"),
+    "fineweb-edu": ("text", "bytes @ HuggingFaceFW/fineweb-edu@87f09149ef sample/100BT"),
+    "finemath": ("text", "bytes @ HuggingFaceTB/finemath@e92b25a616 finemath-3plus"),
+    "stackv2_edu_filtered": ("text", "bytes @ common-pile/stackv2_edu_filtered@c354dbe884"),
+    "stackexchange_filtered": ("text", "bytes @ common-pile/stackexchange_filtered@c0ac737383"),
+    "ubuntu_irc_filtered": ("text", "bytes @ common-pile/ubuntu_irc_filtered@84f88c9865"),
+    "github_archive_filtered": ("text", "bytes @ common-pile/github_archive_filtered@52282fe966"),
 }
 
 #: Repo commit shas, resolved from the HF API on 2026-08-01 and pinned here.
@@ -103,6 +118,18 @@ REVISION_DATE = {
     "common-pile/ubuntu_irc_filtered": "2025-06-06",
     "common-pile/github_archive_filtered": "2025-06-06",
 }
+
+#: ⚠️ `config` IS A PATH PREFIX, NOT AN HF CONFIG NAME — and conflating the two broke 3 of 14 rows.
+#:
+#: `corpus_build.hf_files` lists `/api/datasets/<repo>/tree/<sha>/<config>`, so the value has to be a
+#: real directory in the repo. HF's *config* names are frequently NOT directories: `finewiki`'s
+#: config is `en` but its files are under `data/enwiki`; `fineweb-edu`'s is `sample-100BT` but the
+#: path is `sample/100BT`; `finepdfs-edu`'s is `eng_Latn` but the payload is one level deeper still,
+#: at `data/eng_Latn/train`. All three 404'd until the tree was actually listed.
+#:
+#: Resolve it by listing, never by transcribing the card:
+#:   python3 -c "import json,urllib.request as u; print([e['path'] for e in json.load(
+#:     u.urlopen('https://huggingface.co/api/datasets/<repo>/tree/<sha>/<path>?limit=5'))])"
 
 #: Filename prefix of each Common Pile repo's `.json.gz` shards, at the repo root. The prefix does
 #: NOT match the repo name — `stackv2_edu_filtered` ships `stack-edu-NNNN.json.gz` and
@@ -211,15 +238,15 @@ ROWS = [
     # ---- edu-web: 48 B pool, measured 261.3 B (7.0x) ----
     _row(
         key="finepdfs-edu", category="edu-web", source_label="finepdfs-edu",
-        repo="HuggingFaceFW/finepdfs-edu", config="eng_Latn", file_format="parquet",
-        id_column="UNVERIFIED", target_tokens=28_000_000_000,
+        repo="HuggingFaceFW/finepdfs-edu", config="data/eng_Latn/train", file_format="parquet",
+        id_column="id", target_tokens=28_000_000_000,
         pool_tokens=MEASURED["finepdfs-edu"], license="ODC-BY-1.0",
         traps=("PDF-extracted text; extraction artifacts differ in kind from CC-HTML sources.",),
     ),
     _row(
         key="fineweb-edu", category="edu-web", source_label="fineweb-edu",
-        repo="HuggingFaceFW/fineweb-edu", config="sample-100BT", file_format="parquet",
-        id_column="UNVERIFIED", target_tokens=20_000_000_000,
+        repo="HuggingFaceFW/fineweb-edu", config="sample/100BT", file_format="parquet",
+        id_column="id", target_tokens=20_000_000_000,
         pool_tokens=MEASURED["fineweb-edu"], license="ODC-BY-1.0",
         traps=(
             "🛑 100% of this source has a synthetic sibling: sample-100BT ⊂ sample-350BT, which is "
@@ -231,7 +258,7 @@ ROWS = [
     ),
     _row(
         key="essential-web", category="edu-web", source_label="essential-web",
-        repo="EssentialAI/essential-web-v1.0", config="default", file_format="parquet",
+        repo="EssentialAI/essential-web-v1.0", config="data", file_format="parquet",
         id_column="UNVERIFIED", target_tokens=0, pool_tokens=None, license="ODC-BY-1.0",
         domain_column="eai_taxonomy.free_decimal_correspondence",
         traps=(
@@ -274,7 +301,7 @@ ROWS = [
     _row(
         key="finemath", category="math", source_label="finemath",
         repo="HuggingFaceTB/finemath", config="finemath-3plus", file_format="parquet",
-        id_column="UNVERIFIED", target_tokens=34_000_000_000,
+        id_column="url", target_tokens=34_000_000_000,
         pool_tokens=MEASURED["finemath"], license="ODC-BY-1.0",
         traps=(
             "⚠️ The ONLY math source: everything else in the category is a rewrite of it. "
@@ -288,7 +315,7 @@ ROWS = [
     _row(
         key="peS2o_filtered", category="academic", source_label="pes2o",
         repo=_cp("peS2o_filtered"), config=None, file_format="json.gz",
-        id_column="UNVERIFIED", target_tokens=14_000_000_000,
+        id_column="id", target_tokens=14_000_000_000,
         pool_tokens=MEASURED["peS2o_filtered"], license="CC-BY / CC0 (mixed)", share_alike=True,
         traps=(
             "🛑 49.7% of its BYTES are PubMedCentral-derived (measured from per-document "
@@ -303,14 +330,14 @@ ROWS = [
     _row(
         key="pubmed_filtered", category="academic", source_label="pubmed",
         repo=_cp("pubmed_filtered"), config=None, file_format="json.gz",
-        id_column="UNVERIFIED", target_tokens=6_000_000_000,
+        id_column="id", target_tokens=6_000_000_000,
         pool_tokens=MEASURED["pubmed_filtered"], license="CC-BY / CC0 (mixed)",
         traps=("Overlaps peS2o's PMC share — see the peS2o row. Count one, not both.",),
     ),
     _row(
         key="arxiv_papers_filtered", category="academic", source_label="arxiv",
         repo=_cp("arxiv_papers_filtered"), config=None, file_format="json.gz",
-        id_column="UNVERIFIED", target_tokens=0,
+        id_column="id", target_tokens=0,
         pool_tokens=MEASURED["arxiv_papers_filtered"], license="CC-BY / CC0 (mixed)",
         traps=(
             "target_tokens 0 = reserve; the 20 B academic pool is met by peS2o + pubmed. DoReMi "
@@ -321,7 +348,7 @@ ROWS = [
     _row(
         key="stackv2_edu_filtered", category="code", source_label="stackv2-edu",
         repo=_cp("stackv2_edu_filtered"), config=None, file_format="json.gz",
-        id_column="UNVERIFIED", target_tokens=40_000_000_000,
+        id_column="id", target_tokens=40_000_000_000,
         pool_tokens=MEASURED["stackv2_edu_filtered"], license="Blue Oak (100% permissive per-doc)",
         domain_column="metadata.gha_language",
         traps=(
@@ -342,7 +369,7 @@ ROWS = [
     _row(
         key="stackexchange_filtered", category="qa-forum", source_label="stackexchange",
         repo=_cp("stackexchange_filtered"), config=None, file_format="json.gz",
-        id_column="UNVERIFIED", target_tokens=10_000_000_000,
+        id_column="id", target_tokens=10_000_000_000,
         pool_tokens=MEASURED["stackexchange_filtered"], license="CC-BY-SA-4.0", share_alike=True,
         domain_column="metadata.site",
         traps=(
@@ -355,7 +382,7 @@ ROWS = [
     _row(
         key="ubuntu_irc_filtered", category="qa-forum", source_label="ubuntu-irc",
         repo=_cp("ubuntu_irc_filtered"), config=None, file_format="json.gz",
-        id_column="UNVERIFIED", target_tokens=1_800_000_000,
+        id_column="id", target_tokens=1_800_000_000,
         pool_tokens=MEASURED["ubuntu_irc_filtered"], license="Public Domain",
         traps=(
             "The ONLY non-share-alike source in this category. Without it the category is 1.87 B, "
@@ -367,7 +394,7 @@ ROWS = [
     _row(
         key="github_archive_filtered", category="qa-forum", source_label="github-archive",
         repo=_cp("github_archive_filtered"), config=None, file_format="json.gz",
-        id_column="UNVERIFIED", target_tokens=0,
+        id_column="id", target_tokens=0,
         pool_tokens=MEASURED["github_archive_filtered"], license="permissive",
         traps=(
             "Moved here FROM code deliberately: it is issue/PR prose, not code (§3.2).",
@@ -377,8 +404,8 @@ ROWS = [
     # ---- reference: 9 B pool (owner-revised from 14 B), measured 8.87 B (3.70x) ----
     _row(
         key="finewiki", category="reference", source_label="finewiki",
-        repo="HuggingFaceFW/finewiki", config="en", file_format="parquet",
-        id_column="UNVERIFIED", target_tokens=8_800_000_000,
+        repo="HuggingFaceFW/finewiki", config="data/enwiki", file_format="parquet",
+        id_column="id", target_tokens=8_800_000_000,
         pool_tokens=MEASURED["finewiki"], license="CC-BY-SA-4.0 AND GFDL", share_alike=True,
         traps=(
             "100% share-alike, and TWO different copyleft regimes (CC-BY-SA + GFDL). Do not model "

@@ -113,9 +113,9 @@
    "category": "edu-web",
    "source_label": "finepdfs-edu",
    "repo": "HuggingFaceFW/finepdfs-edu",
-   "config": "eng_Latn",
+   "config": "data/eng_Latn/train",
    "file_format": "parquet",
-   "id_column": "UNVERIFIED",
+   "id_column": "id",
    "target_tokens": 28000000000,
    "pool_tokens": 161100000000,
    "license": "ODC-BY-1.0",
@@ -131,18 +131,18 @@
    "category": "edu-web",
    "source_label": "fineweb-edu",
    "repo": "HuggingFaceFW/fineweb-edu",
-   "config": "sample-100BT",
+   "config": "sample/100BT",
    "file_format": "parquet",
-   "id_column": "UNVERIFIED",
+   "id_column": "id",
    "target_tokens": 20000000000,
    "pool_tokens": 100240000000,
    "license": "ODC-BY-1.0",
-   "text_column": "UNVERIFIED",
+   "text_column": "text",
    "revision": "87f09149ef4734204d70ed1d046ddc9ca3f2b8f9",
    "traps": [
-    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of HuggingFaceFW/fineweb-edu>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "\ud83d\uded1 100% of this source has a synthetic sibling: sample-100BT \u2282 sample-350BT, which is FinePhrase's exact parent. Draw synthetic from the ~242M sample-350BT ids NOT in sample-100BT, or every edu-web document appears twice in one run (HANDOFF 'three irreversible decisions', item 3).",
-    "Zero decontamination upstream (\u00a74.2)."
+    "Zero decontamination upstream (\u00a74.2).",
+    "text_column verified in bytes @ HuggingFaceFW/fineweb-edu@87f09149ef sample/100BT"
    ]
   },
   {
@@ -150,7 +150,7 @@
    "category": "edu-web",
    "source_label": "essential-web",
    "repo": "EssentialAI/essential-web-v1.0",
-   "config": "default",
+   "config": "data",
    "file_format": "parquet",
    "id_column": "UNVERIFIED",
    "target_tokens": 0,
@@ -195,17 +195,17 @@
    "repo": "HuggingFaceTB/finemath",
    "config": "finemath-3plus",
    "file_format": "parquet",
-   "id_column": "UNVERIFIED",
+   "id_column": "url",
    "target_tokens": 34000000000,
    "pool_tokens": 34690000000,
    "license": "ODC-BY-1.0",
-   "text_column": "UNVERIFIED",
+   "text_column": "text",
    "revision": "e92b25a616738fe95dc186b64dfb19f9c8525594",
    "traps": [
-    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of HuggingFaceTB/finemath>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "\u26a0\ufe0f The ONLY math source: everything else in the category is a rewrite of it. swallow-math-v2 (32 B, Apache-2.0) is a FineMath rewrite; measured self-similarity means no digest or MinHash catches the duplication.",
     "Pool is 3.6% under the 36 B plan. 3x peak demand IS met (4.96x).",
-    "NOT inside MegaMath \u2014 independent CC re-extractions (\u00a73.1)."
+    "NOT inside MegaMath \u2014 independent CC re-extractions (\u00a73.1).",
+    "text_column verified in bytes @ HuggingFaceTB/finemath@e92b25a616 finemath-3plus"
    ]
   },
   {
@@ -215,7 +215,7 @@
    "repo": "common-pile/peS2o_filtered",
    "config": null,
    "file_format": "json.gz",
-   "id_column": "UNVERIFIED",
+   "id_column": "id",
    "target_tokens": 14000000000,
    "pool_tokens": 40480000000,
    "license": "CC-BY / CC0 (mixed)",
@@ -237,7 +237,7 @@
    "repo": "common-pile/pubmed_filtered",
    "config": null,
    "file_format": "json.gz",
-   "id_column": "UNVERIFIED",
+   "id_column": "id",
    "target_tokens": 6000000000,
    "pool_tokens": 37540000000,
    "license": "CC-BY / CC0 (mixed)",
@@ -256,7 +256,7 @@
    "repo": "common-pile/arxiv_papers_filtered",
    "config": null,
    "file_format": "json.gz",
-   "id_column": "UNVERIFIED",
+   "id_column": "id",
    "target_tokens": 0,
    "pool_tokens": 6230000000,
    "license": "CC-BY / CC0 (mixed)",
@@ -275,20 +275,20 @@
    "repo": "common-pile/stackv2_edu_filtered",
    "config": null,
    "file_format": "json.gz",
-   "id_column": "UNVERIFIED",
+   "id_column": "id",
    "target_tokens": 40000000000,
    "pool_tokens": 74810000000,
    "license": "Blue Oak (100% permissive per-doc)",
    "domain_column": "metadata.gha_language",
-   "text_column": "UNVERIFIED",
+   "text_column": "text",
    "revision": "c354dbe88469a1153e97c6a63ac50591849654de",
    "traps": [
-    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/stackv2_edu_filtered>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "\u26a0\ufe0f 73 distinct languages in ONE shard. Cardinality is PERMANENT \u2014 each becomes a directory inside manifest_sha256. Fold to the top ~20 by token count, rest -> 'other' (\u00a71.2), and pass the map to the reader: it is a reader ARGUMENT, not a spec field.",
     "\ud83d\uded1 SLUG THE VALUE. 'C#' publishes clean and passes Gate A, then urlparse puts everything after the '#' in `fragment` and THE SHARD NAME LEAVES THE PATH. Gate A now rejects '#' and brackets (validate._segment_breakage); other values still need slug_path_segment. 'C#'->'c-sharp', 'C++'->'c-plus-plus'.",
     "Use this, NOT the-stack-v2/stack-edu: those ship SWHIDs only and bulk access needs a Software Heritage agreement demanding open model release (\u00a77 item 3).",
     "Excludes swallow-code-v2 (a Python-only rewrite of the same blobs, self-similarity 0.064 so nothing catches it; 74% no_license upstream despite the apache-2.0 tag).",
-    "`.json.gz` at the REPO ROOT, named stack-edu-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing."
+    "`.json.gz` at the REPO ROOT, named stack-edu-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing.",
+    "text_column verified in bytes @ common-pile/stackv2_edu_filtered@c354dbe884"
    ]
   },
   {
@@ -298,19 +298,19 @@
    "repo": "common-pile/stackexchange_filtered",
    "config": null,
    "file_format": "json.gz",
-   "id_column": "UNVERIFIED",
+   "id_column": "id",
    "target_tokens": 10000000000,
    "pool_tokens": 24050000000,
    "license": "CC-BY-SA-4.0",
    "share_alike": true,
    "domain_column": "metadata.site",
-   "text_column": "UNVERIFIED",
+   "text_column": "text",
    "revision": "c0ac7373830c688a43fc12d1988c4b19ccd884ab",
    "traps": [
-    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/stackexchange_filtered>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "100% share-alike, and the license is visible ONLY in per-row metadata.all_licenses \u2014 cardData declares none. A declared license both over- and under-states what is inside.",
     "~180 sites; same permanent-cardinality fold as stackv2-edu. Slug: '3dprinting.stackexchange.com' -> '3dprinting'.",
-    "`.json.gz` at the REPO ROOT, named stackexchange-dolma-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing."
+    "`.json.gz` at the REPO ROOT, named stackexchange-dolma-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing.",
+    "text_column verified in bytes @ common-pile/stackexchange_filtered@c0ac737383"
    ]
   },
   {
@@ -320,17 +320,17 @@
    "repo": "common-pile/ubuntu_irc_filtered",
    "config": null,
    "file_format": "json.gz",
-   "id_column": "UNVERIFIED",
+   "id_column": "id",
    "target_tokens": 1800000000,
    "pool_tokens": 1870000000,
    "license": "Public Domain",
-   "text_column": "UNVERIFIED",
+   "text_column": "text",
    "revision": "84f88c986584f11d672befab542fa4d5123f3e8f",
    "traps": [
-    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/ubuntu_irc_filtered>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "The ONLY non-share-alike source in this category. Without it the category is 1.87 B, which fails even peak demand once SA is excluded.",
     "IRC logs: short turns. Watch corpus.MIN_DOC_TOKENS \u2014 a mean under 20 tokens per document means EOS fraction > 0.05 and Gate A rejects the shard.",
-    "`.json.gz` at the REPO ROOT, named ubuntu-chat-dolma-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing."
+    "`.json.gz` at the REPO ROOT, named ubuntu-chat-dolma-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing.",
+    "text_column verified in bytes @ common-pile/ubuntu_irc_filtered@84f88c9865"
    ]
   },
   {
@@ -340,17 +340,17 @@
    "repo": "common-pile/github_archive_filtered",
    "config": null,
    "file_format": "json.gz",
-   "id_column": "UNVERIFIED",
+   "id_column": "id",
    "target_tokens": 0,
    "pool_tokens": 11510000000,
    "license": "permissive",
-   "text_column": "UNVERIFIED",
+   "text_column": "text",
    "revision": "52282fe96670254bdc0d44dd718ee7a27210ee85",
    "traps": [
-    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of common-pile/github_archive_filtered>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "Moved here FROM code deliberately: it is issue/PR prose, not code (\u00a73.2).",
     "target_tokens 0 = reserve; the 12 B pool is met without it.",
-    "`.json.gz` at the REPO ROOT, named gharchive-dolma-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing."
+    "`.json.gz` at the REPO ROOT, named gharchive-dolma-NNNN.json.gz \u2014 no config, no data/ prefix. The prefix does not match the repo name and cannot be derived from it (stackv2_edu_filtered ships stack-edu-*, github_archive_filtered ships gharchive-dolma-*), so list the tree at the pinned revision rather than guessing.",
+    "text_column verified in bytes @ common-pile/github_archive_filtered@52282fe966"
    ]
   },
   {
@@ -358,20 +358,20 @@
    "category": "reference",
    "source_label": "finewiki",
    "repo": "HuggingFaceFW/finewiki",
-   "config": "en",
+   "config": "data/enwiki",
    "file_format": "parquet",
-   "id_column": "UNVERIFIED",
+   "id_column": "id",
    "target_tokens": 8800000000,
    "pool_tokens": 8870000000,
    "license": "CC-BY-SA-4.0 AND GFDL",
    "share_alike": true,
-   "text_column": "UNVERIFIED",
+   "text_column": "text",
    "revision": "8bd13e72e6a002407649b3e898535f42ceb1aeb9",
    "traps": [
-    "text_column NOT confirmed from bytes. Settle it with: python3 -c \"import pyarrow.parquet as pq; pf=pq.ParquetFile(<one file of HuggingFaceFW/finewiki>); rg=pf.metadata.row_group(0); print([rg.column(i).path_in_schema for i in range(rg.num_columns)])\" \u2014 and match the EXACT path_in_schema, never a top-level name.",
     "100% share-alike, and TWO different copyleft regimes (CC-BY-SA + GFDL). Do not model SA as a boolean \u2014 record the license string (\u00a71.5).",
     "Pool was revised 14 B -> 9 B and max share 15% -> 12%: at 8.87 B, 15% gives only 2.96x headroom and 15% would have been the one row violating \u00a72.1's own 3x rule.",
-    "The card names NO token count and NO tokenizer; 8.87 B is footer-exact measurement."
+    "The card names NO token count and NO tokenizer; 8.87 B is footer-exact measurement.",
+    "text_column verified in bytes @ HuggingFaceFW/finewiki@8bd13e72e6 data/enwiki"
    ]
   },
   {

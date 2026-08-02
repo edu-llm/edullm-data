@@ -354,6 +354,23 @@ def _domain_of(
 # --------------------------------------------------------------------------------------
 
 
+def _pinned_url(repo: str, path: str, revision: str | None) -> str:
+    """`resolve/<revision>/<path>`, falling back to `main` ONLY when nothing is pinned.
+
+    ⚠️ `ingest_reservoir._resolve_url` hardcodes `resolve/main`, and calling it here silently
+    defeated the registry's revision pins: the build would list files at the pinned sha and then
+    fetch their bytes from whatever `main` pointed at that morning. Nothing downstream would
+    notice — the manifest hashes whatever arrived and Gate A passes it — so "the corpus built from
+    fineweb-edu@87f09149" could quietly contain different bytes on two runs.
+
+    That module keeps its own version because its one caller (the FinePhrase id scan) genuinely
+    wants HEAD-of-branch; this one is for a pinned build.
+    """
+    if not revision:
+        return _resolve_url(repo, path)
+    return f"https://huggingface.co/datasets/{repo}/resolve/{revision}/{path}"
+
+
 def _open_parquet(
     repo: str,
     path: str,
@@ -361,6 +378,7 @@ def _open_parquet(
     headers: Mapping[str, str],
     fileobj: Any | None,
     parquet_file: Any | None = None,
+    revision: str | None = None,
 ) -> Any:
     """`(ParquetFile, underlying_file)` over HTTP Range, or over an injected object.
 
@@ -404,7 +422,7 @@ def _open_parquet(
     # process presents one credential to one metered endpoint, so the brake belongs to the
     # process (`ingest_reservoir.py:228-251`).
     _RATE_GATE.wait()
-    rf = _RangeFile(_resolve_url(repo, path), size, dict(headers))
+    rf = _RangeFile(_pinned_url(repo, path, revision), size, dict(headers))
     return pq.ParquetFile(rf, pre_buffer=False), rf
 
 
@@ -451,7 +469,8 @@ def read_parquet_documents(
         )
 
     pf, _handle = _open_parquet(
-        repo, str(path), int(entry_size or 0), headers or _hf_headers(), fileobj, parquet_file
+        repo, str(path), int(entry_size or 0), headers or _hf_headers(), fileobj, parquet_file,
+        revision=spec.revision,
     )
     md = pf.metadata
 
@@ -662,7 +681,8 @@ def read_jsonl_gz_documents(
             )
         _RATE_GATE.wait()
         chunks = _range_chunks(
-            _RangeFile(_resolve_url(repo, str(path)), int(size), dict(headers or _hf_headers()))
+            _RangeFile(_pinned_url(repo, str(path), spec.revision), int(size),
+                       dict(headers or _hf_headers()))
         )
 
     where = f"{repo}/{path}"
@@ -686,7 +706,25 @@ def read_jsonl_gz_documents(
             )
 
         text = _json_walk(record, spec.text_column)
+        if text is None and lineno == 1:
+            # ⚠️ A WRONG `text_column` MUST NOT READ AS AN EMPTY CORPUS. JSON has no footer, so
+            # unlike the parquet path there is nothing to validate the selector against up front —
+            # and `continue`-ing on a missing key (which is what this did) means a typo, or the
+            # literal string "UNVERIFIED", skips EVERY record and yields zero documents while
+            # reporting success. Measured: `ubuntu_irc_filtered` with `text_column="UNVERIFIED"`
+            # returned 0 documents and raised nothing.
+            #
+            # The first record is the cheapest place to catch it, and a real corpus whose very
+            # first line legitimately lacks the text field does not exist in this registry.
+            raise ReadError(
+                f"{where}:1: no {spec.text_column!r} in the first record; keys are "
+                f"{sorted(record)[:12]}. A missing text column would otherwise skip every record "
+                f"and yield an EMPTY corpus with no error — the json.gz twin of the "
+                f"zero-columns parquet trap in this module's docstring. Fix the registry row."
+            )
         if not isinstance(text, str) or not text:
+            # Past the first record an absent or empty text is a legitimately unusable document
+            # (upstream filtering leaves a few), not a schema error.
             continue
         doc_id = _json_walk(record, spec.id_column)
         if doc_id is None:

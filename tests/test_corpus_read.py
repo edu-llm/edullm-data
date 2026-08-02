@@ -966,3 +966,71 @@ def test_a_custom_floor_is_honoured_and_recorded():
     kept = list(filter_documents(_docs([49, 50, 51]), _words, min_tokens=50, stats=stats))
     assert [d.id for d in kept] == ["d1", "d2"]
     assert stats.min_tokens == 50
+
+
+# ---- the json.gz twin of the zero-columns parquet trap ----
+
+
+def test_a_wrong_text_column_on_json_gz_RAISES_instead_of_yielding_nothing():
+    """A missing text key must not read as an empty corpus.
+
+    JSON has no footer, so unlike parquet there is nothing to validate the selector against up
+    front — and `continue`-ing past a missing key means a typo (or the literal string
+    "UNVERIFIED") skips EVERY record and yields zero documents while reporting success. Measured
+    against real bytes before this guard existed: `ubuntu_irc_filtered` with
+    `text_column="UNVERIFIED"` returned 0 documents and raised nothing.
+    """
+    import gzip
+    import json as _json
+
+    from edullm_data.corpus import CorpusSpec
+    from edullm_data.corpus_read import ReadError, read_jsonl_gz_documents
+
+    body = gzip.compress(
+        b"\n".join(_json.dumps({"id": f"d{i}", "text": f"real text {i}"}).encode() for i in range(3))
+    )
+    spec = CorpusSpec(
+        key="cp", category="academic", source_label="cp", repo="common-pile/x",
+        file_format="json.gz", text_column="NOPE", id_column="id", target_tokens=1,
+        revision="a" * 40,
+    )
+    with pytest.raises(ReadError, match="EMPTY corpus"):
+        list(read_jsonl_gz_documents("common-pile/x", "f.json.gz", spec, chunks=[body]))
+
+    ok = CorpusSpec(**{**spec.__dict__, "text_column": "text"})
+    got = list(read_jsonl_gz_documents("common-pile/x", "f.json.gz", ok, chunks=[body]))
+    assert [d.id for d in got] == ["d0", "d1", "d2"]
+
+
+def test_a_later_record_missing_text_is_skipped_not_fatal():
+    """Only the FIRST record is treated as a schema signal; upstream filtering leaves a few
+    documents with an empty body and those are legitimately unusable, not an error."""
+    import gzip
+    import json as _json
+
+    from edullm_data.corpus import CorpusSpec
+    from edullm_data.corpus_read import read_jsonl_gz_documents
+
+    body = gzip.compress(
+        _json.dumps({"id": "a", "text": "present"}).encode() + b"\n"
+        + _json.dumps({"id": "b"}).encode() + b"\n"
+        + _json.dumps({"id": "c", "text": "also present"}).encode() + b"\n"
+    )
+    spec = CorpusSpec(
+        key="cp", category="academic", source_label="cp", repo="common-pile/x",
+        file_format="json.gz", text_column="text", id_column="id", target_tokens=1,
+        revision="a" * 40,
+    )
+    got = list(read_jsonl_gz_documents("common-pile/x", "f.json.gz", spec, chunks=[body]))
+    assert [d.id for d in got] == ["a", "c"]
+
+
+def test_the_pinned_url_uses_the_revision_not_main():
+    """`ingest_reservoir._resolve_url` hardcodes `resolve/main`, and calling it here silently
+    defeated the registry pins: files listed at the pinned sha, bytes fetched from HEAD."""
+    from edullm_data.corpus_read import _pinned_url
+
+    url = _pinned_url("acme/x", "data/f.parquet", "b" * 40)
+    assert f"/resolve/{'b' * 40}/" in url and "/resolve/main/" not in url
+    # Nothing pinned -> the old behaviour, so an unpinned caller is unchanged rather than broken.
+    assert "/resolve/main/" in _pinned_url("acme/x", "data/f.parquet", None)

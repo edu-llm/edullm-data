@@ -490,3 +490,26 @@ def test_rows_sharing_a_repo_share_its_revision():
         by_repo.setdefault(row["repo"], set()).add(row["revision"])
     for repo, revs in by_repo.items():
         assert len(revs) == 1, f"{repo} pinned at {len(revs)} different revisions: {sorted(revs)}"
+
+
+def test_every_drawn_source_has_a_verified_text_column():
+    """`UNVERIFIED` on a DRAWN row means the build would read the wrong bytes or none at all.
+
+    All 14 drawn sources were confirmed by reading their first record at the pinned revision on
+    2026-08-01. Reserve rows may still be unverified — they are not read.
+    """
+    for row in _registry()["corpora"]:
+        if row["target_tokens"] > 0:
+            assert row["text_column"] != "UNVERIFIED", f"{row['key']}: text_column unverified"
+            assert row["id_column"] != "UNVERIFIED", f"{row['key']}: id_column unverified"
+
+
+def test_finemath_joins_on_url_because_it_has_no_id_column():
+    """Measured: 16 leaves and none of them an id.
+
+    Recorded as a test because the id is the join key for the §9.7 item 4 partition and the
+    FineWeb-Edu anti-join — silently substituting a row index would make both non-reproducible
+    across a re-download.
+    """
+    fm = [r for r in _registry()["corpora"] if r["key"] == "finemath"][0]
+    assert fm["id_column"] == "url"
