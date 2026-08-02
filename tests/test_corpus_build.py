@@ -560,3 +560,82 @@ def test_an_empty_document_is_dropped_without_being_encoded():
     assert len(out) == 1
     assert stats.dropped_empty == 1 and stats.kept == 1
     assert "" not in seen, "the empty document must never reach the tokenizer"
+
+
+def test_a_bundle_drawing_a_SUBSET_of_its_pool_does_not_raise_on_surplus():
+    """The bug that killed the first array, 25 of 27 bundles, at end-of-run.
+
+    `_reader_for` over-delivers ON PURPOSE — `_CHARS_PER_TOKEN` 6.0 against a measured ~4.4, times
+    `_FILTER_HEADROOM` 1.5 — so that filter attrition cannot leave a bundle's last shard unfilled.
+    Whatever that slack does not consume arrives at `pack` as surplus, and `_drain_surplus` used to
+    raise on one shard's worth of it. Every bundle whose pool exceeds its target therefore did its
+    full billable work and then threw the result away.
+
+    Only `ubuntu-irc` survived, which is exactly why the single-bundle proof run passed and told us
+    nothing: its pool is 1.04x its target, so the reader hit end-of-FILES before the budget bound
+    and the surplus was 0. A proof case that cannot exhibit the bug is not a proof.
+
+    Asserted at PRODUCTION shard size deliberately: `_drain_surplus` compares against the module
+    constant `SHARD_TOKENS`, which `_small`'s rescaling does not touch. At TEST_SHARD_TOKENS the
+    surplus never reaches the threshold and this test would pass against the broken code.
+    """
+    rng = random.Random(21)
+    WORDS = 500
+    # Four shards' worth of documents offered against a ONE shard plan — the registry's real shape
+    # (252B drawn from a 1,094B pool).
+    n = (SHARD_TOKENS * 4) // WORDS
+
+    def documents(spec, bundle):
+        for i in range(n):
+            yield Document(id=f"d{i}",
+                           text=" ".join(f"w{rng.randrange(80000)}" for _ in range(WORDS)),
+                           source="tiny")
+
+    spec = _spec(target_tokens=SHARD_TOKENS)
+    plan = B.plan_document([spec])
+    bundle = B.bundles_of(plan)[0]
+    assert bundle.tokens == SHARD_TOKENS, "must run at production size or the bug is invisible"
+
+    s3 = FakeS3()
+    info = B.run_bundle(bundle, plan, spec, s3=s3, bucket=BUCKET, prefix=PREFIX,
+                        documents=documents, tokenizer=WordTok(), eos_id=100257,
+                        vocab_size=100278, wheel_version="0.7.0")
+    assert info["shards"] == 1
+    assert info["unfilled"] == 0, "the shard must be FULL — that is what the headroom buys"
+    # The receipt's own accounting must still close, which is what `partial_source` protects: it
+    # returns unread=0 rather than draining, so tokens_in only ever counts documents pulled.
+    ln = info["length"]
+    assert ln["seen"] == ln["kept"] + ln["dropped_short"] + ln["dropped_empty"], ln
+
+
+def test_a_stream_meant_to_be_consumed_WHOLE_still_raises_on_surplus():
+    """The other half: `partial_source` must not become a blanket suppression.
+
+    A caller packing a complete stream still needs the under-allocation gate — leftover tokens
+    there mean the plan has too few refs for data that exists, and discarding them ships a corpus
+    short of its own source. Only `corpus_build` passes partial_source=True, and only because its
+    reader deliberately over-reads.
+    """
+    import numpy as np
+
+    from edullm_data.corpus_pack import pack
+
+    refs = B.bundles_of(B.plan_document([_spec(target_tokens=SHARD_TOKENS)]))[0].shards
+    # RANDOM ids, not a constant fill: `_verify_shard` enforces the family's distinct-ids floor of
+    # 256 on a sampled window and runs BEFORE the surplus gate, so np.full() fails the wrong check
+    # and the test would pass for the wrong reason.
+    # RANDOM ids with a trailing EOS, because `pack` consumes `tokenize_documents` output and
+    # `_verify_shard` checks BOTH the distinct-ids floor (256, on a sampled window) and that each
+    # document contributes exactly one EOS. Both run before the surplus gate, so a lazier fixture
+    # fails an unrelated check and the test passes for the wrong reason.
+    rng = np.random.default_rng(9)
+
+    def _doc(n):
+        a = rng.integers(1, 100_000, n, dtype="<u4")
+        a[-1] = 100257
+        return a
+
+    docs = [_doc(SHARD_TOKENS // 2) for _ in range(6)]
+    with pytest.raises(BuildError, match="remain after all"):
+        pack({("tiny", None, "train"): iter(docs)}, list(refs),
+             sink=lambda ref, payload: None, eos_id=100257, vocab_size=100278)

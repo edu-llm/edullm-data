@@ -273,10 +273,12 @@ def tokenize_documents(
             kept_batch = []
             for doc in batch:
                 text = doc.text if isinstance(doc, Document) else doc
-                if stats is not None:
-                    stats.seen += 1
                 if not text:
+                    # Counted as seen HERE, because an empty document is fully accounted for the
+                    # moment it is rejected — it is never yielded, so no consumer can stop short
+                    # of it.
                     if stats is not None:
+                        stats.seen += 1
                         stats.dropped_empty += 1
                         if len(stats.sample_dropped) < stats.sample_limit:
                             stats.sample_dropped.append(getattr(doc, "id", ""))
@@ -291,6 +293,14 @@ def tokenize_documents(
         else:
             id_lists = [tokenizer(text) for text in texts]
         for doc, text_ids in zip(batch, id_lists):
+            # `seen` is incremented HERE, per document, and NOT in the pre-pass above. The
+            # difference only shows when the consumer stops early — which `corpus_build` now does
+            # by design, since `_reader_for` over-delivers on purpose. A batch is encoded whole,
+            # but the generator may be abandoned partway through yielding it, so counting `seen`
+            # per batch reported documents the consumer never received and broke the receipt's
+            # `seen == kept + dropped_short + dropped_empty` identity (measured: 596 vs 308).
+            if min_tokens is not None and stats is not None:
+                stats.seen += 1
             if min_tokens is not None and len(text_ids) < min_tokens:
                 # Dropped from the ids this batch already produced — no second encode, and no
                 # `<u4` allocation for a document that is not going into a shard.
@@ -524,6 +534,7 @@ def pack(
     eos_id: int | None = None,
     vocab_size: int | None = None,
     max_eos_fraction: float | None = None,
+    partial_source: bool = False,
 ) -> list[PackResult]:
     """Concatenate tokenized documents into shards of exactly ``ref.tokens`` and hand them to ``sink``.
 
@@ -621,6 +632,7 @@ def pack(
                 max_eos_fraction=max_eos_fraction,
                 zero_run_max=zero_run_max,
                 distinct_min=distinct_min,
+                partial_source=partial_source,
             )
         )
     return results
@@ -653,6 +665,7 @@ def _pack_stream(
     max_eos_fraction: float,
     zero_run_max: int,
     distinct_min: int,
+    partial_source: bool = False,
 ) -> PackResult:
     """Fill one stream's refs in ordinal order from a single carry buffer."""
     label = "/".join(part for part in stream if part)
@@ -743,7 +756,9 @@ def _pack_stream(
     # pulled), while `unread` never entered it. Adding the total would double-count the remainder of
     # a half-consumed document — which is exactly the bug PackResult's conservation assertion caught
     # on its first run, over-reporting tokens_in by up to one document.
-    pending_left, unread = _drain_surplus(label, doc_iter, pending, len(stream_refs))
+    pending_left, unread = _drain_surplus(
+        label, doc_iter, pending, len(stream_refs), partial_source=partial_source
+    )
     tokens_in += unread
     surplus = pending_left + unread
 
@@ -790,6 +805,8 @@ def _drain_surplus(
     doc_iter: Iterator[np.ndarray],
     pending: tuple[np.ndarray, int] | None,
     n_refs: int,
+    *,
+    partial_source: bool = False,
 ) -> tuple[int, int]:
     """``(pending_left, unread)`` — the tokens left over after every ref was filled.
 
@@ -799,12 +816,24 @@ def _drain_surplus(
     never pulled at all. Returning only the sum makes the caller either double-count the remainder
     or miss the unread documents — there is no single number that is correct for both.
 
-    Round-down planning makes a surplus NORMAL — up to ``SHARD_TOKENS - 1`` tokens per stream by
-    construction, which is why this returns numbers rather than raising on any surplus at all. A
-    surplus of a whole shard or more is different in kind: the plan and the realized token count
-    disagree by ~25M tokens, and the honest response is to re-plan from realized counts, not to
-    discard the data. The loop stops counting at the limit instead of draining to an exact figure,
-    because the remaining stream may be terabytes.
+    **``partial_source`` decides whether leftover data is an ERROR or the POINT**, and the two
+    cases are genuinely different builds rather than a strictness preference:
+
+    * ``False`` (default) — the stream is meant to be consumed WHOLE, so tokens left after the last
+      ref mean the plan allocated too few refs for the data that exists. Discarding them silently
+      would ship a corpus short of what its own source contains, so this raises.
+    * ``True`` — the plan deliberately draws a SUBSET. The reservoir registry takes 252 B tokens
+      from a 1,094 B-token pool, and `corpus_build._reader_for` over-delivers on purpose
+      (``_CHARS_PER_TOKEN`` 6.0 against a measured ~4.4, times ``_FILTER_HEADROOM`` 1.5) so that
+      filter attrition cannot leave the final shard unfilled. That overshoot IS surplus. Raising on
+      it turns a working build into a guaranteed end-of-run failure — measured: 25 of 27 bundles,
+      each after its full billable work, and only ``ubuntu-irc`` survived because its pool is 1.04x
+      its target so the reader ran out of FILES before the budget bound.
+
+    When ``partial_source`` is set the iterator is NOT drained: unread documents are left unpulled
+    and reported as ``unread == 0``. That keeps ``PackResult``'s conservation identity exact, since
+    ``tokens_in`` only ever counted documents actually pulled — and it avoids walking the remaining
+    terabytes just to produce a number nobody acts on.
 
     Raising after shards have already reached the sink is safe: the sink writes to
     ``edullm-landing``, which is scratch with a 14-day expiry, and nothing has been promoted.
@@ -813,6 +842,10 @@ def _drain_surplus(
     if pending is not None:
         arr, offset = pending
         pending_left = int(arr.size - offset)
+    if partial_source:
+        # Stop pulling. The remaining stream is the part of the pool this bundle was never meant
+        # to take, and counting it would cost a full read of data that is about to be ignored.
+        return pending_left, 0
     unread = 0
     for doc in doc_iter:
         unread += int(doc.size)
@@ -822,7 +855,9 @@ def _drain_surplus(
                 f"{label}: at least {surplus:,} tokens remain after all {n_refs} planned shards "
                 f"were filled — a whole {SHARD_TOKENS:,}-token shard's worth would be discarded. "
                 f"The plan under-allocated: recompute shard_plan() from the realized token count "
-                f"and re-run. (A surplus under one shard is normal — shard_plan rounds down.)"
+                f"and re-run. (A surplus under one shard is normal — shard_plan rounds down.) "
+                f"If this stream is a deliberate SUBSET of a larger pool, the caller should pass "
+                f"partial_source=True instead of shrinking the plan."
             )
     return pending_left, unread
 

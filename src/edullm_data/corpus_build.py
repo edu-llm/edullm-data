@@ -500,8 +500,14 @@ def run_bundle(
         surviving, tokenizer, eos_id=eos_id, vocab_size=vocab_size,
         min_tokens=plan["min_doc_tokens"], stats=length_stats,
     )
+    # partial_source=True because `_reader_for` DELIBERATELY over-delivers: the registry draws
+    # 252B tokens from a 1,094B pool, and the budget carries `_FILTER_HEADROOM` slack so filter
+    # attrition cannot leave the last shard unfilled. Whatever that slack does not consume is
+    # surplus by design. Without this flag `_drain_surplus` raised on it — measured live as 25 of
+    # 27 bundles failing at end-of-run, each after its full billable work, with only ubuntu-irc
+    # passing because its pool is 1.04x its target so the reader hit end-of-files first.
     results = pack({bundle.stream: arrays}, list(bundle.shards), sink=sink, eos_id=eos_id,
-                   vocab_size=vocab_size)
+                   vocab_size=vocab_size, partial_source=True)
     if not results:
         raise BuildDriverError(f"{bundle.bundle_id}: pack returned no result")
     result = results[0]
