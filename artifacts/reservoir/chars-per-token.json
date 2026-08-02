@@ -1,0 +1,25 @@
+{
+ "_note": "chars/token measured on the FIRST file of each source at its pinned revision, 400 documents each, with the dolma2-tokenizer (vocab 100278). Sets _CHARS_PER_TOKEN in corpus_build.py, which sizes each bundle's read budget. Reading too little leaves the last shard unfilled (a verify failure); reading too much is absorbed by pack as surplus. So the constant is set ABOVE the worst observed value, not at the mean.",
+ "_measured_at": "2026-08-01",
+ "_tokenizer": "allenai/dolma2-tokenizer",
+ "_docs_per_source": 400,
+ "_constant_chosen": 6.0,
+ "_worst_observed": 5.58,
+ "_mean": 4.31,
+ "chars_per_token": {
+  "finepdfs-edu": 4.47,
+  "fineweb-edu": 4.62,
+  "dclm-baseline": 4.39,
+  "finemath": 2.56,
+  "peS2o_filtered": 4.61,
+  "pubmed_filtered": 4.2,
+  "stackv2_edu_filtered": 3.66,
+  "stackexchange_filtered": 4.41,
+  "ubuntu_irc_filtered": 3.02,
+  "finewiki": 4.38,
+  "finephrase-faq": 4.94,
+  "finephrase-math": 4.67,
+  "finephrase-table": 5.58,
+  "finephrase-tutorial": 4.85
+ }
+}

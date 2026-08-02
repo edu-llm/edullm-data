@@ -310,13 +310,38 @@ class Bundle:
     split: str
     spec_key: str
     shards: tuple[ShardRef, ...]
+    #: The plan's `val_fraction`, carried so `keep_rate` needs no second argument. Defaults to
+    #: `VAL_FRACTION` for hand-built bundles in tests; the plan always supplies the real value.
+    val_fraction: float = VAL_FRACTION
 
     @property
     def stream(self) -> tuple[str, str | None, str]:
         return (self.source, self.domain, self.split)
 
+    @property
+    def tokens(self) -> int:
+        """Planned tokens for this bundle — the sum of its refs, not a stored field.
+
+        Derived rather than carried so it cannot disagree with `shards`. `test_corpus_build`
+        rescales refs to `TEST_SHARD_TOKENS`, and a stored total would then describe a different
+        bundle than the one being packed.
+        """
+        return sum(r.tokens for r in self.shards)
+
+    @property
+    def keep_rate(self) -> float:
+        """Fraction of the documents read that this bundle KEEPS, per the val carve.
+
+        A val bundle keeps `val_fraction` (0.005) and discards the rest; a train bundle keeps the
+        complement. This is what makes a val bundle's read ~200x its own token count — there is no
+        way to reach a held-out document except to read the train documents interleaved with it,
+        because `is_held_out` is a hash of the document id and is not knowable per file.
+        """
+        return self.val_fraction if self.split == "val" else (1.0 - self.val_fraction)
+
     @classmethod
-    def from_plan_entry(cls, entry: Mapping[str, Any]) -> Bundle:
+    def from_plan_entry(cls, entry: Mapping[str, Any],
+                        val_fraction: float = VAL_FRACTION) -> Bundle:
         from .manifest import parse_shard_name
 
         refs = []
@@ -339,11 +364,15 @@ class Bundle:
             split=entry["split"],
             spec_key=entry["spec_key"],
             shards=tuple(refs),
+            val_fraction=val_fraction,
         )
 
 
 def bundles_of(plan: Mapping[str, Any]) -> list[Bundle]:
-    return [Bundle.from_plan_entry(e) for e in plan["bundles"]]
+    # The plan's val_fraction reaches each Bundle here, because `_reader_for` sizes a val bundle's
+    # read budget by its inverse and a wrong value there silently starves or over-reads.
+    vf = float(plan.get("val_fraction", VAL_FRACTION))
+    return [Bundle.from_plan_entry(e, vf) for e in plan["bundles"]]
 
 
 def plan_key(prefix: str, plan_id: str) -> str:
@@ -423,7 +452,6 @@ def run_bundle(
     """
     from .corpus_filter import FilterStats, dedup_and_decontaminate
     from .corpus_pack import pack, tokenize_documents
-    from .corpus_read import filter_documents
     from .corpus_receipt import Receipt, SourcePin, write_receipt
 
     plan_id = plan["plan_id"]
@@ -453,10 +481,25 @@ def run_bundle(
     filter_stats = FilterStats()
     surviving = dedup_and_decontaminate(_selected(), index=index, stats=filter_stats)
 
-    kept = filter_documents(
-        surviving, lambda t: len(tokenizer.encode(t).ids), min_tokens=plan["min_doc_tokens"]
+    # The length filter runs INSIDE tokenize_documents, from the ids encode_batch already produced.
+    # It used to be a separate `corpus_read.filter_documents` pass calling `tokenizer.encode` once
+    # per document, which encoded the whole corpus twice — and that pass got no rayon parallelism,
+    # measured at 1.10 M tok/s against encode_batch's 10.5 M across 32 vCPU, making it ~91% of the
+    # build's compute on 1 of 32 cores. `filter_documents` remains the right tool for a caller with
+    # a cheap length proxy; this driver has none, because the tokenizer IS the length.
+    #
+    # TWO stats objects, not one, and they are not interchangeable. `corpus_filter.FilterStats`
+    # closes as `seen == kept + duplicates + contaminated` — an identity a test asserts and the
+    # receipt reports. Letting the length filter decrement its `kept` would break that identity
+    # silently. `corpus_read.FilterStats` is the one with `dropped_short`/`dropped_tokens` and the
+    # `mean_kept_tokens` that predicts the EOS fraction, so the length pass reports into its own.
+    from .corpus_read import FilterStats as LengthStats
+
+    length_stats = LengthStats(min_tokens=plan["min_doc_tokens"])
+    arrays = tokenize_documents(
+        surviving, tokenizer, eos_id=eos_id, vocab_size=vocab_size,
+        min_tokens=plan["min_doc_tokens"], stats=length_stats,
     )
-    arrays = tokenize_documents(kept, tokenizer, eos_id=eos_id, vocab_size=vocab_size)
     results = pack({bundle.stream: arrays}, list(bundle.shards), sink=sink, eos_id=eos_id,
                    vocab_size=vocab_size)
     if not results:
@@ -498,6 +541,19 @@ def run_bundle(
         "tokens_out": result.tokens_out,
         "unfilled": len(result.unfilled),
         "filter": filter_stats.as_dict(),
+        # Reported separately from `filter` because it is a different denominator: `filter.seen`
+        # counts documents entering dedup, `length.seen` counts those that survived it. Merging
+        # them would recreate the `category_attrition` mistake — a numerator whose denominator a
+        # reader has to guess.
+        "length": {
+            "min_tokens": length_stats.min_tokens,
+            "seen": length_stats.seen,
+            "kept": length_stats.kept,
+            "dropped_short": length_stats.dropped_short,
+            "dropped_empty": length_stats.dropped_empty,
+            "kept_tokens": length_stats.kept_tokens,
+            "mean_kept_tokens": round(length_stats.mean_kept_tokens, 2),
+        },
     }
 
 
@@ -741,8 +797,62 @@ def _resolve_pinned(repo: str, revision: str, path: str) -> str:
     return f"https://huggingface.co/datasets/{repo}/resolve/{revision}/{path}"
 
 
+#: Characters of source text read per token the bundle needs, before the reader stops.
+#:
+#: The reader has to stop somewhere, and it cannot stop on a token count: it yields TEXT, and
+#: nothing knows a document's token length until the tokenizer has seen it (which is the whole
+#: point of the previous fix — there is no cheap pre-count). So the budget is denominated in
+#: characters and this is the conversion.
+#:
+#: MEASURED per source on the first file at each pinned revision, 400 documents each
+#: (`artifacts/reservoir/chars-per-token.json`). The spread is wide and the direction matters:
+#:
+#:     finephrase-table 5.58   finephrase-faq 4.94   fineweb-edu 4.62   peS2o 4.61
+#:     finephrase-tutorial 4.85  finephrase-math 4.67  finepdfs-edu 4.47  stackexchange 4.41
+#:     finewiki 4.38   dclm-baseline 4.39   pubmed 4.20   stackv2-edu 3.66
+#:     ubuntu-irc 3.02   finemath 2.56
+#:
+#: 6.0, i.e. above the worst observed, because the two errors are not symmetric. Reading too much
+#: costs time and `pack` discards the overshoot; reading too little leaves the bundle's last shard
+#: unfilled, which `verify` refuses and which costs a re-run of the whole bundle. A first draft
+#: used 4.0 (measured on general prose) and 10 of 14 sources exceeded it — the build only worked
+#: because `_FILTER_HEADROOM` happened to absorb the gap, which is the wrong constant doing the
+#: wrong job by luck.
+_CHARS_PER_TOKEN = 6.0
+
+#: Multiplier on the character budget, to cover what the filters remove downstream.
+#:
+#: Between this reader and `pack` sit exact dedup, decontamination and the >=64-token floor, and
+#: every one of them DELETES documents. A budget sized for exactly `bundle.tokens` therefore
+#: under-delivers by whatever those three remove — measured at 3.4-12.6% for FinePhrase's short
+#: rewrites (`artifacts/recount/synthetic.json:173`) and unmeasured for the rest.
+#:
+#: 1.5 is slack, not a measurement, and it is deliberately generous in the direction that costs
+#: only time. Too high wastes reads that `_drain_surplus` then absorbs; too low leaves the final
+#: shard of a bundle unfilled, which is a `verify` failure and a re-run of the whole bundle.
+#:
+#: It covers ONLY filter attrition. The chars-per-token conversion is `_CHARS_PER_TOKEN`'s job and
+#: is measured separately — conflating the two is how a wrong conversion hides inside a generous
+#: headroom until the one source that needs both fails.
+_FILTER_HEADROOM = 1.5
+
+
 def _reader_for(spec: CorpusSpec, bundle: Bundle) -> Iterable[Document]:
     """Documents for one bundle, dispatched on the registry's `file_format`.
+
+    **Stops once the bundle's character budget is met, and that bound is what makes the build
+    runnable at all.** The registry draws 252 B tokens from a 1,094 B-token pool, so a reader that
+    walks every file arrives at `pack` with thousands of shards' worth of documents the plan has no
+    refs for — and `corpus_pack._drain_surplus` REFUSES a surplus of one whole shard, because
+    discarding already-tokenized tokens means the plan and reality disagree. Measured before this
+    bound existed: all 14 drawn sources raised, 11 of them needing an impossible 46-90% filter loss
+    to come under the threshold. The raise is correct; what was missing is that nothing told the
+    reader when to stop.
+
+    Deliberately NOT a hard cap on documents handed over: the loop breaks between FILES, so the
+    last file is always read to its end. Truncating mid-file would make the document set depend on
+    where the budget happened to run out, and a re-run with a different `min_doc_tokens` would then
+    select a different corpus under the same `plan_id`. Whole files keep the read deterministic.
 
     ⚠️ UNVERIFIED against live HF from inside a Batch container — every offline test injects
     `documents=` instead, so this dispatch is exercised only by its own unit test. Settle it with a
@@ -760,8 +870,21 @@ def _reader_for(spec: CorpusSpec, bundle: Bundle) -> Iterable[Document]:
             f"{spec.key}: no reader for {spec.file_format!r} — this should have been caught at "
             f"plan time by _assert_readable"
         )
+
+    # A val bundle keeps only `val_fraction` of what it reads, so its budget is scaled by the
+    # inverse. Without this a val bundle stops after ~0.5% of the text it needs and every one of
+    # its shards comes up empty. The carve is a pure function of the document id (corpus.is_held_out)
+    # and cannot be predicted per file, so there is no cheaper way to reach a val document than
+    # reading the train ones alongside it and discarding them.
+    keep_rate = bundle.keep_rate
+    budget = int(bundle.tokens * _CHARS_PER_TOKEN * _FILTER_HEADROOM / keep_rate)
+    seen_chars = 0
     for entry in hf_files(spec):
-        yield from reader(spec.repo, entry, spec)
+        for doc in reader(spec.repo, entry, spec):
+            seen_chars += len(doc.text)
+            yield doc
+        if seen_chars >= budget:
+            return
 
 
 def _build_parser() -> argparse.ArgumentParser:

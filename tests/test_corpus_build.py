@@ -389,3 +389,174 @@ def test_contaminated_and_duplicate_documents_never_reach_a_shard():
     assert f["contaminated"] == 1, f
     assert not any(d.text == leak for d in uniq), "the fixture must not leak into the kept set"
     assert f["normalization"] == "week1-nfc-rstrip-v1"
+
+
+# --------------------------------------------------------------------------------------
+# The read budget — why all 14 sources used to raise before writing a shard
+# --------------------------------------------------------------------------------------
+
+
+def test_the_reader_stops_instead_of_walking_a_pool_far_larger_than_the_plan():
+    """THE blocker that made every bundle unrunnable, and it is not a performance concern.
+
+    The registry draws 252B tokens from a 1,094B pool. `_reader_for` used to iterate every file in
+    the repo, so `pack` was handed thousands of shards' worth of documents it had no refs for —
+    and `corpus_pack._drain_surplus` REFUSES a surplus of one whole shard, because discarding
+    already-tokenized tokens means the plan disagrees with reality. Measured before the budget
+    existed: all 14 drawn sources raised, 11 of them needing an impossible 46-90% filter loss to
+    come under the threshold.
+
+    Asserted through file COUNT rather than a token total, because the stop is between files by
+    design — a mid-file cut would make the document set depend on where the budget ran out.
+    """
+    files_read = []
+
+    def reader(repo, entry, spec):
+        files_read.append(entry["path"])
+        # Each "file" carries a whole shard's worth of characters at the assumed 4.0 chars/token.
+        for i in range(200):
+            yield Document(id=f"{entry['path']}-{i}",
+                           text="x" * (SHARD_TOKENS * 4 // 200), source="tiny")
+
+    spec = _spec(target_tokens=SHARD_TOKENS)          # ONE shard planned
+    plan = B.plan_document([spec])
+    bundle = B.bundles_of(plan)[0]
+
+    # 500 files available; the budget must stop long before the end.
+    tree = [{"path": f"data/{i:05d}.parquet", "size": 1000} for i in range(500)]
+    import edullm_data.corpus_build as mod
+    real_hf_files, real_readers = mod.hf_files, None
+    mod.hf_files = lambda sp, headers=None: tree
+    try:
+        from edullm_data import corpus_read
+        real_readers = corpus_read.read_parquet_documents
+        corpus_read.read_parquet_documents = reader
+        docs = list(mod._reader_for(spec, bundle))
+    finally:
+        mod.hf_files = real_hf_files
+        if real_readers is not None:
+            corpus_read.read_parquet_documents = real_readers
+
+    assert len(files_read) < 500, "the reader must stop, not walk the whole pool"
+    # 1 shard x 4.0 chars/token x 1.5 headroom / 0.995 keep = ~1.5 files' worth.
+    assert len(files_read) <= 4, f"read {len(files_read)} files for a 1-shard bundle"
+    assert docs, "it must still yield something"
+
+
+def test_a_val_bundle_reads_far_more_than_it_keeps():
+    """A val bundle's budget is scaled by 1/val_fraction, and without that it reads ~0.5% of what
+    it needs and every one of its shards comes up empty.
+
+    There is no cheaper way: `corpus.is_held_out` hashes the document id, so a held-out document
+    cannot be located without reading the train documents interleaved with it.
+    """
+    big = _spec(key="big", source_label="big", target_tokens=SHARD_TOKENS * 400)
+    plan = B.plan_document([big])
+    train = next(b for b in B.bundles_of(plan) if b.split == "train")
+    val = next(b for b in B.bundles_of(plan) if b.split == "val")
+
+    assert val.keep_rate == plan["val_fraction"]
+    assert train.keep_rate == 1.0 - plan["val_fraction"]
+    # Per PLANNED token, a val bundle must read ~200x what a train bundle does.
+    train_per_tok = 1.0 / train.keep_rate
+    val_per_tok = 1.0 / val.keep_rate
+    assert val_per_tok / train_per_tok > 190
+
+
+def test_bundle_tokens_is_derived_from_its_refs_not_stored():
+    """`_reader_for` sizes its budget from `bundle.tokens`, and the driver tests rescale refs to
+    TEST_SHARD_TOKENS. A stored total would describe a different bundle than the one packed."""
+    plan = B.plan_document([_spec()])
+    bundle = B.bundles_of(plan)[0]
+    assert bundle.tokens == sum(r.tokens for r in bundle.shards) == SHARD_TOKENS * 2
+    assert _small(bundle).tokens == TEST_SHARD_TOKENS * 2
+
+
+# --------------------------------------------------------------------------------------
+# The double encode
+# --------------------------------------------------------------------------------------
+
+
+def test_the_corpus_is_encoded_exactly_once_per_document():
+    """91% of the build's compute was a second, single-threaded encode.
+
+    `run_bundle` called `filter_documents(lambda t: len(tokenizer.encode(t).ids))` and then
+    `tokenize_documents`, so every document was encoded twice — and the filter pass handed the
+    tokenizer one string at a time, which gets no rayon parallelism. Measured on the pinned dolma2
+    tokenizer: 1.10 M tok/s that way against 10.5 M for encode_batch across 32 vCPU.
+
+    Counted per document rather than by wall clock, so it holds on any machine.
+    """
+    # Counted at `_ids`, BELOW both entry points, because WordTok.encode_batch is itself
+    # implemented over encode — so counting `encode` calls would measure the fixture's internals
+    # rather than how many times the driver tokenizes each document.
+    calls = {"n": 0}
+
+    class CountingTok(WordTok):
+        def _ids(self, text):
+            calls["n"] += 1
+            return super()._ids(text)
+
+    docs = _docs(n=300)
+    s3 = FakeS3()
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    B.run_bundle(bundle, plan, _spec(), s3=s3, bucket=BUCKET, prefix=PREFIX,
+                 documents=lambda sp, bu: docs, tokenizer=CountingTok(), eos_id=100257,
+                 vocab_size=100278, wheel_version="0.6.3")
+
+    # Every document tokenized ONCE. The old shape tokenized each one twice (filter, then pack),
+    # so this asserted ~2x before the fuse. `<=` rather than `==` because the val carve drops ~0.5%
+    # before the tokenizer ever sees them.
+    assert calls["n"] <= len(docs), (
+        f"{calls['n']} tokenizations for {len(docs)} documents — the length filter is encoding "
+        f"again instead of reading the batch's own ids"
+    )
+    assert calls["n"] > len(docs) * 0.9, f"only {calls['n']} tokenizations; fixture is not exercising the path"
+
+
+def test_the_length_filter_still_drops_short_documents_and_reports_them():
+    """Fusing the filter into the tokenizer must not weaken it — the >=64-token floor is what keeps
+    the EOS fraction under the family's 0.05 bound, and it is reported under its own denominator."""
+    # DISTINCT short texts, deliberately. 200 copies of one string are exact duplicates and dedup
+    # removes 199 of them before the length filter runs — measured, the first draft of this test
+    # asserted 150 drops and got 1.
+    short = [Document(id=f"s{i}", text=f"w{i} w{i+1} w{i+2}", source="tiny") for i in range(200)]
+    long = _docs(n=400)
+    s3 = FakeS3()
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    info = B.run_bundle(bundle, plan, _spec(), s3=s3, bucket=BUCKET, prefix=PREFIX,
+                        documents=lambda sp, bu: short + long, tokenizer=WordTok(),
+                        eos_id=100257, vocab_size=100278, wheel_version="0.6.3")
+    ln = info["length"]
+    assert ln["min_tokens"] == plan["min_doc_tokens"]
+    assert ln["dropped_short"] > 150, f"3-token documents must be dropped: {ln}"
+    assert ln["seen"] == ln["kept"] + ln["dropped_short"] + ln["dropped_empty"]
+    assert ln["mean_kept_tokens"] >= plan["min_doc_tokens"]
+    # The two stats blocks have DIFFERENT denominators and must not be conflated.
+    assert ln["seen"] <= info["filter"]["kept"]
+
+
+def test_an_empty_document_is_dropped_without_being_encoded():
+    """Empty text costs the tokenizer nothing to reject, and it is counted under its own field
+    because an empty document contributes one EOS and no content — the shape that drives the EOS
+    fraction to 1.0."""
+    from edullm_data.corpus_pack import tokenize_documents
+    from edullm_data.corpus_read import FilterStats
+
+    stats = FilterStats(min_tokens=4)
+    seen = []
+
+    class Tok(WordTok):
+        def encode_batch(self, texts, add_special_tokens=False):
+            seen.extend(texts)
+            return super().encode_batch(texts, add_special_tokens=add_special_tokens)
+
+    docs = [Document(id="a", text="", source="s"),
+            Document(id="b", text="w1 w2 w3 w4 w5", source="s")]
+    out = list(tokenize_documents(docs, Tok(), eos_id=1, vocab_size=100278,
+                                  min_tokens=4, stats=stats))
+    assert len(out) == 1
+    assert stats.dropped_empty == 1 and stats.kept == 1
+    assert "" not in seen, "the empty document must never reach the tokenizer"

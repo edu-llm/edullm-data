@@ -54,7 +54,7 @@ import functools
 import json
 import os
 import warnings
-from typing import Callable, Iterable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 import numpy as np
 
@@ -191,8 +191,23 @@ def tokenize_documents(
     eos_id: int,
     vocab_size: int | None = None,
     batch_size: int = _ENCODE_BATCH,
+    min_tokens: int | None = None,
+    stats: Any = None,
 ) -> Iterator[np.ndarray]:
     """Yield one ``<u4`` array per input document, in input order, with EOS appended.
+
+    **``min_tokens`` applies the short-document filter HERE, from the ids this function already
+    computed.** It is optional only for the callers that predate it; the build driver must pass it.
+    ``corpus_read.filter_documents`` measures the same quantity by calling ``tokenizer.encode`` once
+    per document, and a driver that used both encoded the entire corpus TWICE — once one-document-
+    at-a-time, which gets no rayon parallelism at all. Measured on the pinned dolma2 tokenizer over
+    real prose: 1.10 M tok/s single-document versus 10.5 M tok/s for ``encode_batch`` across 32
+    vCPU, so the filter pass alone was ~91% of the build's compute on 1 of 32 cores. Filtering from
+    the batch's own output makes the second encode unnecessary rather than merely faster.
+
+    The `<u4` array is only built for documents that survive, so a dropped document costs the
+    encode and nothing else. `stats` is duck-typed (a `corpus_read.FilterStats`) and updated with
+    the same fields that function sets, so a receipt's accounting is unchanged by the move.
 
     ``tokenizer`` is duck-typed, and both accepted shapes are deliberate:
 
@@ -227,6 +242,15 @@ def tokenize_documents(
         raise BuildError(f"eos_id must be an int; got {eos_id!r}")
     if batch_size < 1:
         raise BuildError(f"batch_size must be >= 1; got {batch_size}")
+    if min_tokens is not None and min_tokens < 1:
+        # Mirrors filter_documents' guard verbatim: a floor of 0 admits empty documents, which
+        # contribute one EOS and no content — the shape that drives the EOS fraction to 1.0.
+        raise BuildError(
+            f"min_tokens must be at least 1; got {min_tokens}. A floor of 0 admits empty "
+            f"documents, which contribute one EOS and no content."
+        )
+    if stats is not None and min_tokens is not None:
+        stats.min_tokens = min_tokens
 
     encode_batch = getattr(tokenizer, "encode_batch", None)
     if vocab_size is None:
@@ -242,12 +266,43 @@ def tokenize_documents(
         _warn_if_parallelism_unset()
 
     for batch in _batched(docs, batch_size):
+        # Empty documents are dropped BEFORE the encode, not after: they cost the tokenizer nothing
+        # to reject and `filter_documents` counted them under their own field, which the receipt's
+        # accounting reads.
+        if min_tokens is not None:
+            kept_batch = []
+            for doc in batch:
+                text = doc.text if isinstance(doc, Document) else doc
+                if stats is not None:
+                    stats.seen += 1
+                if not text:
+                    if stats is not None:
+                        stats.dropped_empty += 1
+                        if len(stats.sample_dropped) < stats.sample_limit:
+                            stats.sample_dropped.append(getattr(doc, "id", ""))
+                    continue
+                kept_batch.append(doc)
+            batch = kept_batch
+            if not batch:
+                continue
         texts = [doc.text if isinstance(doc, Document) else doc for doc in batch]
         if encode_batch is not None:
             id_lists = [enc.ids for enc in encode_batch(texts, add_special_tokens=False)]
         else:
             id_lists = [tokenizer(text) for text in texts]
-        for text_ids in id_lists:
+        for doc, text_ids in zip(batch, id_lists):
+            if min_tokens is not None and len(text_ids) < min_tokens:
+                # Dropped from the ids this batch already produced — no second encode, and no
+                # `<u4` allocation for a document that is not going into a shard.
+                if stats is not None:
+                    stats.dropped_short += 1
+                    stats.dropped_tokens += len(text_ids)
+                    if len(stats.sample_dropped) < stats.sample_limit:
+                        stats.sample_dropped.append(getattr(doc, "id", ""))
+                continue
+            if min_tokens is not None and stats is not None:
+                stats.kept += 1
+                stats.kept_tokens += len(text_ids)
             # int64 first, so the range assertion sees the values the tokenizer actually emitted
             # rather than their already-wrapped uint32 shadows.
             wide = np.fromiter(text_ids, dtype=np.int64, count=len(text_ids))
