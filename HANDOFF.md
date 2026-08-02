@@ -358,27 +358,45 @@ GPU budget**, not an IAM grant — see "What is NOT done" and `docs/PLATFORM-INT
 the reservoir must hold ≥3× peak plausible demand per category and let a teammate re-weight sources
 at read time via `build_mixture`.
 
-**Status: the ingest is proven. Option E (full pipeline from documents) is CONFIRMED, and the corpus-construction pipeline is ~2–3 weeks of work.** Everything
-between "documents exist upstream" and "shards exist in S3" is what remains — see "Next Steps".
-The owner has chosen the **full pipeline** over three faster alternatives, with MinHash deferred.
+**Status: the pipeline is BUILT and unrun.** Option E (full pipeline from documents) was confirmed by
+the owner over three faster alternatives, MinHash deferred — and as of end-of-session
+**2026-08-01 every stage between "documents exist upstream" and "shards exist in S3" is written,
+tested, and exercised against real bytes.** 1,090 tests. The reader pulls real documents from
+**14/14** drawn sources at their pinned revisions.
+
+**What has NOT happened: the build has never run.** No shard exists. The remaining work is
+execution — register a job def, run the array, publish, verify — and it is the first step in this
+project that spends real money (~4 TB fetched, ~1 TB copied) and writes into a bucket where frozen
+means frozen. See "Next Steps"; it opens with a go/no-go, deliberately.
 
 ---
 
 ## Current Progress
 
-### Reservoir pipeline status — 2026-08-01
+### Reservoir pipeline status — 2026-08-01 (end of session). Every build stage is BUILT.
 
 | stage | status |
 |---|---|
 | ingest transport (HF → S3, array-sharded) | ✅ **proven on Batch**, `v0.6.3`, job def `edullm-reservoir-ingest:7` |
-| §9.7 item 4 id partition | ✅ built + verified on 287,000 real ids (24.86–25.26% per format vs a 17.3% worst-case floor) |
+| §9.7 item 4 id partition | ✅ verified on 287,000 real ids (24.86–25.26% per format vs a 17.3% floor) |
 | domain slugging | ✅ `manifest.build_domain_slug_map` |
-| per-corpus readers (10–13 schemas) | ❌ parquet path generalises; `.json.gz` path absent |
-| tokenize + exact 25,001,984-token shard | ❌ write fresh, ~400–800 lines |
-| bundling / receipts / resumability | ❌ ~420 array children |
-| exact dedup + decontamination | ❌ but a real decontam bundle exists in `datamix1-jul22` |
+| **build contract** | ✅ `corpus.py` (440) — shard geometry, ordinal allocator, held-out predicate, EOS floor |
+| **source registry** | ✅ `artifacts/reservoir/corpus-registry.json` — 17 rows, generated, **all revisions pinned**, `text_column` 17/17 verified from bytes |
+| **per-corpus readers** | ✅ `corpus_read.py` (890) — parquet **and** `.json.gz`; **14/14 drawn sources yield real documents** |
+| **tokenize + exact 25,001,984-token shard** | ✅ `corpus_pack.py` (809) — conservation asserted at RUNTIME |
+| **bundling / receipts / resumability** | ✅ `corpus_build.py` (~800) + `corpus_receipt.py` (1,043) |
+| **exact dedup + decontamination** | ✅ `corpus_filter.py` (~300) — **40/40 real GSM8K questions caught, 0 false positives** |
 | MinHash + LSH + connected components | ⏸ **deferred** (owner, on §4.1's own evidence) |
-| publish / Gate A / promote | ✅ mature, 786 tests, live infra |
+| publish / Gate A / promote | ✅ mature, live infra |
+| **RUN IT** | ❌ **the only thing left.** Register a job def, run the array, publish, verify |
+
+**Suite 790 → 1,090** across the session; ruff clean; 71 commits ahead of `main` on
+`agent/claude-01/reservoir-ingest`, all pushed.
+
+The plan built from the registry: **27 bundles, 10,082 shards, 252.07 B tokens**, nothing excluded —
+landing on §2.2's ~10,400-object sizing, which is what Gate A's ~1.4 h estimate was derived from.
+`plan_id` is a content address (`plan_document` is pure — no clock, no S3), verified byte-identical
+across regenerations and independent of input order.
 
 **Proof the ingest works** (`reservoir-ingest-v063-smoke`, 4-child array):
 
@@ -1107,6 +1125,27 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## What Worked
 
+### 2026-08-01 (night, end) — reading real bytes as the LAST step before spending money
+
+The single highest-yield ten minutes of the session was pointing the finished reader at every drawn
+source and looking at what came back. It found five defects, one of which (`resolve/main` overriding
+the pins) would have made the whole corpus unreproducible while looking perfect.
+
+Why it worked when 44 passing registry tests did not: those tests check that a string is well-formed
+and that a dataclass accepts it. Reading a record checks that the string *names data*. Those are
+different claims, and only the second one is the one the build depends on.
+
+Generalisable ordering, and it is cheap: **verify structure offline, then verify meaning against the
+real thing, then spend.** Each step is a strict superset of the last, and the expensive step runs on
+inputs that have already survived both cheaper ones.
+
+Related: every stage's *runtime* assertion earned its place this session. `corpus_pack`'s token
+conservation identity found a real double-counting bug on its first execution;
+`corpus_build`'s pre-receipt `verify_receipt` refuses to record work whose shards failed; the packer's
+decode check rejected two of my own test fixtures for being degenerate, which is exactly what it
+would do to a real degenerate shard. A check that has never fired is a check you do not yet know
+works.
+
 ### 2026-08-01 (night) — pinning the interface BEFORE fanning out, and an assertion that runs in production
 
 Two stages were built in parallel by separate agents and merged with no interface conflicts. What made
@@ -1631,6 +1670,40 @@ Other misses this session:
 
 ## Key Decisions
 
+### 2026-08-01 (night) — four decisions taken WITHOUT the owner, on explicit instruction
+
+The owner said "continue handling it all yourself." Each of these was a real judgement call, so each
+is recorded with what would reverse it.
+
+**1. DCLM is sourced from `HuggingFaceFW/dclm_100BT`, NOT `mlfoundations/dclm-baseline-1.0`.**
+The question posed was "add a `zstandard` dependency or drop diverse web?" — and it was a false
+choice. The row named a `.jsonl.zst` repo while claiming `parquet`, but `sizing-revised.md` line 40
+shows the 114.69 B pool figure was **measured against `dclm_100BT`**, which is parquet. The registry
+was citing one repo's number under another repo's name. So this is not a substitution of one source
+for another; it is the row finally agreeing with its own evidence. **No new dependency, and the
+corpus keeps its diversity counterweight.** Reverse only if `dclm_100BT` turns out not to be
+DCLM-baseline-derived — its card says it is.
+
+**2. Exact dedup only. No Bloom filter, no fuzzy matching.** §4.1's own evidence: DCLM measured a
+Bloom filter ALONE at +1.6 CORE — equal to the full Exact+MinHash+SuffixArray stack — and FineWeb
+found the *removed* data scored better than the kept. Dedup is scoped **within a bundle**, which is
+where duplicates actually cluster (one source, one crawl). `SeenHashes` says so in its docstring
+rather than implying global coverage. Cross-bundle dedup is a separate stage and is not built.
+
+**3. A missing decontamination index RAISES; `--no-decontaminate` is the only way to skip.**
+`week1_corpus/worker.py:102-106` falls back to an empty index, which turns a staging mistake into a
+corpus that *looks* decontaminated. You would discover it when a benchmark score looked too good,
+months later, with no way to tell which runs were affected. A truncated container is refused for the
+same reason — it would parse as a smaller index that decontaminates less and reports success.
+
+**4. A source too small for one whole val shard gets NO val split, recorded in the plan.**
+At `VAL_FRACTION` 0.005 the break-even is **5,000,396,800 tokens**. `ubuntu-irc` (1.8 B) yields 0.36
+of a shard, and `shard_plan` correctly refuses a stream it cannot give ordinals to. Its documents all
+go to train — nothing lost, nothing leaked — but there is no per-source held-out set for it, so a
+category-level val split must come from its siblings. Written into the plan as `no_val_split` rather
+than warned about, so the omission is auditable afterwards. The alternative was a 1.4% val fraction
+for that one source, which would make the held-out fraction non-uniform across the corpus.
+
 ### 2026-08-01 (late) — the three irreversible label decisions, SETTLED and SHIPPED (`6eff578`)
 
 Owner approved all three. Each was gated on establishing what the code *permits*, not what sounds
@@ -1833,6 +1906,55 @@ a job def, run the array, publish, backfill sidecars, verify. Compute is ~12 hou
 🛑 **The next step spends money and writes to landing.** Everything up to here has been free and
 reversible; `run` fetches ~4 TB and `publish` copies ~1 TB. Worth a deliberate go/no-go rather than
 drifting into it.
+
+#### ▶️ WHAT TO ACTUALLY TYPE, in order. Items 1–4 below are DONE; this is the whole remaining job.
+
+**0. Preflight, all free, all read-only.** Any failure here is cheaper than any failure later.
+```bash
+python3 artifacts/reservoir/build_registry.py          # regenerate; must print 17 corpora, 0 UNVERIFIED
+python3 artifacts/reservoir/verify_pins.py --deep      # must print 14/14 with correct magic
+python3 -m pytest -q                                   # 1,090 passing
+PYTHONPATH=src python3 -m edullm_data.corpus_build plan # 27 bundles / 10,082 shards / 252,070,002,688 tokens
+```
+If `plan_id` is **not** `d5c9bcd38735e1f0`, the registry changed — find out why before running. (It
+moved twice in one session, both times legitimately: once when DCLM was re-sourced, once when the
+`config` paths and `finemath`'s `id_column` were corrected. `plan_id` is the sha256 of the plan JSON,
+so it is *supposed* to move when the inputs do — that is the property, not a nuisance.)
+
+**1. Build the wheel and ship it.** The live job defs bootstrap `0.6.3` **by exact filename**, so a
+new wheel changes nothing until a job def is re-registered. Keep the PEP-427 name
+(`edullm_data-<version>-py3-none-any.whl`); a renamed `w.whl` is rejected by pip.
+
+**2. Register a job def for the build.** Model it on `edullm-reservoir-ingest:7` (2 vCPU / 8 GB,
+role `edullm-reservoir-ingest`, which cannot write `edullm-data`). Three things it MUST do, each a
+silent failure otherwise, and all three are enforced or documented in `corpus_build.py`:
+   - **`TOKENIZERS_PARALLELISM` explicitly set** — the driver *refuses to start* without it. Neither
+     default is safe: `false` throws away the rayon parallelism that makes a 255 B-token tokenize
+     affordable; unset in a forking process is the documented HF deadlock.
+   - **stage `families/` and the registry into the image or via S3** — `corpus_pack` refuses to start
+     without `families/pretrain.json` rather than degrading to the profile's laxer 0.5 EOS bound, and
+     the wheel does not carry `artifacts/`, so pass `--registry`.
+   - **stage the tokenizer** (`tokenizer/dolma2-bpe/v1`) and pass `--tokenizer-dir`. `vocab_size` and
+     `eos_token_id` are DERIVED from its `tokenizer.json` by the same function the validator uses.
+   - **raise the timeout past 7200 s** — there is no Batch maximum; 7200 was ours.
+
+**3. Run the plan, then the array.**
+```bash
+# plan once, to S3 — every child reads it and NO child allocates an ordinal
+... corpus_build plan --upload
+# then the array. Start with a SINGLE child against the smallest source to prove the loop.
+... corpus_build run --plan-id <id> --of <n> --tokenizer-dir /opt/tok
+```
+Resume is free and safe: a bundle whose receipt exists **and** whose every shard is present at the
+right size is skipped. Re-run failed indices; `--force` rebuilds regardless.
+
+**4. `verify`, then publish.** `corpus_build verify --plan-id <id>` refuses an incomplete build;
+`--deep` re-hashes every payload byte (a full GET per shard — the only re-hash in this pipeline).
+Only then run `publish()` per item 5 below.
+
+⚠️ **`_reader_for`'s dispatch has never run inside a Batch container** — it is exercised from this
+laptop against live HF and by unit tests, which is not the same as running under the job's IAM role
+and network. That is what step 3's single-child run is for.
 
 **Suite 1,085 passing** (was 790 at the start of the session), ruff clean. New modules:
 `corpus.py` (440), `corpus_read.py` (890), `corpus_pack.py` (809), `corpus_build.py` (~800),
