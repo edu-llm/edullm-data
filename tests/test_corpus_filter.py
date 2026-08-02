@@ -282,3 +282,38 @@ def test_the_real_index_catches_real_benchmark_text():
         "Sourdough starter needs regular feeding with equal parts flour and water, kept at room "
         "temperature until it doubles reliably within four to six hours."
     ), "ordinary prose must not be flagged"
+
+
+def test_the_dedup_set_stores_ints_not_hex_strings():
+    """A memory fix with a measured cause, not a style preference.
+
+    tracemalloc over 200,000 entries: `set[str]` of 64-char hex costs 154.9 B/entry, `set[int]` of
+    128 bits costs 85.9 B. At `stackv2-edu--train`'s ~120M documents that is 18.6 GB versus 10.3 GB
+    — and the container was 20 GiB, which is why only 3 children fit per 64 GiB host while 25% of
+    the cluster's CPU sat idle.
+
+    Pinned as a test because the obvious "cleanup" is to store the hex string back.
+    """
+    s = SeenHashes()
+    s.add_if_new(content_hash("some document"))
+    assert all(isinstance(k, int) for k in s.hashes), "must not store str"
+
+
+def test_dedup_still_detects_duplicates_and_distinguishes_different_text():
+    """The truncation must not change behaviour. 128 bits of sha256 over 120M documents gives a
+    birthday collision probability of ~2e-20; a collision would silently DROP a document, which is
+    why the width is stated rather than left to whatever felt small enough."""
+    s = SeenHashes()
+    a, b = content_hash("alpha"), content_hash("beta")
+    assert s.add_if_new(a) is True
+    assert s.add_if_new(a) is False, "the same document must be seen as a duplicate"
+    assert s.add_if_new(b) is True, "different documents must not collide"
+    assert len(s) == 2
+
+
+def test_content_hash_still_returns_hex_for_the_decontamination_index():
+    """`content_hash` is ALSO the key format of the shipped decontamination index, so it stays hex.
+    Narrowing it would invalidate a 54 MB artifact already staged in S3."""
+    h = content_hash("x")
+    assert isinstance(h, str) and len(h) == 64
+    int(h, 16)  # raises if not hex

@@ -217,22 +217,40 @@ def load_index(s3, bucket: str = "edullm-landing", key: str = DECON_INDEX_KEY):
 class SeenHashes:
     """Content hashes already emitted, for exact dedup within a build.
 
-    A plain `set[str]` of 64-char hex. At ~1.5B documents that is far too large for one worker, and
-    this is honest about the limit rather than pretending otherwise: dedup here is **within a
-    bundle**, which is where the duplicates actually cluster (one source, one crawl, adjacent
-    shards). Cross-bundle dedup needs the shared Bloom filter §4.1 budgets at ~$3, and is a
-    different stage.
+    Dedup here is **within a bundle**, which is where duplicates actually cluster (one source, one
+    crawl, adjacent shards); cross-bundle dedup needs the shared Bloom filter §4.1 budgets at ~$3
+    and is a different stage.
 
-    Sized in the report so the limit is visible rather than assumed: 64-char hex strings cost ~113 B
-    each in CPython, so a 10M-document bundle is ~1.1 GB.
+    **Stores a 128-bit int, not the 64-char hex string, and that is a memory fix rather than a
+    style one.** MEASURED with `tracemalloc` over a 200,000-entry set:
+
+        set[str]  (64-char hex)  154.9 B/entry   ->  120M documents = 18.6 GB
+        set[int]  (128-bit)       85.9 B/entry   ->  120M documents = 10.3 GB
+
+    The docstring this replaces claimed ~113 B/entry, which is `sys.getsizeof` of the string alone
+    and ignores the set's own slot overhead — it understated the real cost by 37%. That mattered:
+    `stackv2-edu--train` is ~120M documents, so its dedup set alone wanted 18.6 GB inside a 20 GiB
+    container, which is why only 3 children fit per 64 GiB host and the whole cluster sat at 97%
+    memory with 25% of its CPU idle.
+
+    128 bits of sha256 is the right truncation. Birthday collision probability over 120M documents
+    is ~2e-20 — a false "duplicate" would silently drop one document, and at that rate it will not
+    happen. Full 256-bit would cost 65 B/entry more for no reachable benefit.
+
+    :func:`content_hash` still returns hex and is UNCHANGED, because it is also the key format of
+    the shipped decontamination index (`DecontaminationIndex.exact_hashes`); changing it would
+    invalidate a 54 MB artifact already staged in S3. The narrowing happens here, at the one call
+    site that keeps hashes resident.
     """
 
-    hashes: set[str] = field(default_factory=set)
+    hashes: set[int] = field(default_factory=set)
 
     def add_if_new(self, digest: str) -> bool:
-        if digest in self.hashes:
+        """`digest` is hex, as :func:`content_hash` returns; the int conversion is internal."""
+        key = int(digest[:32], 16)  # top 128 bits
+        if key in self.hashes:
             return False
-        self.hashes.add(digest)
+        self.hashes.add(key)
         return True
 
     def __len__(self) -> int:

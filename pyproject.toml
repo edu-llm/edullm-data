@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "edullm-data"
-version = "0.7.2"
+version = "0.7.3"
 description = "Publisher, validator, and reader for the eduLLM Dataset Standard v1"
 readme = "README.md"
 # 3.10, not 3.11. The floor exists to be installable ALONGSIDE OLMo-core, whose own floor is
