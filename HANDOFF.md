@@ -31,12 +31,16 @@ then **built the reader and the packer** — the two stages the plan called the 
 > called "most likely to break the estimate." `corpus.py` (contract) + `corpus_read.py` (parquet
 > **and** `.json.gz`) + `corpus_pack.py` (exact 25,001,984-token shards, conservation asserted at
 > runtime) + `corpus_build.py` (plan / run / verify, resume that re-heads every shard) +
-> `corpus_receipt.py` (the only payload re-hash in the pipeline) +
+> `corpus_receipt.py` (the only payload re-hash in the pipeline) + `corpus_filter.py` (exact dedup
+> + eval decontamination — **40/40 real GSM8K test questions caught, 0 false positives**) +
 > `artifacts/reservoir/corpus-registry.json` (17 sources, generated, all revisions pinned).
-> **1,058 tests passing**, up from 790; ruff clean. Remaining: **~3–5 days**, not 2–3 weeks.
+> **1,085 tests passing**, up from 790; ruff clean. Remaining: **~2–3 days**, not 2–3 weeks.
 >
-> 🛑 **One decision blocks the build:** DCLM-baseline is `.jsonl.zst` and the reader refuses zstd —
-> 30 B of the 252.6 B target. Add a `zstandard` dependency, or source diverse web elsewhere.
+> **Nothing is blocked.** The DCLM zstd problem was a registry error, not a missing dependency:
+> the row cited `dclm_100BT`'s measurement under `mlfoundations/dclm-baseline-1.0`'s name. Fixed.
+> The plan covers the full corpus — **27 bundles, 10,082 shards, 252.07 B tokens**.
+>
+> **Next is execution, not construction:** run the build on Batch (items 5–7), publish, verify.
 >
 > Also closed: the eval decontamination bundle is **authentic** (recomputed sha256 equals its
 > manifest's claim) and was on the laptop only — now at
@@ -1801,20 +1805,22 @@ not open.
 
 ### THE CURRENT LIST — updated 2026-08-01 (late). Decision of record: FULL PIPELINE, MinHash deferred.
 
-Remaining: **~3–5 days**, down from 2–3 weeks. **Items 1, 2, 3 and the registry are DONE** —
-including the one this list called "most likely to break the estimate" — and item 4's
-decontamination half is answered. Compute is still ~12 hours and ~$20.
+Remaining: **~2–3 days**, down from 2–3 weeks. **Items 1–4 and the registry are DONE** — including
+the one this list called "most likely to break the estimate". What is left is items 5–7: run the
+build on Batch, publish, backfill sidecars, verify. Compute is still ~12 hours and ~$20.
 
-**Suite 1,058 passing** (was 790 at the start of the session), ruff clean. New modules:
-`corpus.py` (440), `corpus_read.py` (890), `corpus_pack.py` (809), `corpus_build.py` (780),
-`corpus_receipt.py` (1,043), plus ~4,800 lines of tests and a generated 17-source registry.
+**Suite 1,085 passing** (was 790 at the start of the session), ruff clean. New modules:
+`corpus.py` (440), `corpus_read.py` (890), `corpus_pack.py` (809), `corpus_build.py` (~800),
+`corpus_receipt.py` (1,043), `corpus_filter.py` (~300), plus ~5,100 lines of tests and a generated
+17-source registry with every revision pinned.
 
-🛑 **ONE DECISION BLOCKS THE BUILD: DCLM-baseline is `.jsonl.zst` and the reader refuses zstd.**
-That is 30 B of the 252.6 B target, and the plan currently excludes it (222.1 B over 25 bundles).
-Either add a `zstandard` dependency plus a decompression branch — the streaming shape mirrors the
-existing `zlib.decompressobj` path, `eof` check included — or source diverse web elsewhere. Nothing
-downstream is blocked on it; the corpus is just missing its diversity counterweight until it is
-settled.
+✅ **The zstd blocker is RESOLVED, and it did not need a dependency.** `dclm-baseline` named
+`mlfoundations/dclm-baseline-1.0` (`.jsonl.zst`) while claiming `parquet` — but
+`sizing-revised.md` line 40 shows the 114.69 B pool figure was measured against
+**`HuggingFaceFW/dclm_100BT`**, which *is* parquet. The registry was citing one repo's number under
+another repo's name; pointing the row at the measured repo removes the contradiction rather than
+adding a claim. Verified from bytes at the pinned revision. **The plan now excludes nothing: 27
+bundles, 10,082 shards, 252.07 B tokens** — landing on §2.2's ~10,400-object sizing.
 
 **1. ~~Per-corpus readers~~ — ✅ DONE. `src/edullm_data/corpus_read.py`, 890 lines, 61 tests.**
 Both paths exist: parquet over the proven `_RangeFile` transport, and the Common Pile `.json.gz`
@@ -1959,8 +1965,35 @@ counting pass into the reader (a reader ARGUMENT, not a spec field — forget it
 permanent directories inside `manifest_sha256`), and stage `families/` where the job can read it or
 `corpus_pack` refuses to start rather than degrading to the profile's laxer 0.5 EOS.
 
-**4. Dedup + decontamination — the decontamination half is ANSWERED.**
-Exact content-hash dedup (Bloom, ~$3) still delivers the entire measured quality gain.
+**4. ~~Dedup + decontamination~~ — ✅ DONE.** `corpus_filter.py`, 26 tests, wired into `run_bundle`
+before the length filter and before tokenizing.
+
+Exact content-hash dedup only, deliberately — §4.1 records DCLM measuring a Bloom filter ALONE at
++1.6 CORE, equal to the full Exact+MinHash+SuffixArray stack, and FineWeb finding the *removed* data
+scored better than the kept. MinHash stays deferred.
+
+🎯 **The decontamination provably catches benchmarks**, which is the one property separating this
+from decoration: measured against the real index, **40/40 verbatim GSM8K test questions caught, 0/2
+false positives** on ordinary prose. A parser producing an index that matched *nothing* would pass
+every other test in the file, so that test uses the real 54 MB artifact rather than a fixture.
+
+Also verified against it: parses in 0.9 s, and its 149,777 exact + 3,097,372 ngram entries equal the
+manifest's declared counts exactly. `normalize_text`/`content_hash` are byte-identical to
+`week1_corpus`'s across CRLF, NFC, NUL and whitespace cases — parity matters because the index's
+exact-hash half only works if both sides agree what a document's hash is.
+
+Two places this **refuses** where `week1_corpus` falls back: a missing index raises rather than
+becoming an empty one (`worker.py:102-106` turns a staging mistake into a clean-*looking* corpus),
+and a truncated container is refused rather than parsed as a smaller index that decontaminates less
+and reports success. `--no-decontaminate` is the only way to skip, and it announces itself.
+
+Dedup runs **before** the contamination check: dedup is one sha256, contamination is thousands of
+blake2b hashes against a 3.1M-entry set. Attrition is reported per bundle as counts, never ratios.
+
+⚠️ **Still open, and unchanged:** the matching is word-level 13-gram and casefolded, so it does
+**nothing for rephrased text** — the FinePhrase half of the corpus has no decontamination. §4.2's
+second tier (`lm-sys/llm-decontaminator`, ~$200 over the synthetic 60 B) is the answer and is not
+built.
 
 ✅ **The bundle is reusable and authentic, and is now backed up.** Recomputed its sha256 —
 `04aa8fe5…50bfd7` — and it equals the `index.sha256` its manifest claims; the header parses
