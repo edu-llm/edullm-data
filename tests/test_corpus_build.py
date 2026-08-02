@@ -342,3 +342,50 @@ def test_the_real_registry_plans_cleanly_and_reports_its_gaps():
     assert plan["registry_revisions_pinned_at"], "the plan must record which pin set it used"
     # ~10,400 objects at 25,001,984 tokens is what §2.2 sized Gate A (~1.4 h) against.
     assert 9_000 < len(paths) < 11_000, f"{len(paths)} shards is off the §2.2 sizing"
+
+
+def test_contaminated_and_duplicate_documents_never_reach_a_shard():
+    """The filter is wired in, not merely importable.
+
+    Runs the real pipeline over documents that are one-third duplicates and one-third benchmark
+    text, and asserts both are gone from the receipt's own accounting. A driver that imported
+    `corpus_filter` and forgot to call it would pass every test in `test_corpus_filter.py`.
+    """
+    from edullm_data.corpus_filter import DecontaminationIndex, _ngram_hash, _words, content_hash
+
+    leak = "the mitochondrion is the powerhouse of the cell and everyone knows it"
+    ngrams = set()
+    w = _words(leak)
+    for i in range(len(w) - 12):
+        ngrams.add(_ngram_hash(w[i:i + 13]))
+    index = DecontaminationIndex(frozenset({content_hash(leak)}), frozenset(ngrams), 13, 2)
+
+    rng = random.Random(11)
+    uniq = [
+        Document(id=f"u{i}", text=" ".join(f"w{rng.randrange(80000)}" for _ in range(300)),
+                 source="tiny")
+        for i in range(400)
+    ]
+    docs = uniq + [Document(id=f"dup{i}", text=d.text, source="tiny") for i, d in enumerate(uniq)]
+    docs += [Document(id=f"leak{i}", text=leak, source="tiny") for i in range(50)]
+
+    s3 = FakeS3()
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    info = B.run_bundle(
+        bundle, plan, _spec(), s3=s3, bucket=BUCKET, prefix=PREFIX,
+        documents=lambda sp, bu: docs, tokenizer=WordTok(), eos_id=100257,
+        vocab_size=100278, wheel_version="0.6.3", index=index,
+    )
+    f = info["filter"]
+    # `seen` is what reached the FILTER, which is less than len(docs): the val carve runs first and
+    # routes ~0.5% elsewhere (measured exactly 3 of these 850, since carve is a pure function of the
+    # id). Asserting len(docs) here would be asserting the wrong stage's count.
+    assert f["seen"] < len(docs)
+    assert f["seen"] == f["kept"] + f["duplicates"] + f["contaminated"], "every document accounted"
+    assert f["duplicates"] > 350, f"repeated documents must be dropped, got {f}"
+    # The 50 identical leaks: the FIRST is contamination, the other 49 are duplicates of it. Dedup
+    # runs first precisely so the expensive n-gram check sees each distinct text once.
+    assert f["contaminated"] == 1, f
+    assert not any(d.text == leak for d in uniq), "the fixture must not leak into the kept set"
+    assert f["normalization"] == "week1-nfc-rstrip-v1"

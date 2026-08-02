@@ -118,8 +118,12 @@ REGISTRY_PATH = "artifacts/reservoir/corpus-registry.json"
 
 #: Formats `corpus_read` can actually consume. A registry row naming anything else is a
 #: PLAN-TIME error, not a run-time one: discovering it mid-run means other bundles have already
-#: been built and paid for. `dclm-baseline` is `jsonl.zst` today and is exactly this case — the
-#: package declares no `zstandard` dependency, so 30B of the 252.6B target has no reader.
+#: been built and paid for, and the corpus quietly lacks a whole category.
+#:
+#: This fired for real. `dclm-baseline` pointed at `mlfoundations/dclm-baseline-1.0`, which ships
+#: `.jsonl.zst` while the row claimed `parquet` — a 30B hole. It was resolved by re-sourcing to
+#: `HuggingFaceFW/dclm_100BT` (parquet, and where the pool measurement came from anyway), not by
+#: adding a zstd dependency, so every drawn source is readable today.
 READABLE_FORMATS = frozenset({"parquet", "json.gz"})
 
 
@@ -406,6 +410,7 @@ def run_bundle(
     eos_id: int,
     vocab_size: int | None = None,
     wheel_version: str = "0.0.0",
+    index: Any = None,
 ) -> dict[str, Any]:
     """Read → carve → filter → tokenize → pack → upload → receipt, for one bundle.
 
@@ -416,6 +421,7 @@ def run_bundle(
     memory before the next one is cut — `corpus_pack` holds at most one 100 MB shard at a time and
     routing it through a buffer here would undo that.
     """
+    from .corpus_filter import FilterStats, dedup_and_decontaminate
     from .corpus_pack import pack, tokenize_documents
     from .corpus_read import filter_documents
     from .corpus_receipt import Receipt, SourcePin, write_receipt
@@ -438,8 +444,17 @@ def run_bundle(
             if split == want_split:
                 yield doc
 
+    # §4.1 step 2 + §4.2, and this order is the one the design specifies: dedup and decontaminate
+    # DOCUMENTS, before anything is tokenized. After tokenization a document is a byte range inside
+    # a shard, and removing one means re-cutting every shard after it.
+    #
+    # Ahead of the length filter as well, because both are cheaper than tokenizing and there is no
+    # point measuring the token length of a document that is about to be dropped.
+    filter_stats = FilterStats()
+    surviving = dedup_and_decontaminate(_selected(), index=index, stats=filter_stats)
+
     kept = filter_documents(
-        _selected(), lambda t: len(tokenizer.encode(t).ids), min_tokens=plan["min_doc_tokens"]
+        surviving, lambda t: len(tokenizer.encode(t).ids), min_tokens=plan["min_doc_tokens"]
     )
     arrays = tokenize_documents(kept, tokenizer, eos_id=eos_id, vocab_size=vocab_size)
     results = pack({bundle.stream: arrays}, list(bundle.shards), sink=sink, eos_id=eos_id,
@@ -482,6 +497,7 @@ def run_bundle(
         "shards": len(result.written),
         "tokens_out": result.tokens_out,
         "unfilled": len(result.unfilled),
+        "filter": filter_stats.as_dict(),
     }
 
 
@@ -577,6 +593,20 @@ def _cmd_run(args) -> int:
     print(f"RUN_START plan={args.plan_id} shard={shard}/{args.of} bundles={len(mine)}", flush=True)
 
     tok, eos, vocab = load_tokenizer(args.tokenizer_dir)
+
+    # §4.2. Loading RAISES when the index is absent, and `--no-decontaminate` is the only way to
+    # skip it — a build that silently skipped would produce a corpus indistinguishable from a
+    # decontaminated one, discovered when a benchmark score looks too good months later.
+    index = None
+    if args.no_decontaminate:
+        print("WARNING decontamination DISABLED by --no-decontaminate", flush=True)
+    else:
+        from .corpus_filter import load_index
+
+        index = load_index(s3, args.bucket)
+        print(f"DECON index {len(index.exact_hashes):,} exact + "
+              f"{len(index.ngram_hashes):,} ngrams", flush=True)
+
     done = skipped = 0
     for bundle in mine:
         if not args.force and bundle_is_done(bundle, args.plan_id, s3, args.bucket, args.prefix):
@@ -587,11 +617,14 @@ def _cmd_run(args) -> int:
         info = run_bundle(
             bundle, plan, specs[bundle.spec_key], s3=s3, bucket=args.bucket, prefix=args.prefix,
             documents=_reader_for, tokenizer=tok, eos_id=eos, vocab_size=vocab,
-            wheel_version=_wheel_version(),
+            wheel_version=_wheel_version(), index=index,
         )
         done += 1
+        f = info["filter"]
         print(f"DONE {bundle.bundle_id} shards={info['shards']} "
-              f"tokens={info['tokens_out']:,} {time.monotonic() - t0:.0f}s", flush=True)
+              f"tokens={info['tokens_out']:,} docs={f['kept']:,}/{f['seen']:,} "
+              f"dup={f['duplicates']:,} decon={f['contaminated']:,} "
+              f"{time.monotonic() - t0:.0f}s", flush=True)
     print(f"RUN_END built={done} skipped={skipped}", flush=True)
     return 0
 
@@ -757,6 +790,8 @@ def _build_parser() -> argparse.ArgumentParser:
     r.add_argument("--of", type=int, required=True)
     r.add_argument("--tokenizer-dir", required=True)
     r.add_argument("--force", action="store_true", help="rebuild even if a receipt verifies")
+    r.add_argument("--no-decontaminate", action="store_true",
+                   help="DELIBERATELY skip the eval decontamination pass (§4.2)")
     r.set_defaults(func=_cmd_run)
 
     v = sub.add_parser("verify", help="refuse an incomplete build")
