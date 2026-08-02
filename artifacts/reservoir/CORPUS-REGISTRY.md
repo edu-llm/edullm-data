@@ -4,11 +4,14 @@
 loads into `edullm_data.corpus.CorpusSpec` as a build-time check, so a registry that would crash the
 reader fails when it is generated.
 
-**17 corpora · 14 drawn in v1 · 3 reserve · 252.6 B target.**
+**17 corpora · 14 drawn in v1 · 3 reserve · 252.6 B target · every drawn source readable.**
+
+The plan built from this registry is **27 bundles, 10,082 shards, 252.07 B tokens** — which lands on
+§2.2's ~10,400-object sizing, the figure Gate A's ~1.4 h estimate was derived from.
 
 ## Read this before using any number
 
-**`text_column` is verified for 9 of 17.** The rest say the literal string `"UNVERIFIED"`, and each
+**`text_column` is verified for 10 of 17.** The rest say the literal string `"UNVERIFIED"`, and each
 carries the exact command that settles it in its first `traps` entry. That is not a formality: the
 column is the one field where being wrong is *completely silent*.
 
@@ -42,12 +45,17 @@ repositories:
    `stackv2_edu_filtered` ships `stack-edu-NNNN.json.gz`; `github_archive_filtered` ships
    `gharchive-dolma-NNNN.json.gz`; `pubmed_filtered` ships `licensed_pubmed-NNNN.json.gz`. Now
    recorded per row and in `_common_pile_file_prefix`.
-3. 🛑 **DCLM-baseline is `.jsonl.zst`, and the reader refuses zstd.** The row said `parquet` under a
-   `default` config; neither exists. Verified from bytes:
-   `global-shard_01_of_10/local-shard_0_of_10/shard_00000000_processed.jsonl.zst`, magic
-   `28 b5 2f fd`. `corpus_read` declines that format because the package declares no `zstandard`
-   dependency. **30 B of the 252.6 B target is blocked on either adding that dependency or sourcing
-   diverse web elsewhere** — see "What is not here".
+3. **DCLM-baseline was pointing at a repo it could not read, and at another repo's number.** The
+   row said `mlfoundations/dclm-baseline-1.0`, `parquet`, config `default` — none of which is true:
+   that repo ships `.jsonl.zst` (verified from bytes, magic `28 b5 2f fd`), has no `default` config,
+   and `corpus_read` refuses zstd. **RESOLVED 2026-08-01 by pointing the row at
+   `HuggingFaceFW/dclm_100BT`**, which is where the 114.69 B pool measurement came from in the first
+   place (`sizing-revised.md` line 40, exact rows, `partial: false`). So the fix removes a
+   contradiction rather than introducing a claim: the row now cites the repo its own evidence came
+   from. Verified from bytes at the pinned revision — parquet under `data/`, leaves
+   `['text','id','url','language','language_score','fasttext_score','dataset']`, 895,229 rows in the
+   first of 96 files, sampled `text` is genuine web prose. License is ODC-BY-1.0 here vs CC-BY-4.0
+   on the repo it replaces; both permit the use, and the string is recorded rather than assumed.
 
 While confirming the Common Pile layout I also read a real record from each of three repos, which
 settles their schema from bytes rather than from a card: keys are
@@ -138,11 +146,12 @@ inside. *Licensing notes are research findings, not legal advice.*
 
 ## What is not here
 
-- 🛑 **A zstd reader.** `corpus_read` refuses `.zst` because the package declares no `zstandard`
-  dependency, and **one row now requires it**: `dclm-baseline`, 30 B of the target. This was
-  "no row currently requires it" until the pins were resolved. Decide before the build: add
-  `zstandard` plus a decompression branch (the streaming shape mirrors the existing
-  `zlib.decompressobj` path, including the `eof` check), or source diverse web from another corpus.
+- **A zstd reader** — still absent, and now nothing needs it. `corpus_read` refuses `.zst` because
+  the package declares no `zstandard` dependency. That briefly blocked 30 B of the target when
+  `dclm-baseline` pointed at `mlfoundations/dclm-baseline-1.0`; re-sourcing to
+  `HuggingFaceFW/dclm_100BT` (parquet) removed the need rather than the dependency. **Every drawn
+  source is parquet or `.json.gz`**, and `corpus_build`'s `_assert_readable` fails at PLAN time if
+  that ever stops being true.
 - **`id_column`** is `UNVERIFIED` on 13 of 17 rows. Confirmed present as `id` for the three Common
   Pile repos whose records I read, but not yet pinned per row. It matters most where the id is a
   join key — the FinePhrase partition and the FineWeb-Edu anti-join.

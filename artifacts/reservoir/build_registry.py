@@ -36,6 +36,10 @@ VERIFIED_TEXT_COLUMN = {
     "arxiv_papers_filtered": ("text", "artifacts/recount/_footer-academic-arxiv_papers.json"),
     "finepdfs-edu": ("text", "artifacts/recount/_footer-finepdfs-edu.json"),
     "essential-web": ("text", "artifacts/recount/edu-web-essential-web.json"),
+    # Read from the pinned revision through `ingest_reservoir._RangeFile` on 2026-08-01: the
+    # footer's leaves are ['text','id','url','language','language_score','fasttext_score',
+    # 'dataset'] and a sampled value is real web prose, not a URL or an id.
+    "dclm-baseline": ("text", "verified from bytes at HuggingFaceFW/dclm_100BT@01022d378d94"),
     "finephrase": (
         "rollout_results.list.element.text",
         "artifacts/reservoir/id-partition-verification.json",
@@ -72,7 +76,7 @@ REVISION = {
     "HuggingFaceFW/fineweb-edu": "87f09149ef4734204d70ed1d046ddc9ca3f2b8f9",
     "HuggingFaceFW/finewiki": "8bd13e72e6a002407649b3e898535f42ceb1aeb9",
     "HuggingFaceTB/finemath": "e92b25a616738fe95dc186b64dfb19f9c8525594",
-    "mlfoundations/dclm-baseline-1.0": "a3b142c183aebe5af344955ae20836eb34dcf69b",
+    "HuggingFaceFW/dclm_100BT": "01022d378d944de6deeb1c79d08fecb4d27b2c6f",
     "common-pile/peS2o_filtered": "297747513bfb0ff1fbf61ddad3b03319d0f04597",
     "common-pile/pubmed_filtered": "c156f0569a92d8f2edc33cebe1f72f7d3e1cae84",
     "common-pile/arxiv_papers_filtered": "033cf7f53f9b348deec868c1a5a48484f3ee9e52",
@@ -90,7 +94,7 @@ REVISION_DATE = {
     "HuggingFaceFW/fineweb-edu": "2025-07-11T20:16:53.000Z",
     "HuggingFaceFW/finewiki": "2025-10-22T11:02:22.000Z",
     "HuggingFaceTB/finemath": "2025-02-06T10:31:11.000Z",
-    "mlfoundations/dclm-baseline-1.0": "2024-07-22T15:27:52.000Z",
+    "HuggingFaceFW/dclm_100BT": "2026-03-02",
     "common-pile/peS2o_filtered": "2025-06-06",
     "common-pile/pubmed_filtered": "2025-06-06",
     "common-pile/arxiv_papers_filtered": "2025-06-06",
@@ -240,18 +244,28 @@ ROWS = [
     # ---- web (diverse): 30 B pool, measured 114.69 B (5.5x) ----
     _row(
         key="dclm-baseline", category="web-diverse", source_label="dclm",
-        repo="mlfoundations/dclm-baseline-1.0", config=None, file_format="jsonl.zst",
-        id_column="UNVERIFIED", target_tokens=30_000_000_000,
-        pool_tokens=MEASURED["dclm-baseline"], license="CC-BY-4.0",
+        repo="HuggingFaceFW/dclm_100BT", config="data", file_format="parquet",
+        id_column="id", target_tokens=30_000_000_000,
+        pool_tokens=MEASURED["dclm-baseline"], license="ODC-BY-1.0",
         traps=(
-            "🛑 BLOCKED ON A READER: this is `.jsonl.zst`, and `corpus_read` REFUSES zstd — the "
-            "package declares no `zstandard` dependency. Verified from bytes at the pinned "
-            "revision: `global-shard_01_of_10/local-shard_0_of_10/shard_00000000_processed."
-            "jsonl.zst`, magic `28 b5 2f fd`. The row said `parquet` under a `default` config, and "
-            "neither exists. Either add the dependency and a zstd branch to the reader, or source "
-            "diverse web elsewhere. 30B of the 252.6B target depends on this.",
-            "Layout is `global-shard_NN_of_10/local-shard_N_of_10/shard_NNNNNNNN_processed."
-            "jsonl.zst` — two levels of sharding, no config, no data/ prefix.",
+            "⚠️ SOURCE CHANGED 2026-08-01, and the previous row could not have been read at all. "
+            "It named `mlfoundations/dclm-baseline-1.0`, which ships `.jsonl.zst` — verified from "
+            "bytes, magic `28 b5 2f fd` at "
+            "`global-shard_01_of_10/local-shard_0_of_10/shard_00000000_processed.jsonl.zst` — "
+            "while the row claimed `parquet` under a `default` config that does not exist. "
+            "`corpus_read` refuses zstd (no `zstandard` dependency declared), so that row was a "
+            "30B hole in the corpus.",
+            "This repo is where the 114.69B measurement ALREADY came from: "
+            "`artifacts/sizing-revised.md` line 40 cites `dclm_100BT`, exact rows, "
+            "`partial: false`. So the registry was citing one repo's number against another "
+            "repo's name — swapping to this one makes the row agree with its own evidence, and "
+            "adds no unmeasured claim.",
+            "Verified from real bytes at the pinned revision: parquet under `data/`, leaves "
+            "`['text','id','url','language','language_score','fasttext_score','dataset']`, "
+            "895,229 rows in the first of 96 files, and a sampled `text` is genuine web prose.",
+            "License differs from the row it replaces: ODC-BY-1.0 here vs CC-BY-4.0 on "
+            "`mlfoundations/dclm-baseline-1.0`. Both permit the use; the string is recorded rather "
+            "than assumed (§1.5 — never model a license as a boolean).",
             "The diversity counterweight to edu filtering — the point is that it is NOT filtered.",
             "olmo-mix-1124 is ~95% DCLM-baseline (§3.1), so this overlaps the published corpora.",
         ),

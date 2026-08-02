@@ -323,17 +323,22 @@ def test_the_pinned_resolve_url_never_says_main():
 def test_the_real_registry_plans_cleanly_and_reports_its_gaps():
     """An integration check against the committed registry, not a fixture.
 
-    Asserts the two things a reader of the plan needs to trust: ordinals are globally unique across
-    every source, and the sources that silently get no val split are named.
+    Asserts what a reader of the plan needs to trust: every drawn source HAS a reader, ordinals are
+    globally unique across all of them, and the sources that silently get no val split are named.
+
+    The readable assertion is the interesting one. It was `pytest.raises(match="no reader")` while
+    `dclm-baseline` pointed at `mlfoundations/dclm-baseline-1.0` (`.jsonl.zst`, which `corpus_read`
+    refuses) — a 30B hole. Now that the row points at `HuggingFaceFW/dclm_100BT`, where the pool
+    measurement came from anyway, the whole registry is readable and this test says so.
     """
     specs, meta = B.load_registry()
     drawn = [s for s in specs if s.target_tokens > 0]
-    with pytest.raises(BuildError, match="no reader"):
-        B._assert_readable(drawn)  # dclm-baseline is jsonl.zst today
+    B._assert_readable(drawn)  # every drawn source must have a reader — no exclusions
 
-    readable = [s for s in drawn if s.file_format in B.READABLE_FORMATS]
-    plan = B.plan_document(readable, registry_meta=meta)
+    plan = B.plan_document(drawn, registry_meta=meta)
     paths = [p for b in plan["bundles"] for p in b["shards"]]
     assert len(set(paths)) == len(paths), "ordinal collision across sources"
     assert plan["no_val_split"] == ["ubuntu-irc"], plan["no_val_split"]
     assert plan["registry_revisions_pinned_at"], "the plan must record which pin set it used"
+    # ~10,400 objects at 25,001,984 tokens is what §2.2 sized Gate A (~1.4 h) against.
+    assert 9_000 < len(paths) < 11_000, f"{len(paths)} shards is off the §2.2 sizing"
