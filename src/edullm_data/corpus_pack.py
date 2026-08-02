@@ -85,6 +85,7 @@ __all__ = [
     "FAMILY_FILE",
     "PackResult",
     "Sink",
+    "neutralize_boundary_markers",
     "tokenize_documents",
     "pack",
     "shard_plan",
@@ -100,6 +101,48 @@ __all__ = [
 #: ``vocab-out-of-range``, whose message blames a wrong dtype. Allocating as ``<u4`` makes the
 #: on-disk order right by construction instead of by the host's accident.
 DTYPE_LE = np.dtype("<u4")
+
+#: Literal text that a tokenizer would parse back into a SPECIAL token id, mapped to an inert
+#: rewrite. Applied to document text before encoding, by :func:`neutralize_boundary_markers`.
+#:
+#: **This is a real corpus property, not a hypothetical.** Five of the largest train bundles failed
+#: live on it — `dclm`, `finemath`, `fineweb-edu`, `stackexchange`, `stackv2-edu` — each reporting
+#: a handful more EOS occurrences than documents (measured: 1, 2 and 8 extra per ~20,000-document
+#: shard, so roughly 1 document in 2,500). Web-scraped text simply contains the string
+#: ``<|endoftext|>``, and `tokenizers` parses it as id 100257 wherever it appears.
+#:
+#: Why that is fatal rather than untidy: OLMo-core recovers document boundaries with
+#: ``(mmap == eos_token_id).nonzero()``, so a marker inside a document becomes a FALSE boundary.
+#: The model would train on fragments split at whatever point a scraped page happened to mention
+#: the token. The EOS is the only document boundary this corpus ships (§2.3, no ``.csv.gz``
+#: sidecars), so there is no second signal to disambiguate against.
+#:
+#: **Only the boundary id is rewritten.** The tokenizer defines 22 added tokens and all 22 parse
+#: from raw text (verified by execution), but the other 21 are ordinary in-vocab ids — unusual,
+#: not dangerous. Rewriting them too would modify documents to fix a problem that does not exist.
+#:
+#: The rewrite is a SPACE SPLIT rather than a deletion. It keeps the text human-legible and
+#: honest about what was there, adds no invisible characters (a zero-width space would be an
+#: encoding landmine for every later reader), and deletes no content — the alternative considered
+#: was `s.replace(EOS, "")`, which silently drops what the document actually said.
+_BOUNDARY_MARKER_REWRITES = (("<|endoftext|>", "<| endoftext |>"),)
+
+
+def neutralize_boundary_markers(text: str) -> str:
+    """Rewrite literal special-token text so it cannot tokenize to the EOS boundary id.
+
+    Cheap on the common path: :meth:`str.replace` on a string with no match returns the same object,
+    and the guard below skips the call entirely for the ~2,499 documents in 2,500 that never contain
+    the marker. That matters at 340M documents.
+
+    Idempotent, which resume depends on — a re-run of a partially built bundle must produce
+    byte-identical shards, and ``"<| endoftext |>"`` contains no further match to rewrite.
+    """
+    if "<|" not in text:  # the only prefix any rewrite starts with; one substring scan
+        return text
+    for literal, replacement in _BOUNDARY_MARKER_REWRITES:
+        text = text.replace(literal, replacement)
+    return text
 
 #: Tokens in ONE decode-test window, derived the way ``_sampled_ids`` derives it
 #: (``profiles/pretrain_tokens_v1.py:209-211``) rather than hardcoded to 4096, so a change to
@@ -287,7 +330,10 @@ def tokenize_documents(
             batch = kept_batch
             if not batch:
                 continue
-        texts = [doc.text if isinstance(doc, Document) else doc for doc in batch]
+        # Neutralize BEFORE encoding. This is the only place it can go: after the encode the
+        # marker is already an id indistinguishable from the boundary this function appends.
+        texts = [neutralize_boundary_markers(doc.text if isinstance(doc, Document) else doc)
+                 for doc in batch]
         if encode_batch is not None:
             id_lists = [enc.ids for enc in encode_batch(texts, add_special_tokens=False)]
         else:

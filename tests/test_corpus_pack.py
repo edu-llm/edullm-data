@@ -1112,3 +1112,86 @@ def test_the_full_pipeline_plan_allocate_pack_agrees_on_every_key():
     assert sum(r.tokens_out for r in results) == sink.total_tokens == per_shard * 3
     assert all(len(p) % (DTYPE_SIZE * SEQ_LEN) == 0 for _r, p in sink.calls)
     assert cp.DECODE_WINDOW_TOKENS == 4096
+
+
+# --------------------------------------------------------------------------------------
+# The EOS boundary collision — five live bundles died on this
+# --------------------------------------------------------------------------------------
+
+
+def test_literal_endoftext_in_source_text_cannot_become_a_document_boundary():
+    """The failure that killed dclm, finemath, fineweb-edu, stackexchange and stackv2-edu.
+
+    Web-scraped documents contain the literal string `<|endoftext|>`, and `tokenizers` parses it as
+    id 100257 — the same id used as the document boundary. Live symptom, per shard:
+
+        20014 documents end in this shard but id 100257 appears 20016 times
+
+    Roughly 1 document in 2,500. It matters because OLMo-core recovers boundaries with
+    `(mmap == eos_token_id).nonzero()`, so each occurrence is a FALSE boundary and the model trains
+    on fragments split wherever a scraped page mentioned the token.
+
+    A real tokenizer is NOT used here on purpose — this test must run with no 4 MB tokenizer.json
+    download. The fake reproduces the one behaviour that matters: text matching the marker maps to
+    the boundary id.
+    """
+    from edullm_data.corpus_pack import neutralize_boundary_markers, tokenize_documents
+
+    EOS = 100257
+
+    class MarkerTok:
+        """Parses `<|endoftext|>` to EOS the way the dolma2 tokenizer does."""
+
+        class E:
+            def __init__(self, ids):
+                self.ids = ids
+
+        def _ids(self, text):
+            out = []
+            for part in text.split("<|endoftext|>"):
+                out.extend((hash(w) % 90000) + 1 for w in part.split())
+                out.append(EOS)
+            return out[:-1]  # no trailing marker for the final segment
+
+        def encode_batch(self, texts, add_special_tokens=False):
+            return [MarkerTok.E(self._ids(t)) for t in texts]
+
+    # One document whose TEXT carries the marker mid-way.
+    docs = [Document(id="d0", text="alpha beta <|endoftext|> gamma delta", source="s")]
+    arrays = list(tokenize_documents(docs, MarkerTok(), eos_id=EOS, vocab_size=100278))
+    assert len(arrays) == 1
+    # EXACTLY ONE EOS — the one appended as the boundary, at the end.
+    n_eos = int((arrays[0] == EOS).sum())
+    assert n_eos == 1, f"{n_eos} EOS in a single document; the marker was not neutralized"
+    assert arrays[0][-1] == EOS, "the boundary must be the LAST token"
+
+    # And the neutralizer itself, directly.
+    assert neutralize_boundary_markers("a <|endoftext|> b") == "a <| endoftext |> b"
+    assert "<|endoftext|>" not in neutralize_boundary_markers("x<|endoftext|>y")
+
+
+def test_neutralizing_is_idempotent_and_leaves_clean_text_untouched():
+    """Resume depends on idempotence: re-running a partially built bundle must produce
+    byte-identical shards, so a second pass over already-rewritten text must not rewrite again.
+
+    Identity on clean text is the hot path — ~2,499 documents in 2,500 — and `str.replace` with no
+    match returns the same object, so this also documents that the common case allocates nothing.
+    """
+    from edullm_data.corpus_pack import neutralize_boundary_markers as n
+
+    clean = "an ordinary document with no markers at all"
+    assert n(clean) is clean, "clean text must not be copied"
+    once = n("a <|endoftext|> b")
+    assert n(once) == once, "not idempotent — resume would produce different bytes"
+
+
+def test_only_the_boundary_id_is_rewritten_not_every_special_token():
+    """The dolma2 tokenizer defines 22 added tokens and all 22 parse from raw text, but only 100257
+    is the document boundary. The other 21 are ordinary in-vocab ids — unusual, not dangerous — and
+    rewriting them would modify documents to fix a problem that does not exist.
+    """
+    from edullm_data.corpus_pack import _BOUNDARY_MARKER_REWRITES, neutralize_boundary_markers
+
+    assert len(_BOUNDARY_MARKER_REWRITES) == 1
+    for other in ("<|fim_prefix|>", "<|im_start|>", "|||EMAIL_ADDRESS|||", "<|pad|>"):
+        assert neutralize_boundary_markers(f"x {other} y") == f"x {other} y", other
