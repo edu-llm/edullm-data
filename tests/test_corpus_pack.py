@@ -843,17 +843,33 @@ def test_an_all_one_token_shard_is_refused_as_degenerate():
 
 
 def test_the_distinct_floor_is_capped_by_vocab_the_way_gate_a_caps_it():
-    """A byte tokenizer has vocab 256; the family floor of 256 would demand every byte value,
-    including control bytes formal text never uses. That contaminated real corpora once."""
+    """A byte tokenizer has vocab 256; the family floor would demand every byte value,
+    including control bytes formal text never uses. That contaminated real corpora once.
+
+    Both id spaces are DERIVED from the family bound rather than typed, because this test is a
+    two-sided control: the shard must clear the capped floor and fail the uncapped one. Typing
+    "~199 distinct" pinned it between 16 and 256 specifically, so lowering the family bound to
+    128 made the negative half stop firing — a control that silently became vacuous. Deriving
+    keeps the gap straddled at whatever the family declares.
+    """
+    from edullm_data.corpus_pack import _family_decode_bounds
+    from edullm_data.profiles.pretrain_tokens_v1 import _cap_min_distinct_by_vocab
+
+    declared = _family_decode_bounds()[2]
+    capped = _cap_min_distinct_by_vocab(declared, 256)
+    assert capped < declared, "the cap must actually bind at vocab 256 for this test to mean anything"
+
     rng = np.random.default_rng(9)
-    doc = rng.integers(1, 200, size=SEQ_LEN * 2).astype(DTYPE_LE)  # ~199 distinct, under 256
+    # Strictly between the capped floor and the declared one: passes capped, fails uncapped.
+    n_ids = (capped + declared) // 2
+    doc = rng.integers(1, n_ids + 1, size=SEQ_LEN * 2).astype(DTYPE_LE)
     doc[-1] = 255
     sink, _result = pack_one([doc], refs_for(2), eos_id=255, vocab_size=256)
-    assert len(sink.calls) == 2, "capped to vocab // 16 == 16, so ~199 distinct passes"
+    assert len(sink.calls) == 2, f"capped to vocab // 16 == {capped}, so ~{n_ids} distinct passes"
 
-    # Uncapped (vocab unknown), the family floor of 256 applies and the SAME shard is rejected —
-    # which is the contamination this cap exists to prevent: publishers interleaved 0..255 alphabet
-    # markers into real training shards to satisfy the floor.
+    # Uncapped (vocab unknown), the family floor applies and the SAME shard is rejected — which is
+    # the contamination this cap exists to prevent: publishers interleaved 0..255 alphabet markers
+    # into real training shards to satisfy the floor.
     with pytest.raises(BuildError, match="distinct ids"):
         pack_one([doc.copy()], refs_for(2), eos_id=255, vocab_size=None)
 

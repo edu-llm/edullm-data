@@ -11,7 +11,7 @@ Two independent bugs made every family-declared bound dead code:
    ``max_eos_fraction`` / ``max_zero_run``. Names inverted AND nesting mismatched.
 
 Net effect on the live corpus: it was validated against the profile's own fallbacks — 16
-distinct ids, 50% EOS, 50% zeros — instead of the family's 256 / 5% / 1%. So a shard that was
+distinct ids, 50% EOS, 50% zeros — instead of the family's declared bounds. So a shard that was
 half end-of-text padding, or half zeros from a crashed writer, would have passed.
 """
 
@@ -26,7 +26,7 @@ from edullm_data.validate import FAMILIES_DIR, _family_defaults_for
 
 def test_pretrain_family_bounds_resolve_to_the_declared_values():
     fd = _family_defaults_for("pretrain/olmo-mix-1124-31b")
-    assert fd["min_distinct_ids"] == 256
+    assert fd["min_distinct_ids"] == 128
     assert fd["max_eos_fraction"] == 0.05
     assert fd["max_zero_run"] == 256
     # window_bytes is deliberately NOT flattened: the decode window is a fixed constant, so

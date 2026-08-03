@@ -312,7 +312,7 @@ def check_decode_smoke(ctx: GroupContext) -> list[Violation]:
         distinct = int(np.unique(ids).size)
         # The floor SCALES with how much was actually sampled. A bound expressed as an absolute
         # count is unsatisfiable for a shard smaller than the bound: a 5-token shard can never
-        # reach 256 distinct ids, or even 16, no matter how healthy it is.
+        # reach 128 distinct ids, or even 16, no matter how healthy it is.
         #
         # That is not hypothetical. In the 150B corpus, 2 of 6,921 shards are 20 bytes / 5
         # tokens. Under an absolute floor they are guaranteed violations, and because promote()
@@ -325,7 +325,8 @@ def check_decode_smoke(ctx: GroupContext) -> list[Violation]:
         # exists to catch, so it must stay catchable at every size where "degenerate" is even
         # meaningful. At n == 1 there is nothing to compare, so 1 is the honest bound there.
         #
-        # Above ~1 KB of sampled tokens the declared bound applies unchanged.
+        # Once the sample is at least 4x the declared bound the declared bound applies unchanged
+        # (>= 512 sampled tokens at the family's 128).
         effective_min = min(min_distinct, max(n // 4, 2 if n > 1 else 1))
         if distinct < effective_min:
             scaled = " (scaled to this shard's sample size)" if effective_min != min_distinct else ""

@@ -174,7 +174,7 @@ def _publish_corpus_with_tokenizer(s3: FakeS3, dsid: str, tokenizer: str, max_id
     #
     # Two properties this fixture must hold so unrelated checks stay quiet, both of which are
     # the FAMILY's bounds (families/pretrain.json defaults.decode_smoke_test), not the
-    # profile's laxer fallbacks: >= 256 distinct ids in any 64 KB window, and a zero fraction
+    # profile's laxer fallbacks: >= 128 distinct ids in any 64 KB window, and a zero fraction
     # under 0.01. Before family defaults were wired into the gate, the profile fell back to
     # 16 distinct / 0.5 zeros and this fixture passed while violating both.
     span = max(max_id, 1)
@@ -213,7 +213,7 @@ def test_tokenizer_arg_resolves_latest_version():
     s3 = FakeS3()
     _publish_named_tokenizer(s3, "tokenizer/dolma2-bpe", base_vocab=50000, eos_id=50000)
     # reference without a version → resolves the published latest
-    # max_id must clear the family's distinct-ids floor (256) while staying under the
+    # max_id must clear the family's distinct-ids floor (128) while staying under the
     # tokenizer's derived vocab (50001) — the bound actually under test here is vocab-range.
     ok = _publish_corpus_with_tokenizer(s3, "pretrain/dolma2-corpus-10b", "tokenizer/dolma2-bpe", max_id=1000)
     assert ok.ok, [str(v) for v in ok.violations]
