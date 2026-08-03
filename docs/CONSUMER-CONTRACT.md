@@ -347,11 +347,14 @@ the dataset config, val for the eval callback. They are kept **separate rather t
 `paths`** because a flat list is precisely the failure: a caller cannot tell the two apart, so held-out
 shards end up in training with nothing to notice (`read.py:108-113`).
 
-One exception, deliberate: a dataset that declares **no** trainable split at all — a tokenizer, a
-vendored tree, an eval set — returns everything (`read.py:323-326`). There is nothing to protect and
-the whole artifact is the payload. Those families opt out of the validation requirement in their own
-family file with a stated reason (`families/eval.json:11-12`, `probe.json:33-34`,
-`tokenizer.json:13-14`, `vendor.json:27-28`).
+One exception needs an extra guard: a dataset that declares **no** trainable split — a tokenizer or
+eval set — returns everything because the whole artifact is its payload. A `vendored/v1` tree is
+different: it is a byte-preserving provenance artifact, not an approved training representation.
+`dataset_paths()` refuses it unless the caller spells out `allow_vendored=True`, which is appropriate
+only for a dedicated transformation or provenance-audit job. This keeps a raw mirror such as PRM800K
+from quietly becoming an SFT or process-reward input. Those families opt out of the validation
+requirement in their own family file with a stated reason (`families/eval.json:11-12`,
+`probe.json:33-34`, `tokenizer.json:13-14`, `vendor.json:27-28`).
 
 ### The vocabulary is closed, and `held_out` is derived
 
@@ -420,7 +423,8 @@ way that claim can be wrong ends with held-out data inside the trainable set: a 
 empty or malformed `partitions` list, a partition with no name, a `by: field` partition that selects
 every shard, a group whose val shards nobody declared. So the standard's own naming rule
 (`<split>-<NNNNN>.<ext>`, `manifest.py:661-672`) is applied to the read path as a backstop. Names that
-do not parse as shards are **kept**, so tokenizer files and vendored trees are unaffected.
+do not parse as shards are **kept** for tokenizer files and for a vendored tree only after its explicit
+`allow_vendored=True` opt-in.
 
 This is why §2 says feed `r.paths`: it is the only list that has been through this.
 

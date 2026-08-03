@@ -29,6 +29,7 @@ from __future__ import annotations
 import gzip
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -53,7 +54,7 @@ from .manifest import (
     manifest_sha256,
     parse_shard_name,
 )
-from .s3 import S3, NotFound
+from .s3 import S3, NotFound, PreconditionFailed
 
 LANDING_BUCKET = "edullm-landing"
 #: Shared with the validator ON PURPOSE — see ``validate._resolve_families_dir`` for the three
@@ -153,7 +154,9 @@ def _format_for(path: str, family_defaults: Mapping[str, Any]) -> Format:
     )
 
 
-def _count_for(path: str, size: int, fmt: Format, s3: S3, bucket: str, key: str) -> dict[str, Any] | None:
+def _count_for(
+    path: str, size: int, fmt: Format, s3: S3, bucket: str, key: str
+) -> dict[str, Any] | None:
     """Best-effort count, computed WITHOUT loading the payload whole.
 
     * Fixed-width raw → tokens = size / dtype_size. Pure arithmetic on the object size;
@@ -166,10 +169,16 @@ def _count_for(path: str, size: int, fmt: Format, s3: S3, bucket: str, key: str)
     if fmt.container == "raw" and fmt.dtype_size:
         return {"unit": "tokens", "value": size // fmt.dtype_size}
     if path.endswith(".jsonl"):
-        return {"unit": "rows", "value": _stream_count_newlines(s3, bucket, key, gz=False)}
+        return {
+            "unit": "rows",
+            "value": _stream_count_newlines(s3, bucket, key, gz=False),
+        }
     if path.endswith(".jsonl.gz"):
         try:
-            return {"unit": "rows", "value": _stream_count_newlines(s3, bucket, key, gz=True)}
+            return {
+                "unit": "rows",
+                "value": _stream_count_newlines(s3, bucket, key, gz=True),
+            }
         except OSError:
             return None
     return None
@@ -232,7 +241,9 @@ def _is_control_source(rel: str) -> bool:
     return is_control_prefix(rel)
 
 
-def _stage_local_to_landing(source: Path, s3: S3, landing_bucket: str, staging_prefix: str) -> None:
+def _stage_local_to_landing(
+    source: Path, s3: S3, landing_bucket: str, staging_prefix: str
+) -> None:
     """Upload a local directory to a landing staging prefix, one object at a time via a
     STREAMING put (boto3 upload_file handles multipart, bounded memory). After this, a
     local source is indistinguishable from an s3:// source and the rest of publish() only
@@ -286,8 +297,6 @@ def _group_of(rel_path: str) -> str:
     return rel_path.split("/", 1)[0] if "/" in rel_path else ""
 
 
-
-
 # --------------------------------------------------------------------------------------
 # build the plan
 # --------------------------------------------------------------------------------------
@@ -315,6 +324,7 @@ def build_plan(
     notes: str | None = None,
     limitations: Sequence[Mapping[str, Any]] | None = None,
     license: Mapping[str, Any] | None = None,
+    expected_payload: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> PublishPlan:
     """Turn (path, size) metadata + the staged S3 objects into the exact objects to write.
 
@@ -346,13 +356,57 @@ def build_plan(
     if not by_group:
         raise PublishError("no payload files found under the source")
 
+    # A normal publish derives its manifest solely from the staged bytes.  A byte-preserving
+    # vendor mirror has a stronger, independently pinned claim: every staged path, byte count,
+    # and digest must equal a known upstream witness BEFORE a dataset.json reservation or a
+    # commit-point manifest is written.  Keeping this generic optional hook in the publisher
+    # avoids a second full S3 pass in a source-specific ingest command.
+    expected_entries: dict[str, tuple[int, str]] | None = None
+    if expected_payload is not None:
+        expected_entries = {}
+        for path, witness in expected_payload.items():
+            if (
+                not isinstance(path, str)
+                or not path
+                or path.startswith("/")
+                or ".." in path.split("/")
+            ):
+                raise PublishError(
+                    "expected_payload paths must be non-empty relative paths without '..'"
+                )
+            if not isinstance(witness, Mapping):
+                raise PublishError(f"expected_payload[{path!r}] must be a mapping")
+            size = witness.get("bytes")
+            digest = witness.get("sha256")
+            if (
+                not isinstance(size, int)
+                or isinstance(size, bool)
+                or size < 0
+                or not isinstance(digest, str)
+                or re.fullmatch(r"[0-9a-f]{64}", digest) is None
+            ):
+                raise PublishError(
+                    f"expected_payload[{path!r}] needs non-negative integer bytes and lowercase SHA-256"
+                )
+            expected_entries[path] = (size, digest)
+        actual_paths = {path for path, _ in files}
+        if actual_paths != set(expected_entries):
+            missing = sorted(set(expected_entries) - actual_paths)
+            extra = sorted(actual_paths - set(expected_entries))
+            raise PublishError(
+                "staged payload does not match the pinned expected path set "
+                f"(missing={missing}, extra={extra})"
+            )
+
     # resolve the profile per group
     def profile_for(g: str) -> str:
         if isinstance(profile, str):
             return profile
         if g in profile:
             return profile[g]
-        raise PublishError(f"group {g!r} has no profile in the profile mapping {dict(profile)!r}")
+        raise PublishError(
+            f"group {g!r} has no profile in the profile mapping {dict(profile)!r}"
+        )
 
     manifests: dict[str, dict[str, Any]] = {}
     groups_meta: list[dict[str, Any]] = []
@@ -368,7 +422,17 @@ def build_plan(
             rel, _size = item
             fmt = _format_for(rel, defaults)
             src_key = f"{source_prefix}/{rel}" if source_prefix else rel
-            sha, hashed_size = s3.hash_object(source_bucket, src_key)  # streamed, no whole-object RAM
+            sha, hashed_size = s3.hash_object(
+                source_bucket, src_key
+            )  # streamed, no whole-object RAM
+            if expected_entries is not None:
+                expected_size, expected_sha = expected_entries[rel]
+                if hashed_size != expected_size or sha != expected_sha:
+                    raise PublishError(
+                        f"staged payload witness mismatch for {rel!r}: "
+                        f"got bytes={hashed_size}, sha256={sha}; expected "
+                        f"bytes={expected_size}, sha256={expected_sha}"
+                    )
             parsed = parse_shard_name(rel)
             try:
                 derived_labels = labels_from_path(rel)
@@ -381,7 +445,16 @@ def build_plan(
                 path=rel,
                 sha256=sha,
                 bytes=hashed_size,
-                count=_count_for(rel, hashed_size, fmt, s3, source_bucket, src_key),
+                # A vendored JSONL mirror must preserve upstream bytes, not derive a local
+                # row interpretation.  More importantly, `_count_for`'s generic JSONL branch
+                # currently calls `get()` and would buffer PRM800K's 456 MiB file.  `count` is
+                # optional by contract; the raw mirror's bounded JSONL plausibility check is
+                # the honest validation here.
+                count=(
+                    None
+                    if profile_for(g).startswith("vendored/")
+                    else _count_for(rel, hashed_size, fmt, s3, source_bucket, src_key)
+                ),
                 format=fmt,
                 # Both derived from the key itself, never asked of the caller, and both
                 # recomputed by Gate A from that same key — so neither can drift from the
@@ -423,11 +496,24 @@ def build_plan(
         # family default is dangerous because a mismatched tokenizer's ids usually still fall
         # in range and pass silently).
         if profile_for(g).startswith("pretrain-tokens/"):
-            already = any(d.get("role") == "tokenizer" for d in (group_meta.get(g, {}).get("depends_on", []) or []))
+            already = any(
+                d.get("role") == "tokenizer"
+                for d in (group_meta.get(g, {}).get("depends_on", []) or [])
+            )
             fam_dep = defaults.get("tokenizer_dependency_optional")
-            if not already and isinstance(fam_dep, Mapping) and fam_dep.get("dataset_id"):
+            if (
+                not already
+                and isinstance(fam_dep, Mapping)
+                and fam_dep.get("dataset_id")
+            ):
                 existing = list(gm.get("depends_on", []) or [])
-                existing.append({k: fam_dep[k] for k in ("role", "dataset_id", "version", "manifest_sha256") if fam_dep.get(k)})
+                existing.append(
+                    {
+                        k: fam_dep[k]
+                        for k in ("role", "dataset_id", "version", "manifest_sha256")
+                        if fam_dep.get(k)
+                    }
+                )
                 gm["depends_on"] = existing
         if defaults.get("partitions") and "partitions" not in group_meta.get(g, {}):
             # The family default declares the partition SHAPE (name + by:path glob) but
@@ -456,7 +542,11 @@ def build_plan(
     dataset_json = {
         "schema_version": SCHEMA_VERSION,
         "dataset_id": dataset_id,
-        "version": {"id": version, "relation": "supersedes", "of": _prev_version(version)},
+        "version": {
+            "id": version,
+            "relation": "supersedes",
+            "of": _prev_version(version),
+        },
         "created_at": created_at,
         "owner": owner or family.get("owner", "unknown"),
         "purpose": purpose,
@@ -472,7 +562,9 @@ def build_plan(
             "executor": build_executor,
             "reproducibility": defaults.get("reproducibility", "logical"),
         },
-        "license": dict(license) if license is not None else family.get("license", {"id": None, "basis": "unknown"}),
+        "license": dict(license)
+        if license is not None
+        else family.get("license", {"id": None, "basis": "unknown"}),
     }
     # about/notes/limitations are optional free-text/structured provenance (§3: they exist
     # because the README is generated). Emit only when provided — an absent key reads as "not
@@ -510,8 +602,10 @@ def _count_rows_for_glob(glob: str, entries: Sequence[ManifestEntry]) -> int | N
     import fnmatch
 
     matched = [
-        e for e in entries
-        if fnmatch.fnmatch(e.path.rsplit("/", 1)[-1], glob) or fnmatch.fnmatch(e.path, glob)
+        e
+        for e in entries
+        if fnmatch.fnmatch(e.path.rsplit("/", 1)[-1], glob)
+        or fnmatch.fnmatch(e.path, glob)
     ]
     if not matched:
         return None
@@ -573,31 +667,104 @@ def _resolve_path_partitions(
 # --------------------------------------------------------------------------------------
 
 
-def _next_version(s3: S3, landing_bucket: str, dataset_id: str) -> str:
-    """Highest existing version under the dataset id (in landing OR the catalog) + 1. Not a
-    lock — the create-only write of dataset.json is the actual guard; this just picks a good
-    first guess so the common case doesn't collide."""
+def _next_version(
+    s3: S3, landing_bucket: str, data_bucket: str, dataset_id: str
+) -> str:
+    """Return one higher than every version in landing *and* the published catalog.
+
+    Landing expires after fourteen days, so it cannot be the only source of truth.  Looking
+    only there could select an already-published ``v1`` after expiry; promotion correctly
+    refuses the sealed data prefix, but only after the producer has already done the work.
+    The create-only landing ``dataset.json`` remains the concurrency guard.
+    """
     highest = 0
     for obj in s3.list(landing_bucket, f"{dataset_id}/"):
         parts = obj["key"][len(dataset_id) + 1 :].split("/", 1)
         seg = parts[0]
         if seg.startswith("v") and seg[1:].isdigit():
             highest = max(highest, int(seg[1:]))
+    for obj in s3.list(data_bucket, f"_catalog/{dataset_id}/"):
+        base = obj["key"].rsplit("/", 1)[-1]
+        version = base[:-5] if base.endswith(".json") else ""
+        if version.startswith("v") and version[1:].isdigit():
+            highest = max(highest, int(version[1:]))
     return f"v{highest + 1}"
 
 
+def _verify_expected_final_copies(
+    s3: S3,
+    *,
+    landing_bucket: str,
+    dataset_prefix: str,
+    plan: PublishPlan,
+    hash_workers: int,
+) -> None:
+    """Bind copied final objects to the stream-hashed plan before its manifest commits.
+
+    An ``expected_payload`` table protects a vendor mirror from a mutable source prefix only
+    if the object copied to the final landing prefix is also the object that was hashed against
+    that table.  Re-hashing the destination closes the source-hash → server-side-copy window
+    without relying on multipart ETags (which are not content SHA-256 values).  This extra pass
+    is deliberately opt-in through ``expected_payload``: ordinary large corpus publication does
+    not make an external byte-for-byte source claim.
+    """
+    expected: dict[str, tuple[int, str]] = {}
+    for manifest in plan.manifests.values():
+        for raw in manifest.get("entries", []):
+            entry = ManifestEntry.from_dict(raw)
+            if entry.path in expected:
+                raise PublishError(
+                    f"duplicate final-payload witness for {entry.path!r}"
+                )
+            expected[entry.path] = (entry.bytes, entry.sha256)
+
+    def verify_one(item: tuple[str, tuple[int, str]]) -> None:
+        rel, (expected_size, expected_sha) = item
+        actual_sha, actual_size = s3.hash_object(
+            landing_bucket, f"{dataset_prefix}/{rel}"
+        )
+        if actual_size != expected_size or actual_sha != expected_sha:
+            raise PublishError(
+                f"final payload witness mismatch for {rel!r}: got bytes={actual_size}, "
+                f"sha256={actual_sha}; expected bytes={expected_size}, sha256={expected_sha}"
+            )
+
+    items = sorted(expected.items())
+    if hash_workers > 1 and len(items) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=hash_workers) as pool:
+            list(pool.map(verify_one, items))
+    else:
+        for item in items:
+            verify_one(item)
+
+
 def _build_executor_from_env(env: Mapping[str, str]) -> dict[str, Any]:
-    """Capture provenance from the environment (§3). AWS Batch producers get their job id
-    and image digest for free; everything else records source + lockfile hashes, which are
-    obtainable anywhere (this repo has no root .git, so a commit sha is not universal)."""
+    """Capture execution provenance from explicit Batch/container identity inputs.
+
+    AWS Batch provides the job id, queue name, and job-definition *name*, but it does not expose
+    the immutable job-definition ARN or container image digest as standard environment variables.
+    A deployed job definition must therefore inject the ``EDULLM_*`` identity values itself.  In
+    particular, ``AWS_BATCH_JQ_NAME`` is a queue name, never a job-definition ARN; storing it as
+    one would turn a provenance field into a plausible but false claim.
+    """
     if env.get("AWS_BATCH_JOB_ID"):
-        return {
+        executor: dict[str, Any] = {
             "kind": "aws-batch",
             "job_id": env.get("AWS_BATCH_JOB_ID"),
             "job_attempt": int(env.get("AWS_BATCH_JOB_ATTEMPT", "1")),
-            "job_definition_arn": env.get("AWS_BATCH_JQ_NAME") or env.get("AWS_BATCH_JOB_DEFINITION_ARN"),
+            "job_queue": env.get("AWS_BATCH_JQ_NAME"),
+            "job_definition": env.get("AWS_BATCH_JD_NAME"),
             "region": env.get("AWS_REGION", "us-east-1"),
         }
+        injected = {
+            "job_definition_arn": env.get("EDULLM_BATCH_JOB_DEFINITION_ARN"),
+            "image_digest": env.get("EDULLM_IMAGE_DIGEST"),
+            "image_repo": env.get("EDULLM_IMAGE_REPO"),
+        }
+        executor.update({key: value for key, value in injected.items() if value})
+        return {key: value for key, value in executor.items() if value is not None}
     return {
         "kind": "external",
         "host_class": env.get("EDULLM_HOST_CLASS", "unknown"),
@@ -606,7 +773,9 @@ def _build_executor_from_env(env: Mapping[str, str]) -> dict[str, Any]:
     }
 
 
-def _resolve_tokenizer_dependency(tokenizer: str, s3: S3, data_bucket: str) -> dict[str, Any]:
+def _resolve_tokenizer_dependency(
+    tokenizer: str, s3: S3, data_bucket: str
+) -> dict[str, Any]:
     """Turn a ``tokenizer/<name>[/vN]`` reference into a pinned depends_on entry by looking
     up the PUBLISHED tokenizer dataset in the data bucket. Fails loudly if it isn't published
     — a corpus must reference a real, owned tokenizer, never a bare string."""
@@ -623,7 +792,11 @@ def _resolve_tokenizer_dependency(tokenizer: str, s3: S3, data_bucket: str) -> d
         best = 0
         for obj in s3.list(data_bucket, f"_catalog/{tok_id}/"):
             base = obj["key"].rsplit("/", 1)[-1]
-            if base.endswith(".json") and base[:-5].startswith("v") and base[:-5][1:].isdigit():
+            if (
+                base.endswith(".json")
+                and base[:-5].startswith("v")
+                and base[:-5][1:].isdigit()
+            ):
                 best = max(best, int(base[:-5][1:]))
         if best == 0:
             raise PublishError(
@@ -635,12 +808,19 @@ def _resolve_tokenizer_dependency(tokenizer: str, s3: S3, data_bucket: str) -> d
     try:
         pds = _load_family_json_from_s3(s3, data_bucket, f"{dprefix}/dataset.json")
     except Exception as e:  # noqa: BLE001
-        raise PublishError(f"tokenizer {dprefix!r} is not readable in {data_bucket}: {e}") from e
+        raise PublishError(
+            f"tokenizer {dprefix!r} is not readable in {data_bucket}: {e}"
+        ) from e
     groups = pds.get("groups", [])
     if not groups:
         raise PublishError(f"tokenizer {dprefix!r} has no groups")
     man_sha = groups[0].get("manifest_sha256")
-    return {"role": "tokenizer", "dataset_id": tok_id, "version": version, "manifest_sha256": man_sha}
+    return {
+        "role": "tokenizer",
+        "dataset_id": tok_id,
+        "version": version,
+        "manifest_sha256": man_sha,
+    }
 
 
 def _load_family_json_from_s3(s3: S3, bucket: str, key: str) -> dict[str, Any]:
@@ -672,6 +852,8 @@ def publish(
     notes: str | None = None,
     limitations: Sequence[Mapping[str, Any]] | None = None,
     license: Mapping[str, Any] | None = None,
+    expected_payload: Mapping[str, Mapping[str, Any]] | None = None,
+    expected_version: str | None = None,
 ) -> PublishPlan:
     """Publish a dataset to landing. Returns the plan that was written.
 
@@ -703,6 +885,17 @@ def publish(
     uri?, scope?}`` describing the data mix; ``about`` is a curated narrative block; ``notes`` is
     a free-text caveat; ``limitations`` is a list of structured ``{kind, ...}`` caveats. None of
     these add a validator-required field — they are read only by the README generator.
+
+    ``expected_payload`` is an optional immutable witness table keyed by source-relative path.
+    When present, the publisher compares each staged object's streamed byte count and SHA-256 to
+    that table before reserving a version, then re-hashes the copied final landing objects before
+    writing a manifest.  It is intended for mirrors whose source identity is pinned outside
+    mutable landing metadata.
+
+    ``expected_version`` is an opt-in fixed reservation for an artifact that must never be
+    retried under a fresh version.  If a matching landing ``dataset.json`` already exists, the
+    call resumes that same version; if it differs, it fails instead of silently allocating
+    another version.
     """
     # validate the four typed things up front — a bad name fails before any bytes move
     try:
@@ -713,6 +906,13 @@ def publish(
         validate_purpose(purpose)
     except NamingError as e:
         raise PublishError(f"invalid purpose: {e}") from e
+    if (
+        expected_version is not None
+        and re.fullmatch(r"v[1-9][0-9]*", expected_version) is None
+    ):
+        raise PublishError(
+            "expected_version must be a positive canonical version such as 'v1'"
+        )
 
     family = _load_family(family_name)
     env = env if env is not None else dict(os.environ)
@@ -749,14 +949,19 @@ def publish(
         _stage_local_to_landing(Path(source), s3, landing_bucket, source_prefix)
         source_kind = "local"
 
-    files = _enumerate_s3(s3, source_bucket, source_prefix)  # (path, size) — metadata only
+    files = _enumerate_s3(
+        s3, source_bucket, source_prefix
+    )  # (path, size) — metadata only
     if not files:
         raise PublishError(f"no files found at source {source!r}")
 
     # allocate version + write, retrying on create-only collision
     last_err: Exception | None = None
-    for _ in range(max_version_attempts):
-        version = _next_version(s3, landing_bucket, dataset_id)
+    attempts = 1 if expected_version is not None else max_version_attempts
+    for _ in range(attempts):
+        version = expected_version or _next_version(
+            s3, landing_bucket, data_bucket, dataset_id
+        )
         plan = build_plan(
             files,
             dataset_id=dataset_id,
@@ -778,14 +983,29 @@ def publish(
             notes=notes,
             limitations=limitations,
             license=license,
+            expected_payload=expected_payload,
         )
         ds_prefix = f"{dataset_id}/{version}"
         # 1. reserve the version: create-only dataset.json FIRST (§6 order)
         try:
-            _put_create_only(s3, landing_bucket, f"{ds_prefix}/dataset.json", canonical_json(plan.dataset_json))
+            _put_create_only(
+                s3,
+                landing_bucket,
+                f"{ds_prefix}/dataset.json",
+                canonical_json(plan.dataset_json),
+            )
         except FileExistsError as e:
             last_err = e
-            continue  # someone took this version; bump and retry
+            if expected_version is None:
+                continue  # someone took this version; bump and retry
+            # A fixed-version retry is safe only when it resumes its OWN exact reservation.
+            # Comparing canonical bytes makes a stale/other producer's v1 a loud failure rather
+            # than a quiet v2 allocation after the landing prefix expires.
+            existing = s3.get(landing_bucket, f"{ds_prefix}/dataset.json")
+            if existing != canonical_json(plan.dataset_json):
+                raise VersionConflict(
+                    f"fixed version {dataset_id}/{version} is already reserved with different metadata"
+                ) from e
 
         # 2. payload objects: SERVER-SIDE COPY from the staged/source location to the final
         #    dataset prefix. Bytes move S3→S3 in-region; nothing transits the client. If the
@@ -808,9 +1028,26 @@ def publish(
             for item in files:
                 _copy_one(item)
 
+        # An external immutable witness has a stricter source-to-destination claim than an
+        # ordinary publish.  The source staging prefix is mutable, so hash the copies before the
+        # manifest (the EventBridge commit point) makes them visible to the validator.
+        if expected_payload is not None:
+            _verify_expected_final_copies(
+                s3,
+                landing_bucket=landing_bucket,
+                dataset_prefix=ds_prefix,
+                plan=plan,
+                hash_workers=hash_workers,
+            )
+
         # 3. group manifests LAST — the commit point (§6). Small control objects, safe to put.
         for g, man in plan.manifests.items():
-            _put_idempotent(s3, landing_bucket, f"{ds_prefix}/{g}/manifest.json", canonical_json(man))
+            _put_idempotent(
+                s3,
+                landing_bucket,
+                f"{ds_prefix}/{g}/manifest.json",
+                canonical_json(man),
+            )
 
         # 4. best-effort: clear the local-staging area now that bytes are at the final prefix.
         if source_kind == "local":
@@ -822,19 +1059,23 @@ def publish(
 
         return plan
 
-    raise VersionConflict(f"could not allocate a version for {dataset_id!r} after {max_version_attempts} attempts") from last_err
+    raise VersionConflict(
+        f"could not allocate a version for {dataset_id!r} after {max_version_attempts} attempts"
+    ) from last_err
 
 
 def _put_create_only(s3: S3, bucket: str, key: str, body: bytes) -> None:
-    """Write only if absent. FakeS3/Boto3S3 both expose plain put; we emulate create-only by
-    a head-then-put, and the bucket policy's IfNoneMatch requirement enforces it for real on
-    the server (a concurrent racer still gets rejected server-side)."""
+    """Atomically write only if absent using S3's ``If-None-Match: *`` precondition."""
     try:
-        s3.head(bucket, key)
-    except NotFound:
-        s3.put(bucket, key, body, content_type="application/json")
-        return
-    raise FileExistsError(key)
+        s3.put(
+            bucket,
+            key,
+            body,
+            content_type="application/json",
+            if_none_match=True,
+        )
+    except PreconditionFailed as exc:
+        raise FileExistsError(key) from exc
 
 
 def _put_idempotent(s3: S3, bucket: str, key: str, body: bytes) -> None:

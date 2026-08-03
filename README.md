@@ -130,6 +130,7 @@ edullm-data/                    ← git root
 │   ├── readme.py               render_readme() — README generated from dataset.json  done
 │   ├── fsck.py                 wu-fsck, Gate B, weekly integrity re-check        done
 │   ├── ingest_reservoir.py     HF → S3 ingest, array-sharded (Batch)             done
+│   ├── ingest_prm800k.py       pinned HF → landing raw vendor ingest              done
 │   ├── reservoir_ids.py        §9.7 id partition (key-derived, reproducible)     done
 │   └── profiles/
 │       ├── base.py             Violation / GroupContext / sample_offsets         done
@@ -138,7 +139,8 @@ edullm-data/                    ← git root
 │       ├── eval_results_v1.py      model pin, decode params, failure accounting  done
 │       ├── token_order_v1.py       permutation/index-vector checks               done
 │       ├── tokenizer_v1.py         tokenizer-family checks                       done
-│       └── sft_conversations_v1.py messages[] schema, dedup + leakage report     done
+│       ├── sft_conversations_v1.py messages[] schema, dedup + leakage report     done
+│       └── vendored_v1.py          byte-preserving upstream mirror checks         done
 ├── infra/                      CloudFormation + policies + Dockerfile + runbooks done (deployed)
 ├── families/                   the seven family.json files                       done
 └── tests/                      786 passing                                       done

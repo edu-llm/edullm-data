@@ -16,6 +16,7 @@ names, never trust the declaration.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 from pathlib import Path
@@ -217,11 +218,26 @@ def test_a_vendored_tree_keeps_its_upstream_shard_names():
     s3 = FakeS3()
     d = Path(tempfile.mkdtemp())
     (d / "mirror").mkdir()
-    (d / "mirror" / "test-00000.parquet").write_bytes(b"PAR1" + b"\x00" * 400)
+    body = b"PAR1" + b"\x00" * 400
+    (d / "mirror" / "test-00000.parquet").write_bytes(body)
     plan = P.publish(
         d, dataset_id="vendor/dclm-hero-fasttext",
         purpose="Mirror of an upstream release kept byte-for-byte so its provenance stays verifiable",
-        profile="vendor/v1", s3=s3, created_at=CREATED, env=ENV,
+        profile="vendored/v1", s3=s3, created_at=CREATED, env=ENV,
+        group_meta={"mirror": {
+            "vendor_root": "mirror",
+            "upstream": {
+                "name": "upstream/dclm-hero-fasttext",
+                "uri": "https://example.test/dclm-hero-fasttext",
+                "revision": "0123456789abcdef0123456789abcdef01234567",
+                "retrieved_at": CREATED,
+            },
+            "sentinels": [],
+            "upstream_files": [{
+                "path": "test-00000.parquet", "bytes": len(body),
+                "sha256": hashlib.sha256(body).hexdigest(),
+            }],
+        }},
     )
     res = V.validate_dataset(
         "edullm-landing", f"vendor/dclm-hero-fasttext/{plan.version}", s3, data_bucket="edullm-data"

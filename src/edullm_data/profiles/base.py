@@ -60,6 +60,10 @@ class GroupContext:
       see), computes ``vocab_size``/``eos_token_id`` from its ``tokenizer.json``, and places
       them here as ``resolved["tokenizer"]``. A check reads the bound from here, not from a
       hand-typed field — so the bound is unfakeable.
+    * ``observations`` — ephemeral, validator-owned facts computed while checks run.  Unlike
+      ``resolved``, these are about landing objects themselves.  A profile may record a
+      content hash plus stable ETag here so promotion can condition its later server-side copy
+      on the exact object Gate A inspected.  This is never serialized into dataset metadata.
     """
 
     dataset_id: str
@@ -72,6 +76,7 @@ class GroupContext:
     rng_seed: str
     family_defaults: Mapping[str, Any] = field(default_factory=dict)
     resolved: Mapping[str, Any] = field(default_factory=dict)
+    observations: dict[str, Any] = field(default_factory=dict)
 
 
 # A check recomputes something and returns any violations it finds. Empty list = clean.
@@ -106,7 +111,9 @@ class Profile(Protocol):
 DECODE_SAMPLE_BYTES = 64 * 1024
 
 
-def sample_offsets(seed_hex: str, object_size: int, *, window: int, n: int, align: int) -> list[int]:
+def sample_offsets(
+    seed_hex: str, object_size: int, *, window: int, n: int, align: int
+) -> list[int]:
     """Deterministic byte offsets for a decode smoke test.
 
     Reproducible from ``seed_hex`` alone (§7: "any auditor can re-run the identical
@@ -129,7 +136,7 @@ def sample_offsets(seed_hex: str, object_size: int, *, window: int, n: int, alig
     while len(offsets) < n:
         h = hashlib.sha256(f"{seed_hex}:{counter}".encode()).digest()
         raw = int.from_bytes(h[:8], "big")
-        off = (raw % (hi + 1))
+        off = raw % (hi + 1)
         off -= off % align
         offsets.append(off)
         counter += 1
