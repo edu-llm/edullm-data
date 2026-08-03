@@ -42,8 +42,9 @@ with what the repository or the API actually says, the disagreement is named in 
 > 5. **Two blockers this document never listed.** (a) `config/datasets.yaml` has one entry,
 >    `dolma-2026-07`, naming nothing in `edullm-data`; an unregistered dataset is
 >    **denied outright**, not merely awkward. (b) `config/repositories.yaml` pins
->    `dockerfile_path: .edullm/Dockerfile` for OLMo-core and **that file does not exist**, nor does
->    any image install `edullm_data`/`boto3`. No image, no run.
+>    `dockerfile_path: .edullm/Dockerfile` for `edullm-data`. That former image blocker is now
+>    closed: the repository supplies the registered-base Dockerfile and installs `edullm_data` /
+>    `boto3` into the published image.
 >
 > Change 1 (the IAM grant) is unaffected and remains the cleanest single fix: one statement on
 > `batch-gpu-roles.yaml`, no bucket-policy edit — the `edullm-data` Deny covers writes only.

@@ -172,13 +172,13 @@ arguments you hand-type, and the one that must not be guessed.
 | model outputs + scores from an eval run | `eval` | `eval-results/v1` | ✅ shipped |
 | a tokenizer (`tokenizer.json` + friends) | `tokenizer` | `tokenizer/v1` | ✅ shipped |
 | benchmark **items** (the questions, not the answers) | `eval` / `probe` | `eval-items/v1` | ⚠️ **not implemented** |
-| a vendored upstream tree, verbatim | `vendor` | `vendored/v1` | ⚠️ **not implemented** |
+| a vendored upstream tree, verbatim | `vendor` | `vendored/v1` | ✅ shipped — provenance artifact, explicit reader opt-in |
 
-> **⚠️ Read this before you plan around `probe` or `vendor`.** Those two families default to
-> profiles that **do not exist in the registry** (`registry.py:_SHIPPED` ships five). Publishing
-> into them today fails with `ProfileError`. `experimental/v1` is also referenced in
-> `CONTRIBUTING.md` and is likewise unregistered. If your data is one of those shapes, you are
-> writing the profile as part of your work — budget for it (see §1.3) and talk to Eric first.
+> **⚠️ Read this before you plan around `probe`.** `vendored/v1` is shipped and is the right
+> contract for a verbatim third-party mirror, but it deliberately requires explicit reader opt-in:
+> a raw vendor artifact is not automatically train-ready. `eval-items/v1` and `experimental/v1`
+> remain unregistered; if your data is one of those shapes, you are writing the profile as part of
+> your work — budget for it (see §1.3) and talk to Eric first.
 
 **If nothing fits, write a profile.** That is the expected path, not an exception. Four things: a
 registry entry, a schema fragment, check functions, and two fixtures (one passing, one

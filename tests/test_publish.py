@@ -43,9 +43,13 @@ def _eval_meta() -> dict:
 def _tokens_dir(n: int = 60000) -> Path:
     d = Path(tempfile.mkdtemp())
     (d / "tokens").mkdir()
-    (d / "tokens" / "train-00000.u32le.bin").write_bytes((np.arange(1, n + 1, dtype=np.uint32) % 90000).tobytes())
+    (d / "tokens" / "train-00000.u32le.bin").write_bytes(
+        (np.arange(1, n + 1, dtype=np.uint32) % 90000).tobytes()
+    )
     # val shard: pretrain now requires held-out data (validation_required=true)
-    (d / "tokens" / "val-00000.u32le.bin").write_bytes((np.arange(1, n // 3, dtype=np.uint32) % 90000).tobytes())
+    (d / "tokens" / "val-00000.u32le.bin").write_bytes(
+        (np.arange(1, n // 3, dtype=np.uint32) % 90000).tobytes()
+    )
     return d
 
 
@@ -81,7 +85,12 @@ def test_eval_publish_then_validate():
         env=ENV,
     )
     assert plan.version == "v1"
-    r = V.validate_dataset("edullm-landing", f"{plan.dataset_id}/{plan.version}", s3, data_bucket="edullm-data")
+    r = V.validate_dataset(
+        "edullm-landing",
+        f"{plan.dataset_id}/{plan.version}",
+        s3,
+        data_bucket="edullm-data",
+    )
     assert r.ok, [str(v) for v in r.violations]
 
 
@@ -97,11 +106,20 @@ def test_pretrain_publish_then_validate_partition_rows_computed():
         group_meta=_tokens_meta(),
         env=ENV,
     )
-    r = V.validate_dataset("edullm-landing", f"pretrain/dolma2-150b/{plan.version}", s3, data_bucket="edullm-data")
+    r = V.validate_dataset(
+        "edullm-landing",
+        f"pretrain/dolma2-150b/{plan.version}",
+        s3,
+        data_bucket="edullm-data",
+    )
     assert r.ok, [str(v) for v in r.violations]
-    ds = json.loads(s3.get("edullm-landing", f"pretrain/dolma2-150b/{plan.version}/dataset.json"))
+    ds = json.loads(
+        s3.get("edullm-landing", f"pretrain/dolma2-150b/{plan.version}/dataset.json")
+    )
     part = ds["groups"][0]["partitions"][0]
-    assert part["name"] == "train" and part["rows"] == 60000  # computed from the manifest
+    assert (
+        part["name"] == "train" and part["rows"] == 60000
+    )  # computed from the manifest
 
 
 # --------------------------------------------------------------------------------------
@@ -132,6 +150,7 @@ def test_sidecars_never_become_manifest_entries_or_enter_the_hash_chain():
     to the same publish without any sidecar staged. That is what proves the sidecar is outside
     the dataset's identity, rather than merely absent from a list.
     """
+
     def run(src: Path) -> tuple[P.PublishPlan, FakeS3]:
         s3 = FakeS3()
         plan = P.publish(
@@ -159,7 +178,9 @@ def test_sidecars_never_become_manifest_entries_or_enter_the_hash_chain():
     assert plan_with.manifests["tokens"] == plan_without.manifests["tokens"]
     sha_with = plan_with.dataset_json["groups"][0]["manifest_sha256"]
     sha_without = plan_without.dataset_json["groups"][0]["manifest_sha256"]
-    assert sha_with == sha_without, "a sidecar changed manifest_sha256 — it is inside the chain"
+    assert sha_with == sha_without, (
+        "a sidecar changed manifest_sha256 — it is inside the chain"
+    )
 
     # 3. inventory counts payload only, so dataset.json does not claim the sidecar either
     assert plan_with.dataset_json["inventory"] == plan_without.dataset_json["inventory"]
@@ -220,10 +241,12 @@ def _multishard_tokens_dir(shards: int = 6) -> Path:
     (d / "tokens").mkdir()
     for i in range(shards):
         n = 40000 + i * 7000  # distinct sizes per shard
-        arr = (np.arange(1, n + 1, dtype=np.uint32) % 90000)
+        arr = np.arange(1, n + 1, dtype=np.uint32) % 90000
         (d / "tokens" / f"train-{i:05d}.u32le.bin").write_bytes(arr.tobytes())
     # val shard: pretrain requires held-out data (validation_required=true)
-    (d / "tokens" / "val-00000.u32le.bin").write_bytes((np.arange(1, 20001, dtype=np.uint32) % 90000).tobytes())
+    (d / "tokens" / "val-00000.u32le.bin").write_bytes(
+        (np.arange(1, 20001, dtype=np.uint32) % 90000).tobytes()
+    )
     return d
 
 
@@ -248,10 +271,17 @@ def test_parallel_workers_produce_identical_manifest_and_validate():
             hash_workers=hw,
             copy_workers=cw,
         )
-        r = V.validate_dataset("edullm-landing", f"{plan.dataset_id}/{plan.version}", s3, data_bucket="edullm-data")
+        r = V.validate_dataset(
+            "edullm-landing",
+            f"{plan.dataset_id}/{plan.version}",
+            s3,
+            data_bucket="edullm-data",
+        )
         assert r.ok, [str(v) for v in r.violations]
         ds = s3.get("edullm-landing", f"{plan.dataset_id}/{plan.version}/dataset.json")
-        man = s3.get("edullm-landing", f"{plan.dataset_id}/{plan.version}/tokens/manifest.json")
+        man = s3.get(
+            "edullm-landing", f"{plan.dataset_id}/{plan.version}/tokens/manifest.json"
+        )
         return ds, man
 
     seq_ds, seq_man = run(1, 1)
@@ -266,7 +296,11 @@ def test_publish_from_s3_source():
     body = (np.arange(1, 40001, dtype=np.uint32) % 90000).tobytes()
     s3.seed("edullm-landing", "_pending/mcq/tokens/train-00000.u32le.bin", body)
     # val shard: pretrain requires held-out data (validation_required=true)
-    s3.seed("edullm-landing", "_pending/mcq/tokens/val-00000.u32le.bin", body[: (len(body) // 3 // 4) * 4])
+    s3.seed(
+        "edullm-landing",
+        "_pending/mcq/tokens/val-00000.u32le.bin",
+        body[: (len(body) // 3 // 4) * 4],
+    )
     plan = P.publish(
         "s3://edullm-landing/_pending/mcq/",
         dataset_id="pretrain/fineweb-edu-10b",
@@ -277,7 +311,12 @@ def test_publish_from_s3_source():
         group_meta=_tokens_meta(),
         env=ENV,
     )
-    r = V.validate_dataset("edullm-landing", f"pretrain/fineweb-edu-10b/{plan.version}", s3, data_bucket="edullm-data")
+    r = V.validate_dataset(
+        "edullm-landing",
+        f"pretrain/fineweb-edu-10b/{plan.version}",
+        s3,
+        data_bucket="edullm-data",
+    )
     assert r.ok, [str(v) for v in r.violations]
 
 
@@ -300,17 +339,32 @@ def test_descriptive_fields_land_in_dataset_json_and_validate():
         created_at=CREATED,
         group_meta=_tokens_meta(),
         env=ENV,
-        sources=[{"name": "DCLM-Baseline", "tokens": 3700000000000, "license": "CC-BY-4.0",
-                  "scope": "upstream-full-collection",
-                  "uri": "https://huggingface.co/datasets/allenai/olmo-mix-1124"}],
+        sources=[
+            {
+                "name": "DCLM-Baseline",
+                "tokens": 3700000000000,
+                "license": "CC-BY-4.0",
+                "scope": "upstream-full-collection",
+                "uri": "https://huggingface.co/datasets/allenai/olmo-mix-1124",
+            }
+        ],
         about="A document-trimmed ~31B-token subset of allenai/olmo-mix-1124.",
         notes="Subset proportions were not separately measured.",
-        limitations=[{"kind": "contamination", "benchmark": "gsm8k", "overlap_rate": 0.003}],
+        limitations=[
+            {"kind": "contamination", "benchmark": "gsm8k", "overlap_rate": 0.003}
+        ],
         license={"id": "ODC-By-1.0", "basis": "declared"},
     )
-    r = V.validate_dataset("edullm-landing", f"{plan.dataset_id}/{plan.version}", s3, data_bucket="edullm-data")
+    r = V.validate_dataset(
+        "edullm-landing",
+        f"{plan.dataset_id}/{plan.version}",
+        s3,
+        data_bucket="edullm-data",
+    )
     assert r.ok, [str(v) for v in r.violations]
-    ds = json.loads(s3.get("edullm-landing", f"{plan.dataset_id}/{plan.version}/dataset.json"))
+    ds = json.loads(
+        s3.get("edullm-landing", f"{plan.dataset_id}/{plan.version}/dataset.json")
+    )
     assert ds["sources"][0]["name"] == "DCLM-Baseline"
     assert ds["about"].startswith("A document-trimmed")
     assert ds["notes"].startswith("Subset proportions")
@@ -332,7 +386,9 @@ def test_descriptive_fields_default_to_family_inheritance():
         group_meta=_tokens_meta(),
         env=ENV,
     )
-    ds = json.loads(s3.get("edullm-landing", f"{plan.dataset_id}/{plan.version}/dataset.json"))
+    ds = json.loads(
+        s3.get("edullm-landing", f"{plan.dataset_id}/{plan.version}/dataset.json")
+    )
     fam = P._load_family("pretrain")
     assert ds["sources"] == fam.get("sources", [])
     assert ds["license"] == fam.get("license", {"id": None, "basis": "unknown"})
@@ -438,7 +494,11 @@ def test_build_executor_aws_batch_captured():
     # build_plan hashes objects from S3 by streaming — seed the staged object, pass (path, size)
     s3 = FakeS3()
     body = np.arange(1, 1001, dtype=np.uint32).tobytes()
-    s3.seed("edullm-landing", "_staging/pretrain/dolma2-150b/tokens/train-00000.u32le.bin", body)
+    s3.seed(
+        "edullm-landing",
+        "_staging/pretrain/dolma2-150b/tokens/train-00000.u32le.bin",
+        body,
+    )
     plan = P.build_plan(
         [("tokens/train-00000.u32le.bin", len(body))],
         dataset_id="pretrain/dolma2-150b",
@@ -447,7 +507,20 @@ def test_build_executor_aws_batch_captured():
         profile="pretrain-tokens/v1",
         family=P._load_family("pretrain"),
         created_at=CREATED,
-        build_executor=P._build_executor_from_env({"AWS_BATCH_JOB_ID": "job-123", "AWS_REGION": "us-east-1"}),
+        build_executor=P._build_executor_from_env(
+            {
+                "AWS_BATCH_JOB_ID": "job-123",
+                "AWS_BATCH_JOB_ATTEMPT": "2",
+                "AWS_BATCH_JQ_NAME": "edullm-ingest-queue",
+                "AWS_BATCH_JD_NAME": "edullm-prm800k-ingest:1",
+                "EDULLM_BATCH_JOB_DEFINITION_ARN": (
+                    "arn:aws:batch:us-east-1:<ACCOUNT_ID>:job-definition/edullm-prm800k-ingest:1"
+                ),
+                "EDULLM_IMAGE_REPO": "edullm-prm800k-ingest",
+                "EDULLM_IMAGE_DIGEST": "sha256:" + "a" * 64,
+                "AWS_REGION": "us-east-1",
+            }
+        ),
         source_kind="local",
         s3=s3,
         source_bucket="edullm-landing",
@@ -456,8 +529,15 @@ def test_build_executor_aws_batch_captured():
     )
     ex = plan.dataset_json["build"]["executor"]
     assert ex["kind"] == "aws-batch" and ex["job_id"] == "job-123"
+    assert ex["job_queue"] == "edullm-ingest-queue"
+    assert ex["job_definition"] == "edullm-prm800k-ingest:1"
+    assert ex["job_definition_arn"].endswith("edullm-prm800k-ingest:1")
+    assert ex["image_repo"] == "edullm-prm800k-ingest"
+    assert ex["image_digest"] == "sha256:" + "a" * 64
 
 
 def test_build_executor_external_from_env():
-    ex = P._build_executor_from_env({"EDULLM_CODE_SHA256": "a" * 64, "EDULLM_PACKAGES_LOCK_SHA256": "b" * 64})
+    ex = P._build_executor_from_env(
+        {"EDULLM_CODE_SHA256": "a" * 64, "EDULLM_PACKAGES_LOCK_SHA256": "b" * 64}
+    )
     assert ex["kind"] == "external" and ex["code_sha256"] == "a" * 64

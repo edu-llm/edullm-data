@@ -1,0 +1,78 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadWriteOnlyPrm800kStaging",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectAttributes",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::edullm-landing/_staging/vendor/openai-prm800k/*"
+    },
+    {
+      "Sid": "ReadWriteOnlyPrm800kFinalLandingPrefix",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectAttributes",
+        "s3:PutObject",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": "arn:aws:s3:::edullm-landing/vendor/openai-prm800k/v1/*"
+    },
+    {
+      "Sid": "NeverWriteValidatorTerminalMarkers",
+      "Effect": "Deny",
+      "Action": "s3:PutObject",
+      "Resource": [
+        "arn:aws:s3:::edullm-landing/vendor/openai-prm800k/v1/_VALIDATED.json",
+        "arn:aws:s3:::edullm-landing/vendor/openai-prm800k/v1/_REJECTED.json"
+      ]
+    },
+    {
+      "Sid": "ListOnlyPrm800kLandingPrefixes",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::edullm-landing",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "_staging/vendor/openai-prm800k/*",
+            "vendor/openai-prm800k/v1/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadOnlyPrm800kPublishedState",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectAttributes"
+      ],
+      "Resource": [
+        "arn:aws:s3:::edullm-data/_catalog/vendor/openai-prm800k/v1.json",
+        "arn:aws:s3:::edullm-data/vendor/openai-prm800k/v1/_VALIDATED.json",
+        "arn:aws:s3:::edullm-data/vendor/openai-prm800k/v1/dataset.json",
+        "arn:aws:s3:::edullm-data/vendor/openai-prm800k/v1/raw/manifest.json"
+      ]
+    },
+    {
+      "Sid": "ListOnlyPrm800kPublishedExistenceChecks",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::edullm-data",
+      "Condition": {
+        "StringEquals": {
+          "s3:prefix": [
+            "_catalog/vendor/openai-prm800k/v1.json",
+            "vendor/openai-prm800k/v1/_VALIDATED.json",
+            "vendor/openai-prm800k/v1/dataset.json"
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "edullm-data"
-version = "0.5.0"
+version = "0.5.2"
 description = "Publisher, validator, and reader for the eduLLM Dataset Standard v1"
 readme = "README.md"
 # 3.10, not 3.11. The floor exists to be installable ALONGSIDE OLMo-core, whose own floor is
@@ -48,6 +48,7 @@ test = ["pytest>=7.0"]
 # ENTRYPOINT actually invoke) is unaffected — these are an addition, not a replacement.
 edullm-data-validate = "edullm_data.validate:main"
 wu-fsck = "edullm_data.fsck:main"
+edullm-prm800k-ingest = "edullm_data.ingest_prm800k:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/edullm_data"]

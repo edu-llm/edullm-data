@@ -26,7 +26,7 @@ from typing import Any, Mapping
 
 from .contracts import (
     CONTROL_BASENAMES,
-    CONTROL_PREFIXES,
+    CONTROL_PREFIXES,  # noqa: F401 - deliberately re-exported for the shared-control contract
     FAMILIES,
     _resolve_families_dir,
     SPLITS,
@@ -59,7 +59,7 @@ from .manifest import (
 )
 from .profiles import registry
 from .profiles.base import GroupContext, Violation
-from .s3 import S3, NotFound
+from .s3 import S3, NotFound, PreconditionFailed
 
 # Control files that live under a dataset prefix but are not group payload — excluded from
 # the manifest-exhaustiveness comparison so they never read as "extra".
@@ -99,6 +99,10 @@ class ValidationResult:
     version: str
     violations: list[Violation] = field(default_factory=list)
     incomplete: bool = False
+    # A clean Gate A run captures the control bytes and payload witnesses it actually checked.
+    # ``promote()`` must use this in-memory snapshot rather than re-read mutable landing
+    # dataset.json or manifests.  It is deliberately omitted from report()/rejection docs.
+    promotion_snapshot: "PromotionSnapshot | None" = field(default=None, repr=False)
 
     @property
     def ok(self) -> bool:
@@ -111,7 +115,8 @@ class ValidationResult:
             "dataset_id": self.dataset_id,
             "version": self.version,
             "violations": [
-                {"code": v.code, "message": v.message, "path": v.path} for v in self.violations
+                {"code": v.code, "message": v.message, "path": v.path}
+                for v in self.violations
             ],
         }
 
@@ -122,12 +127,85 @@ class ValidationResult:
             "version": self.version,
             "incomplete": self.incomplete,
             "violations": [
-                {"code": v.code, "message": v.message, "path": v.path} for v in self.violations
+                {"code": v.code, "message": v.message, "path": v.path}
+                for v in self.violations
             ],
         }
         if now is not None:
             doc["rejected_at"] = now
         return doc
+
+
+class PromotionIntegrityError(ValueError):
+    """A copied vendored payload differs from the manifest before the data-bucket seal."""
+
+
+class LandingSourceChangedError(PromotionIntegrityError):
+    """A vendored landing payload changed after Gate A and before its conditional copy.
+
+    This is terminal for the current submission: the source bytes are no longer the exact
+    bytes Gate A approved, so reusing the in-memory promotion snapshot would be unsound.
+    """
+
+
+class PromotionRetryableError(PromotionIntegrityError):
+    """A vendored destination copy did not verify before the data-bucket seal.
+
+    Promotion leaves the prefix unsealed.  Retrying the same validation snapshot is safe because
+    every retry reuses only full-hash-matching destination objects and conditionally copies every
+    other vendored source object against the ETag Gate A observed.
+    """
+
+
+class SealedSnapshotMismatchError(ValueError):
+    """A published seal exists, but it does not prove the current Gate-A snapshot.
+
+    The immutable data prefix cannot be re-promoted.  The landing artifact must instead receive
+    a terminal rejection so self-discovery does not retry an impossible overwrite forever.
+    """
+
+
+@dataclass(frozen=True)
+class _ControlSnapshot:
+    """One small Gate-A control object retained byte-for-byte for promotion."""
+
+    path: str
+    body: bytes
+
+
+@dataclass(frozen=True)
+class _PayloadSnapshot:
+    """A manifest payload entry frozen into a validated promotion plan.
+
+    ``source_etag`` is present for vendored payloads only.  It is captured around the profile's
+    full stream hash and supplied to S3's CopySourceIfMatch guard during promotion.
+    """
+
+    path: str
+    bytes: int
+    sha256: str
+    vendored: bool
+    source_etag: str | None = None
+
+
+@dataclass(frozen=True)
+class PromotionSnapshot:
+    """The immutable, validation-time inputs to one promotion attempt."""
+
+    controls: tuple[_ControlSnapshot, ...]
+    payloads: tuple[_PayloadSnapshot, ...]
+
+
+@dataclass(frozen=True)
+class _ValidatedGroup:
+    """Private result of one group validation, retained only until Gate A returns."""
+
+    name: str
+    profile: str
+    manifest_rel: str
+    manifest_body: bytes
+    entries: tuple[ManifestEntry, ...]
+    observations: Mapping[str, Any]
 
 
 # --------------------------------------------------------------------------------------
@@ -175,7 +253,9 @@ def _load_json(s3: S3, bucket: str, key: str) -> Any:
 # --------------------------------------------------------------------------------------
 
 
-def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: str | None = None) -> ValidationResult:
+def validate_dataset(
+    landing_bucket: str, prefix: str, s3: S3, *, data_bucket: str | None = None
+) -> ValidationResult:
     """Run Gate A against ``s3://landing_bucket/prefix/``. Reads only via ``s3``; never
     promotes. ``data_bucket`` is only needed if the dataset declares ``depends_on`` (the
     parent is read from the published bucket)."""
@@ -184,11 +264,18 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
 
     # -- load dataset.json --
     try:
-        ds = _load_json(s3, landing_bucket, _join(prefix, "dataset.json"))
+        dataset_body = s3.get(landing_bucket, _join(prefix, "dataset.json"))
+        ds = json.loads(dataset_body.decode("utf-8"))
     except NotFound:
-        return ValidationResult("?", "?", [Violation("no-dataset-json", f"no dataset.json under {prefix!r}")])
+        return ValidationResult(
+            "?",
+            "?",
+            [Violation("no-dataset-json", f"no dataset.json under {prefix!r}")],
+        )
     except (ValueError, UnicodeDecodeError) as e:
-        return ValidationResult("?", "?", [Violation("dataset-json-unparseable", str(e))])
+        return ValidationResult(
+            "?", "?", [Violation("dataset-json-unparseable", str(e))]
+        )
 
     dataset_id = str(ds.get("dataset_id", "?"))
     version_id = "?"
@@ -199,7 +286,12 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
     # -- core fields present --
     for f_ in REQUIRED_CORE_FIELDS:
         if f_ not in ds:
-            v.append(Violation("missing-core-field", f"dataset.json is missing required field {f_!r}"))
+            v.append(
+                Violation(
+                    "missing-core-field",
+                    f"dataset.json is missing required field {f_!r}",
+                )
+            )
 
     # READABLE_SCHEMA_VERSIONS, not an equality check against the current one. Gate A re-runs
     # against already-published datasets (the in-place README backfill did exactly that), so an
@@ -207,11 +299,13 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
     # retroactive invalidation CONTRIBUTING forbids. New datasets are written at SCHEMA_VERSION;
     # older ones remain readable and validatable at the version they were sealed with.
     if ds.get("schema_version") not in READABLE_SCHEMA_VERSIONS:
-        v.append(Violation(
-            "schema-version",
-            f"schema_version is {ds.get('schema_version')!r}, expected one of "
-            f"{sorted(READABLE_SCHEMA_VERSIONS)} (new datasets are written at {SCHEMA_VERSION!r})",
-        ))
+        v.append(
+            Violation(
+                "schema-version",
+                f"schema_version is {ds.get('schema_version')!r}, expected one of "
+                f"{sorted(READABLE_SCHEMA_VERSIONS)} (new datasets are written at {SCHEMA_VERSION!r})",
+            )
+        )
 
     # -- identity: dataset_id/version valid AND equal to the prefix (§7) --
     try:
@@ -225,7 +319,9 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
         except (ValueError, NamingError) as e:
             v.append(Violation("bad-version", str(e)))
     else:
-        v.append(Violation("bad-version", "version must be an object {id, relation, of}"))
+        v.append(
+            Violation("bad-version", "version must be an object {id, relation, of}")
+        )
 
     if "purpose" in ds:
         try:
@@ -236,14 +332,21 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
     # prefix must equal <dataset_id>/<version_id>
     expected_prefix = f"{dataset_id}/{version_id}"
     if prefix != expected_prefix:
-        v.append(Violation(
-            "prefix-mismatch",
-            f"landing prefix {prefix!r} != dataset_id/version {expected_prefix!r}",
-        ))
+        v.append(
+            Violation(
+                "prefix-mismatch",
+                f"landing prefix {prefix!r} != dataset_id/version {expected_prefix!r}",
+            )
+        )
 
     mutability = ds.get("mutability")
     if mutability not in MUTABILITIES:
-        v.append(Violation("bad-mutability", f"mutability {mutability!r} not in {sorted(MUTABILITIES)}"))
+        v.append(
+            Violation(
+                "bad-mutability",
+                f"mutability {mutability!r} not in {sorted(MUTABILITIES)}",
+            )
+        )
 
     groups = ds.get("groups")
     if not isinstance(groups, list) or not groups:
@@ -258,8 +361,11 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
     # -- per-group validation --
     total_objects = 0
     total_bytes = 0
-    all_shas: dict[str, str] = {}  # sha256 -> first path that declared it (dup detection)
+    all_shas: dict[
+        str, str
+    ] = {}  # sha256 -> first path that declared it (dup detection)
     group_manifest_paths: dict[str, set[str]] = {}  # group -> its manifest's paths
+    validated_groups: dict[str, _ValidatedGroup] = {}
     my_shas: set[str] = set()
     incomplete = False
 
@@ -270,8 +376,17 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
         # LISTs `<prefix>/<gprefix>/` for the exhaustiveness diff. A second copy at this level
         # would only be a second source of truth for the same string.
         gres = _validate_group(
-            s3, landing_bucket, prefix, dataset_id, version_id, group, v, all_shas, my_shas,
-            data_bucket=data_bucket, collect_paths=group_manifest_paths,
+            s3,
+            landing_bucket,
+            prefix,
+            dataset_id,
+            version_id,
+            group,
+            v,
+            all_shas,
+            my_shas,
+            data_bucket=data_bucket,
+            collect_paths=group_manifest_paths,
         )
         if gres is None:
             # missing manifest: incomplete for frozen, fine otherwise
@@ -285,9 +400,11 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
                 # tracked separately from invalidity — surfaced but flagged incomplete
                 v.append(v_incomplete)
             continue
-        gobjs, gbytes = gres
+        gobjs, gbytes, group_snapshot = gres
         total_objects += gobjs
         total_bytes += gbytes
+        if group_snapshot is not None:
+            validated_groups[gname] = group_snapshot
 
     # -- dataset-level sweep: orphan prefixes + observed-vs-declared splits --
     # After the group loop, so every group's manifest paths have been collected. A group-scoped
@@ -301,17 +418,89 @@ def validate_dataset(landing_bucket: str, prefix: str, s3: S3, *, data_bucket: s
     inv = ds.get("inventory") or {}
     if not incomplete:
         if int(inv.get("objects", -1)) != total_objects:
-            v.append(Violation(
-                "inventory-objects",
-                f"inventory.objects={inv.get('objects')} but recomputed {total_objects} across groups",
-            ))
+            v.append(
+                Violation(
+                    "inventory-objects",
+                    f"inventory.objects={inv.get('objects')} but recomputed {total_objects} across groups",
+                )
+            )
         if int(inv.get("bytes", -1)) != total_bytes:
-            v.append(Violation(
-                "inventory-bytes",
-                f"inventory.bytes={inv.get('bytes')} but recomputed {total_bytes} across groups",
-            ))
+            v.append(
+                Violation(
+                    "inventory-bytes",
+                    f"inventory.bytes={inv.get('bytes')} but recomputed {total_bytes} across groups",
+                )
+            )
 
-    result = ValidationResult(dataset_id, version_id, v, incomplete=incomplete)
+    # PRM800K is a known immutable vendor artifact.  Its code-pinned OpenAI Git-LFS table is
+    # intentionally compared here, not read from the producer-controlled dataset.json.  Without
+    # this a producer could replace payload + manifest + upstream_files together and make the
+    # generic vendored profile prove only that three mutable documents agree.
+    if not incomplete:
+        _check_pinned_prm800k_contract(
+            landing_bucket=landing_bucket,
+            prefix=prefix,
+            dataset=ds,
+            groups=groups,
+            validated_groups=validated_groups,
+            violations=v,
+        )
+
+    snapshot: PromotionSnapshot | None = None
+    if not v and not incomplete:
+        controls = [_ControlSnapshot("dataset.json", dataset_body)]
+        payloads: list[_PayloadSnapshot] = []
+        for group in groups:
+            gname = str(group.get("name", "?"))
+            group_snapshot = validated_groups.get(gname)
+            # A clean group always has a parsed manifest; keep the defensive branch so a future
+            # validation extension cannot accidentally construct a partial promotion plan.
+            if group_snapshot is None:
+                v.append(
+                    Violation(
+                        "promotion-snapshot-missing-group",
+                        f"clean group {gname!r} had no captured manifest snapshot",
+                        path=gname,
+                    )
+                )
+                continue
+            controls.append(
+                _ControlSnapshot(
+                    group_snapshot.manifest_rel, group_snapshot.manifest_body
+                )
+            )
+            vendored = str(group.get("profile", "")).startswith("vendored/")
+            observations = group_snapshot.observations.get("vendored_payloads", {})
+            for entry in group_snapshot.entries:
+                observed = (
+                    observations.get(entry.path)
+                    if isinstance(observations, Mapping)
+                    else None
+                )
+                source_etag = (
+                    observed.get("etag") if isinstance(observed, Mapping) else None
+                )
+                payloads.append(
+                    _PayloadSnapshot(
+                        entry.path,
+                        entry.bytes,
+                        entry.sha256,
+                        vendored=vendored,
+                        source_etag=source_etag
+                        if isinstance(source_etag, str)
+                        else None,
+                    )
+                )
+        if not v:
+            snapshot = PromotionSnapshot(tuple(controls), tuple(payloads))
+
+    result = ValidationResult(
+        dataset_id,
+        version_id,
+        v,
+        incomplete=incomplete,
+        promotion_snapshot=snapshot,
+    )
     # if the only violations are the incomplete markers, report incomplete (not invalid)
     if incomplete and all(x.code == "incomplete-group" for x in v):
         result.violations = [x for x in v if x.code != "incomplete-group"]
@@ -331,31 +520,37 @@ def _validate_group(
     *,
     data_bucket: str | None,
     collect_paths: dict[str, set[str]] | None = None,
-) -> tuple[int, int] | None:
+) -> tuple[int, int, _ValidatedGroup | None] | None:
     """Validate one group. Returns (objects, bytes) or None if the group's manifest is
     absent (incomplete). Appends Violations to ``v`` in place."""
     gname = str(group.get("name", "?"))
     gprefix = str(group.get("prefix", "")).strip("/")
     profile_name = group.get("profile")
+    observations: dict[str, Any] = {}
 
-    manifest_rel = group.get("manifest") or (f"{gprefix}/manifest.json" if gprefix else "manifest.json")
+    manifest_rel = group.get("manifest") or (
+        f"{gprefix}/manifest.json" if gprefix else "manifest.json"
+    )
     try:
-        manifest = _load_json(s3, landing_bucket, _join(prefix, manifest_rel))
+        manifest_body = s3.get(landing_bucket, _join(prefix, manifest_rel))
+        manifest = json.loads(manifest_body.decode("utf-8"))
     except NotFound:
         return None
     except (ValueError, UnicodeDecodeError) as e:
         v.append(Violation("manifest-unparseable", f"group {gname!r}: {e}", path=gname))
-        return (0, 0)
+        return (0, 0, None)
 
     # -- hash chain: recompute manifest_sha256, compare to the group's declared value (§7) --
     recomputed = manifest_sha256(manifest)
     declared = group.get("manifest_sha256")
     if declared != recomputed:
-        v.append(Violation(
-            "manifest-sha256-mismatch",
-            f"group {gname!r}: declared manifest_sha256={declared!r} but recomputed {recomputed!r}",
-            path=gname,
-        ))
+        v.append(
+            Violation(
+                "manifest-sha256-mismatch",
+                f"group {gname!r}: declared manifest_sha256={declared!r} but recomputed {recomputed!r}",
+                path=gname,
+            )
+        )
 
     raw_entries = manifest.get("entries", [])
     entries: list[ManifestEntry] = []
@@ -363,14 +558,32 @@ def _validate_group(
         try:
             entries.append(ManifestEntry.from_dict(re_))
         except (ValueError, KeyError) as e:
-            v.append(Violation("bad-manifest-entry", f"group {gname!r}: {e}", path=gname))
+            v.append(
+                Violation("bad-manifest-entry", f"group {gname!r}: {e}", path=gname)
+            )
 
     # -- manifest bytes/objects self-consistency (recompute from entries) --
-    rebuilt = build_manifest(entries, group_name=gname) if entries else {"objects": 0, "bytes": 0}
+    rebuilt = (
+        build_manifest(entries, group_name=gname)
+        if entries
+        else {"objects": 0, "bytes": 0}
+    )
     if manifest.get("objects") != rebuilt["objects"]:
-        v.append(Violation("manifest-objects", f"group {gname!r}: manifest objects={manifest.get('objects')} != {rebuilt['objects']}", path=gname))
+        v.append(
+            Violation(
+                "manifest-objects",
+                f"group {gname!r}: manifest objects={manifest.get('objects')} != {rebuilt['objects']}",
+                path=gname,
+            )
+        )
     if manifest.get("bytes") != rebuilt["bytes"]:
-        v.append(Violation("manifest-bytes", f"group {gname!r}: manifest bytes={manifest.get('bytes')} != {rebuilt['bytes']}", path=gname))
+        v.append(
+            Violation(
+                "manifest-bytes",
+                f"group {gname!r}: manifest bytes={manifest.get('bytes')} != {rebuilt['bytes']}",
+                path=gname,
+            )
+        )
 
     # Shard-naming (<split>-<NNNNN>) is exempt for profiles whose files aren't shards:
     # vendored trees keep upstream names; a tokenizer's files have fixed meaningful names
@@ -381,7 +594,15 @@ def _validate_group(
 
     # -- register depends_on parent shas FIRST, so the per-entry loop can catch a child
     #    shard that re-materializes a parent's bytes (the 37 GB duplication) --
-    _register_parent_shas(s3, data_bucket, group, ds_depends=group.get("depends_on"), all_shas=all_shas, v=v, gname=gname)
+    _register_parent_shas(
+        s3,
+        data_bucket,
+        group,
+        ds_depends=group.get("depends_on"),
+        all_shas=all_shas,
+        v=v,
+        gname=gname,
+    )
 
     # -- per-entry: HEAD size, arithmetic, extension honesty, shard naming, dup digests --
     seen_sha: set[str] = set()
@@ -390,33 +611,51 @@ def _validate_group(
         try:
             head = s3.head(landing_bucket, full_key)
         except NotFound:
-            v.append(Violation("missing-object", f"manifest lists {entry.path!r} but it is absent", path=entry.path))
+            v.append(
+                Violation(
+                    "missing-object",
+                    f"manifest lists {entry.path!r} but it is absent",
+                    path=entry.path,
+                )
+            )
             continue
         if head["size"] != entry.bytes:
-            v.append(Violation(
-                "head-size-mismatch",
-                f"{entry.path}: manifest bytes={entry.bytes} but S3 size={head['size']}",
-                path=entry.path,
-            ))
+            v.append(
+                Violation(
+                    "head-size-mismatch",
+                    f"{entry.path}: manifest bytes={entry.bytes} but S3 size={head['size']}",
+                    path=entry.path,
+                )
+            )
         for msg in verify_arithmetic(entry):
             v.append(Violation("count-arithmetic", msg, path=entry.path))
         for msg in check_extension_matches_format(entry.path, entry.format):
             v.append(Violation("extension-format-mismatch", msg, path=entry.path))
-        for msg in check_shard_naming(entry.path, exempt=is_cas_name(entry.path) or profile_is_vendored):
+        for msg in check_shard_naming(
+            entry.path, exempt=is_cas_name(entry.path) or profile_is_vendored
+        ):
             v.append(Violation("shard-naming", msg, path=entry.path))
 
         # pairwise-distinct digests within the group (byte-identical duplicated shard)
         if entry.sha256 in seen_sha:
-            v.append(Violation("duplicate-shard-digest", f"{entry.path}: sha256 already used by another shard in this group", path=entry.path))
+            v.append(
+                Violation(
+                    "duplicate-shard-digest",
+                    f"{entry.path}: sha256 already used by another shard in this group",
+                    path=entry.path,
+                )
+            )
         seen_sha.add(entry.sha256)
 
         # cross-dataset dup vs depends_on parents (the 37 GB re-materialization)
         if entry.sha256 in all_shas and all_shas[entry.sha256].startswith("PARENT:"):
-            v.append(Violation(
-                "shared-sha-with-parent",
-                f"{entry.path}: sha256 also appears in depends_on parent {all_shas[entry.sha256][7:]} — reference it, do not copy",
-                path=entry.path,
-            ))
+            v.append(
+                Violation(
+                    "shared-sha-with-parent",
+                    f"{entry.path}: sha256 also appears in depends_on parent {all_shas[entry.sha256][7:]} — reference it, do not copy",
+                    path=entry.path,
+                )
+            )
         all_shas.setdefault(entry.sha256, entry.path)
         my_shas.add(entry.sha256)
 
@@ -425,7 +664,11 @@ def _validate_group(
     listed = s3.list(landing_bucket, list_prefix)
     actual_rel: set[str] = set()
     for obj in listed:
-        rel_to_dataset = obj["key"][len(prefix) + 1 :] if obj["key"].startswith(prefix + "/") else obj["key"]
+        rel_to_dataset = (
+            obj["key"][len(prefix) + 1 :]
+            if obj["key"].startswith(prefix + "/")
+            else obj["key"]
+        )
         if _is_control_key(rel_to_dataset):
             continue
         actual_rel.add(rel_to_dataset)
@@ -434,23 +677,37 @@ def _validate_group(
         collect_paths[gname] = manifest_paths
     missing, extra = diff_paths(manifest_paths, actual_rel)
     for m in sorted(missing):
-        v.append(Violation("missing-object", f"manifest lists {m!r} but it is not in S3", path=m))
+        v.append(
+            Violation(
+                "missing-object", f"manifest lists {m!r} but it is not in S3", path=m
+            )
+        )
     for x in sorted(extra):
-        v.append(Violation("unlisted-object", f"{x!r} is in S3 but not in the manifest (a globbing reader would train on it)", path=x))
+        v.append(
+            Violation(
+                "unlisted-object",
+                f"{x!r} is in S3 but not in the manifest (a globbing reader would train on it)",
+                path=x,
+            )
+        )
 
     # -- partitions (§7): every partition declares rows; structural check of the four forms --
     _validate_partitions(group, v, gname, manifest_paths, entries)
 
     # -- profile CHECKS (recompute against bytes) --
     if profile_name is None:
-        v.append(Violation("no-profile", f"group {gname!r} declares no profile", path=gname))
+        v.append(
+            Violation("no-profile", f"group {gname!r} declares no profile", path=gname)
+        )
     else:
         try:
             profile = registry.get_profile(profile_name)
         except registry.ProfileError as e:
             v.append(Violation("unknown-profile", str(e), path=gname))
         else:
-            rng_seed = hashlib.sha256(f"{dataset_id}|{version_id}|{gname}".encode()).hexdigest()
+            rng_seed = hashlib.sha256(
+                f"{dataset_id}|{version_id}|{gname}".encode()
+            ).hexdigest()
             # Resolve facts the profile can't compute itself because they live in the data
             # bucket (which the profile deliberately can't see). The tokenizer is the case
             # that matters: derive vocab_size/eos_token_id from the tokenizer this group
@@ -493,14 +750,228 @@ def _validate_group(
                 rng_seed=rng_seed,
                 family_defaults=_family_defaults_for(dataset_id),
                 resolved=resolved,
+                observations=observations,
             )
             for check in profile.CHECKS:
                 try:
                     v.extend(check(ctx))
                 except Exception as e:  # noqa: BLE001 - a check bug must not crash the gate
-                    v.append(Violation("profile-check-error", f"group {gname!r} check {getattr(check,'__name__','?')}: {e}", path=gname))
+                    v.append(
+                        Violation(
+                            "profile-check-error",
+                            f"group {gname!r} check {getattr(check, '__name__', '?')}: {e}",
+                            path=gname,
+                        )
+                    )
 
-    return (rebuilt["objects"], rebuilt["bytes"])
+    return (
+        rebuilt["objects"],
+        rebuilt["bytes"],
+        _ValidatedGroup(
+            name=gname,
+            profile=str(profile_name or ""),
+            manifest_rel=str(manifest_rel).strip("/"),
+            manifest_body=manifest_body,
+            entries=tuple(entries),
+            observations=observations,
+        ),
+    )
+
+
+def _check_pinned_prm800k_contract(
+    *,
+    landing_bucket: str,
+    prefix: str,
+    dataset: Mapping[str, Any],
+    groups: list[Any],
+    validated_groups: Mapping[str, _ValidatedGroup],
+    violations: list[Violation],
+) -> None:
+    """Bind the known PRM800K target to the wheel's immutable OpenAI witness table.
+
+    ``vendored/v1`` is intentionally reusable for arbitrary third-party mirrors, where its
+    upstream witness list is part of the dataset contract.  PRM800K is stronger: the requested
+    artifact has a known canonical commit and four Git-LFS OIDs, so accepting a producer-owned
+    replacement witness list would defeat the whole reason for pinning it in the ingress code.
+
+    The actual payload digests and stable ETags come from the vendored profile's Gate-A
+    observations.  This function compares those observations — not just the manifest — against
+    the code-pinned table before a promotion snapshot can exist.
+    """
+    # Local import prevents the generic validator import path from eagerly depending on the
+    # optional PRM800K command module, while still making the immutable table part of the same
+    # signed/pinned package image that runs Gate A.
+    from .ingest_prm800k import PRM800K_SOURCE
+
+    spec = PRM800K_SOURCE
+    if dataset.get("dataset_id") != spec.dataset_id:
+        return
+    version_doc = dataset.get("version")
+    if not isinstance(version_doc, Mapping):
+        return
+    if version_doc.get("id") != spec.version:
+        violations.append(
+            Violation(
+                "pinned-vendor-version-reserved",
+                f"{spec.dataset_id!r} is reserved for the code-pinned {spec.version} PRM800K mirror; "
+                "publish a differently named derived artifact instead",
+            )
+        )
+        return
+
+    expected_paths = {f"raw/{file.path}" for file in spec.files}
+    expected_files = {file.path: (file.bytes, file.sha256) for file in spec.files}
+
+    if prefix != f"{spec.dataset_id}/{spec.version}":
+        # The ordinary prefix check reports the same structural problem.  Keep this helper
+        # silent here so it does not obscure the actionable identity error.
+        return
+
+    if len(groups) != 1:
+        violations.append(
+            Violation(
+                "pinned-vendor-group-set-mismatch",
+                "the pinned PRM800K artifact must contain exactly one raw vendored group",
+            )
+        )
+        return
+    group = groups[0]
+    if not isinstance(group, Mapping):
+        violations.append(
+            Violation(
+                "pinned-vendor-group-set-mismatch",
+                "the pinned PRM800K raw group is not a metadata object",
+            )
+        )
+        return
+    if group.get("name") != "raw" or group.get("profile") != "vendored/v1":
+        violations.append(
+            Violation(
+                "pinned-vendor-group-set-mismatch",
+                "the pinned PRM800K artifact must declare raw with profile vendored/v1",
+                "raw",
+            )
+        )
+        return
+    if group.get("vendor_root") != "raw":
+        violations.append(
+            Violation(
+                "pinned-vendor-root-mismatch",
+                "the pinned PRM800K artifact requires vendor_root='raw'",
+                "raw",
+            )
+        )
+
+    upstream = group.get("upstream")
+    expected_upstream = {
+        "name": spec.canonical_repo,
+        "uri": spec.canonical_uri,
+        "revision": spec.canonical_revision,
+    }
+    if not isinstance(upstream, Mapping) or any(
+        upstream.get(key) != value for key, value in expected_upstream.items()
+    ):
+        violations.append(
+            Violation(
+                "pinned-vendor-upstream-mismatch",
+                "PRM800K upstream name, URI, and revision differ from the code-pinned OpenAI release",
+                "raw",
+            )
+        )
+    transport = upstream.get("transport") if isinstance(upstream, Mapping) else None
+    if not isinstance(transport, Mapping) or (
+        transport.get("name"),
+        transport.get("uri"),
+        transport.get("revision"),
+    ) != (spec.hf_repo, spec.hf_uri, spec.hf_revision):
+        violations.append(
+            Violation(
+                "pinned-vendor-transport-mismatch",
+                "PRM800K transport metadata differs from the code-pinned Hugging Face revision",
+                "raw",
+            )
+        )
+
+    license_doc = dataset.get("license")
+    if not isinstance(license_doc, Mapping) or license_doc.get("id") != spec.license_id:
+        violations.append(
+            Violation(
+                "pinned-vendor-license-mismatch",
+                f"PRM800K must retain the pinned {spec.license_id!r} license identifier",
+            )
+        )
+
+    raw_witnesses = group.get("upstream_files")
+    witnessed: dict[str, tuple[Any, Any]] = {}
+    if isinstance(raw_witnesses, list):
+        for witness in raw_witnesses:
+            if isinstance(witness, Mapping) and isinstance(witness.get("path"), str):
+                witnessed[str(witness["path"])] = (
+                    witness.get("bytes"),
+                    witness.get("sha256"),
+                )
+    if (
+        witnessed != expected_files
+        or not isinstance(raw_witnesses, list)
+        or len(witnessed) != len(raw_witnesses)
+    ):
+        violations.append(
+            Violation(
+                "pinned-vendor-witness-mismatch",
+                "PRM800K upstream_files differs from the code-pinned OpenAI Git-LFS witness table",
+                "raw",
+            )
+        )
+
+    snapshot = validated_groups.get("raw")
+    if snapshot is None:
+        violations.append(
+            Violation(
+                "pinned-vendor-manifest-not-validated",
+                "PRM800K raw manifest was not captured by Gate A",
+                "raw",
+            )
+        )
+        return
+    entries = {entry.path: entry for entry in snapshot.entries}
+    if set(entries) != expected_paths or len(entries) != len(snapshot.entries):
+        violations.append(
+            Violation(
+                "pinned-vendor-path-set-mismatch",
+                "PRM800K manifest paths differ from the code-pinned four-file raw tree",
+                "raw",
+            )
+        )
+    observations = snapshot.observations.get("vendored_payloads", {})
+    for file in spec.files:
+        path = f"raw/{file.path}"
+        entry = entries.get(path)
+        if entry is None:
+            continue
+        if entry.bytes != file.bytes or entry.sha256 != file.sha256:
+            violations.append(
+                Violation(
+                    "pinned-vendor-manifest-witness-mismatch",
+                    "PRM800K manifest entry differs from the code-pinned OpenAI Git-LFS witness",
+                    path,
+                )
+            )
+        observation = (
+            observations.get(path) if isinstance(observations, Mapping) else None
+        )
+        if (
+            not isinstance(observation, Mapping)
+            or observation.get("bytes") != file.bytes
+            or observation.get("sha256") != file.sha256
+            or not isinstance(observation.get("etag"), str)
+        ):
+            violations.append(
+                Violation(
+                    "pinned-vendor-payload-witness-mismatch",
+                    "PRM800K payload bytes observed by Gate A differ from the code-pinned OpenAI witness",
+                    path,
+                )
+            )
 
 
 #: Family ``defaults.decode_smoke_test.<key>`` -> the flat key a profile's ``_bound()`` reads.
@@ -550,7 +1021,9 @@ def _family_defaults_for(dataset_id: str) -> dict[str, Any]:
     defaults = family.get("defaults")
     if not isinstance(defaults, Mapping):
         return {}
-    flat: dict[str, Any] = {k: val for k, val in defaults.items() if k != "decode_smoke_test"}
+    flat: dict[str, Any] = {
+        k: val for k, val in defaults.items() if k != "decode_smoke_test"
+    }
     smoke = defaults.get("decode_smoke_test")
     if isinstance(smoke, Mapping):
         for fam_key, profile_key in _DECODE_BOUND_ALIASES.items():
@@ -600,7 +1073,7 @@ def _check_dataset_exhaustive_and_splits(
         if not isinstance(group, Mapping):
             continue
         prof = str(group.get("profile", ""))
-        if prof.startswith(("vendor/", "tokenizer/")):
+        if prof.startswith(("vendored/", "vendor/", "tokenizer/")):
             gpfx = str(group.get("prefix") or group.get("name") or "").strip("/")
             if gpfx:
                 exempt_prefixes.append(gpfx + "/")
@@ -612,15 +1085,18 @@ def _check_dataset_exhaustive_and_splits(
     # If a group's manifest never parsed, `collect_paths` has no entry for it and its payload
     # would read as dataset-level orphans — reporting healthy objects from an unrelated group as
     # stray. Only reconcile groups we actually managed to read.
-    unread = [str(g.get("name")) for g in groups
-              if isinstance(g, Mapping) and str(g.get("name")) not in group_manifest_paths]
+    unread = [
+        str(g.get("name"))
+        for g in groups
+        if isinstance(g, Mapping) and str(g.get("name")) not in group_manifest_paths
+    ]
 
     listed = s3.list(landing_bucket, prefix + "/")
     observed: dict[str, list[str]] = {}
     orphans: list[str] = []
     for obj in listed:
         key = obj["key"]
-        rel = key[len(prefix) + 1:] if key.startswith(prefix + "/") else key
+        rel = key[len(prefix) + 1 :] if key.startswith(prefix + "/") else key
         if _is_control_key(rel):
             continue
         if rel not in claimed:
@@ -636,17 +1112,19 @@ def _check_dataset_exhaustive_and_splits(
             observed.setdefault(parsed[0], []).append(rel)
 
     for rel in sorted(orphans) if not unread else []:
-        v.append(Violation(
-            "unlisted-object-dataset-level",
-            f"{rel!r} is under the dataset prefix but is in no group's manifest. It belongs to "
-            f"no declared group, so no group's exhaustiveness check ever looked at it — a "
-            f"globbing reader would still find it.",
-            path=rel,
-        ))
+        v.append(
+            Violation(
+                "unlisted-object-dataset-level",
+                f"{rel!r} is under the dataset prefix but is in no group's manifest. It belongs to "
+                f"no declared group, so no group's exhaustiveness check ever looked at it — a "
+                f"globbing reader would still find it.",
+                path=rel,
+            )
+        )
 
     declared: set[str] = set()
     for group in groups:
-        for part in (group.get("partitions") or []):
+        for part in group.get("partitions") or []:
             if isinstance(part, Mapping) and part.get("name"):
                 declared.add(str(part["name"]))
     # NOT an early return when nothing is declared. If objects on disk carry split-shaped names
@@ -654,26 +1132,33 @@ def _check_dataset_exhaustive_and_splits(
     # declaring nothing used to switch this whole sweep off (see _check_validation_present).
     for split_word, paths in sorted(observed.items()):
         if split_word not in declared:
-            v.append(Violation(
-                "undeclared-split",
-                f"{len(paths)} object(s) are named {split_word!r}-NNNNN.* but no partition "
-                f"declares a split called {split_word!r}. They are unreachable via "
-                f"split={split_word!r} AND (before the reader's trainable-only default) were "
-                f"returned by an unsplit read — trainable by accident. Declare the split or "
-                f"rename the shards. First: {sorted(paths)[0]}",
-                path=sorted(paths)[0],
-            ))
+            v.append(
+                Violation(
+                    "undeclared-split",
+                    f"{len(paths)} object(s) are named {split_word!r}-NNNNN.* but no partition "
+                    f"declares a split called {split_word!r}. They are unreachable via "
+                    f"split={split_word!r} AND (before the reader's trainable-only default) were "
+                    f"returned by an unsplit read — trainable by accident. Declare the split or "
+                    f"rename the shards. First: {sorted(paths)[0]}",
+                    path=sorted(paths)[0],
+                )
+            )
     for split_word in sorted(declared - set(observed)):
-        v.append(Violation(
-            "empty-split",
-            f"partition {split_word!r} is declared but no object is named "
-            f"{split_word!r}-NNNNN.*; a reader asking for it gets silence",
-            path=split_word,
-        ))
+        v.append(
+            Violation(
+                "empty-split",
+                f"partition {split_word!r} is declared but no object is named "
+                f"{split_word!r}-NNNNN.*; a reader asking for it gets silence",
+                path=split_word,
+            )
+        )
 
 
 def _check_validation_present(
-    groups: list[Any], family_defaults: Mapping[str, Any], v: list[Violation], dataset_id: str
+    groups: list[Any],
+    family_defaults: Mapping[str, Any],
+    v: list[Violation],
+    dataset_id: str,
 ) -> None:
     """A dataset must carry held-out data unless its family explicitly opts out.
 
@@ -704,34 +1189,42 @@ def _check_validation_present(
         # undeclared-split backstop, and then made the reader see no trainable split and return
         # EVERYTHING. An ordinary curriculum publish leaked its val shards as trainable with no
         # adversarial input at all, while `.val` reported None.
-        v.append(Violation(
-            "missing-required-split",
-            f"{dataset_id} declares no partitions at all, so nothing marks which objects are "
-            f"held out. Its family requires validation data. Declaring nothing is not an "
-            f"exemption: a reader cannot distinguish 'no held-out data' from 'held-out data "
-            f"nobody labelled', and it resolves that ambiguity by treating everything as "
-            f"trainable. Declare train and {sorted(SPLITS - TRAINABLE_SPLITS)} partitions, or "
-            f"set validation_required=false in families/<family>.json with a reason.",
-        ))
+        v.append(
+            Violation(
+                "missing-required-split",
+                f"{dataset_id} declares no partitions at all, so nothing marks which objects are "
+                f"held out. Its family requires validation data. Declaring nothing is not an "
+                f"exemption: a reader cannot distinguish 'no held-out data' from 'held-out data "
+                f"nobody labelled', and it resolves that ambiguity by treating everything as "
+                f"trainable. Declare train and {sorted(SPLITS - TRAINABLE_SPLITS)} partitions, or "
+                f"set validation_required=false in families/<family>.json with a reason.",
+            )
+        )
         return
     held_out = {s for s in declared if not is_trainable(s)}
     if held_out:
         return
-    v.append(Violation(
-        "missing-required-split",
-        f"{dataset_id} declares splits {sorted(declared)} but none of them is held out. Its "
-        f"family requires validation data: a corpus you cannot measure held-out loss on cannot "
-        f"support any claim about the model trained on it. Add a {sorted(SPLITS - TRAINABLE_SPLITS)} "
-        f"split (name the shards e.g. 'val-00000.<ext>' and declare a matching partition), or — "
-        f"if this family genuinely has nothing to hold out — set validation_required=false in "
-        f"families/<family>.json with a reason. NOTE: pretrain/olmo-mix-1124-31b/v1 is EXPECTED "
-        f"to fail this; it predates the rule, is frozen (so it cannot gain a split in place), and "
-        f"is slated for replacement.",
-    ))
+    v.append(
+        Violation(
+            "missing-required-split",
+            f"{dataset_id} declares splits {sorted(declared)} but none of them is held out. Its "
+            f"family requires validation data: a corpus you cannot measure held-out loss on cannot "
+            f"support any claim about the model trained on it. Add a {sorted(SPLITS - TRAINABLE_SPLITS)} "
+            f"split (name the shards e.g. 'val-00000.<ext>' and declare a matching partition), or — "
+            f"if this family genuinely has nothing to hold out — set validation_required=false in "
+            f"families/<family>.json with a reason. NOTE: pretrain/olmo-mix-1124-31b/v1 is EXPECTED "
+            f"to fail this; it predates the rule, is frozen (so it cannot gain a split in place), and "
+            f"is slated for replacement.",
+        )
+    )
 
 
 def _check_split_matches_filename(
-    entries: list[Any], v: list[Violation], gname: str, *, profile_is_vendored: bool = False
+    entries: list[Any],
+    v: list[Violation],
+    gname: str,
+    *,
+    profile_is_vendored: bool = False,
 ) -> None:
     """A declared ``split`` must equal the split RECOMPUTED from the object's own filename.
 
@@ -758,18 +1251,24 @@ def _check_split_matches_filename(
             continue
         observed = parsed[0]
         if observed != declared:
-            v.append(Violation(
-                "split-contradicts-filename",
-                f"{entry.path}: manifest declares split={declared!r} but the filename says "
-                f"{observed!r}. One of the two is wrong, and a reader that trusts the manifest "
-                f"would put this object in the wrong split — training on held-out data, or "
-                f"evaluating on data it was trained on.",
-                path=entry.path,
-            ))
+            v.append(
+                Violation(
+                    "split-contradicts-filename",
+                    f"{entry.path}: manifest declares split={declared!r} but the filename says "
+                    f"{observed!r}. One of the two is wrong, and a reader that trusts the manifest "
+                    f"would put this object in the wrong split — training on held-out data, or "
+                    f"evaluating on data it was trained on.",
+                    path=entry.path,
+                )
+            )
 
 
 def _check_labels_match_path(
-    entries: list[Any], v: list[Violation], gname: str, *, profile_is_vendored: bool = False
+    entries: list[Any],
+    v: list[Violation],
+    gname: str,
+    *,
+    profile_is_vendored: bool = False,
 ) -> None:
     """Declared ``labels`` must equal the labels RECOMPUTED from the object's own key.
 
@@ -792,19 +1291,25 @@ def _check_labels_match_path(
         try:
             expected = labels_from_path(entry.path)
         except Exception as e:  # noqa: BLE001 - a deeper tree than we can name
-            v.append(Violation("labels-unnameable-path", f"{entry.path}: {e}", path=entry.path))
+            v.append(
+                Violation(
+                    "labels-unnameable-path", f"{entry.path}: {e}", path=entry.path
+                )
+            )
             continue
         declared = getattr(entry, "labels", None) or {}
         if not expected and not declared:
             continue
         if declared != expected:
-            v.append(Violation(
-                "labels-contradict-path",
-                f"{entry.path}: manifest declares labels={declared or {}} but the key's own "
-                f"segments say {expected}. The path and the label disagree about which slice "
-                f"this object belongs to, so any mixture computed from labels is wrong.",
-                path=entry.path,
-            ))
+            v.append(
+                Violation(
+                    "labels-contradict-path",
+                    f"{entry.path}: manifest declares labels={declared or {}} but the key's own "
+                    f"segments say {expected}. The path and the label disagree about which slice "
+                    f"this object belongs to, so any mixture computed from labels is wrong.",
+                    path=entry.path,
+                )
+            )
 
 
 def _min_dtype_size_for_vocab(vocab_size: int) -> int:
@@ -823,7 +1328,10 @@ def _min_dtype_size_for_vocab(vocab_size: int) -> int:
 
 
 def _check_dtype_width_vs_vocab(
-    entries: list[ManifestEntry], tok_derived: Mapping[str, Any], v: list[Violation], gname: str
+    entries: list[ManifestEntry],
+    tok_derived: Mapping[str, Any],
+    v: list[Violation],
+    gname: str,
 ) -> None:
     """Every fixed-width shard's dtype must be wide enough for the tokenizer's vocab.
 
@@ -835,13 +1343,19 @@ def _check_dtype_width_vs_vocab(
     # `isinstance(True, int)` is True in Python, so exclude bool explicitly — the same idiom
     # pretrain_tokens_v1 uses for its tokenizer fields. Without it, vocab_size=True yields
     # required=1 and the check silently passes everything.
-    if isinstance(vocab_size, bool) or not isinstance(vocab_size, int) or vocab_size <= 0:
+    if (
+        isinstance(vocab_size, bool)
+        or not isinstance(vocab_size, int)
+        or vocab_size <= 0
+    ):
         return  # nothing derived to compare against; _resolve_tokenizer already flagged it
     required = _min_dtype_size_for_vocab(vocab_size)
     for entry in entries:
         fmt = entry.format
         declared = fmt.dtype_size
-        unit_for_scope = entry.count.get("unit") if isinstance(entry.count, Mapping) else None
+        unit_for_scope = (
+            entry.count.get("unit") if isinstance(entry.count, Mapping) else None
+        )
         # A dtype NAME the standard does not know sizes for is not "nothing to check" — it is a
         # width nobody can verify, and skipping silently is how the whole lie gets through.
         # `Format.dtype_size` is `DTYPE_SIZES.get(dtype)`, an 8-entry map, while numpy happily
@@ -849,28 +1363,32 @@ def _check_dtype_width_vs_vocab(
         # AND verify_arithmetic (which returns early on dtype_size=None) both skip, so a uint32
         # corpus could claim half-width and ship a 2x-inflated token count.
         if fmt.dtype is not None and declared is None:
-            v.append(Violation(
-                "dtype-not-checkable",
-                f"{entry.path}: dtype {fmt.dtype!r} is not one of {sorted(DTYPE_SIZES)}, so its "
-                f"width cannot be verified against the tokenizer's vocab — and the count "
-                f"arithmetic cannot be checked either. Use the canonical name (e.g. 'uint32', "
-                f"not 'u4' or '<u4'); an alias no gate can size is indistinguishable from a lie.",
-                path=entry.path,
-            ))
+            v.append(
+                Violation(
+                    "dtype-not-checkable",
+                    f"{entry.path}: dtype {fmt.dtype!r} is not one of {sorted(DTYPE_SIZES)}, so its "
+                    f"width cannot be verified against the tokenizer's vocab — and the count "
+                    f"arithmetic cannot be checked either. Use the canonical name (e.g. 'uint32', "
+                    f"not 'u4' or '<u4'); an alias no gate can size is indistinguishable from a lie.",
+                    path=entry.path,
+                )
+            )
             continue
         # A fixed-width dtype declared inside a container that is NOT byte-addressable raw is a
         # contradiction, and it used to route around the width check entirely (e.g.
         # container: "memmap" or "raw " with a trailing space).
         if declared and fmt.container not in FIXED_WIDTH_CONTAINERS:
             if unit_for_scope in FIXED_WIDTH_UNITS:
-                v.append(Violation(
-                    "fixed-width-dtype-in-nonraw-container",
-                    f"{entry.path}: declares a fixed-width dtype {fmt.dtype!r} and a "
-                    f"{unit_for_scope} count, but container is {fmt.container!r}, not one of "
-                    f"{sorted(FIXED_WIDTH_CONTAINERS)}. Token width is only meaningful for a raw "
-                    f"byte-addressable array, so this combination cannot be verified.",
-                    path=entry.path,
-                ))
+                v.append(
+                    Violation(
+                        "fixed-width-dtype-in-nonraw-container",
+                        f"{entry.path}: declares a fixed-width dtype {fmt.dtype!r} and a "
+                        f"{unit_for_scope} count, but container is {fmt.container!r}, not one of "
+                        f"{sorted(FIXED_WIDTH_CONTAINERS)}. Token width is only meaningful for a raw "
+                        f"byte-addressable array, so this combination cannot be verified.",
+                        path=entry.path,
+                    )
+                )
             continue
         if not declared:
             continue  # jsonl/tar and friends genuinely have no token width to check
@@ -882,17 +1400,19 @@ def _check_dtype_width_vs_vocab(
         if unit_for_scope not in FIXED_WIDTH_UNITS:
             continue
         if declared < required:
-            v.append(Violation(
-                "dtype-too-narrow-for-vocab",
-                f"{entry.path}: declared dtype {fmt.dtype!r} is {declared} bytes, but the "
-                f"tokenizer this group depends_on has vocab_size={vocab_size}, which needs "
-                f"at least {required} bytes per token. A {declared}-byte read of these bytes "
-                f"cannot represent every id, and the declared count "
-                f"({entry.count['value']:,}) "
-                f"is inflated by {required // declared}x. Arithmetic and extension checks "
-                f"CANNOT catch this — they are self-consistent with the wrong dtype.",
-                path=entry.path,
-            ))
+            v.append(
+                Violation(
+                    "dtype-too-narrow-for-vocab",
+                    f"{entry.path}: declared dtype {fmt.dtype!r} is {declared} bytes, but the "
+                    f"tokenizer this group depends_on has vocab_size={vocab_size}, which needs "
+                    f"at least {required} bytes per token. A {declared}-byte read of these bytes "
+                    f"cannot represent every id, and the declared count "
+                    f"({entry.count['value']:,}) "
+                    f"is inflated by {required // declared}x. Arithmetic and extension checks "
+                    f"CANNOT catch this — they are self-consistent with the wrong dtype.",
+                    path=entry.path,
+                )
+            )
 
 
 def _matches_glob(path: str, glob: str) -> bool:
@@ -912,29 +1432,65 @@ def _validate_partitions(
     if parts is None:
         return
     if not isinstance(parts, list):
-        v.append(Violation("bad-partitions", f"group {gname!r}: partitions must be a list", path=gname))
+        v.append(
+            Violation(
+                "bad-partitions",
+                f"group {gname!r}: partitions must be a list",
+                path=gname,
+            )
+        )
         return
     coverage = group.get("coverage")
     if coverage not in {"partition", "overlapping", "incomplete"}:
-        v.append(Violation("bad-coverage", f"group {gname!r}: coverage {coverage!r} not in partition|overlapping|incomplete", path=gname))
+        v.append(
+            Violation(
+                "bad-coverage",
+                f"group {gname!r}: coverage {coverage!r} not in partition|overlapping|incomplete",
+                path=gname,
+            )
+        )
 
     by_name: dict[str, set[str]] = {}  # partition name -> the paths it selects
     for p in parts:
         if not isinstance(p, Mapping):
-            v.append(Violation("bad-partitions", f"group {gname!r}: a partition must be an object, got {type(p).__name__}", path=gname))
+            v.append(
+                Violation(
+                    "bad-partitions",
+                    f"group {gname!r}: a partition must be an object, got {type(p).__name__}",
+                    path=gname,
+                )
+            )
             continue
         pname = str(p.get("name", "?"))
         if "rows" not in p:
-            v.append(Violation("partition-no-rows", f"group {gname!r} partition {pname!r} declares no rows", path=gname))
+            v.append(
+                Violation(
+                    "partition-no-rows",
+                    f"group {gname!r} partition {pname!r} declares no rows",
+                    path=gname,
+                )
+            )
         by = p.get("by")
         if by not in {"path", "field", "range", "indices"}:
-            v.append(Violation("bad-partition-form", f"partition {pname!r} has by={by!r}", path=gname))
+            v.append(
+                Violation(
+                    "bad-partition-form",
+                    f"partition {pname!r} has by={by!r}",
+                    path=gname,
+                )
+            )
         elif by == "path":
             glob = p.get("glob", "")
             matched = {mp for mp in manifest_paths if _matches_glob(mp, glob)}
             by_name[pname] = matched
             if not matched:
-                v.append(Violation("partition-glob-empty", f"partition {pname!r} glob {glob!r} matches no manifest path", path=gname))
+                v.append(
+                    Violation(
+                        "partition-glob-empty",
+                        f"partition {pname!r} glob {glob!r} matches no manifest path",
+                        path=gname,
+                    )
+                )
             elif entries is not None:
                 _check_partition_rows(p, pname, matched, entries, v, gname)
         # field/range/indices scans are a v1 TODO — a profile check reads the bytes.
@@ -969,19 +1525,26 @@ def _check_partition_rows(
     this reads no payload bytes.
     """
     declared = part.get("rows")
-    if declared is None or isinstance(declared, bool) or not isinstance(declared, int) or declared < 0:
+    if (
+        declared is None
+        or isinstance(declared, bool)
+        or not isinstance(declared, int)
+        or declared < 0
+    ):
         # A VIOLATION, not a silent return. `if "rows" not in p` is satisfied by an explicit
         # `rows: null`, and returning early here meant that shape passed Gate A and reached a
         # trainer as `ResolvedSplit.rows = None` — a presence check and a value check that each
         # assumed the other would catch it.
         if "rows" in part:
-            v.append(Violation(
-                "partition-bad-rows",
-                f"group {gname!r} partition {pname!r} declares rows={declared!r}, which is not a "
-                f"non-negative integer. An explicit null satisfies the presence check and then "
-                f"reaches a trainer as an unknown split size.",
-                path=gname,
-            ))
+            v.append(
+                Violation(
+                    "partition-bad-rows",
+                    f"group {gname!r} partition {pname!r} declares rows={declared!r}, which is not a "
+                    f"non-negative integer. An explicit null satisfies the presence check and then "
+                    f"reaches a trainer as an unknown split size.",
+                    path=gname,
+                )
+            )
         return
     actual = 0
     countable = False
@@ -997,13 +1560,15 @@ def _check_partition_rows(
     if not countable:
         return  # nothing in this partition declares an honest count; §5 allows that
     if actual != declared:
-        v.append(Violation(
-            "partition-rows-mismatch",
-            f"group {gname!r} partition {pname!r} declares rows={declared:,} but the "
-            f"{len(matched)} object(s) it selects sum to {actual:,} "
-            f"({declared - actual:+,}). A trainer reads this number as the split's size.",
-            path=gname,
-        ))
+        v.append(
+            Violation(
+                "partition-rows-mismatch",
+                f"group {gname!r} partition {pname!r} declares rows={declared:,} but the "
+                f"{len(matched)} object(s) it selects sum to {actual:,} "
+                f"({declared - actual:+,}). A trainer reads this number as the split's size.",
+                path=gname,
+            )
+        )
 
 
 def _check_no_trainable_heldout_overlap(
@@ -1022,19 +1587,24 @@ def _check_no_trainable_heldout_overlap(
         for h in sorted(held_out):
             shared = by_name[t] & by_name[h]
             if shared:
-                v.append(Violation(
-                    "train-heldout-leakage",
-                    f"group {gname!r}: partition {t!r} (trainable) and {h!r} (held out) both "
-                    f"select {len(shared)} object(s), e.g. {sorted(shared)[0]}. Every number "
-                    f"produced from a model trained on this is meaningless — it was evaluated "
-                    f"on data it trained on. This is an error under EVERY coverage mode; "
-                    f"'overlapping' waives replay between trainable partitions, not this.",
-                    path=gname,
-                ))
+                v.append(
+                    Violation(
+                        "train-heldout-leakage",
+                        f"group {gname!r}: partition {t!r} (trainable) and {h!r} (held out) both "
+                        f"select {len(shared)} object(s), e.g. {sorted(shared)[0]}. Every number "
+                        f"produced from a model trained on this is meaningless — it was evaluated "
+                        f"on data it trained on. This is an error under EVERY coverage mode; "
+                        f"'overlapping' waives replay between trainable partitions, not this.",
+                        path=gname,
+                    )
+                )
 
 
 def _check_coverage_is_a_partition(
-    by_name: dict[str, set[str]], manifest_paths: set[str], v: list[Violation], gname: str
+    by_name: dict[str, set[str]],
+    manifest_paths: set[str],
+    v: list[Violation],
+    gname: str,
 ) -> None:
     """``coverage: "partition"`` claims the splits are disjoint AND cover everything. Check it.
 
@@ -1048,36 +1618,48 @@ def _check_coverage_is_a_partition(
     """
     names = sorted(by_name)
     for i, a in enumerate(names):
-        for b in names[i + 1:]:
+        for b in names[i + 1 :]:
             shared = by_name[a] & by_name[b]
             if shared:
-                v.append(Violation(
-                    "coverage-not-disjoint",
-                    f"group {gname!r} declares coverage='partition' but partitions {a!r} and "
-                    f"{b!r} both select {len(shared)} object(s), e.g. {sorted(shared)[0]}. "
-                    f"Summing partition rows would double-count. Use coverage='overlapping' if "
-                    f"the overlap is intended — but if {a!r} is trainable and {b!r} is held out, "
-                    f"this is train/test leakage.",
-                    path=gname,
-                ))
+                v.append(
+                    Violation(
+                        "coverage-not-disjoint",
+                        f"group {gname!r} declares coverage='partition' but partitions {a!r} and "
+                        f"{b!r} both select {len(shared)} object(s), e.g. {sorted(shared)[0]}. "
+                        f"Summing partition rows would double-count. Use coverage='overlapping' if "
+                        f"the overlap is intended — but if {a!r} is trainable and {b!r} is held out, "
+                        f"this is train/test leakage.",
+                        path=gname,
+                    )
+                )
     selected = set().union(*by_name.values()) if by_name else set()
     unclaimed = manifest_paths - selected
     if unclaimed:
-        v.append(Violation(
-            "coverage-incomplete",
-            f"group {gname!r} declares coverage='partition' but {len(unclaimed)} object(s) "
-            f"belong to no partition, e.g. {sorted(unclaimed)[0]}. They are invisible to every "
-            f"split= read yet still counted in the group's totals. Declare a partition that "
-            f"covers them, or use coverage='incomplete' to say so on purpose.",
-            path=gname,
-        ))
+        v.append(
+            Violation(
+                "coverage-incomplete",
+                f"group {gname!r} declares coverage='partition' but {len(unclaimed)} object(s) "
+                f"belong to no partition, e.g. {sorted(unclaimed)[0]}. They are invisible to every "
+                f"split= read yet still counted in the group's totals. Declare a partition that "
+                f"covers them, or use coverage='incomplete' to say so on purpose.",
+                path=gname,
+            )
+        )
 
 
-def _register_parent_shas(s3, data_bucket, group, ds_depends, all_shas, v, gname) -> None:
+def _register_parent_shas(
+    s3, data_bucket, group, ds_depends, all_shas, v, gname
+) -> None:
     if not ds_depends:
         return
     if data_bucket is None:
-        v.append(Violation("depends-on-no-data-bucket", f"group {gname!r} has depends_on but no data_bucket to resolve it", path=gname))
+        v.append(
+            Violation(
+                "depends-on-no-data-bucket",
+                f"group {gname!r} has depends_on but no data_bucket to resolve it",
+                path=gname,
+            )
+        )
         return
     for dep in ds_depends:
         did = dep.get("dataset_id")
@@ -1086,7 +1668,13 @@ def _register_parent_shas(s3, data_bucket, group, ds_depends, all_shas, v, gname
         try:
             pds = _load_json(s3, data_bucket, f"{dprefix}/dataset.json")
         except NotFound:
-            v.append(Violation("dangling-parent", f"depends_on parent {dprefix!r} not found in data bucket", path=gname))
+            v.append(
+                Violation(
+                    "dangling-parent",
+                    f"depends_on parent {dprefix!r} not found in data bucket",
+                    path=gname,
+                )
+            )
             continue
         for pg in pds.get("groups", []):
             pmanifest_rel = pg.get("manifest") or "manifest.json"
@@ -1113,20 +1701,39 @@ def _resolve_tokenizer(s3, data_bucket, group, v, gname) -> dict[str, Any] | Non
     from .profiles.tokenizer_v1 import derive_vocab
 
     deps = group.get("depends_on") or []
-    tok_dep = next((d for d in deps if str(d.get("role", "")) == "tokenizer"
-                    or str(d.get("dataset_id", "")).startswith(("tokenizer/", "vendor/"))
-                    and "tokenizer" in str(d.get("dataset_id", ""))), None)
+    tok_dep = next(
+        (
+            d
+            for d in deps
+            if str(d.get("role", "")) == "tokenizer"
+            or str(d.get("dataset_id", "")).startswith(("tokenizer/", "vendor/"))
+            and "tokenizer" in str(d.get("dataset_id", ""))
+        ),
+        None,
+    )
     if tok_dep is None:
         return None
     if data_bucket is None:
-        v.append(Violation("tokenizer-no-data-bucket", f"group {gname!r} depends on a tokenizer but no data_bucket to resolve it", path=gname))
+        v.append(
+            Violation(
+                "tokenizer-no-data-bucket",
+                f"group {gname!r} depends on a tokenizer but no data_bucket to resolve it",
+                path=gname,
+            )
+        )
         return None
     dprefix = f"{tok_dep.get('dataset_id')}/{tok_dep.get('version')}"
     # find tokenizer.json in the parent's manifests
     try:
         pds = _load_json(s3, data_bucket, f"{dprefix}/dataset.json")
     except NotFound:
-        v.append(Violation("tokenizer-parent-missing", f"tokenizer dependency {dprefix!r} not found in data bucket", path=gname))
+        v.append(
+            Violation(
+                "tokenizer-parent-missing",
+                f"tokenizer dependency {dprefix!r} not found in data bucket",
+                path=gname,
+            )
+        )
         return None
     for pg in pds.get("groups", []):
         pman_rel = pg.get("manifest") or "manifest.json"
@@ -1141,9 +1748,21 @@ def _resolve_tokenizer(s3, data_bucket, group, v, gname) -> dict[str, Any] | Non
                     body = s3.get(data_bucket, f"{dprefix}/{path}")
                     return derive_vocab(body)
                 except Exception as e2:  # noqa: BLE001
-                    v.append(Violation("tokenizer-parent-unreadable", f"{dprefix}/{path}: {e2}", path=gname))
+                    v.append(
+                        Violation(
+                            "tokenizer-parent-unreadable",
+                            f"{dprefix}/{path}: {e2}",
+                            path=gname,
+                        )
+                    )
                     return None
-    v.append(Violation("tokenizer-json-not-in-parent", f"tokenizer dependency {dprefix!r} has no tokenizer.json", path=gname))
+    v.append(
+        Violation(
+            "tokenizer-json-not-in-parent",
+            f"tokenizer dependency {dprefix!r} has no tokenizer.json",
+            path=gname,
+        )
+    )
     return None
 
 
@@ -1198,30 +1817,106 @@ def promote(
             f"one. (An overwrite needs no Delete call, so no policy would stop it.)"
         )
 
+    snapshot = result.promotion_snapshot
+    if snapshot is None:
+        raise ValueError(
+            "refusing to promote without the validation-time promotion snapshot; "
+            "run Gate A again rather than re-reading mutable landing controls"
+        )
+
     prefix = f"{result.dataset_id}/{result.version}"
-    # copy dataset.json + every group manifest + every payload object
-    ds = _load_json(s3, landing_bucket, f"{prefix}/dataset.json")
-    keys: list[str] = [f"{prefix}/dataset.json"]
-    payload_paths: list[str] = []  # manifest-relative, for the CRC reference below
-    for group in ds.get("groups", []):
-        manifest_rel = group.get("manifest") or "manifest.json"
-        keys.append(f"{prefix}/{manifest_rel}")
-        man = _load_json(s3, landing_bucket, f"{prefix}/{manifest_rel}")
-        for e in man.get("entries", []):
-            keys.append(_join(prefix, e["path"]))
-            payload_paths.append(e["path"])
+    try:
+        dataset_control = next(
+            control for control in snapshot.controls if control.path == "dataset.json"
+        )
+    except StopIteration as exc:
+        raise ValueError("promotion snapshot has no dataset.json control") from exc
+    try:
+        ds = json.loads(dataset_control.body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            "promotion snapshot dataset.json is not valid UTF-8 JSON"
+        ) from exc
 
-    def _copy_one(key: str) -> None:
-        s3.copy(landing_bucket, key, data_bucket, key)
+    # Control objects are copied from the bytes Gate A parsed, not from mutable landing.  A
+    # previous interrupted attempt may have written an unsealed partial prefix; reusing an
+    # identical control is safe, while replacing a differing *unsealed* control with this
+    # snapshot is safe because the seal check above rejects every published prefix first.
+    def _write_control(control: _ControlSnapshot) -> None:
+        key = _join(prefix, control.path)
+        try:
+            existing = s3.get(data_bucket, key)
+        except NotFound:
+            existing = None
+        if existing != control.body:
+            s3.put(
+                data_bucket,
+                key,
+                control.body,
+                content_type="application/json"
+                if control.path.endswith(".json")
+                else None,
+            )
 
-    if copy_workers > 1 and len(keys) > 1:
+    for control in snapshot.controls:
+        _write_control(control)
+
+    payload_paths = [payload.path for payload in snapshot.payloads]
+
+    def _destination_matches(payload: _PayloadSnapshot) -> bool:
+        try:
+            actual_sha, actual_size = s3.hash_object(
+                data_bucket, _join(prefix, payload.path)
+            )
+        except NotFound:
+            return False
+        return actual_size == payload.bytes and actual_sha == payload.sha256
+
+    def _copy_payload(payload: _PayloadSnapshot) -> None:
+        # A prior failed attempt can leave a prefix without a seal because data-bucket deletes
+        # are intentionally denied.  Reuse only a payload whose full destination hash matches
+        # this exact Gate-A snapshot; otherwise copy a fresh, source-conditional object.
+        if payload.vendored and _destination_matches(payload):
+            return
+        try:
+            if payload.vendored:
+                s3.copy(
+                    landing_bucket,
+                    _join(prefix, payload.path),
+                    data_bucket,
+                    _join(prefix, payload.path),
+                    source_etag=payload.source_etag,
+                )
+            else:
+                s3.copy(
+                    landing_bucket,
+                    _join(prefix, payload.path),
+                    data_bucket,
+                    _join(prefix, payload.path),
+                )
+        except PreconditionFailed as exc:
+            raise LandingSourceChangedError(
+                f"vendored landing payload {payload.path!r} changed after Gate A; "
+                "no data-bucket seal was written"
+            ) from exc
+        if payload.vendored and not _destination_matches(payload):
+            actual_sha, actual_size = s3.hash_object(
+                data_bucket, _join(prefix, payload.path)
+            )
+            raise PromotionRetryableError(
+                f"vendored copy {payload.path!r} differs from its validation snapshot: "
+                f"got bytes={actual_size}, sha256={actual_sha}; expected "
+                f"bytes={payload.bytes}, sha256={payload.sha256}"
+            )
+
+    if copy_workers > 1 and len(snapshot.payloads) > 1:
         from concurrent.futures import ThreadPoolExecutor
 
         with ThreadPoolExecutor(max_workers=copy_workers) as pool:
-            list(pool.map(_copy_one, keys))  # raises if any copy failed
+            list(pool.map(_copy_payload, snapshot.payloads))
     else:
-        for key in keys:
-            _copy_one(key)
+        for payload in snapshot.payloads:
+            _copy_payload(payload)
 
     # CAPTURE THE CRC REFERENCE POST-COPY, FROM THE DESTINATION. This is what lets wu-fsck
     # (Gate B) detect a same-length overwrite of a frozen object for the price of a HEAD, with
@@ -1343,6 +2038,206 @@ def promote(
     )
 
 
+def _data_prefix_is_sealed(result: ValidationResult, s3: S3, data_bucket: str) -> bool:
+    """Whether the immutable data prefix has any seal at all.
+
+    This intentionally checks only presence.  Callers that need to accept it as a successful
+    promotion must additionally call :func:`_sealed_snapshot_matches`.
+    """
+    try:
+        s3.head(
+            data_bucket,
+            f"{result.dataset_id}/{result.version}/_VALIDATED.json",
+        )
+    except NotFound:
+        return False
+    return True
+
+
+def _sealed_snapshot_matches(
+    result: ValidationResult, s3: S3, data_bucket: str
+) -> bool:
+    """Whether a pre-existing data-bucket seal is exactly this Gate-A result.
+
+    This is the narrow recovery check for the gap between a completed promotion and the later
+    landing ``_VALIDATED.json`` work-list marker.  It must fail closed: a seal merely existing is
+    never enough to mark mutable landing data validated.  In particular, it binds the data seal
+    and catalog to the precise controls Gate A retained, then re-hashes vendored destination
+    payloads because those objects have an additional source-ETag/copy integrity contract.
+
+    ``promote()`` deliberately remains strict and refuses every sealed prefix.  Only the CLI
+    invokes this helper to reconcile a known-complete promotion with its missing landing marker.
+    """
+    snapshot = result.promotion_snapshot
+    if not result.ok or snapshot is None:
+        return False
+
+    controls = {control.path: control.body for control in snapshot.controls}
+    if len(controls) != len(snapshot.controls):
+        return False  # duplicate paths would make the in-memory snapshot ambiguous
+    dataset_body = controls.get("dataset.json")
+    if dataset_body is None:
+        return False
+    try:
+        dataset = json.loads(dataset_body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(dataset, Mapping):
+        return False
+    version_doc = dataset.get("version")
+    inventory = dataset.get("inventory")
+    groups = dataset.get("groups")
+    if (
+        dataset.get("dataset_id") != result.dataset_id
+        or not isinstance(version_doc, Mapping)
+        or version_doc.get("id") != result.version
+        or not isinstance(inventory, Mapping)
+        or not isinstance(groups, list)
+    ):
+        return False
+
+    expected_manifest_sha256: dict[str, Any] = {}
+    for group in groups:
+        if not isinstance(group, Mapping):
+            return False
+        manifest_sha = group.get("manifest_sha256")
+        if manifest_sha:
+            expected_manifest_sha256[str(group.get("name"))] = manifest_sha
+
+    prefix = f"{result.dataset_id}/{result.version}"
+    try:
+        for control in snapshot.controls:
+            if s3.get(data_bucket, _join(prefix, control.path)) != control.body:
+                return False
+        seal = _load_json(s3, data_bucket, f"{prefix}/_VALIDATED.json")
+        catalog = _load_json(
+            s3,
+            data_bucket,
+            f"_catalog/{result.dataset_id}/{result.version}.json",
+        )
+    except NotFound:
+        return False
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return False
+
+    if not isinstance(seal, Mapping) or not isinstance(catalog, Mapping):
+        return False
+    dataset_sha256 = sha256_bytes(dataset_body)
+    if (
+        catalog.get("dataset_id") != result.dataset_id
+        or catalog.get("version") != result.version
+        or catalog.get("dataset_sha256") != dataset_sha256
+        or catalog.get("uri") != f"s3://{data_bucket}/{prefix}/"
+        or catalog.get("objects") != inventory.get("objects")
+        or catalog.get("bytes") != inventory.get("bytes")
+    ):
+        return False
+    if (
+        seal.get("dataset_id") != result.dataset_id
+        or seal.get("version") != result.version
+        or seal.get("dataset_sha256") != dataset_sha256
+        or seal.get("objects") != inventory.get("objects")
+        or seal.get("bytes") != inventory.get("bytes")
+        or seal.get("manifest_sha256") != expected_manifest_sha256
+    ):
+        return False
+
+    for payload in snapshot.payloads:
+        if not payload.vendored:
+            continue
+        try:
+            actual_sha, actual_size = s3.hash_object(
+                data_bucket, _join(prefix, payload.path)
+            )
+        except NotFound:
+            return False
+        if actual_size != payload.bytes or actual_sha != payload.sha256:
+            return False
+    return True
+
+
+# A manifest event is a single wake-up and the deployed EventBridge target currently has one
+# Batch attempt.  A one-off destination corruption would otherwise remain pending forever, so
+# perform one safe in-process retry.  More than one failure is an integrity incident, not a
+# reason to keep overwriting an unsealed published prefix indefinitely.
+_PROMOTION_RETRY_ATTEMPTS = 2
+
+
+def _promote_or_reconcile(
+    result: ValidationResult,
+    s3: S3,
+    *,
+    data_bucket: str,
+    landing_bucket: str,
+    now: str | None,
+    copy_workers: int,
+) -> str:
+    """Promote a clean result, or reconcile a matching completed promotion.
+
+    Returns ``"promoted"`` when this invocation sealed the data prefix and ``"reconciled"``
+    when it proved a prior invocation already did.  The latter is deliberately checked both
+    before promotion and after its sealed-prefix refusal to close the concurrent-validator race.
+    """
+    if _sealed_snapshot_matches(result, s3, data_bucket):
+        return "reconciled"
+    if _data_prefix_is_sealed(result, s3, data_bucket):
+        raise SealedSnapshotMismatchError(
+            f"refusing to reconcile {result.dataset_id!r}/{result.version!r}: "
+            "the data-bucket prefix is already sealed but does not match this Gate-A snapshot"
+        )
+
+    for attempt in range(_PROMOTION_RETRY_ATTEMPTS):
+        try:
+            promote(
+                result,
+                s3,
+                data_bucket=data_bucket,
+                landing_bucket=landing_bucket,
+                now=now,
+                copy_workers=copy_workers,
+            )
+        except PromotionRetryableError:
+            if attempt + 1 == _PROMOTION_RETRY_ATTEMPTS:
+                raise
+            continue
+        except ValueError:
+            # Do not weaken promote()'s public sealed-prefix guard.  A concurrent promotion is
+            # only accepted here if every durable object proves it sealed THIS exact snapshot.
+            if _sealed_snapshot_matches(result, s3, data_bucket):
+                return "reconciled"
+            if _data_prefix_is_sealed(result, s3, data_bucket):
+                raise SealedSnapshotMismatchError(
+                    f"refusing to reconcile {result.dataset_id!r}/{result.version!r}: "
+                    "the data-bucket prefix was sealed concurrently but does not match this "
+                    "Gate-A snapshot"
+                ) from None
+            raise
+        else:
+            return "promoted"
+
+    raise AssertionError("promotion retry loop exited without a result")
+
+
+def _promotion_rejection_doc(
+    result: ValidationResult,
+    *,
+    code: str,
+    message: str,
+    now: str | None,
+) -> dict[str, Any]:
+    """Terminal evidence for an integrity failure discovered after an otherwise clean Gate A."""
+    rejection: dict[str, Any] = {
+        "schema_version": "edullm-rejection/v1",
+        "dataset_id": result.dataset_id,
+        "version": result.version,
+        "incomplete": False,
+        "violations": [{"code": code, "message": message, "path": None}],
+    }
+    if now is not None:
+        rejection["rejected_at"] = now
+    return rejection
+
+
 # --------------------------------------------------------------------------------------
 # self-discovery (§7 event wiring) — the wake-up-and-scan work list
 # --------------------------------------------------------------------------------------
@@ -1383,53 +2278,139 @@ def discover_pending(landing_bucket: str, s3: S3) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="edullm-data-validate", description="Gate A validator")
+    ap = argparse.ArgumentParser(
+        prog="edullm-data-validate", description="Gate A validator"
+    )
     ap.add_argument("--landing-bucket", default="edullm-landing")
     ap.add_argument("--data-bucket", default="edullm-data")
-    ap.add_argument("--prefix", help="dataset prefix (<dataset_id>/<version>); omit to self-discover")
+    ap.add_argument(
+        "--prefix",
+        help="dataset prefix (<dataset_id>/<version>); omit to self-discover",
+    )
     ap.add_argument("--promote", action="store_true")
     ap.add_argument(
         "--promote-workers",
         type=int,
         default=1,
         help="threads for promote()'s copy + CRC loops (default 1, sequential). Promotion is "
-             "~2 S3 round-trips per object, so a several-thousand-object corpus needs this to "
-             "finish inside the Batch job-def time limit.",
+        "~2 S3 round-trips per object, so a several-thousand-object corpus needs this to "
+        "finish inside the Batch job-def time limit.",
     )
-    ap.add_argument("--now", default=None, help="ISO-8601 timestamp to stamp markers with")
+    ap.add_argument(
+        "--now", default=None, help="ISO-8601 timestamp to stamp markers with"
+    )
     args = ap.parse_args(argv)
 
     from .s3 import Boto3S3
 
     s3 = Boto3S3.default()
-    prefixes = [args.prefix] if args.prefix else discover_pending(args.landing_bucket, s3)
+    prefixes = (
+        [args.prefix] if args.prefix else discover_pending(args.landing_bucket, s3)
+    )
     if not prefixes:
         print("no pending datasets", file=sys.stderr)
         return 0
 
     exit_code = 0
     for prefix in prefixes:
-        result = validate_dataset(args.landing_bucket, prefix, s3, data_bucket=args.data_bucket)
+        result = validate_dataset(
+            args.landing_bucket, prefix, s3, data_bucket=args.data_bucket
+        )
         if result.incomplete:
-            print(f"{prefix}: INCOMPLETE (not sealed) — leaving for a later run", file=sys.stderr)
+            print(
+                f"{prefix}: INCOMPLETE (not sealed) — leaving for a later run",
+                file=sys.stderr,
+            )
             continue
         if result.ok:
+            promotion_outcome: str | None = None
             if args.promote:
-                promote(
-                    result,
-                    s3,
-                    data_bucket=args.data_bucket,
-                    landing_bucket=args.landing_bucket,
-                    now=args.now,
-                    copy_workers=args.promote_workers,
-                )
-            s3.put(args.landing_bucket, f"{prefix}/_VALIDATED.json",
-                   canonical_json(result.report()), content_type="application/json")
-            print(f"{prefix}: PASS" + (" + promoted" if args.promote else ""))
+                try:
+                    promotion_outcome = _promote_or_reconcile(
+                        result,
+                        s3,
+                        data_bucket=args.data_bucket,
+                        landing_bucket=args.landing_bucket,
+                        now=args.now,
+                        copy_workers=args.promote_workers,
+                    )
+                except SealedSnapshotMismatchError as exc:
+                    rejection = _promotion_rejection_doc(
+                        result,
+                        code="sealed-data-snapshot-mismatch",
+                        message=str(exc),
+                        now=args.now,
+                    )
+                    status = "published data seal conflicts with this Gate-A snapshot"
+                except LandingSourceChangedError as exc:
+                    rejection = _promotion_rejection_doc(
+                        result,
+                        code="vendored-landing-source-changed",
+                        message=str(exc),
+                        now=args.now,
+                    )
+                    status = "vendored landing source changed after Gate A"
+                except PromotionRetryableError as exc:
+                    rejection = _promotion_rejection_doc(
+                        result,
+                        code="vendored-final-copy-mismatch",
+                        message=(
+                            f"{exc} (failed after {_PROMOTION_RETRY_ATTEMPTS} safe promotion attempts)"
+                        ),
+                        now=args.now,
+                    )
+                    status = (
+                        "vendored final-copy mismatch after "
+                        f"{_PROMOTION_RETRY_ATTEMPTS} attempts"
+                    )
+                except PromotionIntegrityError as exc:
+                    rejection = _promotion_rejection_doc(
+                        result,
+                        code="vendored-promotion-integrity-failure",
+                        message=str(exc),
+                        now=args.now,
+                    )
+                    status = "vendored promotion integrity failure"
+                else:
+                    rejection = None
+                    status = ""
+
+                if rejection is not None:
+                    s3.put(
+                        args.landing_bucket,
+                        f"{prefix}/_REJECTED.json",
+                        canonical_json(rejection),
+                        content_type="application/json",
+                    )
+                    print(
+                        f"{prefix}: REJECTED ({status})",
+                        file=sys.stderr,
+                    )
+                    exit_code = 1
+                    continue
+            s3.put(
+                args.landing_bucket,
+                f"{prefix}/_VALIDATED.json",
+                canonical_json(result.report()),
+                content_type="application/json",
+            )
+            suffix = ""
+            if promotion_outcome == "promoted":
+                suffix = " + promoted"
+            elif promotion_outcome == "reconciled":
+                suffix = " + promotion reconciled"
+            print(f"{prefix}: PASS" + suffix)
         else:
-            s3.put(args.landing_bucket, f"{prefix}/_REJECTED.json",
-                   canonical_json(result.rejection_doc(now=args.now)), content_type="application/json")
-            print(f"{prefix}: REJECTED ({len(result.violations)} violations)", file=sys.stderr)
+            s3.put(
+                args.landing_bucket,
+                f"{prefix}/_REJECTED.json",
+                canonical_json(result.rejection_doc(now=args.now)),
+                content_type="application/json",
+            )
+            print(
+                f"{prefix}: REJECTED ({len(result.violations)} violations)",
+                file=sys.stderr,
+            )
             for v in result.violations:
                 print(f"  - {v}", file=sys.stderr)
             exit_code = 1

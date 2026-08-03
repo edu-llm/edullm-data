@@ -46,6 +46,16 @@ class NotValidated(ReadError):
     """The prefix carries no validation marker — refuse to read (§9)."""
 
 
+class VendoredReadRequiresOptIn(ReadError):
+    """A raw ``vendored/v1`` mirror needs an explicit non-training read opt-in.
+
+    A vendored group proves provenance and byte preservation; it does not assert that the
+    upstream records are an approved training representation.  Requiring the caller to spell
+    out ``allow_vendored=True`` keeps a raw mirror such as PRM800K from silently becoming an
+    SFT or reward-model source through the convenience reader.
+    """
+
+
 class SealMismatch(ReadError):
     """The dataset's bytes do not match the seal written when it was validated.
 
@@ -235,6 +245,7 @@ def dataset_paths(
     require_validated: bool = True,
     group: str | None = None,
     include_held_out: bool = False,
+    allow_vendored: bool = False,
     labels: Mapping[str, str] | None = None,
     warn_partial_labels: bool = True,
 ) -> ResolvedSplit:
@@ -268,8 +279,11 @@ def dataset_paths(
     hands a trainer its own held-out shards with no way to tell them apart. Silence means the
     safe subset.
 
-    A dataset that declares no trainable split at all (a tokenizer, a vendored tree, an eval
-    set) returns everything: there is nothing to protect, and the whole artifact is the payload.
+    A dataset that declares no trainable split at all (a tokenizer or eval set) returns everything:
+    there is nothing to protect, and the whole artifact is the payload.  A ``vendored/v1`` group
+    is deliberately different: it is a byte-preserving provenance artifact, not an approved
+    training representation.  Pass ``allow_vendored=True`` only from a transformation/audit job
+    that intentionally consumes the raw mirror.
 
     ``include_held_out=True`` opts back into the old behaviour for the rare deliberate case.
     It is spelled out so it shows up in a code review of a training config.
@@ -309,6 +323,12 @@ def dataset_paths(
         raise ReadError(f"no dataset.json at {data_bucket}/{prefix}") from None
 
     chosen = _choose_group(ds.get("groups", []), group, dataset_id, version)
+    if str(chosen.get("profile", "")).startswith("vendored/") and not allow_vendored:
+        raise VendoredReadRequiresOptIn(
+            f"{dataset_id}/{version} group {chosen.get('name')!r} is a raw vendored mirror, "
+            "not a train-ready dataset. Pass allow_vendored=True only from an explicit "
+            "transformation or provenance-audit job."
+        )
     gname = chosen["name"]
     manifest = _load_json(s3, data_bucket, f"{prefix}/{chosen.get('manifest', f'{gname}/manifest.json')}")
     entries = [ManifestEntry.from_dict(e) for e in manifest.get("entries", [])]
@@ -1045,4 +1065,5 @@ __all__ = [
     "ResolvedSplit",
     "ReadError",
     "NotValidated",
+    "VendoredReadRequiresOptIn",
 ]

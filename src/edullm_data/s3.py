@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import io
-from typing import Protocol, runtime_checkable
+from typing import BinaryIO, Protocol, runtime_checkable
 
 
 class S3Error(RuntimeError):
@@ -28,6 +28,10 @@ class S3Error(RuntimeError):
 
 class NotFound(S3Error):
     """The object or bucket does not exist (404 / NoSuchKey / NoSuchBucket)."""
+
+
+class PreconditionFailed(S3Error):
+    """A conditional object operation did not match the object's current state."""
 
 
 @runtime_checkable
@@ -67,9 +71,23 @@ class S3(Protocol):
         (the old ``get`` + ``len`` path pulled TB to the caller). Raises :class:`NotFound`."""
         ...
 
-    def put(self, bucket: str, key: str, body: bytes, *, content_type: str | None = None) -> None:
+    def put(
+        self,
+        bucket: str,
+        key: str,
+        body: bytes,
+        *,
+        content_type: str | None = None,
+        if_none_match: bool = False,
+    ) -> None:
         """Write ``body`` at ``key``. Used for ``_REJECTED.json`` on landing and the
-        catalog entry on the published bucket — small control objects only."""
+        catalog entry on the published bucket — small control objects only.
+
+        ``if_none_match=True`` maps to S3's atomic ``If-None-Match: *`` precondition.  It
+        is deliberately part of the small adapter rather than a caller-side ``HEAD`` + PUT
+        convention: a landing reservation is a concurrency boundary, and a HEAD cannot make
+        a subsequent write create-only.
+        """
         ...
 
     def put_file(self, bucket: str, key: str, local_path: str) -> None:
@@ -78,10 +96,42 @@ class S3(Protocol):
         into landing; payload bytes above laptop scale should originate in S3, not here."""
         ...
 
-    def copy(self, src_bucket: str, src_key: str, dst_bucket: str, dst_key: str) -> None:
+    def put_stream(
+        self,
+        bucket: str,
+        key: str,
+        source: BinaryIO,
+        *,
+        part_size: int = ...,
+        content_type: str | None = None,
+    ) -> dict:
+        """Stream ``source`` into one object and return its post-upload ``head()`` result.
+
+        This is the source-to-S3 counterpart of :meth:`hash_object`: it bounds buffering to
+        one multipart part, never writes a temporary local payload file, and aborts an
+        incomplete multipart upload on failure.  Callers that need a source digest wrap the
+        readable object and update their hash from ``read()``; no opaque SDK upload helper is
+        allowed to consume an unobserved byte stream.
+        """
+        ...
+
+    def copy(
+        self,
+        src_bucket: str,
+        src_key: str,
+        dst_bucket: str,
+        dst_key: str,
+        *,
+        source_etag: str | None = None,
+    ) -> None:
         """Server-side copy — bytes never transit the client (§1 promotion, and publish()'s
         staged→final move). Implementations must use multipart copy above the 5 GB single-part
-        ceiling (§9); 8 of the audit's 15 largest objects exceeded it, so this is not optional."""
+        ceiling (§9); 8 of the audit's 15 largest objects exceeded it, so this is not optional.
+
+        A non-``None`` ``source_etag`` is an atomic source precondition.  The promotion gate
+        uses it for vendored payloads after hashing them in landing: a producer can still mutate
+        landing, but cannot race a changed object through the server-side copy.
+        """
         ...
 
     def delete(self, bucket: str, key: str) -> None:
@@ -96,7 +146,31 @@ class S3(Protocol):
 
 # CopyObject single-part ceiling (§9). Above this, UploadPartCopy is required.
 _MULTIPART_COPY_THRESHOLD = 5 * 1024**3
-_COPY_PART_BYTES = 256 * 1024**2  # 256 MiB parts; 10,000-part cap ⇒ up to ~2.4 TiB/object
+_COPY_PART_BYTES = (
+    256 * 1024**2
+)  # 256 MiB parts; 10,000-part cap ⇒ up to ~2.4 TiB/object
+_STREAM_PART_BYTES = 16 * 1024**2
+# S3 requires every multipart part except the final one to be at least 5 MiB.  Export this
+# boundary so callers can reject an invalid configuration before opening a large HTTP response.
+MIN_MULTIPART_PART_BYTES = 5 * 1024**2
+
+
+def _read_stream_part(source: BinaryIO, part_size: int) -> bytes:
+    """Read up to one multipart part without assuming a network stream fills ``read(n)``.
+
+    HTTP response objects are allowed to return short reads before EOF.  Accumulating until a
+    part is full (or EOF) keeps S3's non-final multipart parts above its 5 MiB minimum while
+    holding at most one bounded part in memory.
+    """
+    chunks = bytearray()
+    while len(chunks) < part_size:
+        chunk = source.read(part_size - len(chunks))
+        if not chunk:
+            break
+        if not isinstance(chunk, bytes):
+            raise TypeError("stream upload source.read() must return bytes")
+        chunks.extend(chunk)
+    return bytes(chunks)
 
 
 class Boto3S3:
@@ -114,9 +188,15 @@ class Boto3S3:
 
     def _wrap_not_found(self, err: Exception) -> Exception:
         code = getattr(err, "response", {}).get("Error", {}).get("Code")
-        status = getattr(err, "response", {}).get("ResponseMetadata", {}).get("HTTPStatusCode")
+        status = (
+            getattr(err, "response", {})
+            .get("ResponseMetadata", {})
+            .get("HTTPStatusCode")
+        )
         if code in {"NoSuchKey", "NoSuchBucket", "404", "NotFound"} or status == 404:
             return NotFound(str(err))
+        if code in {"PreconditionFailed", "412"} or status == 412:
+            return PreconditionFailed(str(err))
         return S3Error(str(err))
 
     def get(self, bucket: str, key: str) -> bytes:
@@ -172,14 +252,24 @@ class Boto3S3:
             raise self._wrap_not_found(e) from e
         return h.hexdigest(), size
 
-    def put(self, bucket: str, key: str, body: bytes, *, content_type: str | None = None) -> None:
+    def put(
+        self,
+        bucket: str,
+        key: str,
+        body: bytes,
+        *,
+        content_type: str | None = None,
+        if_none_match: bool = False,
+    ) -> None:
         kwargs: dict = {"Bucket": bucket, "Key": key, "Body": body}
         if content_type:
             kwargs["ContentType"] = content_type
+        if if_none_match:
+            kwargs["IfNoneMatch"] = "*"
         try:
             self._c.put_object(**kwargs)
         except Exception as e:  # noqa: BLE001
-            raise S3Error(str(e)) from e
+            raise self._wrap_not_found(e) from e
 
     def put_file(self, bucket: str, key: str, local_path: str) -> None:
         # upload_file streams and does multipart automatically — bounded memory
@@ -188,17 +278,113 @@ class Boto3S3:
         except Exception as e:  # noqa: BLE001
             raise S3Error(str(e)) from e
 
-    def copy(self, src_bucket: str, src_key: str, dst_bucket: str, dst_key: str) -> None:
+    def put_stream(
+        self,
+        bucket: str,
+        key: str,
+        source: BinaryIO,
+        *,
+        part_size: int = _STREAM_PART_BYTES,
+        content_type: str | None = None,
+    ) -> dict:
+        """Upload a readable stream with one bounded multipart buffer.
+
+        ``upload_fileobj`` would also stream, but it obscures the source reads from the caller
+        that is simultaneously computing a provenance hash.  Owning the loop here makes that
+        relationship explicit, keeps memory bounded to one part, and lets us abort a failed
+        multipart upload instead of relying on a lifecycle rule to clean it up later.
+        """
+        if part_size < MIN_MULTIPART_PART_BYTES:
+            raise ValueError(
+                f"part_size must be at least {MIN_MULTIPART_PART_BYTES} bytes for multipart upload"
+            )
+        create: dict = {"Bucket": bucket, "Key": key}
+        if content_type:
+            create["ContentType"] = content_type
         try:
-            size = int(self._c.head_object(Bucket=src_bucket, Key=src_key)["ContentLength"])
+            upload = self._c.create_multipart_upload(**create)
+            upload_id = upload["UploadId"]
+        except Exception as e:  # noqa: BLE001
+            raise self._wrap_not_found(e) from e
+
+        parts: list[dict] = []
+        try:
+            part_number = 1
+            while True:
+                body = _read_stream_part(source, part_size)
+                if not body:
+                    break
+                response = self._c.upload_part(
+                    Bucket=bucket,
+                    Key=key,
+                    UploadId=upload_id,
+                    PartNumber=part_number,
+                    Body=body,
+                )
+                parts.append({"ETag": response["ETag"], "PartNumber": part_number})
+                part_number += 1
+            if not parts:
+                # An empty stream is valid, but an empty multipart upload is not useful.  Abort
+                # it before the small, non-streaming control-object write.
+                self._c.abort_multipart_upload(
+                    Bucket=bucket, Key=key, UploadId=upload_id
+                )
+                self._c.put_object(
+                    Bucket=bucket,
+                    Key=key,
+                    Body=b"",
+                    **({"ContentType": content_type} if content_type else {}),
+                )
+            else:
+                self._c.complete_multipart_upload(
+                    Bucket=bucket,
+                    Key=key,
+                    UploadId=upload_id,
+                    MultipartUpload={"Parts": parts},
+                )
+        except Exception as e:  # noqa: BLE001
+            try:
+                self._c.abort_multipart_upload(
+                    Bucket=bucket, Key=key, UploadId=upload_id
+                )
+            except Exception:
+                pass
+            raise self._wrap_not_found(e) from e
+        return self.head(bucket, key)
+
+    def copy(
+        self,
+        src_bucket: str,
+        src_key: str,
+        dst_bucket: str,
+        dst_key: str,
+        *,
+        source_etag: str | None = None,
+    ) -> None:
+        try:
+            size = int(
+                self._c.head_object(Bucket=src_bucket, Key=src_key)["ContentLength"]
+            )
             if size < _MULTIPART_COPY_THRESHOLD:
+                kwargs: dict = {
+                    "Bucket": dst_bucket,
+                    "Key": dst_key,
+                    "CopySource": {"Bucket": src_bucket, "Key": src_key},
+                }
+                if source_etag is not None:
+                    kwargs["CopySourceIfMatch"] = source_etag
                 self._c.copy_object(
-                    Bucket=dst_bucket,
-                    Key=dst_key,
-                    CopySource={"Bucket": src_bucket, "Key": src_key},
+                    **kwargs,
                 )
                 return
-            self._multipart_copy(src_bucket, src_key, dst_bucket, dst_key, size)
+            self._multipart_copy(
+                src_bucket,
+                src_key,
+                dst_bucket,
+                dst_key,
+                size,
+                source_etag=source_etag,
+            )
         except S3Error:
             raise
         except Exception as e:  # noqa: BLE001
@@ -211,7 +397,14 @@ class Boto3S3:
             raise S3Error(str(e)) from e
 
     def _multipart_copy(
-        self, src_bucket: str, src_key: str, dst_bucket: str, dst_key: str, size: int
+        self,
+        src_bucket: str,
+        src_key: str,
+        dst_bucket: str,
+        dst_key: str,
+        size: int,
+        *,
+        source_etag: str | None = None,
     ) -> None:
         upload = self._c.create_multipart_upload(Bucket=dst_bucket, Key=dst_key)
         upload_id = upload["UploadId"]
@@ -221,15 +414,22 @@ class Boto3S3:
             offset = 0
             while offset < size:
                 last = min(offset + _COPY_PART_BYTES, size) - 1
+                kwargs: dict = {
+                    "Bucket": dst_bucket,
+                    "Key": dst_key,
+                    "UploadId": upload_id,
+                    "PartNumber": part_number,
+                    "CopySource": {"Bucket": src_bucket, "Key": src_key},
+                    "CopySourceRange": f"bytes={offset}-{last}",
+                }
+                if source_etag is not None:
+                    kwargs["CopySourceIfMatch"] = source_etag
                 r = self._c.upload_part_copy(
-                    Bucket=dst_bucket,
-                    Key=dst_key,
-                    UploadId=upload_id,
-                    PartNumber=part_number,
-                    CopySource={"Bucket": src_bucket, "Key": src_key},
-                    CopySourceRange=f"bytes={offset}-{last}",
+                    **kwargs,
                 )
-                parts.append({"ETag": r["CopyPartResult"]["ETag"], "PartNumber": part_number})
+                parts.append(
+                    {"ETag": r["CopyPartResult"]["ETag"], "PartNumber": part_number}
+                )
                 offset = last + 1
                 part_number += 1
             self._c.complete_multipart_upload(
@@ -239,7 +439,9 @@ class Boto3S3:
                 MultipartUpload={"Parts": parts},
             )
         except Exception:
-            self._c.abort_multipart_upload(Bucket=dst_bucket, Key=dst_key, UploadId=upload_id)
+            self._c.abort_multipart_upload(
+                Bucket=dst_bucket, Key=dst_key, UploadId=upload_id
+            )
             raise
 
 
@@ -302,7 +504,10 @@ class FakeS3:
             # fsck._check_crc64nvme untestable and a constant would have made it vacuous.
             # Truncated + labelled so nobody mistakes it for a real CRC64NVME value.
             "crc64nvme": "fake64:" + hashlib.sha256(body).hexdigest()[:16],
-            "etag": None,
+            # A deterministic identity for the Fake's conditional-copy contract.  It is not
+            # intended to model S3's MD5/multipart ETag algorithm; it only has to change when
+            # a stored object changes, exactly as the real CopySourceIfMatch guard requires.
+            "etag": "fake-etag:" + hashlib.sha256(body).hexdigest(),
             "content_type": None,
         }
         base.update(self._head_overrides.get((bucket, key), {}))
@@ -327,15 +532,63 @@ class FakeS3:
             raise NotFound(f"s3://{bucket}/{key}") from None
         return hashlib.sha256(body).hexdigest(), len(body)
 
-    def put(self, bucket: str, key: str, body: bytes, *, content_type: str | None = None) -> None:
+    def put(
+        self,
+        bucket: str,
+        key: str,
+        body: bytes,
+        *,
+        content_type: str | None = None,
+        if_none_match: bool = False,
+    ) -> None:
+        if if_none_match and (bucket, key) in self._store:
+            raise PreconditionFailed(f"s3://{bucket}/{key} already exists")
         self._store[(bucket, key)] = body
 
     def put_file(self, bucket: str, key: str, local_path: str) -> None:
         with open(local_path, "rb") as fh:
             self._store[(bucket, key)] = fh.read()
 
-    def copy(self, src_bucket: str, src_key: str, dst_bucket: str, dst_key: str) -> None:
+    def put_stream(
+        self,
+        bucket: str,
+        key: str,
+        source: BinaryIO,
+        *,
+        part_size: int = _STREAM_PART_BYTES,
+        content_type: str | None = None,
+    ) -> dict:
+        # The fake models the public contract (bounded reads and an object only after a
+        # successful complete upload), not S3's multipart implementation details.  Tests can
+        # instrument ``source.read`` to prove no unbounded read occurred.
+        body = bytearray()
+        while True:
+            chunk = source.read(part_size)
+            if not chunk:
+                break
+            if not isinstance(chunk, bytes):
+                raise TypeError("stream upload source.read() must return bytes")
+            body.extend(chunk)
+        self.put(bucket, key, bytes(body), content_type=content_type)
+        return self.head(bucket, key)
+
+    def copy(
+        self,
+        src_bucket: str,
+        src_key: str,
+        dst_bucket: str,
+        dst_key: str,
+        *,
+        source_etag: str | None = None,
+    ) -> None:
         try:
+            if (
+                source_etag is not None
+                and self.head(src_bucket, src_key).get("etag") != source_etag
+            ):
+                raise PreconditionFailed(
+                    f"source s3://{src_bucket}/{src_key} no longer has the validated ETag"
+                )
             self._store[(dst_bucket, dst_key)] = self._store[(src_bucket, src_key)]
         except KeyError:
             raise NotFound(f"s3://{src_bucket}/{src_key}") from None
@@ -345,4 +598,13 @@ class FakeS3:
 
 
 # Re-export io so a caller can wrap bytes without a separate import when streaming.
-__all__ = ["S3", "Boto3S3", "FakeS3", "S3Error", "NotFound", "io"]
+__all__ = [
+    "S3",
+    "Boto3S3",
+    "FakeS3",
+    "S3Error",
+    "NotFound",
+    "PreconditionFailed",
+    "MIN_MULTIPART_PART_BYTES",
+    "io",
+]
