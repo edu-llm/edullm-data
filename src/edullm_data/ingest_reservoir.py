@@ -190,6 +190,28 @@ _MAX_ATTEMPTS = 8
 #: 120 s keeps a stuck worker from idling for half the job's timeout.
 _BACKOFF_CAP_S = 120.0
 
+#: HTTP statuses worth a second try. Anything NOT in here raises on the first failure.
+#:
+#: This set exists because it used to be just ``429``, and that cost five wave-1 bundles overnight:
+#: each died on one ``503 Service Unavailable`` from Hugging Face — five different repos, five
+#: different files — after hours of billable work, with the error reading "failed after 1 attempts".
+#:
+#: Explicit statuses rather than ``code >= 500``, because a blanket rule also retries 501 Not
+#: Implemented and 505 HTTP Version Not Supported, which are permanent: retrying them buries a real
+#: error behind eight backoffs and up to ~8 minutes of sleeping. 403 is deliberately ABSENT — a
+#: mid-read CDN signature expiry surfaces as 403 and needs a fresh `_cdn_url()`, not a retry of the
+#: stale one (see `_CDN_URL_TTL_S`).
+_TRANSIENT_STATUSES = frozenset({
+    408,  # Request Timeout
+    425,  # Too Early
+    429,  # Too Many Requests — the only one that penalises the shared _RATE_GATE
+    500,  # Internal Server Error
+    502,  # Bad Gateway
+    503,  # Service Unavailable — what actually happened
+    504,  # Gateway Timeout
+    509,  # Bandwidth Limit Exceeded (non-standard, seen from CDNs)
+})
+
 #: How long to reuse a signed CDN URL. HF signs them for 1 hour (decoded from the token's
 #: `Expires`); 50 minutes leaves margin for a slow file without risking a mid-read expiry, which
 #: would surface as a 403 rather than a retryable error.
@@ -402,10 +424,22 @@ class _RangeFile(io.RawIOBase):
         return bytes(out)
 
     def _read_once(self, n: int, start: int) -> bytes:
-        """One ranged GET of at most `n` bytes from `start`, with 429-aware backoff.
+        """One ranged GET of at most `n` bytes from `start`, retrying every TRANSIENT status.
 
         Goes to the signed CDN URL, NOT `self.url` — see `_cdn_url`. No auth header: the signature
         carries the authorisation, and sending a stale bearer token to the CDN is pointless.
+
+        **429 is not the only status worth retrying, and assuming it was cost five bundles.** This
+        branch used to read ``if exc.code != 429``, so anything else raised on the FIRST attempt —
+        the message even said "failed after 1 attempts". Overnight, five of eight wave-1 children
+        died on a single ``HTTP Error 503: Service Unavailable`` from Hugging Face, on five
+        different repos and files, after hours of billable work each. A 503 is by definition
+        temporary; it is the one status that most deserves a second try.
+
+        `_TRANSIENT_STATUSES` is a small explicit set rather than "anything >= 500", because a
+        blanket rule would also retry a 501 or a 505 — permanent conditions where retrying just
+        delays a real error behind eight backoffs. 408 and 425 are included for the same reason
+        429 is: the server is telling us to try again.
         """
         req = urllib.request.Request(
             self._cdn_url(),
@@ -420,15 +454,22 @@ class _RangeFile(io.RawIOBase):
                 break
             except urllib.error.HTTPError as exc:
                 last = exc
-                if exc.code != 429 or attempt == _MAX_ATTEMPTS - 1:
+                if exc.code not in _TRANSIENT_STATUSES or attempt == _MAX_ATTEMPTS - 1:
                     raise IngestError(
                         f"range read failed after {attempt + 1} attempts: {self.url}: {exc}"
                     ) from last
-                self.n_429 += 1
-                # Honour Retry-After when the server sends one; it knows better than we do.
-                retry_after = exc.headers.get("Retry-After") if exc.headers else None
-                delay = _backoff_delay(attempt, retry_after)
-                _RATE_GATE.penalise(delay)
+                if exc.code == 429:
+                    # Only 429 penalises the shared gate: it means WE are sending too fast, so
+                    # every worker should slow down. A 503 is the server's own problem and
+                    # throttling ourselves for it would idle the whole fleet over one bad file.
+                    self.n_429 += 1
+                    retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                    delay = _backoff_delay(attempt, retry_after)
+                    _RATE_GATE.penalise(delay)
+                else:
+                    # Honour Retry-After when the server sends one; it knows better than we do.
+                    retry_after = exc.headers.get("Retry-After") if exc.headers else None
+                    delay = _backoff_delay(attempt, retry_after)
                 time.sleep(delay)
             except Exception as exc:  # noqa: BLE001 - transport retry, re-raised below
                 last = exc

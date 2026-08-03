@@ -12,6 +12,7 @@ prefix that nothing expires. Those are exactly the shape this project's audit wa
 from __future__ import annotations
 
 import json
+from unittest import mock
 
 import pytest
 
@@ -873,3 +874,94 @@ def test_range_file_read_returns_exactly_n_bytes():
     assert got == payload[:9_000], "the loop must reassemble contiguous bytes in order"
     assert len(calls) > 1, "a short transport should have forced more than one request"
     assert rf.pos == 9_000 and rf.bytes_fetched == 9_000
+
+
+# --------------------------------------------------------------------------------------
+# Transient HTTP statuses — five wave-1 bundles died on a single 503
+# --------------------------------------------------------------------------------------
+
+
+# NOTE: not `_range_file` — that name is already taken at line 507 by a helper
+# with a different signature, and shadowing it broke five existing tests.
+def _plain_range_file(url="https://hf.co/x.parquet", size=1 << 20):
+    from edullm_data.ingest_reservoir import _RangeFile
+
+    return _RangeFile(url, size, {"User-Agent": "test"})
+
+
+def test_a_503_is_retried_not_raised_on_the_first_attempt():
+    """THE overnight failure. Five of eight wave-1 children died on one `503 Service Unavailable`
+    from Hugging Face — five different repos, five different files — each after hours of billable
+    work, with the error reading "failed after 1 attempts".
+
+    The guard was `if exc.code != 429`, so 429 was the ONLY retried status and every other HTTP
+    error escaped immediately. A 503 is by definition temporary; it is the status that most
+    deserves a second try.
+    """
+    import urllib.error
+
+    from edullm_data import ingest_reservoir as m
+
+    rf = _plain_range_file()
+    calls = {"n": 0}
+
+    def flaky(req, timeout=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise urllib.error.HTTPError(rf.url, 503, "Service Unavailable", {}, None)
+
+        class R:
+            def read(self):
+                return b"\x00" * 64
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return R()
+
+    with mock.patch.object(m.urllib.request, "urlopen", flaky), \
+            mock.patch.object(m.time, "sleep", lambda s: None), \
+            mock.patch.object(m._RangeFile, "_cdn_url", lambda self: self.url):
+        got = rf._read_once(64, 0)
+
+    assert got == b"\x00" * 64
+    assert calls["n"] == 2, "the 503 must be retried, not raised"
+
+
+def test_a_404_still_raises_immediately():
+    """`_TRANSIENT_STATUSES` must not become "retry everything". A 404 is permanent: retrying it
+    buries a real error behind eight backoffs and minutes of sleeping."""
+    import urllib.error
+
+    from edullm_data import ingest_reservoir as m
+
+    rf = _plain_range_file()
+    calls = {"n": 0}
+
+    def gone(req, timeout=None):
+        calls["n"] += 1
+        raise urllib.error.HTTPError(rf.url, 404, "Not Found", {}, None)
+
+    with mock.patch.object(m.urllib.request, "urlopen", gone), \
+            mock.patch.object(m.time, "sleep", lambda s: None), \
+            mock.patch.object(m._RangeFile, "_cdn_url", lambda self: self.url):
+        with pytest.raises(IngestError, match="after 1 attempts"):
+            rf._read_once(64, 0)
+    assert calls["n"] == 1, "a permanent status must not be retried"
+
+
+def test_only_429_penalises_the_shared_rate_gate():
+    """429 means WE are sending too fast, so every worker should slow down. A 503 is the server's
+    own problem — throttling the whole fleet over one bad file would idle every child."""
+    from edullm_data.ingest_reservoir import _TRANSIENT_STATUSES
+
+    assert 429 in _TRANSIENT_STATUSES and 503 in _TRANSIENT_STATUSES
+    # 403 is deliberately absent: a mid-read CDN signature expiry needs a FRESH signed url, not a
+    # retry of the stale one.
+    assert 403 not in _TRANSIENT_STATUSES
+    # Nothing permanent may creep in.
+    for permanent in (400, 401, 404, 410, 501, 505):
+        assert permanent not in _TRANSIENT_STATUSES, permanent
