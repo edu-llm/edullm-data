@@ -140,5 +140,53 @@ publish(
    "upstream-full-collection"` exists to flag.
 3. **`edullm-landing-manifest-created` is DISABLED.** Writing `manifest.json` normally fires
    EventBridge -> the validator -> promotion. With the rule off, nothing auto-promotes: submit
-   `edullm-validator` (currently rev 10, running as `sbsandbox-intern-edullm-dataset-validator`)
-   manually, or re-enable the rule first. Decide which BEFORE publishing, not after.
+   `edullm-validator` (**rev 12** as of 2026-08-04, running as
+   `sbsandbox-intern-edullm-dataset-validator`) manually, or re-enable the rule first. Decide which
+   BEFORE publishing, not after. **Do not hardcode a revision** — both EventBridge rules target the
+   job def by *unversioned* name, so a manual submission naming an old revision runs a different
+   validator than the automatic path would. Re-read the current revision before submitting.
+4. **`publish()` has nowhere to run yet.** Item 3's premise is that this runs on Batch, but there is
+   no reservoir publish job definition — `edullm-prm800k-publish` is a different corpus with a
+   different entry point (`edullm-prm800k-ingest publish --run-id`). One must be registered first;
+   see "The publish job definition" below.
+
+## The two image lines, and why the version string cannot identify the code
+
+`validator:12` and the image that built this corpus come from **branches that diverge** at
+`a372bf8`, and **two different commits both call themselves `0.7.4`**:
+
+| commit | version | `distinct_ids_min` | line |
+|---|---|---|---|
+| `7a97c27` | 0.7.4 | 256 | reservoir — **built this corpus** (`edullm-reservoir-build:9`) |
+| `d08aa05` | 0.7.4 | 128 | vendored/prm — lowered the bound for a 152k-vocab Qwen corpus |
+| `e0984c8` | 0.8.0 | 128 | the merge of both; **`validator:12`'s image** |
+
+So `assert __version__ == '0.7.4'` — which every build job definition does — is satisfied by two
+different trees with different gate bounds. A version assertion is not a code identity; the ECR tag
+(a commit sha) is. `validator:10` is older still: its image is tagged
+`prm800k-codebuild-20260731T193909Z-d732af0e67fe`, a CodeBuild commit **not present in this repo**.
+
+**Measured, so this does not block the publish.** The bound is enforced off the same bytes in two
+places (`pretrain_tokens_v1.check_decode_smoke` and `corpus_pack._verify_shard`), so a corpus built
+at 256 and validated at 128 is validated *more loosely* than it was built — never the reverse. And
+it is moot here: sampling Gate A's own window (65,536 B in 4 windows) from the **smallest shard of
+each of the 27 bundles** gives 2,278–4,507 distinct ids against a floor of 256 — a ≥8.9x margin on
+the worst case, `ubuntu-irc--train`'s 3.5M-token tail. Every sampled id is also `< 100278`. Either
+validator passes this corpus on this check.
+
+## The publish job definition
+
+`publish()` stream-hashes every object, so it PULLS every byte to wherever it runs — 587 GiB at the
+0.8 MiB/s this project measured off-region is ~9 days. It must run in-region. Model it on
+`edullm-reservoir-build-force:1` (which was itself cloned from `edullm-reservoir-build:9`), not on
+`edullm-prm800k-publish:2`, whose 2 vCPU / 4 GiB and 7200 s timeout are sized for a small corpus:
+
+- image: the same digest that built the corpus, or a strictly newer one from a branch that
+  **contains** `7a97c27` — check ancestry with `git merge-base --is-ancestor`, do not trust versions
+- `hash_workers=16`, `copy_workers=16` (single-threaded publish timed out on the 218-shard/125 GB
+  olmo run), and `--timeout attemptDurationSeconds=7200` or more — 10,049 shards is ~50x that corpus
+- `executionRoleArn` MUST be set, or the container starts with no readable logs (this cost a full
+  diagnosis cycle once: the symptom looks like a missing log group)
+- the role needs `PutObject` on `edullm-landing` only. It must NOT have it on `edullm-data` — that
+  bucket is writable solely by the validator role, which is the airlock, and is an IAM Deny rather
+  than a convention.

@@ -10,9 +10,15 @@
 >
 > | job def | top ACTIVE rev | how code gets in | timeout |
 > |---|---|---|---|
-> | `edullm-validator` | **10** | **image, digest-pinned (`sbsandbox-intern-edullm-data@sha256:339c2b6b…`) — no wheel, no bootstrap** | 7200 s |
+> | `edullm-validator` | **12** (was 10 when this banner was written, 2026-08-01) | **image, digest-pinned (`…@sha256:a71e62f4…`, tag `e0984c88b7c5` = 0.8.0) — no wheel, no bootstrap** | 7200 s |
 > | `edullm-fsck` | **6** | wheel `0.6.0` | 3600 s |
 > | `edullm-reservoir-ingest` | **7** | wheel `0.6.3` | 7200 s |
+>
+> **Do not hardcode a validator revision anywhere.** Both EventBridge rules target the job def by
+> *unversioned* name, so the automatic path always runs the top ACTIVE rev while a hand-written
+> submission naming `:10` runs an older image. Rev 10's image (`…@sha256:339c2b6b…`) is tagged
+> `prm800k-codebuild-20260731T193909Z-d732af0e67fe`, a CodeBuild commit **not in this repo at all**.
+> Re-read the live revision before submitting; that is why this row now carries its own date.
 >
 > - **"BLOCKED on one external step"** — not blocked. The validator has been running in-cluster
 >   for days and has promoted live corpora. The stated blocker (no Docker host, no git remote to

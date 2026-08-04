@@ -1,0 +1,112 @@
+{
+  "_comment": [
+    "Permission policy for edullm-reservoir-publish — the role that runs `publish()` for",
+    "pretrain/reservoir-dolma2 on AWS Batch, in-region.",
+    "",
+    "WHY THIS ROLE EXISTS AT ALL, rather than reusing edullm-reservoir-ingest. That role's",
+    "`NeverWriteValidatorTriggeringOrTerminalNames` statement explicitly DENIES PutObject on",
+    "`*manifest.json` and `*dataset.json` anywhere in edullm-landing — which are exactly the two",
+    "objects publish() must write (publish.py:785 reserves the version with a create-only",
+    "dataset.json, publish.py:813 writes each group's manifest.json). Its Allow is also scoped to",
+    "`_ingest/reservoir-dolma2/*`, and publish() copies payload to `<dataset_id>/<version>/`, which",
+    "is outside that prefix. So the build role cannot publish, deliberately: a builder that could",
+    "write a manifest could fire the validator against a half-built prefix.",
+    "",
+    "The reverse of the build role's Deny is the whole point here, so this role is the ONLY one in",
+    "the reservoir line permitted those two basenames, and only under the dataset's own prefix.",
+    "",
+    "STILL NO WRITE TO edullm-data. That bucket is writable solely by the validator role, and that",
+    "is the airlock — an IAM Deny in 02-bucket-policy.json, not a convention. publish() only ever",
+    "stages into landing; promote() is the validator's job. Read access to edullm-data is needed",
+    "because publish() reads the published tokenizer (to bind tokenizer/dolma2-bpe) and the catalog",
+    "to pick the next version.",
+    "",
+    "GetObject on the build prefix is required and is NOT redundant with the copy: publish()",
+    "stream-hashes every source object to compute the manifest sha256 (which is why it must run",
+    "in-region — it pulls every byte to wherever it runs; measured at 0.8 MiB/s off-region, ~9 days",
+    "for 587 GiB). The copies themselves are server-side and need read on the source plus write on",
+    "the destination, both of which are in landing here."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadTheBuiltCorpusToHashAndCopyIt",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectAttributes"
+      ],
+      "Resource": "arn:aws:s3:::edullm-landing/_ingest/reservoir-dolma2/*"
+    },
+    {
+      "Sid": "WriteOnlyThisDatasetsStagedPrefix",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:GetObjectAttributes",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": "arn:aws:s3:::edullm-landing/pretrain/reservoir-dolma2/*"
+    },
+    {
+      "Sid": "ListLandingForVersionSelectionAndCopySources",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::edullm-landing",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "_ingest/reservoir-dolma2/*",
+            "pretrain/reservoir-dolma2/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadPublishedTokenizerAndCatalog",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectAttributes"
+      ],
+      "Resource": [
+        "arn:aws:s3:::edullm-data/_catalog/*",
+        "arn:aws:s3:::edullm-data/tokenizer/dolma2-bpe/*"
+      ]
+    },
+    {
+      "Sid": "ListDataBucketToResolveTheNextVersion",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::edullm-data",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "pretrain/reservoir-dolma2/*",
+            "_catalog/*",
+            "tokenizer/dolma2-bpe/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "NeverWriteToTheDataBucketThatIsTheAirlock",
+      "Effect": "Deny",
+      "Action": [
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::edullm-data/*"
+    },
+    {
+      "Sid": "NeverForgeAValidatorVerdict",
+      "Effect": "Deny",
+      "Action": "s3:PutObject",
+      "Resource": [
+        "arn:aws:s3:::edullm-landing/*_VALIDATED.json",
+        "arn:aws:s3:::edullm-landing/*_REJECTED.json"
+      ]
+    }
+  ]
+}

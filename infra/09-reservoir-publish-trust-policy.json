@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "Trust policy for edullm-reservoir-publish — WHO may become this role.",
+    "",
+    "`ecs-tasks.amazonaws.com` only, identical in shape to 08-reservoir-ingest-trust-policy.json and",
+    "to the validator's. AWS Batch runs containers as ECS tasks, so that principal is what a running",
+    "job needs; no human session and no EC2 instance can assume it.",
+    "",
+    "This matters more for this role than for the builder. The intern role in this account carries",
+    "AdministratorAccess, so IAM is not what keeps a human out of the pipeline's identities — this",
+    "trust policy is. And this is the one reservoir role permitted to write `dataset.json` and",
+    "`manifest.json`, i.e. the one whose credentials could fire the validator. Keeping it",
+    "unassumable from a session is what makes 'publishing happens only through a Batch job' a",
+    "mechanism rather than a habit.",
+    "",
+    "Deliberately NO `Condition` block, for the reason recorded on the ingest role: Batch does not",
+    "populate `aws:SourceArn` on the ECS task-assume call the way one would expect, so a SourceArn",
+    "condition scoping this to one job queue evaluates false and every job fails to start with an",
+    "unhelpful credential error. The blast radius is bounded by the permission policy",
+    "(09-reservoir-publish-policy.json), which Denies all writes to edullm-data."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcsTasksOnly",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}

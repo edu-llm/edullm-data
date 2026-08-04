@@ -1,0 +1,36 @@
+{
+ "_comment": [
+  "Measured 2026-08-04 against the built corpus at plan d5c9bcd38735e1f0, to settle whether the",
+  "two diverged image lines' disagreement about families/pretrain.json `distinct_ids_min`",
+  "(256 on the reservoir line at 7a97c27, 128 on the vendored line at d08aa05/e0984c8) could",
+  "change this corpus's Gate A verdict. It cannot: every bundle's SMALLEST shard clears BOTH.",
+  "",
+  "Method: read Gate A's own sampling window (DECODE_SAMPLE_BYTES=65536 in _N_WINDOWS=4 windows)",
+  "from the smallest shard of each of the 27 bundles via ranged GETs, count np.unique, and compare",
+  "against the scaled floor min(declared, max(n//4, 2)). The vocab cap is inert here:",
+  "_cap_min_distinct_by_vocab returns min(declared, max(16, 100278//16=6267)), so the declared",
+  "floor passes through unchanged. Every sampled id was also asserted < vocab 100278.",
+  "",
+  "Smallest shards are the risky ones -- the two ragged tails (finewiki--train 19,529,728 tokens",
+  "and ubuntu-irc--train 3,538,944) are where a thin shard would show up first."
+ ],
+ "plan_id": "d5c9bcd38735e1f0",
+ "measured_at": "2026-08-04",
+ "gate_a_sample": {
+  "bytes": 65536,
+  "windows": 4,
+  "ids_per_shard": 16384
+ },
+ "vocab_size": 100278,
+ "floors_compared": {
+  "reservoir_line_7a97c27": 256,
+  "vendored_line_d08aa05": 128
+ },
+ "worst_case": {
+  "bundle": "ubuntu-irc--train",
+  "shard_tokens": 3538944,
+  "distinct_ids": 2278,
+  "margin_vs_256": 8.9
+ },
+ "result": "0 of 27 bundles fail at either floor; worst-case margin 8.9x over the stricter bound"
+}
