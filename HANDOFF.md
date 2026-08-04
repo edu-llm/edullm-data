@@ -1,12 +1,21 @@
 # HANDOFF — eduLLM Dataset Standard
 
-Last updated: **2026-08-01 (late)**, after a session that proved the reservoir ingest on Batch and
-then **built the reader and the packer** — the two stages the plan called the riskiest. The published
-150B and 127B corpora are untouched and readable.
+Last updated: **2026-08-04**, after the reservoir corpus was **BUILT on Batch**: 27/27 bundles,
+10,049 shards, **251.2B tokens** staged on `edullm-landing`. The published 150B and 127B corpora are
+untouched and readable.
 
 > ## ▶️ START HERE
 >
-> 1. **This file's "Next Steps → THE CURRENT LIST"** — what to do next, in order.
+> **The corpus is built and NOT published. One blocker stands in the way, and it is known:**
+> `verify --deep` refuses with `bundle-set-mixed-wheel-versions` because four code fixes landed
+> mid-build, so five different wheels packed the corpus. **Nine bundles / 4,137 shards must be re-run
+> on wheel 0.7.4** (`edullm-reservoir-build:9`, `--force`, since resume would otherwise skip them).
+> That check is correct — do not waive it. Then re-verify, require `VERIFY_DONE_RC=0`, and publish per
+> `artifacts/reservoir/PUBLISH-SPEC.md`. Full detail in **Next Steps item 1**.
+>
+> 1. **This file's "Next Steps"** — what to do next, in order. Item 1 is the only blocker.
+> 1b. **`artifacts/reservoir/PUBLISH-SPEC.md`** — both irreversible decisions, confirmed by the owner,
+>    plus the exact `publish()` call and the three pre-publish gates.
 > 2. **`DATASET-DESIGN-reservoir.md`** — the plan. §5.6 is the build sequence; §4.1 the dedup
 >    pipeline; §2.1 the pool sizing.
 > 3. **`src/edullm_data/corpus.py`** — the build-time CONTRACT. Read it before touching any build
@@ -358,20 +367,80 @@ GPU budget**, not an IAM grant — see "What is NOT done" and `docs/PLATFORM-INT
 the reservoir must hold ≥3× peak plausible demand per category and let a teammate re-weight sources
 at read time via `build_mixture`.
 
-**Status: the pipeline is BUILT and unrun.** Option E (full pipeline from documents) was confirmed by
-the owner over three faster alternatives, MinHash deferred — and as of end-of-session
-**2026-08-01 every stage between "documents exist upstream" and "shards exist in S3" is written,
-tested, and exercised against real bytes.** 1,090 tests. The reader pulls real documents from
-**14/14** drawn sources at their pinned revisions.
+**Status as of 2026-08-04: the corpus is BUILT. 27/27 bundles, 10,049 shards, 251.2B tokens on
+landing.** Option E (full pipeline from documents) was confirmed by the owner over three faster
+alternatives, MinHash deferred. The build ran on Batch across 2026-08-02→04 and cost four code fixes
+found only by running it (see *What Didn't Work*). Suite 1,107.
 
-**What has NOT happened: the build has never run.** No shard exists. The remaining work is
-execution — register a job def, run the array, publish, verify — and it is the first step in this
-project that spends real money (~4 TB fetched, ~1 TB copied) and writes into a bucket where frozen
-means frozen. See "Next Steps"; it opens with a go/no-go, deliberately.
+**What has NOT happened: nothing is published.** `verify --deep` **refuses** with
+`bundle-set-mixed-wheel-versions` — the five wheels that packed the corpus are not
+interchangeable, because the gates a bundle passed are a property of the wheel that packed it. Nine
+bundles / 4,137 shards must be re-run on 0.7.4 before anything can be published. That is the only
+blocker, and *Next Steps* item 1 is exactly it.
+
+~~**What has NOT happened: the build has never run.**~~ Superseded above 2026-08-04.
 
 ---
 
 ## Current Progress
+
+### 2026-08-04 — THE CORPUS IS BUILT. 27/27 receipts. `verify` WILL REFUSE, and the reason is known.
+
+**All 27 bundles are built and receipted** at
+`s3://edullm-landing/_ingest/reservoir-dolma2/build/d5c9bcd38735e1f0/`. Numbers read from the
+receipts, not the plan:
+
+| | |
+|---|---|
+| bundles | **27 / 27** |
+| shards written | **10,049** (plan allocated 10,082 — see the 33 unfilled below) |
+| documents | **308,291,107** |
+| train tokens | **250,242,924,544** |
+| val tokens | **975,077,376** (0.39%) |
+| total | **251,218,001,920** |
+| conservation | holds on **all 27** — `tokens_in == out + tail + surplus` |
+| unfilled refs | **33, all in `finewiki--train`** |
+
+**⚠️ `verify --deep` WILL REFUSE, and I confirmed it locally before spending the 1 TB read.** The
+set-level checks are pure and free (`verify_bundle_set` called with no `s3=`), so running them over
+the downloaded receipts predicts the verdict for nothing:
+
+```
+bundle-set-mixed-wheel-versions: bundles were built by 5 different wheels
+['0.7.0', '0.7.1', '0.7.2', '0.7.3', '0.7.4']. The gates a bundle passed are a property of
+the wheel that packed it ... Re-run the bundles built by the older wheel.
+```
+
+**That check is CORRECT and must not be waived.** Four code fixes landed *during* the build, so early
+bundles were packed by wheels lacking later gates. Nine bundles / 4,137 shards need re-running on
+0.7.4; eighteen are already on it and resume skips them:
+
+| wheel | bundle | shards |
+|---|---|---|
+| 0.7.0 | `ubuntu-irc--train` | 71 |
+| 0.7.1 | `finewiki--val` | 1 |
+| 0.7.1 | `pes2o--val` | 2 |
+| 0.7.1 | `pubmed--val` | 1 |
+| 0.7.1 | `stackexchange--val` | 1 |
+| 0.7.2 | `fineweb-edu--val` | 3 |
+| 0.7.3 | `finemath--train` | 1353 |
+| 0.7.3 | `finepdfs-edu--train` | 1114 |
+| 0.7.3 | `stackv2-edu--train` | 1591 |
+
+**The 33 unfilled refs in `finewiki--train` are DATA, not a fault.** finewiki's pool is 8.87B against
+an 8.8B target — the tightest ratio in the registry — so the source ran out of documents at ordinal
+`train-04771`. `pack` skips the allocation rather than writing a short shard (an unfilled ref costs
+nothing; a surplus would discard real tokens). Realized 7,920,156,672 = **90.5% of plan**. Two
+consequences: 33 planned keys will never exist, and `sources[]` must cite **7.92B** for finewiki,
+not 8.75B.
+
+**Zero build-code failures in the final run.** Every failure this session was my own termination
+(exit 137), a `CannotPullContainerError` from an expired ECR digest, or one of the four bugs under
+*What Didn't Work* — each caught by a gate before bad data persisted.
+
+Verify job `a4531f96-8937-44ee-bf64-ab481d3dd3a3` (`rsv-verify-deep`, job def
+`edullm-reservoir-verify:1`) is RUNNING. It will report the violation above. Safe to let finish or
+kill — the verdict is already known.
 
 ### Reservoir pipeline status — 2026-08-01 (end of session). Every build stage is BUILT.
 
@@ -1125,6 +1194,41 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## What Worked
 
+### 2026-08-04 — predicting a 1 TB gate's verdict for free, by running only its pure half
+
+`verify_bundle_set` takes `s3`/`bucket` as **optional**, and its docstring says why: the set-level
+checks "are pure and free, so a driver can check completeness before spending a single HEAD." So
+instead of waiting hours for `verify --deep` to read ~1 TB and then report, I copied the 27 receipts
+locally (one recursive `s3 cp`, 1.6 MiB) and ran the set-level checks on my laptop. It printed
+`bundle-set-mixed-wheel-versions` in under a second.
+
+**Reusable shape: when a gate has a cheap tier and an expensive tier, run the cheap tier first even
+when you intend to run both.** The expensive tier here is a full corpus re-hash; the cheap tier
+answered the question. The same receipts also gave the realized `tokens_out` per bundle, which is
+what `sources[]` needs and which the plan cannot supply — finewiki realized 90.5% of its planned
+tokens, so citing the plan would have published a false mix table.
+
+### 2026-08-04 — reverting each fix to confirm its test fails, five more times
+
+Continued from the earlier sessions and it paid every time. The `<|endoftext|>` test reports
+"2 EOS in a single document" with the neutralizer removed; the surplus test reproduces the production
+error string *verbatim*; the encode-once test reports **594 tokenizations for 300 documents** —
+exactly 2× — with the fuse reverted. A test written against a bug you have already fixed proves
+nothing until you have seen it fail.
+
+Also caught two of my own fixtures being wrong rather than the code: 200 identical short documents
+were removed by *dedup* before the length filter could see them (1 drop, not 150), and my
+`_range_file` helper **shadowed an existing one** with a different signature and broke 5 unrelated
+tests. Both surfaced only because the assertions were specific enough to contradict.
+
+### 2026-08-04 — writing the operational lessons INTO the monitoring prompt
+
+The hourly check accumulated three hard-won rules as it ran: use `s3api list-objects-v2` with
+`sort_by`, never `s3 ls` on a shard prefix (those responses ran 800+ lines to yield two numbers);
+read the **ordinal**, not the object count, because leftover keys from terminated attempts are
+overwritten at the same paths; and do not quote per-bundle ETAs at all, because every one was wrong.
+Encoding those in the recurring prompt meant they survived my own forgetting across ~20 checks.
+
 ### 2026-08-01 (night, end) — reading real bytes as the LAST step before spending money
 
 The single highest-yield ten minutes of the session was pointing the finished reader at every drawn
@@ -1319,6 +1423,70 @@ shards have odd token counts — a filename tells you nothing; `size % 4` and a 
   reading `pyproject.toml` both said `families/` shipped. Installing proved it did not.
 
 ## What Didn't Work (and the fix)
+
+### 2026-08-02→04 — FOUR code bugs, all found by running, none reachable from 1,101 green tests
+
+Every one produced a corpus that would have been silently wrong or a build that could not finish.
+Each was caught by a gate *before* bad data persisted, which is the pipeline working as designed —
+but none was reachable from the suite, and the reason each was invisible is the transferable part.
+
+**1. `_reader_for` had no stop condition** (`241334c`, 0.7.0). It walked every file in the source
+repo. The registry draws 252B tokens from a 1,094B pool, so `pack` was handed thousands of shards'
+worth of documents the plan had no refs for, and `_drain_surplus` refuses a surplus of one whole
+shard. Measured before the fix: **all 14 drawn sources raised before writing a shard**, 11 of them
+needing an impossible 46–90% filter loss to come under the threshold. Invisible to the suite because
+every driver test injects `documents=`, bypassing `_reader_for` entirely.
+
+**2. The surplus gate refused a deliberate subset** (`0b8135e`, 0.7.1). Having fixed #1, the reader
+now over-delivers *on purpose* — `_CHARS_PER_TOKEN` 6.0 against a measured ~4.4, times
+`_FILTER_HEADROOM` 1.5 — so filter attrition cannot leave a bundle's last shard unfilled. That
+overshoot IS surplus. **25 of 27 bundles died at end-of-run**, each after its full billable work.
+`partial_source=True` splits the two cases rather than loosening the bound. Invisible because
+`TEST_SHARD_TOKENS` rescaling does not touch the module constant `_drain_surplus` compares against —
+at test size the surplus never reaches the threshold and both directions pass against broken code.
+
+**3. Scraped text contains `<|endoftext|>`, which IS the boundary id** (`1a0912e`, 0.7.2). Five large
+train bundles failed with *"20014 documents end in this shard but id 100257 appears 20016 times"* —
+1, 2 and 8 extra per ~20,000-document shard, so roughly 1 document in 2,500. Not a BPE collision:
+`tokenizers` parses the literal string into id 100257 wherever it occurs. Fatal because OLMo-core
+recovers boundaries with `(mmap == eos_token_id).nonzero()`, so a marker inside a document is a FALSE
+boundary and the model trains on fragments split wherever a scraped page mentioned the token.
+Neutralized to `<| endoftext |>` before encoding — space-split rather than deletion, so nothing is
+silently dropped and no invisible character enters a published corpus.
+
+**4. 429 was the ONLY retried HTTP status** (`7a97c27`, 0.7.4). `_read_once` guarded on
+`if exc.code != 429`, so every other error raised on the first attempt against a retry budget of 8 —
+the message said so outright, *"failed after 1 attempts"*. **One transient 503 killed 5 of 8 children
+overnight**, five different repos and files, hours of work each. This is the same class of bug this
+repo already paid for and documented once, for 429s specifically: the fix then made the backoff long
+enough, and nobody asked which statuses reach it.
+
+**Two infra faults, neither a code bug.** A pinned ECR digest in `sbsandbox-intern-edullm-olmo-core`
+— another project's repo, 50-image retention — aged out mid-run and all 8 children died with
+`CannotPullContainerError`. Fixed by pointing at `sbsandbox-intern-edullm-data`, which `.edullm/
+Dockerfile` actually builds and which *contains* the package, so the wheel-from-S3 bootstrap could be
+deleted along with the whole stale-wheel-by-filename failure mode. Separately, the dedup set cost
+**155 B/entry measured, not the 113 B its docstring claimed** (`sys.getsizeof` of the string alone,
+ignoring the set's slot overhead) — that 37% understatement is what pinned all four hosts at 97%
+memory with 25% of their CPU idle.
+
+### 2026-08-04 — I terminated running jobs while a queue could backfill, and gained nothing
+
+Asked to free memory for the owner's own jobs, I terminated the 3 smallest running children plus one
+more. Batch **refilled the freed slots from the 10-deep queue faster than my cancels landed**, so
+occupancy returned to 12 and free memory stayed at 1,786 MiB. Net effect: ~50 minutes × 4 bundles of
+work destroyed, zero capacity freed. The queue must be drained *first*, or the whole array terminated
+in one call. `update-compute-environment` also refuses to scale down (`Manually scaling down compute
+environment is not supported`), so the environment is not the lever either.
+
+### 2026-08-04 — every per-bundle ETA I gave was wrong, in both directions
+
+9.1 h became 2.5. 1–2 h became 8. I once alarmed at 33 h from comparing an ordinal against a
+*previous attempt's* timestamp. Per-shard time swings with host contention (29.6 s/shard uncontended
+vs ~43 s at 12-way) and with document length, and my val-read rate came from a single 2-shard bundle
+that was ~3× pessimistic. Also: **object counts are not a progress signal here** — leftover keys from
+terminated attempts are overwritten at the same paths, so `dclm` showed ~706 objects while at ordinal
+~500. Only the max ordinal and consecutive timestamps mean anything.
 
 ### 2026-08-01 (night) — four registry rows were unreadable, and only real bytes could tell
 
@@ -1670,6 +1838,48 @@ Other misses this session:
 
 ## Key Decisions
 
+### 2026-08-03 — the two IRREVERSIBLE publish decisions, CONFIRMED by the owner
+
+Both are transcribed in full in `artifacts/reservoir/PUBLISH-SPEC.md` (`6e34aa6`) with the exact
+`publish()` call. Summarized because both are unfixable after the fact:
+
+**Name: `pretrain/reservoir-dolma2`.** Validated mechanically, not by eye. **No token budget in the
+name**, even though siblings carry one (`olmo-150b-dolma2`, `regmix-10b`) — those describe corpora
+built *to* a budget, and this is a reservoir teammates draw 20B mixtures from. "252b" would read as
+an instruction to train on all of it. (`pretrain/reservoir-final` was checked and correctly REJECTED —
+`final` is a version token.)
+
+**The synthetic half ships UNDECONTAMINATED, with the gap stated.** 59.6B tokens, 23.7% of train.
+FinePhrase is rephrased FineWeb-Edu and rephrasing is precisely what defeats n-gram matching, which
+is the only decontamination this pipeline has. The 13-gram gate is verified on verbatim text (40/40
+GSM8K test questions caught, 0/2 false positives) and must be assumed **ineffective** here. It goes in
+`limitations[]` because the README renders that section and omits absent ones — silence would read as
+"decontaminated", and a wrong benchmark score months from now would look like a modelling result
+rather than a data defect.
+
+**Two things surfaced while writing that spec that were NOT part of either decision.** The license is
+mixed and includes share-alike: `stackexchange` and `finewiki` are CC-BY-SA-4.0 (finewiki also GFDL),
+20.5B tokens / 8.2%, so no single top-level `license.id` is truthful. And `sources[]` token counts
+must come from the receipts' `tokens_out` — finewiki proves why, at 90.5% of plan.
+
+### 2026-08-04 — concurrency capped by submitting individual jobs, not an array
+
+The owner needed ~2 hosts for their own work. A queue-level fair-share policy would have changed
+behaviour for *their* jobs too, and Batch has no per-array concurrency limit. Submitting N individual
+jobs is contained, needs no shared config change, and is trivially reversible. Later, with explicit
+permission, this went to 12 concurrent to overlap the two waves — which cost the reservation for ~8 h
+but pulled the finish from ~19 h to ~8 h at identical cost, since vCPU-hours are conserved.
+
+### 2026-08-04 — container sized from measurement, and my own first proposal was wrong
+
+I proposed 12 GiB in conversation. Checked before acting: it leaves **−3.1 GB** on the worst bundle
+and would have OOM'd `stackv2-edu--train` after hours of work. Measured worst-bundle resident is
+~12.1 GB (10.3 dedup + 0.45 decon index + 0.4 tokenizer + 0.1 shard + 0.5 pyarrow row group +
+interpreter), so **14 GiB** with 1.9 GB headroom, packing 4 children per 64 GiB host instead of 3.
+Related correction: I sized against ~120M documents for that bundle; actual was **42.2M**, because my
+500-tokens-per-document assumption was 2× off against a real mean of 943. Per-bundle document
+estimates in this project run high — treat them as upper bounds.
+
 ### 2026-08-01 (night) — four decisions taken WITHOUT the owner, on explicit instruction
 
 The owner said "continue handling it all yourself." Each of these was a real judgement call, so each
@@ -1897,531 +2107,106 @@ not open.
 
 ## Next Steps (priority order)
 
-### THE CURRENT LIST — updated 2026-08-01 (late). Decision of record: FULL PIPELINE, MinHash deferred.
+### UPDATED 2026-08-04. The corpus is BUILT (27/27 receipts). Three things stand between here and a published dataset.
 
-Remaining: **~2–3 days**, down from 2–3 weeks. **Items 1–4 and the registry are DONE**, and the
-reader is proven against real bytes for all 14 drawn sources. What is left is **execution**: register
-a job def, run the array, publish, backfill sidecars, verify. Compute is ~12 hours and ~$20.
-
-🛑 **The next step spends money and writes to landing.** Everything up to here has been free and
-reversible; `run` fetches ~4 TB and `publish` copies ~1 TB. Worth a deliberate go/no-go rather than
-drifting into it.
-
-#### ▶️ WHAT TO ACTUALLY TYPE, in order. Items 1–4 below are DONE; this is the whole remaining job.
-
-**0. Preflight, all free, all read-only.** Any failure here is cheaper than any failure later.
-```bash
-python3 artifacts/reservoir/build_registry.py          # regenerate; must print 17 corpora, 0 UNVERIFIED
-python3 artifacts/reservoir/verify_pins.py --deep      # must print 14/14 with correct magic
-python3 -m pytest -q                                   # 1,090 passing
-PYTHONPATH=src python3 -m edullm_data.corpus_build plan # 27 bundles / 10,082 shards / 252,070,002,688 tokens
-```
-If `plan_id` is **not** `d5c9bcd38735e1f0`, the registry changed — find out why before running. (It
-moved twice in one session, both times legitimately: once when DCLM was re-sourced, once when the
-`config` paths and `finemath`'s `id_column` were corrected. `plan_id` is the sha256 of the plan JSON,
-so it is *supposed* to move when the inputs do — that is the property, not a nuisance.)
-
-**1. Build the wheel and ship it.** The live job defs bootstrap `0.6.3` **by exact filename**, so a
-new wheel changes nothing until a job def is re-registered. Keep the PEP-427 name
-(`edullm_data-<version>-py3-none-any.whl`); a renamed `w.whl` is rejected by pip.
-
-**2. Register a job def for the build.** Model it on `edullm-reservoir-ingest:7` (2 vCPU / 8 GB,
-role `edullm-reservoir-ingest`, which cannot write `edullm-data`). Three things it MUST do, each a
-silent failure otherwise, and all three are enforced or documented in `corpus_build.py`:
-   - **`TOKENIZERS_PARALLELISM` explicitly set** — the driver *refuses to start* without it. Neither
-     default is safe: `false` throws away the rayon parallelism that makes a 255 B-token tokenize
-     affordable; unset in a forking process is the documented HF deadlock.
-   - **stage `families/` and the registry into the image or via S3** — `corpus_pack` refuses to start
-     without `families/pretrain.json` rather than degrading to the profile's laxer 0.5 EOS bound, and
-     the wheel does not carry `artifacts/`, so pass `--registry`.
-   - **stage the tokenizer** (`tokenizer/dolma2-bpe/v1`) and pass `--tokenizer-dir`. `vocab_size` and
-     `eos_token_id` are DERIVED from its `tokenizer.json` by the same function the validator uses.
-   - **raise the timeout past 7200 s** — there is no Batch maximum; 7200 was ours.
-
-**3. Run the plan, then the array.**
-```bash
-# plan once, to S3 — every child reads it and NO child allocates an ordinal
-... corpus_build plan --upload
-# then the array. Start with a SINGLE child against the smallest source to prove the loop.
-... corpus_build run --plan-id <id> --of <n> --tokenizer-dir /opt/tok
-```
-Resume is free and safe: a bundle whose receipt exists **and** whose every shard is present at the
-right size is skipped. Re-run failed indices; `--force` rebuilds regardless.
-
-**4. `verify`, then publish.** `corpus_build verify --plan-id <id>` refuses an incomplete build;
-`--deep` re-hashes every payload byte (a full GET per shard — the only re-hash in this pipeline).
-Only then run `publish()` per item 5 below.
-
-⚠️ **`_reader_for`'s dispatch has never run inside a Batch container** — it is exercised from this
-laptop against live HF and by unit tests, which is not the same as running under the job's IAM role
-and network. That is what step 3's single-child run is for.
-
-**Suite 1,085 passing** (was 790 at the start of the session), ruff clean. New modules:
-`corpus.py` (440), `corpus_read.py` (890), `corpus_pack.py` (809), `corpus_build.py` (~800),
-`corpus_receipt.py` (1,043), `corpus_filter.py` (~300), plus ~5,100 lines of tests and a generated
-17-source registry with every revision pinned.
-
-✅ **The zstd blocker is RESOLVED, and it did not need a dependency.** `dclm-baseline` named
-`mlfoundations/dclm-baseline-1.0` (`.jsonl.zst`) while claiming `parquet` — but
-`sizing-revised.md` line 40 shows the 114.69 B pool figure was measured against
-**`HuggingFaceFW/dclm_100BT`**, which *is* parquet. The registry was citing one repo's number under
-another repo's name; pointing the row at the measured repo removes the contradiction rather than
-adding a claim. Verified from bytes at the pinned revision. **The plan now excludes nothing: 27
-bundles, 10,082 shards, 252.07 B tokens** — landing on §2.2's ~10,400-object sizing.
-
-**1. ~~Per-corpus readers~~ — ✅ DONE. `src/edullm_data/corpus_read.py`, 890 lines, 61 tests.**
-Both paths exist: parquet over the proven `_RangeFile` transport, and the Common Pile `.json.gz`
-path that previously did not. Every column resolves by exact `path_in_schema`.
-
-**The duplicate-leaf trap was re-verified against real FinePhrase-shaped bytes**, and it is worse
-than the note above said. `pf.schema.names` is `['id','text','text']` so `.index("text")` returns the
-top-level ORIGINAL — but the near-miss selectors do not *fail* either: `columns=["rollout_results.text"]`
-returns a table with **zero columns** and `to_pylist()` of `[{}]`, i.e. a silently empty corpus.
-Measured through the finished reader:
-
-| selector | result |
-|---|---|
-| `rollout_results.list.element.text` | REWRITE ✅ |
-| `rollout_results.text` | REJECTED (was silent-empty) |
-| `rollout_results.list.item.text` | REJECTED (legacy spelling) |
-| `text` | ORIGINAL — the trap |
-
-All three `.json.gz` silent-loss modes are handled and each was re-verified by execution: a truncated
-stream decompresses to complete-looking JSON with **`eof=False` as the only signal**; multi-member
-gzip stops after member 1 with member 2 in `unused_data`; a range boundary lands mid-line, so the
-partial trailing line is carried and never parsed.
-
-⚠️ **`.json.zst` is refused, not supported** — needs a `zstandard` dependency this package does not
-declare. Two `UNVERIFIED` markers remain in-code (the `_filtered` repos' `id`/metadata key names —
-only `text` is confirmed against real peS2o bytes), each carrying the exact command to settle it.
-
-⚠️ **The domain slug map is a reader ARGUMENT, not a `CorpusSpec` field.** A streaming pass cannot
-know the top-20 values, so whoever writes the build driver must thread it from the counting pass.
-Publishing without it commits one permanent directory per distinct upstream value — 73 for
-`stackv2-edu`, ~180 for StackExchange — inside `manifest_sha256`.
-
-**2. ~~Tokenize + exact shard~~ — ✅ DONE. `src/edullm_data/corpus_pack.py`, 809 lines, 66 tests.**
-Written fresh, as planned. Conservation is asserted at **runtime**, not only in tests:
-`tokens_in == tokens_out + tail_dropped + surplus_dropped`. It caught a real bug on its first run
-(double-counting the remainder of a half-consumed document). Verified over 6 randomized trials with
-document lengths spanning shard boundaries — conserved every time, every shard a whole multiple of
-`4 × 8192` bytes. **Mutation-checked: losing ONE token in 25 million fails 24 tests.**
-
-The tail truncates to a whole sequence rather than padding — zero-padding trips `zero_run_max` 256
-and invents tokens the tokenizer never emitted. Worst case 8,191 tokens per stream; a tail
-`>= SEQ_LEN` raises as a packer bug.
-
-**⚠️ The `week1_corpus` packer named in this file was the WRONG one** — see
-`artifacts/reservoir/WEEK1-CORPUS-SURVEY.md`. `packing.py:68` drops its tail remainder per
-(hash-bucket, category) partition, ~8.4M tokens per tier, and nothing in the training path reads the
-field. The correct shape is `validation.py:846` / `quick_validation.py:718`.
-
-**2b. The source registry — ✅ DONE. `artifacts/reservoir/corpus-registry.json` (+ `CORPUS-REGISTRY.md`).**
-17 corpora, 14 drawn in v1, 3 reserve, 252.6 B target. **Generated** by `build_registry.py`, not
-hand-written, so a card figure cannot sit next to a footer-exact measurement looking identical — edit
-the script, never the JSON. Seven tests assert every row loads into `CorpusSpec`, labels are unique
-and safe, and an `UNVERIFIED` row carries the command that settles it.
-
-`text_column` is verified from real bytes for **9 of 17**; the rest say the literal `"UNVERIFIED"`.
-
-**✅ Revisions are PINNED** — all 17 rows carry a 40-hex sha across 14 repos, and
-`python3 artifacts/reservoir/verify_pins.py --deep` re-resolves every one and checks the file magic:
-**14/14 with correct magic**. Two tests enforce that every row is pinned and that rows sharing a repo
-share its revision.
-
-🛑 **Pinning was supposed to be bookkeeping; it falsified three registry claims.** None were catchable
-offline — they are facts about remote repos:
-
-1. **Seven Common Pile rows named the wrong repo.** They said `common-pile/raw_v0.1_parquet` with the
-   subset as a `config`. That repo's tree at the pinned sha holds `peS2o/`, `stackv2/`,
-   `ubuntu_irc/` — the **raw** subsets — and every `<name>_filtered` path 404s. The filtered variants
-   are **standalone repos** shipping `.json.gz` at the root. Wrong repo, wrong `file_format`, and a
-   config that does not exist: **the build would have read nothing.**
-2. **The Common Pile file prefixes are underivable from the repo name** — `stackv2_edu_filtered` ships
-   `stack-edu-*`, `github_archive_filtered` ships `gharchive-dolma-*`, `pubmed_filtered` ships
-   `licensed_pubmed-*`. Now recorded per row and in `_common_pile_file_prefix`.
-3. 🛑 **DCLM-baseline is `.jsonl.zst` and `corpus_read` REFUSES zstd** (no `zstandard` dependency
-   declared). The row said `parquet` under a `default` config; neither exists. Verified from bytes —
-   `global-shard_01_of_10/local-shard_0_of_10/shard_00000000_processed.jsonl.zst`, magic
-   `28 b5 2f fd`. **This blocks 30 B of the 252.6 B target and needs an owner decision:** add
-   `zstandard` plus a decompression branch (the streaming shape mirrors the existing
-   `zlib.decompressobj` path, `eof` check included), or source diverse web from another corpus.
-   "No row currently requires zstd" was true before this and is false now.
-
-Also settled from real bytes while confirming layouts: the Common Pile record schema is
-`{id, text, source, added, created, metadata}` (peS2o adds `version`; `stackv2_edu` adds
-`score`/`int_score`), and both domain columns exist as claimed — `metadata.gha_language`,
-`metadata.site`.
-
-⚠️ **Two category pools are reported twice, deliberately.** Summing the rows overstates `academic` by
-20.1 B and `math` by everything that looks like a second source, so the JSON carries
-`naive_sum_pool_tokens` **and** `non_overlapping_pool_tokens` with a `_pool_note`. Both, because the
-naive sum is what a reader recomputes from the rows; substituting the adjusted figure silently would
-make the arithmetic unreproducible.
-
-🛑 **`math` (1.02×) and `reference` (1.01×) have NO SLACK — and decontamination is not the reason.**
-This trap is worth reading before anyone sizes anything from `leakage-summary.json`: its
-`category_attrition` block reads like a pool fraction (`math 0.543`, `code 0.797`) and is actually
-**excluded ÷ candidates within a category**. Math had **3,926 candidate documents**, not 34.69 B
-tokens. Propagating it as a pool fraction says math comes up 18 B short; the truth is the whole 20 B
-build excluded **10,239 documents ≈ 0.026% of tokens** — wrong by four orders of magnitude. What those
-two categories genuinely cannot absorb is a *sourcing* surprise: `reference` was already resized
-14 B → 9 B when `finewiki/en` measured 8.87 B, and QA/forum drops to 1.87 B if share-alike is excluded.
-
-**3. ~~Bundling + receipts + resumability~~ — ✅ DONE.** `corpus_build.py` (780) +
-`corpus_receipt.py` (1,043), 82 tests.
-
-`edullm-corpus-build {plan,run,verify}`. **Ordinals are allocated ONCE** over the whole plan, never
-by a child. `plan_document` is pure — no clock, no S3 — so `plan_id` is a content address; verified
-byte-identical across regenerations and independent of input order. Against the real registry:
-**25 bundles, 8,884 shards, 222.1 B tokens**, ordinals dense and globally unique.
-
-**Resume re-heads every key and compares SIZES**, not just presence: an interrupted PUT leaves a key
-at the wrong length, and `head` returns the size anyway, so it is strictly stronger for free. Tested
-in four states — intact True, deleted False, **truncated** False, restored True — plus a receipt from
-a different `plan_id` being ignored. The receipt is written only *after* `verify_receipt` passes,
-tested with an S3 that silently drops one object.
-
-**Receipts are the one place this pipeline re-hashes payload.** Cheap tier (always): existence, real
-`ContentLength` vs recorded, `tokens*4 == bytes`, `bytes % (4*8192) == 0`. Deep tier (`--deep`): a
-full GET per shard. Verified that the tiers differ where it matters — corrupting a shard while
-keeping its **length identical** passes every cheap check and is caught only by deep. That is the
-`CLAUDE.md` KNOWN GAP, closed on the build side. `verify` refuses an incomplete set, and catches
-cross-bundle failures a per-receipt check cannot see: duplicate streams, shard path collisions,
-conflicting source revisions between bundles, mixed wheel versions.
-
-**Two findings from wiring it up:**
-
-- 🛑 **`ubuntu-irc` gets NO val split, and the plan records it.** At `VAL_FRACTION` 0.005 the
-  break-even for one whole shard is **5,000,396,800 tokens**; ubuntu-irc's 1.8 B target yields 0.36
-  of a shard, and `shard_plan` correctly refuses a stream it cannot give ordinals to. Its documents
-  all go to train — nothing lost, nothing leaked — but there is no per-source held-out set for it,
-  so a category-level val split must come from its siblings. Everything else clears the bar (pubmed
-  next-lowest at 1.20 shards). Recorded in the plan as `no_val_split` rather than warned about, so
-  the omission is auditable afterwards.
-- **An unreadable source is now a PLAN-time failure**, not a run-time one. Discovering it mid-run
-  means other bundles are already built and paid for. `--allow-unreadable` excludes it deliberately.
-
-**Obligation 1 is now enforced, not documented:** the driver **refuses to start** unless
-`TOKENIZERS_PARALLELISM` is set. Neither default is safe — a library setting it mutates every
-importer including the validator; `"false"` throws away the rayon parallelism that makes a 255B-token
-tokenize affordable; unset in a forking driver is the documented HF deadlock. So the operator chooses.
-
-**Obligations 2 and 3 remain the operator's**, unchanged: thread the domain slug map from the
-counting pass into the reader (a reader ARGUMENT, not a spec field — forget it and you commit ~180
-permanent directories inside `manifest_sha256`), and stage `families/` where the job can read it or
-`corpus_pack` refuses to start rather than degrading to the profile's laxer 0.5 EOS.
-
-**4. ~~Dedup + decontamination~~ — ✅ DONE.** `corpus_filter.py`, 26 tests, wired into `run_bundle`
-before the length filter and before tokenizing.
-
-Exact content-hash dedup only, deliberately — §4.1 records DCLM measuring a Bloom filter ALONE at
-+1.6 CORE, equal to the full Exact+MinHash+SuffixArray stack, and FineWeb finding the *removed* data
-scored better than the kept. MinHash stays deferred.
-
-🎯 **The decontamination provably catches benchmarks**, which is the one property separating this
-from decoration: measured against the real index, **40/40 verbatim GSM8K test questions caught, 0/2
-false positives** on ordinary prose. A parser producing an index that matched *nothing* would pass
-every other test in the file, so that test uses the real 54 MB artifact rather than a fixture.
-
-Also verified against it: parses in 0.9 s, and its 149,777 exact + 3,097,372 ngram entries equal the
-manifest's declared counts exactly. `normalize_text`/`content_hash` are byte-identical to
-`week1_corpus`'s across CRLF, NFC, NUL and whitespace cases — parity matters because the index's
-exact-hash half only works if both sides agree what a document's hash is.
-
-Two places this **refuses** where `week1_corpus` falls back: a missing index raises rather than
-becoming an empty one (`worker.py:102-106` turns a staging mistake into a clean-*looking* corpus),
-and a truncated container is refused rather than parsed as a smaller index that decontaminates less
-and reports success. `--no-decontaminate` is the only way to skip, and it announces itself.
-
-Dedup runs **before** the contamination check: dedup is one sha256, contamination is thousands of
-blake2b hashes against a 3.1M-entry set. Attrition is reported per bundle as counts, never ratios.
-
-⚠️ **Still open, and unchanged:** the matching is word-level 13-gram and casefolded, so it does
-**nothing for rephrased text** — the FinePhrase half of the corpus has no decontamination. §4.2's
-second tier (`lm-sys/llm-decontaminator`, ~$200 over the synthetic 60 B) is the answer and is not
-built.
-
-✅ **The bundle is reusable and authentic, and is now backed up.** Recomputed its sha256 —
-`04aa8fe5…50bfd7` — and it equals the `index.sha256` its manifest claims; the header parses
-(`W1DCI001`, ngram 13, min_hits 2) and `32 + 149777*32 + 3097372*16 == 54,350,848` exactly matches the
-file size. Contents: 9 OE-eval families, MMLU all 57 subjects × {dev,validation,test} with the real
-5-shot template, GSM8K. Reader is `week1_corpus/decontamination.py`, 125 lines, one dependency.
-
-⚠️ **It was on the laptop ONLY** — `datamix1-jul22/validation/audits/` holds the *manifest describing*
-the `.bin`, not the `.bin`. Now at **`s3://edullm-landing/_dist/eval-decontamination.bin`**, chosen
-because `_dist/` carries **no expiry rule** while `_ingest/` expires at 30 d. Two limits: matching is
-word-level 13-gram and casefolded, so it does **nothing** for rephrased text (the FinePhrase half is
-unchanged), and it holds ~250 MB resident — budget it on Batch.
-
-### ✅ THE READER IS PROVEN AGAINST REAL BYTES — 14/14 sources, and it found 5 defects
-
-Before committing Batch compute I ran the reader against every drawn source at its pinned revision.
-**All 14 now yield real documents** (verified by eye: IRC logs, PubMed abstracts, JEE problems,
-Wikipedia articles, DCLM web prose). Getting there exposed five defects, none catchable offline —
-every bad row was internally consistent and externally wrong:
-
-1. 🛑 **The pins were defeated at READ time.** Both readers called
-   `ingest_reservoir._resolve_url`, which hardcodes `resolve/main`. So the build would LIST files at
-   the pinned sha and then fetch their **bytes from HEAD** — and nothing downstream would notice,
-   because the manifest hashes whatever arrived and Gate A passes it. Fixed with `_pinned_url`;
-   `ingest_reservoir` keeps its own version because its one caller genuinely wants HEAD.
-2. 🛑 **A wrong `text_column` on `.json.gz` yielded an EMPTY corpus, silently.** The per-record path
-   did `continue` on a missing key, so a typo skipped every record and returned zero documents with
-   no error. Measured: `ubuntu_irc_filtered` returned 0 documents and raised nothing. This is the
-   json.gz twin of the zero-columns parquet trap the module already warned about.
-3. **`config` is a PATH PREFIX, not an HF config name** — 3 of 14 rows 404'd. `finewiki`'s config is
-   `en` but its files are at `data/enwiki`; `fineweb-edu`'s is `sample-100BT` but the path is
-   `sample/100BT`; `finepdfs-edu`'s payload is deeper still at `data/eng_Latn/train`.
-4. **FineMath has no `id` column** — 16 leaves, none an id. Its identity is `url`, which matters
-   because the id is the join key for the §9.7 item 4 partition and the FineWeb-Edu anti-join.
-5. **`text_column` was `UNVERIFIED` on 8 of 17 rows** and is now verified on **17 of 17**, read from
-   each source's first record at its pinned revision. A test enforces that no *drawn* row is
-   unverified.
-
-Also confirmed §3.3's FinePhrase quality trap is real rather than theoretical: sampled rewrites are
-`"No answer"` (9 chars) and `"No table\nNo question-answer pair"` (32). `MIN_DOC_TOKENS` is what
-keeps them out, and without it those shards would fail Gate A's EOS bound after the upload.
-
-**5. Publish (§5.6 phase 2) on Batch, in-region.** `publish()` GETs every byte to hash it;
-`hash_workers`/`copy_workers=16`, timeout 7200. ⚠️ Auto-promotion is currently **disabled** — the
-concurrent session turned off `edullm-landing-manifest-created`. Either re-enable it or submit the
-validator job manually.
-
-**6. Backfill sidecars AFTER promotion, in place (§5.6 phase 2b).** `promote()` copies only
-`dataset.json`, group manifests, and manifest entries — a sidecar staged to landing passes Gate A and
-is then silently dropped, expiring with landing's lifecycle.
-
-**7. Verify (§5.6 phase 3).** `verify_seal`, read a shard back, confirm `dataset_paths(labels={...})`
-slices, confirm both sidecars survived, and re-verify the airlock **both** directions (intern
-`PutObject` to `edullm-data` → AccessDenied; `edullm-landing` still writable).
-
-### ⏸ DEFERRED: MinHash + LSH + connected components (owner decision, 2026-08-01)
-
-Saves 1–2 weeks. Justified by §4.1's own evidence, not by trimming scope: DCLM measured
-**Bloom-filter-alone at +1.6 CORE, equal to the full Exact+MinHash+SuffixArray stack**, and FineWeb
-trained on the ~31B kept vs 171B removed and found **the removed data scored better**. MinHash ships
-only a cluster×source warning table.
-
-Addable later without a rebuild: it is annotate-only, so it lands as `_dedup/clusters.parquet`, a
-control file written in place after promotion, outside the hash chain. `week1_corpus` has signature
-and LSH-banding primitives but **no connected-components stage** — union-find over ~1–2B documents is
-the hard part, plus an irreducible 1–2 day run on a 460 GB-RAM box that cannot checkpoint.
-
-### 🛑 THREE IRREVERSIBLE DECISIONS — settle before the first byte is tokenized
-
-Each is inside `manifest_sha256` or destroyed by tokenization. Getting one wrong is a ~1 TB re-copy.
-
-1. **`share_alike`, `source`, `synthetic` must be first-class labels at publish time.**
-   `entry.labels` is inside the hash chain — no backfill. A later "strip SA and re-mix" is a full
-   re-copy.
-2. **Real and synthetic must be fused into the `source` label**, not split into separate groups —
-   `build_mixture` cannot span groups.
-3. **The FineWeb-Edu id disjointness.** `fineweb-edu sample-100BT` ⊂ `sample-350BT`, which is
-   FinePhrase's exact parent — so **100% of an edu-web draw has a synthetic sibling**. Free fix: draw
-   synthetic from the ~242M `sample-350BT` ids NOT in `sample-100BT`. Same join key, one pass. This is
-   the §9.7-item-4 collision reappearing in a category the plan never checked.
-
-### Owed doc corrections — **three of four DONE 2026-08-01**
-
-- ~~**`artifacts/PLAN-CORRECTIONS.md` §6 and `artifacts/smoke/harvest_parquet.py:9-13`** state the
-  per-IP rate limit as a general rule.~~ **DONE.** Both corrected with the measured three-surface
-  table (datasets-server per-IP; resolver per-token, `q=3000` anon / `q=5000` authed; CDN
-  unmetered) plus the resolve-once-reuse-many rule. Note the citation was slightly off: the per-IP
-  *general* wording lived in §6's neighbours, not §6's own body — the correction was appended to §6
-  anyway, since that is where every other doc points.
-- ~~**`CLAUDE.md`'s "60-min job-def limit"**~~ **DONE.** Confirmed against the AWS Batch user guide:
-  "There's no maximum timeout value for an AWS Batch job"; minimum 60 s; no default. 3600 s was
-  ours. (Fargate's 14-day ceiling exists but we run on EC2.)
-- ~~**`artifacts/reservoir/INGEST-CALIBRATION.md`** still recommends sizing that the 429 fix
-  obsoletes.~~ **DONE.** Measurement kept, recommendations banner-marked obsolete.
-- **DECIDED 2026-08-01 (owner): LEAVE the diagnostic job defs registered.** Four ACTIVE revisions
-  exist in Batch and **nowhere in this repo** — the segfault investigation registered them live, and
-  `register-job-definition` leaves no committed trace, which is why they are recorded here:
-
-  | job def | revs | role |
-  |---|---|---|
-  | `edullm-reservoir-diag` | 1, 2 | `edullm-reservoir-ingest` |
-  | `edullm-reservoir-diag2` | 1 | `edullm-reservoir-ingest` |
-  | `edullm-reservoir-shim` | 1 | `edullm-reservoir-ingest` |
-
-  Verified 2026-08-01: **no running or queued jobs reference any of them**, all four carry the
-  `edullm-reservoir-ingest` role (which cannot write `edullm-data`, so the airlock is unaffected),
-  and an idle job definition costs nothing — it is a stored config, not a reservation.
-
-  Their scratch output is in landing under three sibling prefixes and **self-expires**, because
-  `expire-ingest-30d` covers `_ingest/`: `_diag/` ~28 MB, `_diag2/` ~55 MB, `_shim/` ~110 MB
-  (that one holds both a 4-shard and an 8-shard run), against `_ids/` ~63 MB which is the REAL
-  output. 114 objects / 240.7 MiB total, gone ≈ 2026-08-30 with no action.
-
-  ⚠️ **The reason to keep them until the fix is trusted:** `_diag*`/`_shim` is the raw evidence
-  behind the `pre_buffer=False` A/B. `SEGFAULT-INVESTIGATION.md` records the 3/4-vs-0/4 tally as a
-  conclusion; that data is what would let someone re-derive it. The only real cost of leaving them
-  is confusion — someone listing job defs later sees four undocumented ones beside the live
-  `edullm-reservoir-ingest:7`, which is exactly what this table is for.
-
-### Cheap, not blocking, do whenever
-- ~~**Scrub `tests/test_publish.py:517`** — real AWS account ID in a Batch ARN, in the concurrent
-  session's uncommitted work.~~ **Not reproducible on this branch 2026-08-01:** `test_publish.py`
-  is 463 lines (no `:517`), and a repo-wide grep for the 12-digit account ID returns **zero** hits
-  in tracked files. Either it was fixed or it never landed here. Re-check before assuming it is
-  gone from other branches.
-- ~~**Deploy bucket-policy v2** (`infra/DEPLOY.md:256+`). Still NOT deployed; the live policy is
-  `edullm-data-airlock-v1`, where one Deny covers Put *and* Delete and exempts the validator from all
-  five actions.~~ **DEPLOYED — verified live 2026-08-01**, `Id: edullm-data-airlock-v2`, Put and
-  Delete split, nobody exempt from Delete. `infra/DEPLOY.md:256` had already recorded this on
-  2026-07-31; this file was the stale one.
-- **A `share_alike` selector** if surgical SA exclusion is ever wanted. Cannot live in `entry.labels`,
-  and the path's two levels are spent — so it would be a `source`-name convention (`stackexchange-sa`),
-  decided before publish.
+Everything before this point is done. Read `artifacts/reservoir/PUBLISH-SPEC.md` first — both
+irreversible decisions are recorded there with the exact `publish()` call.
 
 ---
 
-> **Everything below is a historical log of previous sessions**, kept for the reasoning it records.
-> Several entries describe work already finished; each is struck through where that is the case.
->
-> 🛑 **2026-08-01: items 1, 2 and 3 in this list are DONE.** They are left unstruck-through below
-> only because the list is a historical snapshot; do not read them as open work. 1 — the platform
-> handoff landed and a training run has read the corpus. 2 — bucket-policy v2 is live
-> (`edullm-data-airlock-v2`). 3 — the validator timeout is 7200 s on `edullm-validator:10`.
-> Item 5's "15 lines" is also wrong: the adapter shipped at **746 lines**.
->
-> ~~0. COMMIT `DATASET-DESIGN-reservoir.md`~~ — **DONE**, `84eef1c`.
-> 1. ~~**Hand `docs/PLATFORM-INTEGRATION.md` to whoever owns `edu-llm/platform`** — the four
->    blockers to a training run all live there, and its banner is now re-audited against live
->    state. Not this repo's to fix, and the long pole.~~ **DONE — all four closed.**
-> 2. ~~**Deploy bucket-policy v2** (`infra/DEPLOY.md:256+`) — the live policy is still
->    `airlock-v1`, one Deny covering Put *and* Delete with the validator exempt from both. That
->    was a small risk over 11 objects; it now guards 587 GiB, and the reservoir would take it past 1.5 TB.~~
->    **DONE — deployed 2026-07-31, verified live 2026-08-01.**
-> 3. **Set a timeout on the `edullm-validator` job def** — it has none, so a wedged auto-promote
->    holds the queue forever. 7200 s. **This is also a Phase-0 task in the reservoir runbook**
->    (`DATASET-DESIGN-reservoir.md` §9.3 task C), so it gets done either way.
-> 4. **`sft_conversations_v1` still substring-matches split names** instead of using
->    `contracts.is_trainable`.
-> 5. **Write the adapter** once #1 unblocks — 15 lines, executed and proven against real bytes.
-> 6. **Execute reservoir Phase 0** when the user is ready — `DATASET-DESIGN-reservoir.md` §9 is
->    self-contained and ends at a hard stop. Independent of #1–#5.
->
-> Also queued, small: reship the `_dist` wheel if anything ever runs the READER on Batch
-> (`labels=`/`build_mixture` postdate the deployed 0.5.0; validate/publish don't use them, so it
-> is currently harmless), and delete the now-redundant staged tree at
-> `s3://edullm-landing/_migrate/olmo-150b-staged/`.
+#### 1. Re-run the 9 stale-wheel bundles, then re-verify — THE ONLY BLOCKER
 
-DONE in an earlier session: first tokenizer published (`tokenizer/dolma2-bpe/v1`); first pretrain
-corpus migrated + published + promoted + readable (`pretrain/olmo-mix-1124-31b/v1`, 31.334B tokens
-— **since deleted**, see "THE 31B DELETION"); repo pushed public with `v0.1.0` tag + real install
-URLs. The pipeline is proven with real data end to end.
+`verify --deep` refuses with `bundle-set-mixed-wheel-versions`: the corpus was packed by five
+different wheels because four fixes landed mid-build. **The check is right — do not waive it.** A
+wheel without `families/` silently validates at the 0.5 EOS bound instead of the family's 0.05 and
+reports every shard clean, which is exactly the failure this project already shipped once.
 
-DONE (per-dataset README, this session): added `readme.py` (`render_readme`), wired `promote()` to
-write a generated `README.md` into edullm-data for EVERY promotion, extended `publish()` with
-`sources`/`about`/`notes`/`limitations`/`license`, made `README.md` a control file in both publish
-and Gate A, and **backfilled the two live datasets in place** (README + enriched data-mix metadata,
-descriptive-keys-only, manifests/inventory byte-identical). 380 tests pass. Rebuilt wheel (77.9 KB,
-now includes `readme.py`) + shipped to `_dist/`. Verified: intern PutObject to edullm-data still
-AccessDenied (airlock intact); Gate A re-run in place against the enriched datasets = clean pass.
-This retires old Next-Step #3 (license.basis) for the olmo corpus — now `ODC-By-1.0`/`declared`.
-The README backfill driver + guardrails live at `$CLAUDE_JOB_DIR/tmp/driver/backfill_readme.py`
-(also mirrored to `s3://edullm-landing/_dist/backfill_readme.py`); enrichment content in
-`.../driver/enrich.json`; read-only in-place verifier at `.../driver/verify_inplace.py`.
+Re-run these nine against `edullm-reservoir-build:9` (wheel 0.7.4, image
+`sbsandbox-intern-edullm-data@sha256:4be21c0a...`). One job each, `SHARD=<idx>`:
 
-**COMMITTED + MERGED**: the README feature (+ `docs/ONBOARDING.md`) shipped via PR #1,
-squash-merged to `main` as `afac933` and the `feat/per-dataset-readme` branch deleted. Working tree
-is clean; local `main` == `origin/main`. The two live datasets were verified by a read-only Gate A
-re-run in place (job `e72522a4…`, SUCCEEDED): both `ok=True, violations=0`, READMEs present. Nothing
-outstanding to commit for this feature.
+| idx | bundle | shards |
+|---|---|---|
+| 26 | `ubuntu-irc--train` | 71 |
+| 19 | `finewiki--val` *(idx 9)* | 1 |
+| 11 | `pes2o--val` | 2 |
+| 13 | `pubmed--val` | 1 |
+| 15 | `stackexchange--val` | 1 |
+| 7 | `fineweb-edu--val` | 3 |
+| 2 | `finemath--train` | 1353 |
+| 4 | `finepdfs-edu--train` | 1114 |
+| 16 | `stackv2-edu--train` | 1591 |
 
-0. ~~**FIRST: get this branch off the laptop.**~~ **DONE** — pushed, PR #4, merged to `main` as
-   `2e561cc` with `--merge` (13 commits preserved individually), branch deleted local + remote.
-   Then `38c4a0b` refreshed this file. `main == origin/main`, 541 tests, 0 ruff errors.
+⚠️ **Confirm each index before submitting.** Do not trust the table above — derive it:
 
-   **THE ACTUAL #1 NOW: publish a pretrain corpus — the 150B, from scratch.** `edullm-data` holds
-   only the tokenizer, so there is nothing to train on and nothing else in this file matters as much.
+```bash
+PYTHONPATH=src python3 -c "
+import sys; sys.path.insert(0,'src')
+from edullm_data import corpus_build as B
+from edullm_data.ingest_reservoir import _shard_slice
+specs,meta=B.load_registry()
+plan=B.plan_document([s for s in specs if s.target_tokens>0], registry_meta=meta)
+bundles=B.bundles_of(plan)
+want={'ubuntu-irc--train','finewiki--val','pes2o--val','pubmed--val','stackexchange--val',
+      'fineweb-edu--val','finemath--train','finepdfs-edu--train','stackv2-edu--train'}
+for i in range(27):
+    for b in _shard_slice(bundles,i,27):
+        if b.bundle_id in want: print(i, b.bundle_id, len(b.shards))
+"
+```
 
-   You are starting clean: the first attempt's driver, spec, and runbook were deleted. What survives
-   is (a) the measured source facts in "THE 150B SOURCE DATA" above, (b) the structure decision
-   (ONE `tokens/` group + labels), and (c) a validator that no longer has the two defects that would
-   have wasted the whole run:
-   - caller-supplied partitions now get `rows` filled (`c9d2816`) — without this the publish is
-     rejected at `promote()`, i.e. AFTER the 630 GB copy and the hash;
-   - the distinct-ids floor scales with the sampled size (`72df9f7`) — without this two 20-byte shards
-     fail `distinct-too-few` and `promote()`'s all-or-nothing rule discards all 630 GB.
+**Resume will NOT skip them** — `bundle_is_done` returns true because their receipts and shards are
+all present and correct. Pass `--force`, or delete those nine receipts first. `--force` is cleaner;
+deleting a receipt loses the accounting it holds.
 
-   Order that avoids re-learning what the first attempt learned:
-   1. **Dry-run Gate A on a handful of shards BEFORE the copy.** The first attempt discovered its
-      blockers only after 2.1% of a 630 GB copy. Publish ~5 real shards (including
-      `s2pdf-redacted/adult_content/part-57`, the 20-byte one) through landing → validate → confirm
-      clean. Cheap, and it exercises the two fixes above on real bytes.
-   2. **Decide the `.csv.gz` sidecars deliberately.** The first attempt excluded all 6,915 silently.
-      That is what makes OLMo-core's VSL/packed/padded classes unusable on these shards
-      (`docs/CONSUMER-CONTRACT.md`). Excluding is defensible for plain FSL training; inheriting the
-      decision by accident is not.
-   3. ~~**`publish()` does not populate `entry.split` or `entry.labels`** (see "What is NOT done"). The
-      one-group-plus-labels structure REQUIRES labels, so this is a code change on the write path
-      before the real copy — not a publish-time argument.~~ **DONE (`aa4d509`), verified in code
-      2026-08-01: `publish.py:352-353` sets both.**
-   4. Then the copy + publish on Batch, with `hash_workers`/`copy_workers` and
-      `--timeout attemptDurationSeconds=7200`; a 633 GB single-threaded publish times out.
-   5. Re-verify the airlock afterwards (intern `PutObject` → `AccessDenied`), per CLAUDE.md.
-1. ~~Package `families/` INTO the wheel.~~ **DONE on this branch** (`ad75062`) via
-   `[tool.hatch.build.targets.wheel.force-include]` in `pyproject.toml:42-43`. **Still outstanding:**
-   rebuild the wheel + `aws s3 cp` it to `_dist/`, then simplify `_dist/publish_driver.py` to drop the
-   `FAMILIES_DIR` override. The deployed `_dist` wheel is `0.1.0` and predates this — until it is
-   reshipped, the Batch publisher still needs `_dist/families/`. Folds into Next Step #6.
-2. **Add per-shard progress logging to `publish()` / the driver.** The ~8-min silent hash of 125 GB
-   looked exactly like a hang (I had to probe S3 object counts to tell progress from stall). Emit a
-   line every N shards from `build_plan`'s hash loop and the copy loop.
-3. ~~Set the corpus's real `license.basis`.~~ **DONE for `pretrain/olmo-mix-1124-31b`** (now
-   `{id: ODC-By-1.0, basis: declared}`, set via the README backfill). The tokenizer's license is
-   still an honest `unknown` — set it if/when the upstream dolma2-tokenizer terms are confirmed.
-   Pattern for future datasets: pass `license=` (and `sources=`/`about=`) to `publish()` at publish
-   time so it lands in `dataset.json` and the generated README from the start.
-4. **(Optional) Parallelize `promote()`'s copy loop** like `publish()` — it's still sequential
-   per-shard (~7/min), which is why promotion of the 218-shard corpus took ~30 min. Fine at this scale;
-   revisit if promotion latency matters. The validator's Gate A reads are single-threaded too but
-   I/O-light (~64 KB range-read per shard), so those are fine as-is.
-5. **(Optional, better steady state) Bake the validator container image (Path A).** Docker + ECR push:
-   `infra/Dockerfile.validator` → new ECR repo → re-register `edullm-validator` + `edullm-fsck` job
-   defs at the image (drops the ~30-60s pip-install per run). `infra/05-validator-jobdef.md`. Not
-   blocking — wheel bootstrap works.
-6. **`v0.2.0` release — DONE in git, wheel reship STILL OUTSTANDING (deployment lag).** The version
-   was bumped to `0.2.0` (`pyproject.toml`, `src/edullm_data/__init__.py`) and every **team-facing**
-   install pin updated to `@v0.2.0` (`README.md` — also fixed its stale "no tag exists" line —,
-   `USAGE.md`, `skill/SKILL.md`, `.claude/skills/edullm-datasets/SKILL.md`). Shipped via branch
-   `release/v0.2.0` → PR. **Tag `v0.2.0` is cut on `main` AFTER the PR merges** (the merge is
-   permission-gated; do it once the PR is approved). 380 tests pass. `v0.1.0` still points at the
-   pre-README commit `10c18fb`, which is why the pin was stale.
-   **NOT yet done, needs a broker/creds session (this session had neither `sb-aws` nor local AWS
-   creds, so it could not write S3):**
-   - Two pin sites were deliberately LEFT at `0.1.0` because they describe the *deployed* artifact,
-     not what the team installs: `infra/05-validator-jobdef.md` and `infra/DEPLOY.md` (the git+https
-     line + the `_dist` wheel filename + the ECR tag), and the `CLAUDE.md` gotcha #3 wheel filename.
-     The live Batch validator bootstraps `s3://edullm-landing/_dist/edullm_data-0.1.0-py3-none-any.whl`
-     by exact filename — so bumping those docs to `0.2.0` without reshipping would break the bootstrap.
-   - **Reship steps (run in a broker session):** `python3 -m pip wheel . --no-deps` →
-     `edullm_data-0.2.0-py3-none-any.whl`; `aws s3 cp` it to `s3://edullm-landing/_dist/`; update the
-     hardcoded `0.1.0` filename in `_dist/publish_driver.py` and the validator/fsck bootstrap command
-     (`infra/05-validator-jobdef.md:95`) to `0.2.0` (or ship both wheels and cut over deliberately);
-     then update the two infra docs + the `CLAUDE.md` gotcha to `0.2.0`. Next validator/fsck run picks
-     up the new wheel. Consider `gh release create v0.2.0` if a formal Release page is wanted (only a
-     lightweight tag exists).
-7. **Migrate more high-value legacy datasets** using the proven playbook: server-side rename any
-   headerless `.npy`→`.u32le.bin` into `s3://edullm-landing/_migrate/<name>/`, then run the Batch
-   publish driver with `PUB_HASH_WORKERS`/`PUB_COPY_WORKERS=16`. (Verify each shard is headerless first:
-   first bytes ≠ `\x93NUMPY` and `tokens×dtype_size == bytes`.) **The 150B corpus is Next Step #0's
-   restart, not a "more legacy dataset" — see DEFERRED DECISIONS #1 for the one-group-not-six
-   decision, and note the deleted first attempt's driver is gone, so the copy plan is rebuilt.**
-8. ~~**Populate `entry.split` in `publish()`.** The v2 field, its validation, and the
-   `split-contradicts-filename` gate all exist; the producer never writes it, so the gate is
-   unreachable in production.~~ **DONE (`aa4d509`), verified in code 2026-08-01.**
-   `publish.py:352-353` writes `split=` and `labels=`, both derived from the key, so the
-   `split-contradicts-filename` gate is now reachable in production.
-9. **Make `sft_conversations_v1._partition_globs` use `contracts.is_trainable`** instead of substring
-   matching. Until then the `SPLITS` docstring overstates the fix. See "What is NOT done".
-10. **Deploy bucket-policy v2** — DEFERRED DECISIONS #4, runbook at `infra/DEPLOY.md:256+`.
-11. ~~**Reconcile the fsck schedule.**~~ **DONE 2026-07-29** — live rule is now `cron(6 9 ? * MON *)`
-    (Mondays 09:06 UTC), target verified intact after the `put-rule`. Rule name still says `-nightly`
-    deliberately; see the deployed-infra section.
+Then resubmit `rsv-verify-deep` (job def `edullm-reservoir-verify:1`) and require **`VERIFY_DONE_RC=0`**.
+
+Cost: ~4,137 shards ≈ 8–12 h wall at 4-way concurrency, roughly $25. Cap concurrency at 8 or fewer
+individual jobs — an array fills the cluster and the owner needs ~2 hosts for their own work.
+
+---
+
+#### 2. Publish — per the spec, ON BATCH, and it does NOT auto-promote
+
+Only after RC=0. Everything needed is in `artifacts/reservoir/PUBLISH-SPEC.md`. Four things that will
+bite otherwise:
+
+- **`sources[]` token counts come from each receipt's `tokens_out`, never the plan.** finewiki is the
+  proof: planned 8.75B, realized **7.92B** (90.5%) because it ran out of documents. Citing the plan
+  would publish a false mix table.
+- **`publish()` must run on Batch, in-region.** It stream-hashes every object, so it pulls every byte
+  to wherever it runs — measured at 0.8 MiB/s off-region, i.e. ~9 days for this corpus.
+- **`edullm-landing-manifest-created` is DISABLED.** Writing `manifest.json` will NOT fire the
+  validator. Either submit `edullm-validator:10` manually (it runs as
+  `sbsandbox-intern-edullm-dataset-validator`, the only principal that can write `edullm-data`), or
+  re-enable the rule first — and if you re-enable it, remember it is shared infrastructure.
+- **The license is MIXED with share-alike.** 20.5B tokens (8.2%) are CC-BY-SA-4.0 (`stackexchange`,
+  `finewiki`; finewiki also GFDL). No single top-level `license.id` is truthful.
+
+---
+
+#### 3. Cleanup, after the publish lands
+
+- `_ingest/reservoir-dolma2/build/` holds ~1 TB of staged shards. Landing has a 14-day expiry, so
+  doing nothing is correct — but confirm the lifecycle rule covers `_ingest/` before relying on it.
+- Job defs registered this session and now idle: `edullm-reservoir-build:1–9`,
+  `edullm-reservoir-verify:1`. An idle job def is a stored config, not a reservation — harmless.
+- `artifacts/reservoir/PUBLISH-SPEC.md` needs its `sources[]` block filled in with the realized
+  per-source `tokens_out` once the re-run finishes (the numbers change for the nine rebuilt bundles).
+
+---
+
+### Carried over, still true, NOT blockers
+
+- **The synthetic half has no effective decontamination.** 59.6B tokens / 23.7% of train. FinePhrase
+  is rephrased FineWeb-Edu and rephrasing defeats n-gram matching, which is the only decontamination
+  this pipeline applies. Owner confirmed shipping it with the limitation stated in `limitations[]`.
+  The second tier (`lm-sys/llm-decontaminator`, ~$200) is unbuilt.
+- `sft_conversations_v1` still substring-matches split names (pre-existing, unrelated).
+- PRs #9 and #11 are stale.
+- The PRM800K working tree in the canonical checkout is still **uncommitted** — 15 modified + 13
+  untracked files, never committed on any branch. Its build config was rescued into
+  `edullm/reservoir-dolma2-build` (`9ec447d`), but the PRM code itself is still only in that one
+  directory. Another session owns it.
 
 ## How to operate it (quick reference)
 
