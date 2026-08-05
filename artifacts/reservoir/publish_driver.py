@@ -147,15 +147,37 @@ def main() -> int:
         print("\nDRY RUN — nothing written. Re-run with --go inside an in-region Batch job.")
         return 0
 
+    import boto3
+    from botocore.config import Config
+
     from edullm_data.publish import publish
     from edullm_data.s3 import Boto3S3
 
+    # NOT `Boto3S3.default()`. It passes no botocore Config, so `max_pool_connections` is the
+    # default 10 — and botocore does not pass `block=True` to urllib3, so exceeding the pool
+    # neither raises nor waits: urllib3's `_put_conn` DISCARDS the surplus connection and logs
+    # "Connection pool is full". With hash_workers=16 that means workers 11..16 pay a fresh TLS
+    # handshake on every one of 10,049 objects, silently capping the speedup at ~10 workers with no
+    # error anywhere. Sized to the larger of the two worker counts so every thread keeps a socket.
+    # (Same ceiling `corpus_build._s3(max_pool_connections=...)` handles for the threaded verify.)
+    pool = max(kwargs["hash_workers"], kwargs["copy_workers"]) + 2  # +2: headroom for control calls
+    s3 = Boto3S3(
+        boto3.client("s3", region_name="us-east-1", config=Config(max_pool_connections=pool))
+    )
     created = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    print(f"\ncreated_at : {created}\nPUBLISHING to landing...", flush=True)
-    plan = publish(SOURCE, s3=Boto3S3.default(), created_at=created, **kwargs)
+    print(f"\ncreated_at : {created}\nmax_pool_connections: {pool}")
+    print("PUBLISHING to landing...", flush=True)
+    plan = publish(SOURCE, s3=s3, created_at=created, **kwargs)
     print(f"PUBLISHED {plan.dataset_id} {getattr(plan, 'version', '?')}")
-    print("NOT PROMOTED: `edullm-landing-manifest-created` is disabled, so nothing auto-promotes.")
-    print("Submit `edullm-validator` by UNVERSIONED name, or re-enable the rule first.")
+    # `edullm-landing-manifest-created` is ENABLED (verified live 2026-08-05, and demonstrated
+    # twice by this driver: writing the manifest above fired `edullm-validator` within seconds on
+    # both the first attempt and the retry). An earlier version of these lines said the rule was
+    # disabled and that nothing auto-promotes -- copied from three docs that were all wrong -- so
+    # it printed a reassurance that the same run immediately falsified. Do not restore it; read the
+    # rule state instead of claiming it.
+    print("AUTO-PROMOTION IS LIVE: the manifest write fires EventBridge -> edullm-validator")
+    print("  -> Gate A -> promote() into edullm-data, where frozen means frozen.")
+    print("  Watch the validator job; a pass SEALS the prefix with _VALIDATED.json.")
     return 0
 
 
