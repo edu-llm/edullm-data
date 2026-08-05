@@ -2473,7 +2473,23 @@ def main(argv: list[str] | None = None) -> int:
 
     from .s3 import Boto3S3
 
-    s3 = Boto3S3.default()
+    # Size the HTTP pool to the concurrency we actually ask for. `Boto3S3.default()` passes no
+    # botocore Config, so `max_pool_connections` is the default 10 -- and botocore does not pass
+    # `block=True` to urllib3, so exceeding it neither raises nor waits: urllib3 DISCARDS the surplus
+    # connection and logs "Connection pool is full". A `--head-workers 16 --promote-workers 16` run
+    # against a 10-connection pool therefore pays a fresh TLS handshake per object past the tenth and
+    # silently caps the speedup the operator asked for, with no error anywhere. Only build a custom
+    # client when we need more than the default, so the ordinary single-threaded path is untouched.
+    want_pool = max(args.head_workers, args.promote_workers)
+    if want_pool > 8:
+        import boto3
+        from botocore.config import Config
+
+        s3 = Boto3S3(
+            boto3.client("s3", config=Config(max_pool_connections=want_pool + 2))
+        )
+    else:
+        s3 = Boto3S3.default()
     prefixes = (
         [args.prefix] if args.prefix else discover_pending(args.landing_bucket, s3)
     )

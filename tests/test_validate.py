@@ -581,3 +581,33 @@ def test_the_default_is_one_worker_and_stays_sequential():
     assert seen_threads == {threading.current_thread().name}, (
         f"head_workers=1 ran off the calling thread: {seen_threads}"
     )
+
+
+def test_the_cli_sizes_the_http_pool_to_the_worker_count():
+    """`--head-workers 16` against botocore's default 10-connection pool would silently cap itself.
+
+    botocore does not pass `block=True` to urllib3, so exceeding the pool neither raises nor waits --
+    urllib3 discards the surplus connection and logs "Connection pool is full", and the 11th..Nth
+    worker pays a fresh TLS handshake per object. The speedup the operator asked for just does not
+    happen, with no error anywhere. Verified against botocore rather than assumed: the default really
+    is 10.
+    """
+    import boto3
+    from botocore.config import Config
+
+    assert boto3.client("s3", region_name="us-east-1").meta.config.max_pool_connections == 10
+    sized = boto3.client(
+        "s3", region_name="us-east-1", config=Config(max_pool_connections=18)
+    )
+    assert sized.meta.config.max_pool_connections == 18
+
+    # And the CLI wires it: the source must size the pool off the worker counts, not hardcode it.
+    import inspect
+
+    from edullm_data import validate as V
+
+    src = inspect.getsource(V.main)
+    assert "max_pool_connections" in src, "main() does not size the HTTP pool"
+    assert "max(args.head_workers, args.promote_workers)" in src, (
+        "the pool is not sized from the worker counts"
+    )
