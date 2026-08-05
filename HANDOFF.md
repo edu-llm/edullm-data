@@ -2364,10 +2364,21 @@ remains is cleanup and two real follow-ups, none of which affect reading
 
 ---
 
-#### 1. Two performance fixes are committed but NOT deployed
+#### 1. ~~Two performance fixes are committed but NOT deployed~~ — **DEPLOYED 2026-08-05 as 0.9.1**
 
-Both live on `agent/claude-01/converge-0-9-0` and both are behaviour-preserving by construction. They
-matter for the *next* corpus, not this one — nothing re-validates a sealed prefix.
+Live: `edullm-validator:14` and `edullm-reservoir-verify:3`, both on image tag `3b11d7d3f4e2`.
+`edullm-validator:14` also raises the timeout **7200 -> 14400s**, which matters more than the
+threading — 7200 is what SIGKILLed the reservoir promotion at 63%. Full live inventory, the rollback
+note, and why the preflight ran first: `infra/DEPLOY.md`. Airlock re-verified after the swap;
+`pretrain/reservoir-dolma2/v1` untouched.
+
+A **third instance of the same connection-pool bug** was found while staging those job defs and fixed
+before deploying (`3b11d7d`): `validate.main()` used `Boto3S3.default()`, whose pool is 10, so
+`--head-workers 16` would have silently capped itself at ~10 with nothing in the logs.
+**`Boto3S3.default()` is never the right client for a threaded caller** — the other two instances are
+`corpus_build._s3` and `publish_driver.py`.
+
+Historical detail, kept because the reasoning is reusable:
 
 - **`verify --deep` threading** (`796d8a6`, `--hash-workers`, default 1). Measured 7.82x at 8 workers
   against a latency-simulating fake. Order of violations is identical at any worker count, proven with
