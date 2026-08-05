@@ -22,6 +22,7 @@ import hashlib
 import json
 import sys
 from dataclasses import dataclass, field
+from collections.abc import Sequence
 from typing import Any, Mapping
 
 from .contracts import (
@@ -259,11 +260,25 @@ def _load_json(s3: S3, bucket: str, key: str) -> Any:
 
 
 def validate_dataset(
-    landing_bucket: str, prefix: str, s3: S3, *, data_bucket: str | None = None
+    landing_bucket: str,
+    prefix: str,
+    s3: S3,
+    *,
+    data_bucket: str | None = None,
+    head_workers: int = 1,
 ) -> ValidationResult:
     """Run Gate A against ``s3://landing_bucket/prefix/``. Reads only via ``s3``; never
     promotes. ``data_bucket`` is only needed if the dataset declares ``depends_on`` (the
-    parent is read from the published bucket)."""
+    parent is read from the published bucket).
+
+    ``head_workers`` > 1 prefetches the per-entry HEADs on a thread pool. Gate A issues one HEAD
+    per manifest entry and nothing else in that loop touches the network, so a large corpus is
+    latency-bound: ``pretrain/reservoir-dolma2``'s 10,049 entries ran at 0.1 MB/s and 0.3% CPU.
+    **The verdict is unaffected at any worker count** -- the pass/fail decision is
+    ``if result.violations``, i.e. a property of the SET, and the decision loop still runs serially
+    in manifest order so even the violation ORDER is unchanged. Default 1 is the original strictly
+    sequential path, which is what keeps a previously written ``_VALIDATED.json`` meaningful.
+    """
     prefix = prefix.strip("/")
     v: list[Violation] = []
 
@@ -392,6 +407,7 @@ def validate_dataset(
             my_shas,
             data_bucket=data_bucket,
             collect_paths=group_manifest_paths,
+            head_workers=head_workers,
         )
         if gres is None:
             # missing manifest: incomplete for frozen, fine otherwise
@@ -512,6 +528,57 @@ def validate_dataset(
     return result
 
 
+def _prefetch_heads(
+    s3: S3,
+    landing_bucket: str,
+    prefix: str,
+    entries: Sequence[Any],
+    head_workers: int,
+) -> dict[str, Any]:
+    """HEAD every entry, concurrently when ``head_workers`` > 1. Returns ``{path: head or None}``.
+
+    ``None`` means the object is absent, i.e. exactly the ``NotFound`` the caller used to catch
+    inline; the caller still raises ``missing-object`` for that entry, in manifest order.
+
+    **Deliberately returns data instead of appending violations.** A worker that appended to the
+    shared ``v`` list would make violation order depend on completion order, and Gate A's
+    ``duplicate-shard-digest`` already depends on iteration order to decide which of two identical
+    shards to name. Keeping this function pure -- fetch facts, decide nothing -- is what lets the
+    decision loop stay byte-for-byte identical to the sequential version.
+
+    A duplicated path costs ONE head: the result is keyed by path, so a manifest listing the same
+    object twice does not double the most expensive thing here. (Gate A reports that duplication
+    separately; this function must not change whether it does.)
+
+    ``head_workers=1`` runs strictly sequentially -- the same calls in the same order as before the
+    concurrency existed, which is what keeps an earlier ``_VALIDATED.json`` meaningful.
+    """
+    if head_workers <= 1 or len(entries) <= 1:
+        out: dict[str, Any] = {}
+        for entry in entries:
+            if entry.path in out:
+                continue
+            try:
+                out[entry.path] = s3.head(landing_bucket, _join(prefix, entry.path))
+            except NotFound:
+                out[entry.path] = None
+        return out
+
+    from concurrent.futures import ThreadPoolExecutor
+
+    paths = list(dict.fromkeys(e.path for e in entries))  # de-dup, preserve manifest order
+
+    def one(path: str) -> Any:
+        try:
+            return s3.head(landing_bucket, _join(prefix, path))
+        except NotFound:
+            return None
+
+    with ThreadPoolExecutor(max_workers=head_workers) as pool:
+        # map() yields in submission order; the dict is built in manifest order either way.
+        return dict(zip(paths, pool.map(one, paths)))
+
+
 def _validate_group(
     s3: S3,
     landing_bucket: str,
@@ -525,6 +592,7 @@ def _validate_group(
     *,
     data_bucket: str | None,
     collect_paths: dict[str, set[str]] | None = None,
+    head_workers: int = 1,
 ) -> tuple[int, int, _ValidatedGroup | None] | None:
     """Validate one group. Returns (objects, bytes) or None if the group's manifest is
     absent (incomplete). Appends Violations to ``v`` in place."""
@@ -610,12 +678,32 @@ def _validate_group(
     )
 
     # -- per-entry: HEAD size, arithmetic, extension honesty, shard naming, dup digests --
+    #
+    # The HEADs are PREFETCHED concurrently; every decision below stays serial and in manifest
+    # order. That split is the whole design, not a style preference:
+    #
+    #   * Only `s3.head` is parallelised. It is one round trip per entry and the sole network call
+    #     in this loop, so at 10,049 entries this was ~10,049 sequential round trips --
+    #     latency-bound, measured live at 0.1 MB/s and 0.3% CPU on a 4-vCPU box while validating
+    #     `pretrain/reservoir-dolma2` (~45 min in and still going). The same omission
+    #     `verify --deep` had: the producer side threads its hashing, the checking side never did.
+    #   * The loop body is UNCHANGED and still runs one entry at a time, because `seen_sha` and
+    #     `all_shas` are order-sensitive in an OBSERVABLE way: `duplicate-shard-digest` and
+    #     `shared-sha-with-parent` fire on the SECOND occurrence of a digest, so which of two
+    #     identical shards gets named is decided by iteration order. Threading the body would make
+    #     the reported path nondeterministic and would race on those two shared sets.
+    #
+    # WHY THIS CANNOT INVALIDATE AN EARLIER VERDICT. The pass/fail decision is `if
+    # result.violations` -- `main()` writes `_REJECTED.json` on any non-empty list and
+    # `_VALIDATED.json` otherwise -- so it depends on the SET of violations, never on their order.
+    # Prefetching a HEAD cannot change any check's outcome: `head["size"]` is still compared to
+    # `entry.bytes` per entry, and a `NotFound` still yields `missing-object` for that same entry.
+    # Default 1 keeps the strictly sequential path for every existing caller and test.
     seen_sha: set[str] = set()
+    heads = _prefetch_heads(s3, landing_bucket, prefix, entries, head_workers)
     for entry in entries:
-        full_key = _join(prefix, entry.path)
-        try:
-            head = s3.head(landing_bucket, full_key)
-        except NotFound:
+        head = heads.get(entry.path)
+        if head is None:
             v.append(
                 Violation(
                     "missing-object",
@@ -2356,6 +2444,19 @@ def main(argv: list[str] | None = None) -> int:
         "--prefix",
         help="dataset prefix (<dataset_id>/<version>); omit to self-discover",
     )
+    ap.add_argument(
+        "--head-workers",
+        type=int,
+        default=1,
+        help=(
+            "prefetch the per-entry HEADs on N threads (default 1 = the original strictly "
+            "sequential path). Gate A issues one HEAD per manifest entry and nothing else in that "
+            "loop touches the network, so a 10,049-entry corpus is latency-bound: measured at "
+            "0.1 MB/s and 0.3%% CPU. The verdict is a property of the violation SET and the "
+            "decision loop stays serial in manifest order, so no worker count can change a "
+            "pass into a fail or reorder a report."
+        ),
+    )
     ap.add_argument("--promote", action="store_true")
     ap.add_argument(
         "--promote-workers",
@@ -2383,7 +2484,11 @@ def main(argv: list[str] | None = None) -> int:
     exit_code = 0
     for prefix in prefixes:
         result = validate_dataset(
-            args.landing_bucket, prefix, s3, data_bucket=args.data_bucket
+            args.landing_bucket,
+            prefix,
+            s3,
+            data_bucket=args.data_bucket,
+            head_workers=args.head_workers,
         )
         if result.incomplete:
             print(

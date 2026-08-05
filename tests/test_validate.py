@@ -414,3 +414,170 @@ def test_discover_skips_unsealed():
     _build(s3)
     del s3._store[(LANDING, f"{DID}/{VER}/tokens/manifest.json")]  # unsealed
     assert f"{DID}/{VER}" not in V.discover_pending(LANDING, s3)
+
+
+# --------------------------------------------------------------------------------------
+# Threaded HEAD prefetch: faster, and provably the same verdict
+# --------------------------------------------------------------------------------------
+
+
+class _InvertedLatencyS3:
+    """A fake whose HEADs complete in REVERSE submission order.
+
+    This is the point of the fixture. On a plain in-memory fake, an as-completed implementation
+    usually passes an order assertion by luck, because everything finishes instantly in submission
+    order anyway. Here later entries finish FIRST by construction, so any implementation that
+    collects results as they arrive rather than by submission order fails visibly.
+    """
+
+    def __init__(self, n, missing=()):
+        import threading
+
+        self.n = n
+        self.missing = set(missing)
+        self.completion = []
+        self.peak = 0
+        self._cur = 0
+        self._lock = threading.Lock()
+
+    def head(self, bucket, key):
+        import time
+
+        from edullm_data.s3 import NotFound
+
+        with self._lock:
+            self._cur += 1
+            self.peak = max(self.peak, self._cur)
+        idx = int(key.rsplit("-", 1)[-1])
+        time.sleep(0.01 * (self.n - idx))
+        with self._lock:
+            self._cur -= 1
+            self.completion.append(idx)
+        if idx in self.missing:
+            raise NotFound(key)
+        return {"size": 100 + idx}
+
+
+class _Entry:
+    def __init__(self, path):
+        self.path = path
+
+
+def _entries(n):
+    return [_Entry(f"tokens/train-{i:05d}") for i in range(n)]
+
+
+def test_prefetched_heads_keep_manifest_order_at_every_worker_count():
+    """Gate A's `duplicate-shard-digest` fires on the SECOND occurrence of a digest, so which of
+    two identical shards gets named is decided by iteration order. The prefetch must therefore
+    return results in manifest order, not completion order."""
+    from edullm_data.validate import _prefetch_heads
+
+    ents = _entries(10)
+    baseline = None
+    for workers in (1, 4, 16):
+        fake = _InvertedLatencyS3(10, missing={3, 7})
+        out = _prefetch_heads(fake, "bkt", "pfx", ents, workers)
+        assert list(out.keys()) == [e.path for e in ents], workers
+        got = [(p, None if h is None else h["size"]) for p, h in out.items()]
+        if baseline is None:
+            baseline = got
+        else:
+            assert got == baseline, f"workers={workers} diverged from sequential"
+        if workers > 1:
+            assert fake.peak > 1, "the pool never overlapped; this test proved nothing"
+            # Completion order must differ from submission order — that is what makes the
+            # manifest-order assertion above meaningful. (Not a strict reversal: once the pool is
+            # as wide as the work, every HEAD starts at once and the sleeps interleave.)
+            assert fake.completion != sorted(fake.completion), (
+                f"workers={workers} completed in submission order; the fixture proved nothing"
+            )
+
+
+def test_a_missing_object_is_reported_for_its_own_entry():
+    """`None` must mean "absent" for exactly the entry that is absent — the caller turns that into
+    `missing-object`, and a shifted mapping would blame the wrong shard."""
+    from edullm_data.validate import _prefetch_heads
+
+    ents = _entries(8)
+
+    class _Missing:
+        """Deterministic: no sleeps, so this cannot flake under a loaded test run.
+
+        The earlier version of this test used the latency fixture and failed intermittently in the
+        full suite while passing alone — a flaky test guarding a correctness property is worse than
+        no test, because the next person learns to re-run it.
+        """
+
+        def head(self, bucket, key):
+            from edullm_data.s3 import NotFound
+
+            idx = int(key.rsplit("-", 1)[-1])
+            if idx in (0, 5):
+                raise NotFound(key)
+            return {"size": 100 + idx}
+
+    for workers in (1, 8):
+        out = _prefetch_heads(_Missing(), "b", "p", ents, workers)
+        absent = [i for i, e in enumerate(ents) if out[e.path] is None]
+        assert absent == [0, 5], (workers, absent)
+        for i, e in enumerate(ents):
+            if i not in (0, 5):
+                assert out[e.path]["size"] == 100 + i, (workers, i)
+
+
+def test_a_duplicated_path_costs_one_head():
+    """Two manifest rows for one object describe ONE object. Gate A reports the duplication
+    separately; the prefetch must not double the most expensive call here."""
+    from edullm_data.validate import _prefetch_heads
+
+    class Counting:
+        def __init__(self):
+            self.calls = 0
+
+        def head(self, bucket, key):
+            self.calls += 1
+            return {"size": 1}
+
+    ents = [_Entry("a"), _Entry("a"), _Entry("b")]
+    for workers in (1, 4):
+        c = Counting()
+        out = _prefetch_heads(c, "b", "p", ents, workers)
+        assert c.calls == 2, (workers, c.calls)
+        assert list(out.keys()) == ["a", "b"]
+
+
+def test_the_default_is_one_worker_and_stays_sequential():
+    """A previously written `_VALIDATED.json` stands on the sequential path, so the default must
+    remain it — same calls, same order, no pool."""
+    import inspect
+
+    from edullm_data.validate import validate_dataset
+
+    assert inspect.signature(validate_dataset).parameters["head_workers"].default == 1
+
+    from edullm_data.validate import _prefetch_heads
+
+    fake = _InvertedLatencyS3(6)
+    _prefetch_heads(fake, "b", "p", _entries(6), 1)
+    assert fake.peak == 1, "head_workers=1 used concurrency"
+    assert fake.completion == sorted(fake.completion), "sequential run completed out of order"
+
+    # And prove it never even CONSTRUCTS a pool at 1. peak==1 alone is not enough: a
+    # ThreadPoolExecutor(max_workers=1) also yields peak 1 while running on a worker thread, and
+    # then "the default is the original path" would be false in a way no assertion above catches.
+    # (Found by mutation: replacing the `head_workers <= 1` guard with `if False:` passed every
+    # other test in this file.)
+    import threading
+
+    seen_threads = set()
+
+    class _RecordThread:
+        def head(self, bucket, key):
+            seen_threads.add(threading.current_thread().name)
+            return {"size": 1}
+
+    _prefetch_heads(_RecordThread(), "b", "p", _entries(4), 1)
+    assert seen_threads == {threading.current_thread().name}, (
+        f"head_workers=1 ran off the calling thread: {seen_threads}"
+    )
