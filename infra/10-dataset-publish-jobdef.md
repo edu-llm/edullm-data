@@ -66,8 +66,16 @@ aws iam put-role-policy --role-name edullm-dataset-publish \
 | `image` | the digest that built the corpus, or a newer one whose branch **contains** it | Two commits have both declared `0.7.4`; `assert __version__` cannot tell them apart. Use the ECR tag (a commit sha) + `git merge-base --is-ancestor`. |
 | `jobRoleArn` | `edullm-dataset-publish` | Not a build role — those Deny `*manifest.json` / `*dataset.json`. |
 | `executionRoleArn` | `sbsandbox-intern-edullm-batch-execution` | **Required.** Omitting it yields a container that never starts and no readable logs; the symptom mimics a missing log group. Cost a full diagnosis cycle on the build job def. |
-| `vcpus` / `memory` | 16 / 32768 | `publish()` threads its hashing (`hash_workers`), so cores are actually used here — unlike `verify --deep`, which is single-threaded. |
+| `vcpus` / `memory` | 16 / 32768 | `publish()` threads its hashing (`hash_workers`), so the cores are used. As of `0.7.5` `verify --deep` does too, via `--hash-workers`; before that it was single-threaded and left 15 of 16 idle. |
 | `timeout` | ≥ 21600 s (6 h) | A 218-shard / 125 GB corpus timed out at 3600 s single-threaded. Measured single-stream in-region throughput is ~88 MB/s (from the `verify --deep` run), so ~1 TB is ~3.2 h at one worker; `hash_workers=16` cuts that, but leave headroom. |
+
+**If `hash_workers` > 10, the client needs a matching `max_pool_connections`.** `Boto3S3.default()`
+passes no `botocore.config.Config`, so the pool is botocore's default **10** — and botocore does not
+pass `block=True` to urllib3, so exceeding it neither raises nor waits: urllib3 discards the surplus
+connection and logs "Connection pool is full", and workers 11..N silently pay a fresh TLS handshake
+per object. The speedup is capped with no error anywhere. `corpus_build._s3(max_pool_connections=…)`
+handles this for verify; a publish driver calling `Boto3S3.default()` directly with
+`hash_workers=16` is subject to the same ceiling.
 | `retryStrategy` | `attempts: 1` | **No retry.** `publish()` reserves the version with a *create-only* `dataset.json`; attempt 2 finds `v1` taken and either fails confusingly or lands on `v2`. Diagnose by hand. |
 
 `hash_workers` / `copy_workers` are arguments to `publish()`, not job-definition fields.

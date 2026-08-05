@@ -20,7 +20,7 @@ COPY src ./src
 COPY families ./families
 
 RUN python -m pip install --no-cache-dir . \
-    && python -c "import boto3, numpy, edullm_data; assert edullm_data.__version__ == '0.7.4'"
+    && python -c "import boto3, numpy, edullm_data; assert edullm_data.__version__ == '0.7.5'"
 
 # families/ must resolve from the INSTALLED package, not from the build context above.
 # pyproject's force-include maps it to edullm_data/families, and corpus_pack REFUSES to start

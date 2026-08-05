@@ -162,9 +162,19 @@ publish(
    on the *declared* digest, so a manifest `sha256` is otherwise a producer assertion no gate
    falsifies), and it found nothing wrong. Details in `verify-job.json`.
 
-   Re-run it if any shard is rebuilt. Two cost notes: it is **single-threaded**, so the job def's
-   16 vCPU buys nothing, and it sustained 87.8 MB/s — under ~70 MB/s the 4 h timeout would have been
-   missed. Raise the timeout or thread the loop before this corpus grows.
+   Re-run it if any shard is rebuilt — **and pass `--hash-workers 8`**, which did not exist when
+   this ran. That job was single-threaded at 87.8 MB/s sustained, using 1 of 16 vCPU and finishing
+   only ~0.7 h inside the 4 h timeout; under ~70 MB/s it would have missed it. `0.7.5` threads the
+   deep re-hash (`--hash-workers`, default 1), measured 7.82x at 8 workers, so the same run is
+   ~25 min. `edullm-reservoir-verify:1` does **not** pass the flag — a new revision is needed before
+   the speedup is reachable, and the job def must also move to a `0.7.5` image.
+
+   The default is 1 and is byte-for-byte the old sequential path, so **this verdict is not
+   invalidated by that change** — same code, same order, same calls. Independently confirmed that
+   violations are element-for-element identical at 1/2/4/16 workers and that 1 worker touches only
+   `MainThread`. Also confirmed a `0.7.5` verifier still accepts these `0.7.4` receipts: the
+   provenance check is that receipts agree with *each other*, not with the running package, so the
+   corpus does **not** need rebuilding for the version bump.
 2. `sources[]` token counts come from the **receipts**, not the plan — `tokens_out` is what was
    realized. `stackv2-edu--train` landed at 100.00% of plan but that is not guaranteed, and citing
    planned figures as measured ones is exactly the honesty failure `scope:
