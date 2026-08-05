@@ -142,8 +142,24 @@ publish(
 
 ## Before running it
 
-1. `corpus_build verify --plan-id d5c9bcd38735e1f0 --deep` must pass. `--deep` re-hashes every
-   payload byte and is the ONLY payload re-hash in this pipeline; `verify` without it checks sizes.
+1. ~~`corpus_build verify --plan-id d5c9bcd38735e1f0 --deep` must pass.~~ **✅ SATISFIED 2026-08-05**
+   (`rsv-verify-deep-2`, job `507356db`, exit 0). Verbatim:
+
+   ```
+   WHEEL_VERSION=0.7.4
+   VERIFY_START plan=d5c9bcd38735e1f0 deep=1
+   OK 27 bundles, 10049 shards (payload re-hashed)
+   VERIFY_DONE_RC=0
+   ```
+
+   Every shard's payload bytes were re-read and re-hashed against its receipt — 1.005 TB in 3.27 h.
+   This is the ONLY payload re-hash in this pipeline (Gate A heads for SIZE then does set-membership
+   on the *declared* digest, so a manifest `sha256` is otherwise a producer assertion no gate
+   falsifies), and it found nothing wrong. Details in `verify-job.json`.
+
+   Re-run it if any shard is rebuilt. Two cost notes: it is **single-threaded**, so the job def's
+   16 vCPU buys nothing, and it sustained 87.8 MB/s — under ~70 MB/s the 4 h timeout would have been
+   missed. Raise the timeout or thread the loop before this corpus grows.
 2. `sources[]` token counts come from the **receipts**, not the plan — `tokens_out` is what was
    realized. `stackv2-edu--train` landed at 100.00% of plan but that is not guaranteed, and citing
    planned figures as measured ones is exactly the honesty failure `scope:

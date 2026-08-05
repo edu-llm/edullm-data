@@ -2,5 +2,34 @@
  "jobId": "507356db-cbef-4676-a3dc-c6aadb39cb5c",
  "jobName": "rsv-verify-deep-2",
  "predicted_set_violations": 0,
- "wheel": "0.7.4 across all 27"
+ "wheel": "0.7.4 across all 27",
+ "_comment": [
+  "rsv-verify-deep-2: the ONLY payload re-hash in this pipeline, and it PASSED.",
+  "Gate A never re-reads payload bytes (validate.py heads for SIZE then does set-membership on the",
+  "DECLARED digest), so a manifest sha256 is a producer assertion no gate falsifies. This job is",
+  "the one thing that falsifies it, and it found nothing wrong across 10,049 shards / 1.005 TB.",
+  "Length-preserving corruption is invisible to every cheap check AND to Gate A; that is what this",
+  "tier exists for.",
+  "",
+  "Note the cost shape for next time: verify --deep is SINGLE-THREADED (corpus_receipt.py loops",
+  "receipts serially, _check_objects hashes shard-by-shard), so the job def's 16 vCPU buys nothing.",
+  "Measured 87.8 MB/s sustained single-stream in-region -> 3.27h for 1.005 TB against a 4h timeout.",
+  "Under ~70 MB/s it would have timed out. Raise the timeout or thread the loop before growing the",
+  "corpus."
+ ],
+ "result": "PASS",
+ "exit_code": 0,
+ "verbatim_log": [
+  "WHEEL_VERSION=0.7.4",
+  "VERIFY_START plan=d5c9bcd38735e1f0 deep=1",
+  "OK 27 bundles, 10049 shards (payload re-hashed)",
+  "VERIFY_DONE_RC=0"
+ ],
+ "started": "2026-08-05T04:11:20Z",
+ "finished": "2026-08-05T07:27:42Z",
+ "duration_hours": 3.27,
+ "bytes_rehashed": 1004979748864,
+ "sustained_mb_s": 87.8,
+ "timeout_hours": 4.0,
+ "single_threaded": true
 }
