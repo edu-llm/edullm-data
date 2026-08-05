@@ -33,9 +33,14 @@
 >   code into a digest-pinned image, which is better provenance than a wheel in `_dist/`: the digest
 >   pins the whole dependency tree, and `_dist/` has **no lifecycle expiration**, so a wheel sitting
 >   there is mutable-by-overwrite indefinitely.
-> - ⚠️ **Auto-promotion is currently DISABLED** — the `edullm-landing-manifest-created` EventBridge
->   rule is `DISABLED`, so landing a `manifest.json` fires nothing. Re-enable it or submit the
->   validator job by hand.
+> - ⚠️ ~~**Auto-promotion is currently DISABLED**~~ **WRONG as of 2026-08-05 — it is `ENABLED`.**
+>   `describe-rule edullm-landing-manifest-created` returns `State: ENABLED`, matching **any**
+>   `edullm-landing` key with suffix `manifest.json` (no prefix constraint) and submitting
+>   `edullm-validator` by *unversioned* name. So landing a `manifest.json` fires Gate A and, on a
+>   pass, promotion into `edullm-data` — where frozen means frozen. The old "fires nothing" claim
+>   spread from here into `artifacts/reservoir/PUBLISH-SPEC.md` and a session memory, and all three
+>   were wrong together, which is what a copied claim does. **Check the live rule state; do not trust
+>   this bullet either.**
 
 ~~**Status: BLOCKED on one external step — everything else is ready.**~~
 

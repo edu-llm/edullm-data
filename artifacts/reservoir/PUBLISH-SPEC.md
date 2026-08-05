@@ -179,17 +179,40 @@ publish(
    realized. `stackv2-edu--train` landed at 100.00% of plan but that is not guaranteed, and citing
    planned figures as measured ones is exactly the honesty failure `scope:
    "upstream-full-collection"` exists to flag.
-3. **`edullm-landing-manifest-created` is DISABLED.** Writing `manifest.json` normally fires
-   EventBridge -> the validator -> promotion. With the rule off, nothing auto-promotes: submit
-   `edullm-validator` (**rev 12** as of 2026-08-04, running as
-   `sbsandbox-intern-edullm-dataset-validator`) manually, or re-enable the rule first. Decide which
-   BEFORE publishing, not after. **Do not hardcode a revision** — both EventBridge rules target the
-   job def by *unversioned* name, so a manual submission naming an old revision runs a different
-   validator than the automatic path would. Re-read the current revision before submitting.
-4. **`publish()` has nowhere to run yet.** Item 3's premise is that this runs on Batch, but there is
-   no reservoir publish job definition — `edullm-prm800k-publish` is a different corpus with a
-   different entry point (`edullm-prm800k-ingest publish --run-id`). One must be registered first;
-   see "The publish job definition" below.
+3. **`edullm-landing-manifest-created` is ENABLED — publishing AUTO-PROMOTES.** Verified live
+   2026-08-05: `describe-rule` returns `State: ENABLED`, pattern = any `edullm-landing` key with
+   suffix `manifest.json` (**no prefix constraint**), target = `edullm-validator` by *unversioned*
+   name on `sbsandbox-intern-edullm-cpu`.
+
+   > **This entry said DISABLED until 2026-08-05, and so did `05-validator-jobdef.md` and a session
+   > memory. All three were wrong.** The consequence is not cosmetic: `publish()` writes
+   > `manifest.json`, so the write does **not** stage quietly for later review — it fires Gate A and,
+   > on a pass, `promote()` copies into `edullm-data`, where frozen means frozen. Anyone trusting the
+   > old text would have expected a reviewable staging step that does not exist. **Re-read the rule
+   > state before publishing; do not trust this line either.**
+
+   So there is no "publish now, validate later" unless you disable the rule first. Decide BEFORE
+   publishing. **Do not hardcode a validator revision** — the rule targets the job def by
+   unversioned name, so a manual submission naming an old revision runs a *different* validator than
+   the automatic path.
+4. **The validator writes the README, so ITS code decides what consumers read.** `promote()` renders
+   `README.md` (`validate.py:1366-1371`) from the *validator's* package, not the publisher's — and
+   the call is wrapped in `except Exception: pass`, best-effort by design. A validator without the
+   `_notes_section` fix therefore drops `notes` **silently**, with no gate objecting and nothing in
+   the log. For this corpus `notes` carries the mixed-license disclosure (7.13% of train is
+   CC-BY-SA-4.0 share-alike), which a consumer cannot recompute from the shards.
+
+   `edullm-validator:12`'s image is built from `e0984c8`, which diverges from the reservoir line and
+   has **no** `_notes_section` (`grep -c` → 0). Register a validator built from the converged
+   **0.9.0** tree first, and confirm inside the running image that `available()` reports
+   `vendored/v1` too — the reservoir line alone has five profiles, and registering it would make the
+   live `vendor/openai-prm800k/v1` unvalidatable.
+
+   Known and deliberate gap: **`text-corpus/v1` is registered by no line yet**, including rev 12,
+   and one published dataset declares it (`pretrain/fineweb2-equal-bytes/v1`, group `text`). That is
+   harmless because nothing re-validates promoted data — `fsck` never resolves a profile, and Gate A
+   runs only on landing writes — and that dataset is already sealed. Its implementation lives on
+   `edullm/validator-text-corpus`, a fourth line whose convergence is separate work.
 
 ## The two image lines, and why the version string cannot identify the code
 
