@@ -1,13 +1,13 @@
 {
   "_comment": [
-    "Trust policy for edullm-reservoir-publish — WHO may become this role.",
+    "Trust policy for edullm-reservoir-publish -- WHO may become this role.",
     "",
     "`ecs-tasks.amazonaws.com` only, identical in shape to 08-reservoir-ingest-trust-policy.json and",
     "to the validator's. AWS Batch runs containers as ECS tasks, so that principal is what a running",
     "job needs; no human session and no EC2 instance can assume it.",
     "",
     "This matters more for this role than for the builder. The intern role in this account carries",
-    "AdministratorAccess, so IAM is not what keeps a human out of the pipeline's identities — this",
+    "AdministratorAccess, so IAM is not what keeps a human out of the pipeline's identities -- this",
     "trust policy is. And this is the one reservoir role permitted to write `dataset.json` and",
     "`manifest.json`, i.e. the one whose credentials could fire the validator. Keeping it",
     "unassumable from a session is what makes 'publishing happens only through a Batch job' a",

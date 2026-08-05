@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "Permission policy for edullm-dataset-publish — the GENERAL-PURPOSE publisher role. Any dataset,",
+    "Permission policy for edullm-dataset-publish -- the GENERAL-PURPOSE publisher role. Any dataset,",
     "any family, one role. Supersedes the pattern of a new role per corpus.",
     "",
     "WHY GENERAL RATHER THAN PER-CORPUS. `edullm-prm800k-producer` hardcodes",
@@ -10,7 +10,7 @@
     "each one a fresh chance to fat-finger a Deny. One reviewed role that every publish job assumes",
     "is both less work and less surface.",
     "",
-    "WHAT BOUNDS IT INSTEAD OF A DATASET NAME: the §2 family enum. `contracts.validate_dataset_id`",
+    "WHAT BOUNDS IT INSTEAD OF A DATASET NAME: the Section 2 family enum. `contracts.validate_dataset_id`",
     "refuses any dataset_id whose first segment is not one of the seven families below (verified:",
     "`_ingest/evil` and `_dist/evil` both raise NamingError), so scoping the grant to those seven",
     "prefixes means this role cannot write to the pipeline's own control prefixes -- `_ingest/`",

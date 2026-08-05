@@ -1,6 +1,6 @@
 {
   "_comment": [
-    "Trust policy for edullm-dataset-publish — WHO may become the general-purpose publisher.",
+    "Trust policy for edullm-dataset-publish -- WHO may become the general-purpose publisher.",
     "",
     "`ecs-tasks.amazonaws.com` only, the same shape as the validator, the ingest roles, and the",
     "prm800k producer (all verified live 2026-07-31). AWS Batch runs its containers as ECS tasks, so",
