@@ -27,6 +27,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
+import time
 
 import pytest
 
@@ -44,7 +46,7 @@ from edullm_data.corpus_receipt import (
     verify_receipt,
     write_receipt,
 )
-from edullm_data.s3 import FakeS3, NotFound
+from edullm_data.s3 import FakeS3, NotFound, S3Error
 
 BUCKET = "edullm-landing"
 PREFIX = "pretrain/reservoir-dolma2/v1"
@@ -1019,3 +1021,407 @@ def test_reading_an_absent_receipt_raises_not_found():
     """`NotFound` passes through: "no receipt yet" is how a resumable driver learns to run a bundle."""
     with pytest.raises(NotFound):
         read_receipt(FakeS3(), BUCKET, "_receipts/nope.json")
+
+
+# --------------------------------------------------------------------------------------
+# threaded deep re-hash: the speedup must be observably identical to the sequential path
+# --------------------------------------------------------------------------------------
+#
+# `verify --deep` re-hashes payload serially at 87.8 MB/s — 3.27 h for 10,049 shards / 1.005 TB,
+# measured live 2026-08-05 (job `507356db`, which returned `OK 27 bundles, 10049 shards (payload
+# re-hashed)`). That verdict has to stay trustworthy, so these tests are not about speed. They are
+# about the change being INVISIBLE: same violations, same order, at any worker count.
+#
+# Two of them would pass against a broken implementation if written carelessly, and both are
+# defended:
+#
+# * an order test whose fixture has one violation cannot detect reordering at all, so
+#   `_corrupt_every_other` builds SEVERAL violations across SEVERAL bundles;
+# * a test that never actually engages the pool proves nothing, so `CountingS3` records the distinct
+#   threads that entered `hash_object` and `BarrierS3` DEADLOCKS (fails on timeout) unless real
+#   concurrency exists.
+
+
+class CountingS3(FakeS3):
+    """Records how many distinct threads entered `hash_object`, and the peak overlap.
+
+    `peak_overlap` is the interesting number: `threads_seen` could exceed 1 on a pool that only ever
+    ran one task at a time (a thread is reused, or hands off), whereas an overlap above 1 means two
+    re-hashes were genuinely in flight together. The small sleep widens the window so the overlap is
+    observable at all — without it a hash of an in-memory body returns so fast that the threads
+    serialize by accident and the test would under-report concurrency it did get.
+    """
+
+    def __init__(self, *, delay: float = 0.01) -> None:
+        super().__init__()
+        self._delay = delay
+        self._lock = threading.Lock()
+        self.threads_seen: set[int] = set()
+        self.in_flight = 0
+        self.peak_overlap = 0
+        self.hash_calls: list[str] = []
+
+    def hash_object(self, bucket, key):
+        with self._lock:
+            self.threads_seen.add(threading.get_ident())
+            self.hash_calls.append(key)
+            self.in_flight += 1
+            self.peak_overlap = max(self.peak_overlap, self.in_flight)
+        try:
+            time.sleep(self._delay)
+            return super().hash_object(bucket, key)
+        finally:
+            with self._lock:
+                self.in_flight -= 1
+
+
+class BarrierS3(FakeS3):
+    """`hash_object` blocks until `parties` threads are inside it simultaneously.
+
+    This is the strongest available proof that the pool is real: on a sequential implementation the
+    first call waits for peers that can never arrive, the barrier times out, and `BrokenBarrierError`
+    surfaces as a failure. It cannot pass by accident.
+    """
+
+    def __init__(self, parties: int, *, timeout: float = 10.0) -> None:
+        super().__init__()
+        self.barrier = threading.Barrier(parties, timeout=timeout)
+
+    def hash_object(self, bucket, key):
+        self.barrier.wait()
+        return super().hash_object(bucket, key)
+
+
+def _multi_bundle_with_corruption(n_bundles: int = 3, shards_per_bundle: int = 6):
+    """Several bundles, several shards each, every other shard corrupted length-preservingly.
+
+    Returns `(receipts, streams, s3)`. The corruption is length-preserving, so the cheap tier stays
+    silent and the ONLY violations are deep ones — which is what makes this fixture able to detect a
+    reordering of the deep results specifically. Interleaving corrupt and clean shards also means a
+    naive implementation that appends results as they complete produces a visibly different order.
+    """
+    streams = [("dclm", None, "train"), ("finemath", None, "train"), ("pes2o", None, "train")]
+    streams = streams[:n_bundles]
+    receipts = []
+    all_bodies: dict[str, bytes] = {}
+    corrupted_paths: list[str] = []
+
+    for source, domain, split in streams:
+        bodies = {
+            shard_key(source, domain, split, i): _shard_body(
+                1 + (i % 2), seed=f"{source}/{split}/{i}"
+            )
+            for i in range(shards_per_bundle)
+        }
+        receipts.append(_receipt(source=source, domain=domain, split=split, bodies=bodies))
+        all_bodies.update(bodies)
+
+    s3 = _seeded(all_bodies)
+    # Corrupt every other shard AFTER the receipts recorded the true digests.
+    for source, domain, split in streams:
+        for i in range(0, shards_per_bundle, 2):
+            path = shard_key(source, domain, split, i)
+            original = all_bodies[path]
+            replacement = _shard_body(len(original) // SEQ_LEN_STRIDE, seed=f"corrupt/{path}")
+            assert len(replacement) == len(original)
+            s3.seed(BUCKET, f"{PREFIX}/{path}", replacement)
+            corrupted_paths.append(path)
+
+    return receipts, streams, s3, corrupted_paths
+
+
+def test_the_order_fixture_really_has_many_violations_in_many_bundles():
+    """Guards the fixture the order tests depend on.
+
+    An order-stability test over a single violation is vacuous — any implementation returns a 1-item
+    list in the same "order". This asserts the fixture is genuinely capable of exposing a reorder
+    before the tests below rely on it.
+    """
+    receipts, streams, s3, corrupted = _multi_bundle_with_corruption()
+    violations = verify_bundle_set(receipts, streams, s3=s3, bucket=BUCKET, deep=True)
+
+    assert len(receipts) == 3
+    assert len(corrupted) == 9  # 3 bundles x 3 corrupted shards
+    assert _codes(violations) == ["receipt-payload-digest-mismatch"] * 9
+    assert len({v.path for v in violations}) == 9  # every one a distinct shard
+    # And the cheap tier is silent, so these violations are purely the deep tier's.
+    assert verify_bundle_set(receipts, streams, s3=s3, bucket=BUCKET) == []
+
+
+@pytest.mark.parametrize("workers", [1, 2, 4, 8, 16])
+def test_deep_violations_are_identical_element_by_element_at_every_worker_count(workers):
+    """THE behaviour-preservation test. Not "same set" — same list, same order, same messages.
+
+    Compared against a freshly computed sequential baseline rather than a hardcoded list, so the
+    assertion cannot rot into agreement with a changed implementation.
+    """
+    receipts, streams, s3, _ = _multi_bundle_with_corruption()
+    baseline = verify_bundle_set(receipts, streams, s3=s3, bucket=BUCKET, deep=True)
+
+    threaded = verify_bundle_set(
+        receipts, streams, s3=s3, bucket=BUCKET, deep=True, hash_workers=workers
+    )
+
+    assert threaded == baseline  # dataclass equality: code, message AND path, in order
+    assert [v.path for v in threaded] == [v.path for v in baseline]
+    assert [v.message for v in threaded] == [v.message for v in baseline]
+
+
+@pytest.mark.parametrize("workers", [1, 2, 4, 8, 16])
+def test_a_single_receipts_deep_violations_keep_their_order_too(workers):
+    """`verify_receipt` is a public entry point; the guarantee is not only `verify_bundle_set`'s."""
+    receipts, _, s3, _ = _multi_bundle_with_corruption()
+    receipt = receipts[0]
+
+    baseline = verify_receipt(receipt, s3, BUCKET, deep=True)
+    threaded = verify_receipt(receipt, s3, BUCKET, deep=True, hash_workers=workers)
+
+    assert threaded == baseline
+    assert len(baseline) == 3
+
+
+def test_cheap_and_deep_violations_stay_interleaved_in_shard_order():
+    """The ordering guarantee is across TIERS, not just within the deep results.
+
+    A shard's cheap findings must still precede its own deep finding, and both must precede the next
+    shard's — that is the sequential layout, and a threaded implementation that appended all deep
+    results after all cheap ones would produce a different (and less readable) report while passing
+    a set-equality test.
+    """
+    paths = [shard_key("dclm", None, "train", i) for i in range(3)]
+    bodies = {p: _shard_body(1, seed=f"mixed/{p}") for p in paths}
+    receipt = _receipt(bodies=bodies)
+    s3 = _seeded(bodies)
+
+    # Middle shard: WRONG LENGTH, so it trips the cheap size check AND the deep digest check.
+    s3.seed(BUCKET, f"{PREFIX}/{paths[1]}", _shard_body(2, seed="mixed/grown"))
+    # Last shard: length-preserving corruption, deep only.
+    s3.seed(BUCKET, f"{PREFIX}/{paths[2]}", _shard_body(1, seed="mixed/swapped"))
+
+    baseline = verify_receipt(receipt, s3, BUCKET, deep=True)
+    for workers in (1, 2, 4, 8):
+        assert verify_receipt(receipt, s3, BUCKET, deep=True, hash_workers=workers) == baseline
+
+    # The middle shard's own cheap violations come before its own deep one.
+    codes = _codes(baseline)
+    assert "receipt-size-mismatch" in codes
+    assert codes.index("receipt-size-mismatch") < codes.index("receipt-payload-digest-mismatch")
+    # ...and the deep finding for shard 1 precedes the deep finding for shard 2.
+    deep_paths = [v.path for v in baseline if v.code == "receipt-payload-digest-mismatch"]
+    assert deep_paths == [paths[1], paths[2]]
+
+
+def test_the_thread_pool_is_genuinely_used_at_more_than_one_worker():
+    """Proves the pool RAN. Without this, every order test above could be passing sequentially.
+
+    Asserts overlap, not just thread identity: two re-hashes in flight at the same moment.
+    """
+    receipts, streams, s3_unused, _ = _multi_bundle_with_corruption(n_bundles=1, shards_per_bundle=8)
+    receipt = receipts[0]
+    bodies = {s.path: None for s in receipt.shards}
+
+    s3 = CountingS3()
+    for path in bodies:
+        s3.seed(BUCKET, f"{PREFIX}/{path}", s3_unused.get(BUCKET, f"{PREFIX}/{path}"))
+
+    verify_receipt(receipt, s3, BUCKET, deep=True, hash_workers=4)
+
+    assert len(s3.hash_calls) == 8            # every shard hashed exactly once
+    assert len(s3.threads_seen) > 1, "the re-hash never left the calling thread"
+    assert s3.peak_overlap > 1, f"no two re-hashes overlapped (peak={s3.peak_overlap})"
+
+
+def test_the_default_never_constructs_a_pool_and_stays_on_the_calling_thread():
+    """The complement, and the constraint that protects the 2026-08-05 verdict.
+
+    `hash_workers=1` must be the ORIGINAL code path — not a one-worker pool, which would be
+    behaviourally similar but observably different (a re-hash running on some other thread).
+    """
+    receipts, _, source, _ = _multi_bundle_with_corruption(n_bundles=1, shards_per_bundle=6)
+    receipt = receipts[0]
+
+    s3 = CountingS3()
+    for shard in receipt.shards:
+        s3.seed(BUCKET, f"{PREFIX}/{shard.path}", source.get(BUCKET, f"{PREFIX}/{shard.path}"))
+
+    main_thread = threading.get_ident()
+    for workers in (1,):  # explicit: only the default
+        s3.threads_seen.clear()
+        verify_receipt(receipt, s3, BUCKET, deep=True, hash_workers=workers)
+        assert s3.threads_seen == {main_thread}, "hash_workers=1 must not use a worker thread"
+    assert s3.peak_overlap == 1
+
+
+def test_workers_really_run_concurrently_or_this_test_deadlocks():
+    """A barrier that only releases when N threads are inside `hash_object` at once.
+
+    Sequential code cannot satisfy it: the first call blocks forever waiting for peers, the barrier
+    times out and raises. So this test failing is the pool being absent, and it passing is proof the
+    concurrency is real rather than inferred from a counter.
+    """
+    parties = 4
+    receipts, _, source, _ = _multi_bundle_with_corruption(
+        n_bundles=1, shards_per_bundle=parties
+    )
+    receipt = receipts[0]
+
+    s3 = BarrierS3(parties, timeout=15.0)
+    for shard in receipt.shards:
+        s3.seed(BUCKET, f"{PREFIX}/{shard.path}", source.get(BUCKET, f"{PREFIX}/{shard.path}"))
+
+    violations = verify_receipt(receipt, s3, BUCKET, deep=True, hash_workers=parties)
+
+    # All `parties` shards were corrupted-or-not consistently with the fixture; what matters is that
+    # the call RETURNED, i.e. the barrier was satisfied by genuine simultaneity.
+    assert s3.barrier.n_waiting == 0
+    assert isinstance(violations, list)
+
+
+def test_a_path_listed_twice_is_hashed_once_even_at_many_workers():
+    """The duplicate guard is `hashed`, and threading must not reintroduce a double GET.
+
+    `_check_objects` caches per KEY precisely so a repeated row costs one HEAD and one hash; the deep
+    tier is the expensive one, so a threaded version that moved the guard into the worker would
+    re-read the most expensive thing in the module to report a fact it already reported.
+    """
+    path = shard_key("dclm", None, "train", 0)
+    body = _shard_body(2, seed="dupe")
+    shard = ShardReceipt(
+        path=path, sha256=_sha(body), tokens=len(body) // DTYPE_SIZE, bytes=len(body)
+    )
+    # The SAME path twice, plus a distinct second shard so there is real work to fan out.
+    other = shard_key("dclm", None, "train", 1)
+    other_body = _shard_body(1, seed="dupe-other")
+    other_shard = ShardReceipt(
+        path=other, sha256=_sha(other_body), tokens=len(other_body) // DTYPE_SIZE,
+        bytes=len(other_body),
+    )
+    receipt = _receipt(
+        bodies={path: body},
+        shards=(shard, shard, other_shard),
+        tokens_in=shard.tokens * 2 + other_shard.tokens,
+        tokens_out=shard.tokens * 2 + other_shard.tokens,
+    )
+
+    s3 = CountingS3()
+    s3.seed(BUCKET, f"{PREFIX}/{path}", body)
+    s3.seed(BUCKET, f"{PREFIX}/{other}", other_body)
+
+    for workers in (1, 8):
+        s3.hash_calls.clear()
+        violations = verify_receipt(receipt, s3, BUCKET, deep=True, hash_workers=workers)
+        assert s3.hash_calls.count(f"{PREFIX}/{path}") == 1, "the duplicated path was hashed twice"
+        assert len(s3.hash_calls) == 2
+        # The duplicate itself is still reported exactly once, by the pure tier.
+        assert _codes(violations).count("receipt-duplicate-path") == 1
+
+
+def test_hash_workers_is_ignored_when_deep_is_off_and_costs_no_get():
+    """`--hash-workers` without `--deep` must not silently imply a re-hash."""
+    receipts, streams, s3_src, _ = _multi_bundle_with_corruption(n_bundles=1, shards_per_bundle=4)
+    receipt = receipts[0]
+
+    s3 = CountingS3()
+    for shard in receipt.shards:
+        s3.seed(BUCKET, f"{PREFIX}/{shard.path}", s3_src.get(BUCKET, f"{PREFIX}/{shard.path}"))
+
+    cheap = verify_receipt(receipt, s3, BUCKET, hash_workers=16)
+
+    assert s3.hash_calls == []       # not one payload byte read
+    assert cheap == verify_receipt(receipt, s3, BUCKET)
+
+
+def test_an_exception_from_a_worker_propagates_rather_than_being_swallowed():
+    """A pool that dropped exceptions would turn a broken S3 into a CLEAN verify — the worst
+    possible failure for a tool whose entire job is refusing to say 'done' wrongly."""
+    receipts, _, source, _ = _multi_bundle_with_corruption(n_bundles=1, shards_per_bundle=4)
+    receipt = receipts[0]
+
+    class Broken(FakeS3):
+        def hash_object(self, bucket, key):
+            raise S3Error("throttled")
+
+    s3 = Broken()
+    for shard in receipt.shards:
+        s3.seed(BUCKET, f"{PREFIX}/{shard.path}", source.get(BUCKET, f"{PREFIX}/{shard.path}"))
+
+    for workers in (1, 4):
+        with pytest.raises(S3Error, match="throttled"):
+            verify_receipt(receipt, s3, BUCKET, deep=True, hash_workers=workers)
+
+
+class InvertedLatencyS3(FakeS3):
+    """`hash_object` finishes in REVERSE submission order — the last shard returns first.
+
+    This is what makes the order guarantee falsifiable. Against an in-memory fake, every hash returns
+    in microseconds and a completion-ordered implementation would *usually* happen to produce
+    submission order anyway, so an order test on a plain `FakeS3` is a weak detector. Here the sleep
+    is keyed to the shard's position, so an implementation that collects as-completed produces
+    exactly reversed output every time, deterministically.
+    """
+
+    def __init__(self, order: list[str], *, step: float = 0.02) -> None:
+        super().__init__()
+        self._rank = {key: i for i, key in enumerate(order)}
+        self._step = step
+        self.completion_order: list[str] = []
+        self._lock = threading.Lock()
+
+    def hash_object(self, bucket, key):
+        # later in submission order => shorter sleep => finishes sooner
+        time.sleep(self._step * (len(self._rank) - self._rank.get(key, 0)))
+        with self._lock:
+            self.completion_order.append(key)
+        return super().hash_object(bucket, key)
+
+
+def test_violations_stay_in_submission_order_even_when_hashes_complete_backwards():
+    """The order test with teeth: completion order is provably the REVERSE of submission order.
+
+    Asserts both halves, so the test cannot pass for the wrong reason — first that the fake really
+    did complete backwards (otherwise the scenario never happened and the test is vacuous), then that
+    the violations came back in submission order regardless.
+    """
+    n = 5
+    bodies = {
+        shard_key("dclm", None, "train", i): _shard_body(1, seed=f"inv/{i}") for i in range(n)
+    }
+    receipt = _receipt(bodies=bodies)
+    paths = [s.path for s in receipt.shards]
+    keys = [f"{PREFIX}/{p}" for p in paths]
+
+    s3 = InvertedLatencyS3(keys)
+    for path, body in bodies.items():
+        # Every shard corrupted length-preservingly, so all n produce a deep violation.
+        s3.seed(BUCKET, f"{PREFIX}/{path}", _shard_body(1, seed=f"inv-corrupt/{path}"))
+
+    violations = verify_receipt(receipt, s3, BUCKET, deep=True, hash_workers=n)
+
+    # 1. the fake genuinely completed backwards — the scenario is real
+    assert s3.completion_order == list(reversed(keys)), s3.completion_order
+    # 2. ...and the report is still in submission order
+    assert _codes(violations) == ["receipt-payload-digest-mismatch"] * n
+    assert [v.path for v in violations] == paths
+
+
+def test_a_missing_shard_mid_list_does_not_disturb_the_order_of_the_rest():
+    """A missing shard `continue`s, so it reserves NO deep slot — the slot bookkeeping must survive
+    that hole. If reservation and filling ever disagreed about which index belongs to which shard,
+    this is the fixture where the violations would come back attached to the wrong paths.
+    """
+    paths = [shard_key("dclm", None, "train", i) for i in range(5)]
+    bodies = {p: _shard_body(1, seed=f"hole/{p}") for p in paths}
+    receipt = _receipt(bodies=bodies)
+    s3 = _seeded(bodies)
+
+    s3.delete(BUCKET, f"{PREFIX}/{paths[2]}")                                   # a hole
+    for i in (1, 4):                                                            # corrupted around it
+        s3.seed(BUCKET, f"{PREFIX}/{paths[i]}", _shard_body(1, seed=f"hole-bad/{i}"))
+
+    baseline = verify_receipt(receipt, s3, BUCKET, deep=True)
+    for workers in (1, 2, 4, 8, 16):
+        assert verify_receipt(receipt, s3, BUCKET, deep=True, hash_workers=workers) == baseline
+
+    assert "receipt-shard-missing" in _codes(baseline)
+    deep_paths = [v.path for v in baseline if v.code == "receipt-payload-digest-mismatch"]
+    assert deep_paths == [paths[1], paths[4]]        # attached to the right shards, in order

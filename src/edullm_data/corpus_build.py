@@ -568,10 +568,32 @@ def run_bundle(
 # --------------------------------------------------------------------------------------
 
 
-def _s3():
+def _s3(*, max_pool_connections: int | None = None):
+    """The driver's S3 client.
+
+    ``max_pool_connections`` raises botocore's connection-pool ceiling for the threaded deep verify.
+    The default is **10** (verified: ``botocore.config.Config().max_pool_connections == 10``), and
+    botocore does not pass ``block=True`` to urllib3 — so past 10 in-flight requests urllib3's
+    ``_put_conn`` DISCARDS the surplus connection and logs "Connection pool is full" instead of
+    raising or waiting. Nothing fails; the 11th..Nth worker just eats a fresh TLS handshake on every
+    shard, which would quietly cap the speedup a caller thinks they asked for. Sized to the worker
+    count so a 16-way fan-out actually keeps 16 sockets alive.
+    """
     from .s3 import Boto3S3
 
-    return Boto3S3.default()
+    if max_pool_connections is None:
+        return Boto3S3.default()
+
+    import boto3
+    from botocore.config import Config
+
+    return Boto3S3(
+        boto3.client(
+            "s3",
+            region_name="us-east-1",
+            config=Config(max_pool_connections=max_pool_connections),
+        )
+    )
 
 
 def load_tokenizer(directory: str) -> tuple[Any, int, int]:
@@ -694,7 +716,22 @@ def _cmd_run(args) -> int:
 def _cmd_verify(args) -> int:
     from .corpus_receipt import read_receipt, verify_bundle_set
 
-    s3 = _s3()
+    hash_workers = getattr(args, "hash_workers", 1)
+    if hash_workers < 1:
+        raise BuildDriverError(f"--hash-workers must be at least 1, got {hash_workers}")
+    # `--hash-workers` only parallelizes the deep re-hash. Without `--deep` there is nothing to
+    # parallelize, so accepting it silently would tell the operator their run was sped up when it
+    # ran exactly as before — refuse instead of misleading.
+    if hash_workers > 1 and not args.deep:
+        raise BuildDriverError(
+            f"--hash-workers {hash_workers} has no effect without --deep: it parallelizes the "
+            f"payload re-hash, and the cheap tier is one HEAD per shard. Add --deep, or drop "
+            f"--hash-workers."
+        )
+
+    # Size the connection pool to the fan-out; botocore's default of 10 would otherwise silently
+    # discard connections past the 10th and cap the speedup (see `_s3`).
+    s3 = _s3(max_pool_connections=max(10, hash_workers + 4) if hash_workers > 1 else None)
     plan = _load_plan(s3, args.bucket, args.prefix, args.plan_id)
     bundles = bundles_of(plan)
     receipts = []
@@ -707,6 +744,7 @@ def _cmd_verify(args) -> int:
             missing.append(b.bundle_id)
     violations = verify_bundle_set(
         receipts, [b.stream for b in bundles], s3=s3, bucket=args.bucket, deep=args.deep,
+        hash_workers=hash_workers,
     )
     for m in missing:
         print(f"MISSING RECEIPT {m}")
@@ -927,6 +965,10 @@ def _build_parser() -> argparse.ArgumentParser:
     v.add_argument("--plan-id", required=True)
     v.add_argument("--deep", action="store_true",
                    help="re-hash every payload byte (a full GET per shard)")
+    v.add_argument("--hash-workers", type=int, default=1,
+                   help="threads for the --deep re-hash (default 1 = sequential, unchanged "
+                        "behaviour). Re-hashing is network-bound: 87.8 MB/s single-threaded, "
+                        "3.27h for 10,049 shards. Requires --deep.")
     v.set_defaults(func=_cmd_verify)
     return ap
 

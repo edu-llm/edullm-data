@@ -639,3 +639,71 @@ def test_a_stream_meant_to_be_consumed_WHOLE_still_raises_on_surplus():
     with pytest.raises(BuildError, match="remain after all"):
         pack({("tiny", None, "train"): iter(docs)}, list(refs),
              sink=lambda ref, payload: None, eos_id=100257, vocab_size=100278)
+
+
+# --------------------------------------------------------------------------------------
+# `verify --hash-workers`: the flag exists, defaults to sequential, and refuses to mislead
+# --------------------------------------------------------------------------------------
+
+
+def test_verify_defaults_to_one_hash_worker():
+    """The default is the flag's most important property.
+
+    A `verify --deep` run on 2026-08-05 (job `507356db`) returned `OK 27 bundles, 10049 shards
+    (payload re-hashed)`. That verdict stands on the strictly-sequential path, so the default must
+    keep selecting it — a default of "however many cores" would silently re-characterize the run
+    that produced the verdict.
+    """
+    args = B._build_parser().parse_args(["verify", "--plan-id", "p"])
+
+    assert args.hash_workers == 1
+    assert args.deep is False
+
+
+def test_verify_accepts_hash_workers_with_deep():
+    args = B._build_parser().parse_args(
+        ["verify", "--plan-id", "p", "--deep", "--hash-workers", "16"]
+    )
+
+    assert (args.deep, args.hash_workers) == (True, 16)
+
+
+def test_hash_workers_without_deep_is_refused_rather_than_silently_ignored():
+    """The flag only parallelizes the re-hash. Accepting it without `--deep` would report a run as
+    sped up when it ran exactly as before — a misleading success, which is worse than a refusal.
+
+    Refused BEFORE any client is built, so the check cannot depend on AWS being reachable.
+    """
+    args = B._build_parser().parse_args(["verify", "--plan-id", "p", "--hash-workers", "8"])
+
+    with pytest.raises(BuildError, match="no effect without --deep"):
+        B._cmd_verify(args)
+
+
+def test_a_nonsense_worker_count_is_refused():
+    """`ThreadPoolExecutor(max_workers=0)` raises deep inside the pool; refuse at the edge instead."""
+    args = B._build_parser().parse_args(
+        ["verify", "--plan-id", "p", "--deep", "--hash-workers", "0"]
+    )
+
+    with pytest.raises(BuildError, match="at least 1"):
+        B._cmd_verify(args)
+
+
+def test_the_threaded_verify_raises_the_botocore_connection_pool_ceiling():
+    """botocore's `max_pool_connections` defaults to 10 and does NOT block when exceeded.
+
+    urllib3's `_put_conn` discards the surplus connection and logs "Connection pool is full", so a
+    16-way fan-out on a default client silently pays a fresh TLS handshake per shard past the 10th —
+    the speedup gets capped and nothing reports it. Asserted against botocore's real default so this
+    test starts failing if that default ever changes underneath us.
+    """
+    from botocore.config import Config
+
+    assert Config().max_pool_connections == 10, "botocore default changed; revisit _s3()"
+
+    sized = B._s3(max_pool_connections=20)
+    assert sized._c.meta.config.max_pool_connections == 20
+
+    # The default path is unchanged: no Config is passed, so it keeps botocore's own default.
+    assert B._s3()._c.meta.config.max_pool_connections == 10

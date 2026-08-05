@@ -450,6 +450,7 @@ def verify_receipt(
     bucket: str,
     *,
     deep: bool = False,
+    hash_workers: int = 1,
 ) -> list[Violation]:
     """Falsify a bundle's completion claim against S3. Returns every violation found, in one pass.
 
@@ -482,6 +483,34 @@ def verify_receipt(
     A corrupted payload of unchanged length passes every cheap check here AND every check at Gate A.
     Length-preserving corruption is exactly what the deep tier is for.
 
+    **``hash_workers`` > 1 runs the deep re-hashes on a thread pool** (ignored entirely when
+    ``deep`` is False — the cheap tier is one HEAD per shard and is not what costs 3 hours).
+    Re-hashing is network-bound, exactly like ``publish.build_plan``'s hashing, so threads scale it
+    near-linearly despite the GIL: measured live 2026-08-05 at 87.8 MB/s sustained, 3.27 h for
+    10,049 shards / 1.005 TB on a 16-vCPU box with 15 cores idle. Default 1 keeps the original
+    strictly-sequential path — the same code, in the same order, issuing the same calls — because a
+    ``verify --deep`` verdict already stands on it (job ``507356db``: *OK 27 bundles, 10049 shards
+    (payload re-hashed)*) and a performance change must not be able to invalidate it.
+
+    Violations are collected in **submission order**, so the returned list is element-for-element
+    identical at any worker count. Tests assert on ``deep[0].path`` and ``violations[0].message``;
+    an as-completed collection would make those flaky and would silently reorder a report a human
+    reads top-down.
+
+    RAM stays bounded but the bound scales: ``s3.hash_object`` streams in 8 MiB chunks, so N workers
+    means at most N concurrent streams ⇒ ~``8 MiB * hash_workers`` of payload buffer, plus botocore's
+    per-connection buffers. At 16 workers that is ~128 MiB — trivial next to a 100 MB shard held
+    whole, which is the thing the streaming exists to avoid.
+
+    **Connection-pool ceiling (verified, not assumed).** ``Boto3S3.default()`` builds
+    ``boto3.client("s3")`` with no ``botocore.config.Config``, so ``max_pool_connections`` is
+    botocore's default **10** (confirmed: ``botocore.config.Config().max_pool_connections == 10`` on
+    botocore 1.43.56). botocore does not pass ``block=True`` to urllib3, so exceeding it does not
+    raise or block — urllib3's ``_put_conn`` *discards* the surplus connection and logs "Connection
+    pool is full", meaning workers 11..N silently pay a fresh TLS handshake per shard. That is a
+    throttle on the speedup, not a correctness bug, and it is why ``hash_workers`` above ~10 wants a
+    client built with a matching ``max_pool_connections``; see ``corpus_build._s3``.
+
     **Why size and the identity are both checked, and why they can co-fire.** ``manifest.py``'s
     ``verify_arithmetic`` compares ``count.value * dtype_size`` to the *declared* ``bytes`` — two
     producer numbers agreeing. Here the identity is evaluated against the size S3 reports, so it is
@@ -507,7 +536,7 @@ def verify_receipt(
     v += _check_bundle_shape(receipt)
     v += _check_source_pins(receipt)
     v += _check_recorded_conservation(receipt)
-    v += _check_objects(receipt, s3, bucket, deep=deep)
+    v += _check_objects(receipt, s3, bucket, deep=deep, hash_workers=hash_workers)
     return v
 
 
@@ -679,9 +708,24 @@ def _check_recorded_conservation(receipt: Receipt) -> list[Violation]:
     return v
 
 
-def _check_objects(receipt: Receipt, s3: S3, bucket: str, *, deep: bool) -> list[Violation]:
-    """The S3 tier: one HEAD per shard always, one full GET per shard when ``deep``."""
-    v: list[Violation] = []
+def _check_objects(
+    receipt: Receipt, s3: S3, bucket: str, *, deep: bool, hash_workers: int = 1
+) -> list[Violation]:
+    """The S3 tier: one HEAD per shard always, one full GET per shard when ``deep``.
+
+    **Structure, and why it is segments rather than one flat list.** The cheap tier stays strictly
+    sequential — it is one HEAD per shard, it is not what costs hours, and it mutates the two
+    dedupe structures below, so keeping it single-threaded means those structures are never touched
+    by more than one thread and there is no race to reason about. Only the deep re-hashes fan out,
+    and they are pure: ``_deep_rehash`` reads S3 and returns violations, sharing nothing.
+
+    Output order is preserved *structurally*, not by index arithmetic. Each shard's cheap violations
+    become one segment, and each deep re-hash RESERVES its segment in the same pass — at exactly the
+    position the sequential code would have appended it. The segments are filled afterwards and
+    flattened, so the returned list is element-for-element identical to the sequential path at any
+    ``hash_workers``. That matters because callers index it (``deep[0].path``,
+    ``violations[0].message``) and because a human reads the report top-down.
+    """
     # Keyed by full key, NOT accumulated per row, and that distinction is load-bearing. Two receipt
     # rows for one path describe ONE object in S3, so summing per row would inflate the derived
     # total by exactly the amount a duplicated row inflates `tokens_out` — the two lies would cancel
@@ -692,7 +736,14 @@ def _check_objects(receipt: Receipt, s3: S3, bucket: str, *, deep: bool) -> list
     hashed: set[str] = set()
     all_present = True
 
+    # Ordered output segments. `segments[i]` is one contiguous run of violations; deep slots start
+    # empty and are filled below. Both are appended to only by this sequential loop.
+    segments: list[list[Violation]] = []
+    deep_tasks: list[tuple[int, ShardReceipt, str]] = []
+
     for shard in receipt.shards:
+        v: list[Violation] = []
+        segments.append(v)
         key = _join(receipt.prefix, shard.path)
         if key in observed:
             size = observed[key]
@@ -754,10 +805,20 @@ def _check_objects(receipt: Receipt, s3: S3, bucket: str, *, deep: bool) -> list
 
         # `hashed` guards the same duplicate-row case as `observed`, and here it also guards the
         # COST: the deep tier is a full GET, so re-reading a repeated path would double the most
-        # expensive thing this module does to report a fact it already reported.
+        # expensive thing this module does to report a fact it already reported. The guard lives in
+        # this sequential loop, so it still admits each key exactly once no matter how many workers
+        # drain the queue afterwards — threading cannot reintroduce a double hash or a double report.
         if deep and key not in hashed:
             hashed.add(key)
-            v += _deep_rehash(shard, s3, bucket, key)
+            # Reserve this re-hash's place in the output NOW, so its violations land where the
+            # sequential code would have put them: after this shard's cheap findings, before the
+            # next shard's.
+            deep_tasks.append((len(segments), shard, key))
+            segments.append([])
+
+    _run_deep_rehashes(deep_tasks, segments, s3, bucket, hash_workers=hash_workers)
+
+    v = [item for segment in segments for item in segment]
 
     # The conservation cross-check, re-derived from what S3 actually holds rather than from the
     # receipt's own per-shard token counts (summing those and comparing to the recorded total would
@@ -778,6 +839,46 @@ def _check_objects(receipt: Receipt, s3: S3, bucket: str, *, deep: bool) -> list
                 )
             )
     return v
+
+
+def _run_deep_rehashes(
+    tasks: Sequence[tuple[int, ShardReceipt, str]],
+    segments: list[list[Violation]],
+    s3: S3,
+    bucket: str,
+    *,
+    hash_workers: int,
+) -> None:
+    """Fill each reserved segment with its shard's re-hash result, concurrently when asked.
+
+    Writes ``segments[slot]`` in place. Each task owns a distinct slot, allocated by the sequential
+    caller, so no two workers ever touch the same list — the only shared mutable object is
+    ``segments`` itself, and assigning to distinct pre-existing indices of a Python list is safe
+    without a lock (the list never resizes here).
+
+    ``hash_workers <= 1``, or a single task, takes the plain sequential path: same calls, same order,
+    no pool constructed at all. That is the default and it is what the 2026-08-05 ``verify --deep``
+    verdict rests on.
+    """
+    if not tasks:
+        return
+    if hash_workers > 1 and len(tasks) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+
+        # Never more threads than there is work — 16 workers for 3 shards is 13 idle threads and a
+        # pool the GC has to clean up.
+        with ThreadPoolExecutor(max_workers=min(hash_workers, len(tasks))) as pool:
+            futures = [
+                (slot, pool.submit(_deep_rehash, shard, s3, bucket, key))
+                for slot, shard, key in tasks
+            ]
+            for slot, fut in futures:
+                # `.result()` re-raises in the caller's thread, so an S3Error still propagates
+                # exactly as it does sequentially rather than being swallowed by the pool.
+                segments[slot] = fut.result()
+        return
+    for slot, shard, key in tasks:
+        segments[slot] = _deep_rehash(shard, s3, bucket, key)
 
 
 def _deep_rehash(shard: ShardReceipt, s3: S3, bucket: str, key: str) -> list[Violation]:
@@ -825,6 +926,7 @@ def verify_bundle_set(
     s3: S3 | None = None,
     bucket: str | None = None,
     deep: bool = False,
+    hash_workers: int = 1,
 ) -> list[Violation]:
     """Refuse an incomplete or inconsistent set of bundles.
 
@@ -852,6 +954,24 @@ def verify_bundle_set(
     ``s3``/``bucket`` are optional. Given, every receipt is also run through :func:`verify_receipt`
     (honouring ``deep``) and the results are concatenated; omitted, only the set-level checks run —
     which are pure and free, so a driver can check completeness before spending a single HEAD.
+
+    ``hash_workers`` is forwarded to each receipt's deep tier. **The pool is per-receipt, i.e. the
+    fan-out is across shards WITHIN a bundle, not across bundles** — a deliberate choice, and the
+    alternatives were rejected for concrete reasons:
+
+    * *Across bundles only* would strand the speedup on this corpus's actual shape. The 27 bundles
+      hold between 1 and 1,591 shards, so a 16-way per-bundle pool spends its last hours running one
+      worker on the 1,591-shard tail while 15 sit idle — Amdahl on the largest bundle, which is most
+      of the 3.27 h.
+    * *Both levels* (a pool of bundles each spawning a pool of shards) would multiply out to
+      ``workers ** 2`` concurrent streams from one flag, blowing the RAM bound and the connection
+      pool at once, and would need the per-bundle results interleaved to keep order. More moving
+      parts for no additional throughput: one flat 16-way fan-out already saturates the network.
+
+    Per-receipt is therefore the simplest thing that gets the full speedup, and it keeps the
+    concurrency inside the one function that owns the dedupe structures. Receipts are still verified
+    in list order and their violations concatenated in that order, so the returned list is
+    element-for-element identical at any worker count.
     """
     receipts = list(receipts)
     expected = list(expected_streams)
@@ -901,7 +1021,7 @@ def verify_bundle_set(
 
     if s3 is not None and bucket is not None:
         for r in receipts:
-            v += verify_receipt(r, s3, bucket, deep=deep)
+            v += verify_receipt(r, s3, bucket, deep=deep, hash_workers=hash_workers)
     return v
 
 
