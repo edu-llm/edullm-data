@@ -797,3 +797,37 @@ Rationale for weekly is in `fsck.py`'s module docstring: every fact the sweep re
 when something mutates a frozen prefix or another dataset's lifecycle. Those are rare and no more
 urgent at 24-hour granularity than at 7-day, and nightly bought seven times the false-alarm exposure
 for the same information.
+
+## Live deployment as of 2026-08-05 (0.9.1)
+
+Verified by `describe-job-definitions`, not by memory. **Identify an image by its ECR tag (a commit
+sha), never by version string** — two commits in this repo say `0.7.4` and two more say `0.8.0`, so
+every job def's `assert __version__ == '<X>'` passes on materially different trees.
+
+| job def | rev | image tag | what changed |
+|---|---|---|---|
+| `edullm-validator` | **14** | `3b11d7d3f4e2` (0.9.1) | `--head-workers 16`; timeout **7200 -> 14400s** |
+| `edullm-reservoir-verify` | **3** | `3b11d7d3f4e2` (0.9.1) | `--hash-workers` via `HASH_WORKERS=8` |
+| `edullm-dataset-publish` | 1 | `d8398a25040e` (0.7.5) | general-purpose publisher role |
+
+`edullm-validator` is targeted by the `edullm-landing-manifest-created` EventBridge rule **by
+unversioned name**, so registering rev 14 cut it over immediately — every future auto-promotion runs
+on it. That is why a preflight ran against the exact digest first (`edullm-validator-preflight:2`,
+10 assertions inside the container: version, all six profiles incl. `vendored/v1`, `## Notes`
+rendering, non-"Upstream" headers, `families/` at 0.05, both threading params, `head_workers` default
+still **1**, the shared HEAD cache, and the sized connection pool).
+
+**Why the timeout mattered more than the threading.** 7200s is what SIGKILLed the reservoir promotion
+at 6,324 of 10,051 objects. Gate A on ~10k entries is ~85 min of latency-bound serial I/O
+(~80,392 round trips at ~15.8/s); the threading trims ~12%, not half. Budget >=4h for a corpus of
+that size and more if it grows.
+
+**Airlock re-verified after the swap** (required after anything touching the validator role): intern
+`PutObject` to `edullm-data` -> `AccessDenied`. `pretrain/reservoir-dolma2/v1` is untouched — seal
+still 10,049 objects / 1,004,872,007,680 bytes, README still carries `## Notes` and the
+17,845,944,320-token share-alike figure.
+
+**Rollback:** re-register the previous revision's payload, or submit by explicit revision
+(`edullm-validator:13`). Rev 13 remains ACTIVE. Note that the *automatic* path always takes the top
+revision, so a rollback means registering a new revision that mirrors the old one, not just leaving
+13 in place.
