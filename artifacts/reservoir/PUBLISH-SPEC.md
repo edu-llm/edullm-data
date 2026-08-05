@@ -38,18 +38,28 @@ artifact: a wrong benchmark score months from now looks like a modelling result,
 The README renders `limitations[]`, and absent sections are omitted rather than faked — so silence
 here would read as "decontaminated".
 
-## The realized mix (train split, 251.1B tokens)
+## The realized mix (train split, 250,242,924,544 tokens)
 
-| category | tokens | share | sources |
+Recomputed from the 27 receipts on 2026-08-05, after the nine-bundle re-run; machine-readable in
+`artifacts/reservoir/realized-tokens.json`. **Two figures in the earlier version of this table were
+wrong**, both in the direction that flatters the corpus, which is why item 2 below says to derive
+these from receipts rather than retype them:
+
+- the header said "251.1B tokens" for the train split. That was the **total** (251,218,001,920).
+  Train is 250,242,924,544; val is 975,077,376.
+- `reference` was listed at 8.8B / 3.5%. Realized is **7.92B / 3.16%** — `finewiki--train` has 33
+  unfilled refs and landed at 90.5% of its plan, so the planned figure was being cited as measured.
+
+| category | tokens | share of train | sources |
 |---|---|---|---|
-| synthetic | 59.6B | 23.7% | 4x FinePhrase (faq, math, table, tutorial) |
-| edu-web | 47.7B | 19.0% | finepdfs-edu, fineweb-edu |
-| code | 39.8B | 15.8% | stackv2-edu |
-| math | 33.8B | 13.5% | finemath |
-| web-diverse | 29.8B | 11.9% | dclm |
-| academic | 19.9B | 7.9% | peS2o, pubmed |
-| qa-forum | 11.7B | 4.7% | stackexchange, ubuntu-irc |
-| reference | 8.8B | 3.5% | finewiki |
+| synthetic | 59,604,729,856 | 23.82% | 4x FinePhrase (faq, math, table, tutorial) |
+| edu-web | 47,728,787,456 | 19.07% | finepdfs-edu, fineweb-edu |
+| code | 39,778,156,544 | 15.90% | stackv2-edu |
+| math | 33,827,684,352 | 13.52% | finemath |
+| web-diverse | 29,827,366,912 | 11.92% | dclm |
+| academic | 19,876,577,280 | 7.94% | peS2o, pubmed |
+| qa-forum | 11,679,465,472 | 4.67% | stackexchange, ubuntu-irc |
+| reference | 7,920,156,672 | 3.16% | finewiki (**partial: 90.5% of plan**) |
 
 Val: 0.975B (0.39%). `ubuntu-irc` has **no val split** — a val shard needs 5,000,396,800 source
 tokens at `VAL_FRACTION` 0.005 and the source holds 1.87B, so whole-shard selection cannot produce

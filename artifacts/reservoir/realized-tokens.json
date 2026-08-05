@@ -1,0 +1,196 @@
+{
+ "_comment": [
+  "REALIZED per-source token counts, from each receipt's tokens_out after the 2026-08-05 re-run.",
+  "PUBLISH-SPEC.md item 2: sources[] MUST cite these, never the plan's figures. All 27 bundles are",
+  "on wheel 0.7.4 and the nine re-run ones reproduced byte-identical digests, so these equal the",
+  "original build's numbers -- but they are read from receipts, which is the point.",
+  "finewiki--train carries 33 unfilled refs: 7,920,156,672 tokens = 90.5% of its plan. Cite the",
+  "realized number with partial_source semantics, not the planned one."
+ ],
+ "plan_id": "d5c9bcd38735e1f0",
+ "measured_at": "2026-08-05",
+ "wheel_version": "0.7.4",
+ "bundles": 27,
+ "shards": 10049,
+ "tokens_total": 251218001920,
+ "sources": {
+  "dclm": {
+   "train": 29827366912,
+   "val": 125009920,
+   "shards": 1198,
+   "documents": 23742757,
+   "unfilled": 0,
+   "category": "web-diverse",
+   "total": 29952376832,
+   "train_share_pct": 11.919
+  },
+  "finemath": {
+   "train": 33827684352,
+   "val": 150011904,
+   "shards": 1359,
+   "documents": 21284865,
+   "unfilled": 0,
+   "category": "math",
+   "total": 33977696256,
+   "train_share_pct": 13.518
+  },
+  "finepdfs-edu": {
+   "train": 27852210176,
+   "val": 125009920,
+   "shards": 1119,
+   "documents": 4946721,
+   "unfilled": 0,
+   "category": "edu-web",
+   "total": 27977220096,
+   "train_share_pct": 11.13
+  },
+  "fineweb-edu": {
+   "train": 19876577280,
+   "val": 75005952,
+   "shards": 798,
+   "documents": 19810249,
+   "unfilled": 0,
+   "category": "edu-web",
+   "total": 19951583232,
+   "train_share_pct": 7.943
+  },
+  "finewiki": {
+   "train": 7920156672,
+   "val": 25001984,
+   "shards": 318,
+   "documents": 6018506,
+   "unfilled": 33,
+   "category": "reference",
+   "total": 7945158656,
+   "train_share_pct": 3.165
+  },
+  "pes2o": {
+   "train": 13926105088,
+   "val": 50003968,
+   "shards": 559,
+   "documents": 2158793,
+   "unfilled": 0,
+   "category": "academic",
+   "total": 13976109056,
+   "train_share_pct": 5.565
+  },
+  "pubmed": {
+   "train": 5950472192,
+   "val": 25001984,
+   "shards": 239,
+   "documents": 754675,
+   "unfilled": 0,
+   "category": "academic",
+   "total": 5975474176,
+   "train_share_pct": 2.378
+  },
+  "stackexchange": {
+   "train": 9925787648,
+   "val": 25001984,
+   "shards": 398,
+   "documents": 13653330,
+   "unfilled": 0,
+   "category": "qa-forum",
+   "total": 9950789632,
+   "train_share_pct": 3.966
+  },
+  "stackv2-edu": {
+   "train": 39778156544,
+   "val": 175013888,
+   "shards": 1598,
+   "documents": 42367454,
+   "unfilled": 0,
+   "category": "code",
+   "total": 39953170432,
+   "train_share_pct": 15.896
+  },
+  "synthetic-finephrase-faq": {
+   "train": 14901182464,
+   "val": 50003968,
+   "shards": 598,
+   "documents": 33810845,
+   "unfilled": 0,
+   "category": "synthetic",
+   "total": 14951186432,
+   "train_share_pct": 5.955
+  },
+  "synthetic-finephrase-math": {
+   "train": 14901182464,
+   "val": 50003968,
+   "shards": 598,
+   "documents": 48208114,
+   "unfilled": 0,
+   "category": "synthetic",
+   "total": 14951186432,
+   "train_share_pct": 5.955
+  },
+  "synthetic-finephrase-table": {
+   "train": 14901182464,
+   "val": 50003968,
+   "shards": 598,
+   "documents": 56839223,
+   "unfilled": 0,
+   "category": "synthetic",
+   "total": 14951186432,
+   "train_share_pct": 5.955
+  },
+  "synthetic-finephrase-tutorial": {
+   "train": 14901182464,
+   "val": 50003968,
+   "shards": 598,
+   "documents": 34492855,
+   "unfilled": 0,
+   "category": "synthetic",
+   "total": 14951186432,
+   "train_share_pct": 5.955
+  },
+  "ubuntu-irc": {
+   "train": 1753677824,
+   "val": 0,
+   "shards": 71,
+   "documents": 202720,
+   "unfilled": 0,
+   "category": "qa-forum",
+   "total": 1753677824,
+   "train_share_pct": 0.701
+  }
+ },
+ "by_category": {
+  "synthetic": {
+   "tokens": 59604729856,
+   "share_pct": 23.82
+  },
+  "edu-web": {
+   "tokens": 47728787456,
+   "share_pct": 19.07
+  },
+  "code": {
+   "tokens": 39778156544,
+   "share_pct": 15.9
+  },
+  "math": {
+   "tokens": 33827684352,
+   "share_pct": 13.52
+  },
+  "web-diverse": {
+   "tokens": 29827366912,
+   "share_pct": 11.92
+  },
+  "academic": {
+   "tokens": 19876577280,
+   "share_pct": 7.94
+  },
+  "qa-forum": {
+   "tokens": 11679465472,
+   "share_pct": 4.67
+  },
+  "reference": {
+   "tokens": 7920156672,
+   "share_pct": 3.16
+  }
+ },
+ "splits": {
+  "train": 250242924544,
+  "val": 975077376
+ }
+}
