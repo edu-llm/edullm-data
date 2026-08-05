@@ -1,21 +1,48 @@
 # HANDOFF — eduLLM Dataset Standard
 
-Last updated: **2026-08-04**, after the reservoir corpus was **BUILT on Batch**: 27/27 bundles,
-10,049 shards, **251.2B tokens** staged on `edullm-landing`. The published 150B and 127B corpora are
-untouched and readable.
+Last updated: **2026-08-05**. The reservoir corpus is **PUBLISHED AND PROMOTED**:
+`pretrain/reservoir-dolma2/v1` is live in `s3://edullm-data`, sealed, catalogued, readable. The
+published 150B and 127B corpora are untouched.
 
 > ## ▶️ START HERE
 >
-> **The corpus is built and NOT published. One blocker stands in the way, and it is known:**
-> `verify --deep` refuses with `bundle-set-mixed-wheel-versions` because four code fixes landed
-> mid-build, so five different wheels packed the corpus. **Nine bundles / 4,137 shards must be re-run
-> on wheel 0.7.4** (`edullm-reservoir-build:9`, `--force`, since resume would otherwise skip them).
-> That check is correct — do not waive it. Then re-verify, require `VERIFY_DONE_RC=0`, and publish per
-> `artifacts/reservoir/PUBLISH-SPEC.md`. Full detail in **Next Steps item 1**.
+> **`pretrain/reservoir-dolma2/v1` IS PUBLISHED.** Validator log, verbatim:
+> `pretrain/reservoir-dolma2/v1: PASS + promoted`. The seal (`_VALIDATED.json`, written LAST, so its
+> presence *is* the "complete and published" claim) records:
 >
-> 1. **This file's "Next Steps"** — what to do next, in order. Item 1 is the only blocker.
-> 1b. **`artifacts/reservoir/PUBLISH-SPEC.md`** — both irreversible decisions, confirmed by the owner,
->    plus the exact `publish()` call and the three pre-publish gates.
+> ```
+> objects          10049
+> bytes            1,004,872,007,680        (1.005 TB)
+> dataset_sha256   c3e9b678ec1666ecf2e1259c42706825f88e142e2ba7b99a4d8d9b2175441c2b
+> manifest_sha256  {"tokens": "aba31c73d40e4473867bb8e76e6d42c5949ab67657512b6ebc7ceec79a8db388"}
+> ```
+>
+> **251,218,001,920 tokens** — 250,242,924,544 train + 975,077,376 val, in 10,049 shards.
+> `_catalog/pretrain/reservoir-dolma2/v1.json` is written, so `resolve_latest` finds it. Read it with
+> `dataset_paths("pretrain/reservoir-dolma2", "v1", s3=...)` and **pass `r.dtype` to the loader**.
+>
+> **Everything below that describes the corpus as unpublished, or `verify --deep` as blocked, is
+> HISTORY.** Both were true on 2026-08-04; neither is now. What closed them: the nine stale-wheel
+> bundles were re-run and **all nine reproduced BYTE-IDENTICAL shards** (so that gate was a
+> provenance defect, not a data defect); `verify --deep` then passed `RC=0` over all 10,049 shards —
+> the only payload re-hash in this pipeline; the publish ran on Batch; and promotion completed on the
+> **second** validator attempt, after the first was SIGKILLed mid-copy by a 2 h timeout.
+>
+> ⚠️ **Two claims this file used to make are FALSE and were corrected on 2026-08-05.** Both are the
+> kind that get copied rather than checked:
+> - **`edullm-landing-manifest-created` is ENABLED, not disabled.** Writing `manifest.json` fires
+>   EventBridge → `edullm-validator` (by *unversioned* name) → Gate A → `promote()` into
+>   `edullm-data`. Three separate places said "disabled" and all three were wrong together. There is
+>   no "publish but don't promote" unless you disable the rule first.
+> - **`promote()` renders `README.md` from the VALIDATOR's package**, inside `except Exception: pass`.
+>   So the *running validator's* code decides what documentation consumers get, and a validator
+>   missing a renderer drops a section silently. This is why `edullm-validator` had to move to the
+>   converged **0.9.0** image (now **rev 13**) before publishing — rev 12 lacked `_notes_section` and
+>   would have dropped the mixed-license disclosure with nothing objecting.
+>
+> 1. **This file's "Next Steps"** — what is left. None of it blocks a consumer.
+> 1b. **`artifacts/reservoir/PUBLISH-SPEC.md`** — the two irreversible decisions as published, the
+>    realized mix (three figures in it were wrong and are corrected), and the gates with outcomes.
 > 2. **`DATASET-DESIGN-reservoir.md`** — the plan. §5.6 is the build sequence; §4.1 the dedup
 >    pipeline; §2.1 the pool sizing.
 > 3. **`src/edullm_data/corpus.py`** — the build-time CONTRACT. Read it before touching any build
@@ -114,7 +141,25 @@ untouched and readable.
 > part). S3 Inventory `edullm-data-weekly` is Enabled. **Ten datasets** are in `_catalog/`.
 > Still ACTIVE and owed a deregister: `edullm-reservoir-diag:2`, `-diag2:1`, `-shim:1`.
 
-## THIS SESSION IN ONE PARAGRAPH
+## THE 2026-08-05 SESSION IN ONE PARAGRAPH
+
+**It shipped.** `pretrain/reservoir-dolma2/v1` — 251,218,001,920 tokens, 10,049 shards, 1.005 TB — is
+published, sealed, catalogued, and readable, and every gate it passed recomputed something rather than
+trusting a field. The day's shape was: re-run nine stale-wheel bundles (**all nine reproduced
+byte-identical shards**, proving the build deterministic and the blocking gate a provenance defect
+rather than a data one) → `verify --deep` passed `RC=0` over every payload byte → publish on Batch at
+1,084 MB/s → Gate A passed but promotion was SIGKILLed at 63% by a 2 h timeout → re-ran with 4 h and it
+sealed. What made the difference at the end was **a timeout, not the threading fix I had ready**:
+counting round trips showed the fix covered 12% of them, so it would not have saved the run, and new
+code in a path that had just produced a clean verdict was the worse trade. Along the way, five things
+that documentation asserted turned out to be false — the auto-promote rule was ENABLED (three places
+said disabled, and they had been copied from each other), the validator not the publisher renders the
+README (silently, inside `except Exception: pass`), `notes` was never rendered at all, measured
+per-source counts were labelled "Upstream tokens", and three token figures in my own publish spec were
+planned numbers wearing the word "realized". Each was found by checking the artifact instead of the
+prose, which is the only reason the published README carries the mixed-license disclosure at all.
+
+## THE 2026-08-04 SESSION IN ONE PARAGRAPH
 
 Every timeline estimate I gave was too pessimistic, and each revision came from finding something
 already built rather than from building it — until the end of the day, when the last revision came
@@ -336,8 +381,15 @@ unvalidated data into the read path. Motivating audit:
 `docs/dataset-creation/DATASET-STANDARD.md` + `...-DIAGRAMS.md`.
 
 **Status: CLOSED, and now closed end-to-end — a real training run has read a published corpus.**
-The produce → validate → publish → read loop works. Two corpora are published, sealed, and sliceable
-(157.2B and 126.7B tokens).
+The produce → validate → publish → read loop works. **Three** corpora are published, sealed, and
+sliceable (157.2B, 126.7B, and — as of 2026-08-05 — the 251.2B reservoir).
+
+**The nested goal is also CLOSED as of 2026-08-05.** `pretrain/reservoir-dolma2/v1` — the
+251,218,001,920-token, 14-source, 8-category reservoir teammates draw their own 20B mixtures from —
+was built, verified byte-for-byte, published, and promoted through the airlock. It is the first corpus
+this project produced end-to-end *through its own pipeline*: authored from a registry, tokenized on
+Batch, receipt-verified with a real payload re-hash, staged into landing, and promoted by the
+validator role. Nothing about it was hand-copied.
 
 ~~What is still missing downstream is a *consumer* — no training run has read them, and the blockers
 live in `edu-llm/platform`, not here.~~ **SUPERSEDED 2026-08-01.** The consumer exists and ran.
@@ -383,6 +435,41 @@ blocker, and *Next Steps* item 1 is exactly it.
 ---
 
 ## Current Progress
+
+### 2026-08-05 — PUBLISHED AND PROMOTED. `pretrain/reservoir-dolma2/v1` is live.
+
+The whole chain closed today. In order, with what each step actually produced:
+
+| step | outcome |
+|---|---|
+| re-run 9 stale-wheel bundles (`edullm-reservoir-build-force:1`, `--force`) | 9/9 SUCCEEDED, **all byte-identical** to the original build |
+| predict the verify verdict for free (`verify_bundle_set`, no `s3=`) | **0 set-level violations** — instant, zero API calls |
+| `verify --deep` (`rsv-verify-deep-2`) | **`OK 27 bundles, 10049 shards (payload re-hashed)` / `RC=0`**, 3.27 h, 1.005 TB |
+| `publish()` on Batch (`rsv-publish-go`) | **`PUBLISHED pretrain/reservoir-dolma2 v1` / `RC=0`**, ~32 min at 1,084 MB/s |
+| Gate A + promotion, attempt 1 | **FAILED** — SIGKILL at 122 min, 2 h timeout, 6,324/10,051 copied |
+| Gate A + promotion, attempt 2 (4 h timeout) | **`pretrain/reservoir-dolma2/v1: PASS + promoted`** at ~114 min |
+
+**The determinism result is the most reusable finding.** Nine bundles / 4,137 shards — including
+`stackv2-edu--train` at 1,591 shards — were re-read from Hugging Face, re-deduplicated,
+re-decontaminated and re-tokenized on different machines hours apart, and every single shard digest
+matched the original. Only the receipt's `wheel_version` field changed. So
+`bundle-set-mixed-wheel-versions` was a **provenance** defect, not a data defect — worth costing as
+cheap next time, though still worth clearing, because it is a set-level invariant and
+`verify --deep` refuses until it is clean.
+
+**Three figures in `PUBLISH-SPEC.md` were wrong, all flattering the corpus**, and all found by
+diffing the prose against the receipts rather than reading it:
+
+| claim | was | actually |
+|---|---|---|
+| train split | 251.1B | **250,242,924,544** (251.2B was the *total*) |
+| `reference` category | 8.8B / 3.5% | **7,920,156,672 / 3.16%** |
+| share-alike exposure | 20.5B / 8.2% | **17,845,944,320 / 7.13%** |
+
+All three trace to the same root: `finewiki--train` has 33 unfilled refs and landed at 90.5% of plan,
+so planned figures were sitting in a table labelled "realized". `artifacts/reservoir/sources.json`
+and `realized-tokens.json` now hold the numbers machine-readably, and `publish_driver.py` **refuses to
+run** if they do not reconcile (verified by perturbing one source by 1e6 tokens out of 250e9).
 
 ### 2026-08-04 — THE CORPUS IS BUILT. 27/27 receipts. `verify` WILL REFUSE, and the reason is known.
 
@@ -1194,6 +1281,45 @@ objects)"* — predates the olmo30b migration and was already false; corrected.)
 
 ## What Worked
 
+### 2026-08-05 — measuring a hypothesis before paying for it, twice
+
+Two decisions this session were made from measurement rather than reasoning, and both changed the plan.
+
+**Deciding NOT to ship a fix.** When Gate A looked like it would time out, the obvious move was to
+deploy the threading fix I had ready. Instead I counted the actual round trips from the code —
+`_validate_group` 10,049 HEADs, `_sampled_ids` 10,049 more, its 4 ranged GETs = 40,196,
+`check_first_bytes_not_npy` 10,049, `check_seq_len_alignment` 10,049 = **80,392 total** — and my fix
+covered only the first group, **12%**. Cross-checked against CloudWatch: 80,392 round trips over the
+observed 85 min = 15.8/s = 63 ms each, consistent with serial latency-bound I/O at 0.3% CPU. So the
+fix would not have saved the run, and the right answer was a timeout change with **no new code in a
+path that had just produced a clean Gate A verdict**. That is what worked.
+
+**Finding the phase boundary in a job that logs nothing.** Gate A prints only at the end, so per-minute
+`NetworkIn` was the only progress signal: flat ~43 MB/min for 85 min, then a cliff to 2.1. That
+inflection *is* validation ending and promotion starting, and it is what made the 12% estimate
+checkable rather than a guess.
+
+### 2026-08-05 — a permissions error that was narrower than it read
+
+`iam:CreateRole` returned `AccessDenied`, and I reported that a lead with admin access was required.
+Retrying surfaced the real reason — an explicit deny in the `InternSandboxBoundary` permissions
+boundary — and reading that boundary showed the deny is `DenyUnboundedPrincipalCreation`: it blocks
+`CreateRole` **only when the new role lacks that same boundary**. Passing
+`--permissions-boundary <boundary>` created the role from an ordinary broker session, first try.
+
+Generalizable: an `AccessDenied` naming a *permissions boundary* is a shape constraint, not a
+capability ceiling. Read the boundary before escalating to a human.
+
+### 2026-08-05 — the four-mutation habit caught a vacuous test
+
+Every fix this session was mutation-tested, and it paid twice. On the Gate A threading work, one
+mutation — replacing the `head_workers <= 1` guard with `if False:` — **passed all 26 tests**, because
+nothing distinguished "no pool" from "a pool of size 1". The gap was closed with a thread-identity
+assertion. Separately, my first speedup measurement reported "0 HEADs, 100% saved", which looked like
+a triumph and actually meant the checks had never run: my fixtures used invented field names and
+`ManifestEntry.from_dict` rejected all of them. **A performance measurement that never executes the
+code reads as a perfect result** — the fixtures now derive from the real published manifest's shape.
+
 ### 2026-08-04 — predicting a 1 TB gate's verdict for free, by running only its pure half
 
 `verify_bundle_set` takes `s3`/`bucket` as **optional**, and its docstring says why: the set-level
@@ -1423,6 +1549,78 @@ shards have odd token counts — a filename tells you nothing; `size % 4` and a 
   reading `pyproject.toml` both said `families/` shipped. Installing proved it did not.
 
 ## What Didn't Work (and the fix)
+
+### 2026-08-05 — three docs agreed the auto-promote rule was OFF; it was ON
+
+`PUBLISH-SPEC.md` gate 3, `infra/05-validator-jobdef.md`'s status banner, and a session memory all
+said `edullm-landing-manifest-created` was DISABLED. **`describe-rule` says `State: ENABLED`** —
+matching any `edullm-landing` key with suffix `manifest.json`, no prefix constraint, targeting
+`edullm-validator` by unversioned name.
+
+One wrong claim had been copied into two more, and the trio read as corroboration. The consequence
+was not cosmetic: every plan I had written assumed publishing *staged* the corpus for a reviewable
+manual validation step, when it actually fires Gate A and promotes into a bucket where frozen means
+frozen. Caught at the last pre-publish check.
+
+The oldest source was the one that was right — a 2026-07-30 memory recorded this exact rule
+auto-promoting a 5-shard dry-run probe, with the cancel-or-disable procedure. The newer docs had
+drifted away from a fact the project already paid for once. **Fix:** all three corrected, each now
+telling the reader to re-read the live rule state rather than trust the text, including the correction
+itself.
+
+### 2026-08-05 — the validator, not the publisher, decides what the README says
+
+`promote()` renders `README.md` from the **validator's** package (`validate.py:1366-1371`), inside
+`except Exception: pass` — best-effort by design, because "a rendering bug must not fail an otherwise
+valid promotion." So a validator whose code lacks a renderer drops that section **silently**, with no
+gate objecting and nothing logged.
+
+`edullm-validator:12`'s image came from `e0984c8`, which diverges from the reservoir line and has no
+`_notes_section` (`grep -c` → 0). Publishing on it would have produced a valid dataset whose README
+omitted that 7.13% of train carries CC-BY-SA-4.0 share-alike terms — exactly the claim a consumer
+cannot recompute from shards. **Fix:** converge the two lines into `0.9.0` and register it as rev 13
+*before* publishing. Verified inside the running container (`PROFILES=...,vendored/v1`,
+`PREFLIGHT_OK=1`) rather than in a checkout, then verified again in the published README.
+
+Registering the reservoir image instead would have been the same mistake mirrored: its `available()`
+returns five profiles, no `vendored/v1`, which makes the live `vendor/openai-prm800k/v1` unvalidatable.
+Either image regressed the other; the answer was the union, not a choice.
+
+### 2026-08-05 — two `README.md` fields were being thrown away
+
+Found by rendering the actual publish payload instead of trusting the renderer:
+
+- **`notes` was never rendered at all.** `publish()` accepted it, `dataset.json` stored it,
+  `render_readme` skipped it. The module's own docstring cites §3 saying `notes` and `limitations[]`
+  "exist because the README is generated". For this corpus that field carried the entire mixed-license
+  disclosure.
+- **Measured per-source counts were labelled "Upstream tokens".** A producer that correctly omitted
+  `scope` (because the counts *are* this dataset's, from receipts) got them printed under a heading
+  asserting they were upstream figures — the confusion `scope` exists to prevent, inverted.
+
+**Fix:** `_notes_section` added; headers now follow the `upstream_scoped` flag the renderer already
+computed for its caveat paragraph. Six tests, both halves of each control, each verified to fail on
+reversion — and the `git stash` attempt to verify that proved nothing, because stash removes the tests
+along with the fix.
+
+### 2026-08-05 — a 2 h timeout killed a promotion 63% of the way through
+
+Gate A **passed**, `promote()` started at ~110 min, and the job was SIGKILLed at 122 min with
+6,324 of 10,051 objects copied. No `_VALIDATED.json`, no `_REJECTED.json`.
+
+**Not corruption, by design:** the seal is written *last*, so an unsealed prefix is indistinguishable
+from "not promoted" — and `dataset_paths`/`fsck` both key off the seal. Data-bucket deletes are denied,
+so a partial state can only be overwritten forward. Confirmed in code that neither guard refuses a
+partially-populated prefix (both check seal *presence*), so a retry proceeds.
+
+**Fix:** re-submit with `attemptDurationSeconds=14400` and `--prefix` pinned to the one dataset (the
+validator otherwise self-discovers and would walk all 47 stale landing prefixes). Completed at ~114 min
+with 126 min spare. **The fix was a timeout, not code** — see What Worked on why the threading fix was
+deliberately not used.
+
+Note for next time: a re-run **re-copies everything**, because `_copy_payload`'s skip is gated on
+`payload.vendored` and this corpus is `pretrain-tokens/v1`. Defensible (a same-named object proves
+nothing without re-hashing) but it means partial progress buys nothing.
 
 ### 2026-08-02→04 — FOUR code bugs, all found by running, none reachable from 1,101 green tests
 
@@ -1838,6 +2036,57 @@ Other misses this session:
 
 ## Key Decisions
 
+### 2026-08-05 — one general publisher role, not one per corpus
+
+`edullm-prm800k-producer` hardcodes `vendor/openai-prm800k/*` in five of its six statements, so
+corpus two needed role two and three would need a third — each a fresh chance to fat-finger a `Deny`
+nobody reviews. **Decision: one reviewed identity, `edullm-dataset-publish`, for every family.**
+
+Bounded by the **§2 family enum** rather than by a dataset name — `validate_dataset_id` rejects
+anything outside the seven families (asserted in tests against the real function), so a seven-prefix
+grant cannot reach `_ingest/`, `_dist/`, `_staging/`, or `_catalog/`, which are additionally denied.
+`_dist/` matters most: bootstrap wheels, **no lifecycle expiry**, so anything written there persists
+and gets executed by a later job. Airlock untouched: all writes to landing, `edullm-data` re-denied,
+validator verdicts undeniable-forgeable bucket-wide. `infra/09-reservoir-publish-*.json` (the
+per-corpus version) is superseded before deployment and kept only for its reasoning.
+
+### 2026-08-05 — a timeout increase instead of a code change, and why that was the harder call
+
+Gate A was about to time out and I had a threading fix committed, tested, and ready. **Decision: ship
+the timeout, not the code.** Reasoning, in the order it mattered:
+
+1. Measured share — the fix addresses 10,049 of 80,392 round trips (**12%**). It would not have saved
+   the run; the longer timeout was needed either way.
+2. The path in question had *just produced a clean Gate A verdict* on a 251B-token corpus. New code
+   there buys 12% and risks the one result that mattered.
+3. The fix stays useful for the next corpus, where it can be deployed deliberately with its own
+   image build.
+
+Recorded because the instinct — "I have a performance fix and a performance problem, ship it" — was
+wrong, and only counting made that visible.
+
+### 2026-08-05 — publish with a *derived* driver, not a documented snippet
+
+Every retyped figure in this corpus's history had been retyped wrong at least once (three in
+`PUBLISH-SPEC.md` alone). **Decision: `publish_driver.py` READS `sources[]` and all totals from
+`sources.json` / `realized-tokens.json`** — both generated from the 27 receipts — and **refuses to run
+if they do not reconcile**. Verified by perturbing one source by 1e6 tokens out of 250e9; it caught it.
+
+Also: `sources[]` joins the registry on **`source_label`, not `key`**. Joining on `key` silently
+matched only 4 of 14 sources, and the reconciliation assertion is what caught that too.
+
+### 2026-08-05 — converge the two image lines rather than pick one
+
+Both `edullm-validator:12` (`e0984c8`, 0.8.0) and the reservoir line (`7a97c27`, 0.7.4) were needed:
+the former registers `vendored/v1` (so `vendor/openai-prm800k/v1` stays validatable), the latter has
+the `notes` renderer and threaded verify. **Registering either alone regresses the other.** Decision:
+merge to **0.9.0** (`b484814`) — three conflicts, all pure version strings; the 1,507-line
+`validate.py` delta merged automatically. Suite 1,206 → 1,213.
+
+Resolved to a **new** version number rather than either parent's, because two commits already share
+`0.7.4` and two more share `0.8.0`; reusing one would have made a third collision. **A version string
+does not identify code in this repo — the ECR tag (a commit sha) does.**
+
 ### 2026-08-03 — the two IRREVERSIBLE publish decisions, CONFIRMED by the owner
 
 Both are transcribed in full in `artifacts/reservoir/PUBLISH-SPEC.md` (`6e34aa6`) with the exact
@@ -2107,91 +2356,89 @@ not open.
 
 ## Next Steps (priority order)
 
-### UPDATED 2026-08-04. The corpus is BUILT (27/27 receipts). Three things stand between here and a published dataset.
+### UPDATED 2026-08-05. The corpus is PUBLISHED. Nothing here blocks a consumer.
 
-Everything before this point is done. Read `artifacts/reservoir/PUBLISH-SPEC.md` first — both
-irreversible decisions are recorded there with the exact `publish()` call.
-
----
-
-#### 1. Re-run the 9 stale-wheel bundles, then re-verify — THE ONLY BLOCKER
-
-`verify --deep` refuses with `bundle-set-mixed-wheel-versions`: the corpus was packed by five
-different wheels because four fixes landed mid-build. **The check is right — do not waive it.** A
-wheel without `families/` silently validates at the 0.5 EOS bound instead of the family's 0.05 and
-reports every shard clean, which is exactly the failure this project already shipped once.
-
-Re-run these nine against `edullm-reservoir-build:9` (wheel 0.7.4, image
-`sbsandbox-intern-edullm-data@sha256:4be21c0a...`). One job each, `SHARD=<idx>`:
-
-| idx | bundle | shards |
-|---|---|---|
-| 26 | `ubuntu-irc--train` | 71 |
-| 19 | `finewiki--val` *(idx 9)* | 1 |
-| 11 | `pes2o--val` | 2 |
-| 13 | `pubmed--val` | 1 |
-| 15 | `stackexchange--val` | 1 |
-| 7 | `fineweb-edu--val` | 3 |
-| 2 | `finemath--train` | 1353 |
-| 4 | `finepdfs-edu--train` | 1114 |
-| 16 | `stackv2-edu--train` | 1591 |
-
-⚠️ **Confirm each index before submitting.** Do not trust the table above — derive it:
-
-```bash
-PYTHONPATH=src python3 -c "
-import sys; sys.path.insert(0,'src')
-from edullm_data import corpus_build as B
-from edullm_data.ingest_reservoir import _shard_slice
-specs,meta=B.load_registry()
-plan=B.plan_document([s for s in specs if s.target_tokens>0], registry_meta=meta)
-bundles=B.bundles_of(plan)
-want={'ubuntu-irc--train','finewiki--val','pes2o--val','pubmed--val','stackexchange--val',
-      'fineweb-edu--val','finemath--train','finepdfs-edu--train','stackv2-edu--train'}
-for i in range(27):
-    for b in _shard_slice(bundles,i,27):
-        if b.bundle_id in want: print(i, b.bundle_id, len(b.shards))
-"
-```
-
-**Resume will NOT skip them** — `bundle_is_done` returns true because their receipts and shards are
-all present and correct. Pass `--force`, or delete those nine receipts first. `--force` is cleaner;
-deleting a receipt loses the accounting it holds.
-
-Then resubmit `rsv-verify-deep` (job def `edullm-reservoir-verify:1`) and require **`VERIFY_DONE_RC=0`**.
-
-Cost: ~4,137 shards ≈ 8–12 h wall at 4-way concurrency, roughly $25. Cap concurrency at 8 or fewer
-individual jobs — an array fills the cluster and the owner needs ~2 hosts for their own work.
+Items 1 and 2 of the previous list (re-run the stale bundles, then publish) are **DONE**. What
+remains is cleanup and two real follow-ups, none of which affect reading
+`pretrain/reservoir-dolma2/v1`.
 
 ---
 
-#### 2. Publish — per the spec, ON BATCH, and it does NOT auto-promote
+#### 1. Two performance fixes are committed but NOT deployed
 
-Only after RC=0. Everything needed is in `artifacts/reservoir/PUBLISH-SPEC.md`. Four things that will
-bite otherwise:
+Both live on `agent/claude-01/converge-0-9-0` and both are behaviour-preserving by construction. They
+matter for the *next* corpus, not this one — nothing re-validates a sealed prefix.
 
-- **`sources[]` token counts come from each receipt's `tokens_out`, never the plan.** finewiki is the
-  proof: planned 8.75B, realized **7.92B** (90.5%) because it ran out of documents. Citing the plan
-  would publish a false mix table.
-- **`publish()` must run on Batch, in-region.** It stream-hashes every object, so it pulls every byte
-  to wherever it runs — measured at 0.8 MiB/s off-region, i.e. ~9 days for this corpus.
-- **`edullm-landing-manifest-created` is DISABLED.** Writing `manifest.json` will NOT fire the
-  validator. Either submit `edullm-validator:10` manually (it runs as
-  `sbsandbox-intern-edullm-dataset-validator`, the only principal that can write `edullm-data`), or
-  re-enable the rule first — and if you re-enable it, remember it is shared infrastructure.
-- **The license is MIXED with share-alike.** 20.5B tokens (8.2%) are CC-BY-SA-4.0 (`stackexchange`,
-  `finewiki`; finewiki also GFDL). No single top-level `license.id` is truthful.
+- **`verify --deep` threading** (`796d8a6`, `--hash-workers`, default 1). Measured 7.82x at 8 workers
+  against a latency-simulating fake. Order of violations is identical at any worker count, proven with
+  a fixture that completes in REVERSE submission order.
+- **Gate A HEAD de-duplication** (`db437b6`). `_sampled_ids` and `check_seq_len_alignment` each HEADed
+  the same key for the same fact; now cached once per key in `ctx.observations`. Measured 12% fewer
+  round trips (80,392 → 70,343), ~85 min → ~74 min of Gate A.
 
----
+To deploy either: bump to 0.9.1, push an `edullm/**` branch (that is the ONLY image-build trigger —
+`main` builds nothing, silently), then register a new `edullm-validator` / `edullm-reservoir-verify`
+revision against the new digest. Identify the image by its **ECR tag (a commit sha)**, never by
+version string — see the warning in item 3.
 
-#### 3. Cleanup, after the publish lands
+#### 2. Gate A is still latency-bound, and that is the real cost
 
-- `_ingest/reservoir-dolma2/build/` holds ~1 TB of staged shards. Landing has a 14-day expiry, so
-  doing nothing is correct — but confirm the lifecycle rule covers `_ingest/` before relying on it.
-- Job defs registered this session and now idle: `edullm-reservoir-build:1–9`,
-  `edullm-reservoir-verify:1`. An idle job def is a stored config, not a reservation — harmless.
-- `artifacts/reservoir/PUBLISH-SPEC.md` needs its `sources[]` block filled in with the realized
-  per-source `tokens_out` once the re-run finishes (the numbers change for the nine rebuilt bundles).
+Validation of 10,049 entries took **~85 min at 0.3% CPU and ~15.8 round trips/s**. After the HEAD
+de-dup it is still **~70,000 round trips**, because each entry needs 5 ranged GETs that read
+*different* bytes (4 decode windows + the `.npy` sniff) and no cache can remove them. The remaining
+lever is concurrency *inside the profile checks*, which is unimplemented and would need the same
+order-preservation care as the two fixes above.
+
+Consequence to plan around: **budget ≥4 h for any Gate A on a ~10k-object corpus**, and more if it
+grows. `edullm-validator:13`'s job def still declares 7200 s; the successful run only fit because the
+timeout was overridden at submit time. Either raise the job def or always override.
+
+#### 3. Version numbers do not identify code in this repo — use the ECR tag
+
+Four parallel lines have each shipped an image, and **two pairs of different commits share a version
+string**: `7a97c27` and `d08aa05` both say `0.7.4` (with `distinct_ids_min` 256 vs 128), and
+`e0984c8` and `f91d92d` both say `0.8.0`. Every job def asserts `__version__ == '<X>'`, which
+therefore passes on materially different trees.
+
+`0.9.0` (`b484814`, now `edullm-validator:13`) is the union of the reservoir and vendored/prm lines:
+6 profiles including `vendored/v1`, the `notes` renderer, the corrected mix-table headers, threaded
+verify, `distinct_ids_min=128`. Suite 1,213.
+
+**Still unconverged:** `edullm/validator-text-corpus` (`f91d92d`, on `main`) implements
+`text-corpus/v1`, which **no** live validator registers — including rev 12 before it. One published
+dataset declares it (`pretrain/fineweb2-equal-bytes/v1`, group `text`). Harmless today because
+nothing re-validates promoted data (`fsck` never resolves a profile; Gate A runs only on landing
+writes) and that prefix is sealed. Converging it means a 1,681-line `validate.py` merge that would
+*delete* code from the 0.9.0 side — deliberate work, not a drive-by.
+
+#### 4. Cleanup
+
+- `s3://edullm-landing/pretrain/reservoir-dolma2/` (10,051 objects) and
+  `_ingest/reservoir-dolma2/build/` (~1 TB) are both staging. Landing has a 14-day expiry, so doing
+  nothing is correct — but confirm the lifecycle rule covers those prefixes before relying on it.
+- `edullm-data/pretrain/reservoir-dolma2/v1/` was **partially populated (6,324 objects) by the failed
+  first attempt**, then completed by the retry. That was safe only because the seal is written last
+  and data-bucket deletes are denied: an unsealed prefix is indistinguishable from "not promoted", and
+  the retry overwrote the partials with identical bytes. Do not "clean up" a partial promotion by
+  hand.
+- New this session and now idle: job defs `edullm-dataset-publish:1`, `edullm-reservoir-verify:2`,
+  `edullm-reservoir-build-force:1`, `edullm-validator-preflight:1`, `edullm-validator:13`; IAM role
+  `edullm-dataset-publish`. An idle job def is a stored config, not a reservation.
+- `infra/09-reservoir-publish-*.json` describe a per-corpus publisher role that was **superseded
+  before deployment** by the general-purpose `infra/10-dataset-publish-*.json`. Kept for the
+  reasoning; do not create that role.
+
+#### 5. `edullm-dataset-publish` exists and is general-purpose — use it
+
+Any family, one role, bounded by the §2 family enum rather than a dataset name (so it cannot reach
+`_ingest/`, `_dist/`, `_staging/`, `_catalog/` — all additionally denied). It may write
+`manifest.json`/`dataset.json`, which the *build* roles are explicitly denied. Runbook:
+`infra/10-dataset-publish-jobdef.md`. 12 tests, 6 mutations verified to fail them.
+
+Creating it needed `iam:CreateRole`, which the broker session denies — **but not outright**: the
+`InternSandboxBoundary` permissions boundary denies only *unbounded* principal creation, so passing
+`--permissions-boundary <that boundary>` works from a normal session. That was a wrong "you need an
+admin" call on my part; the guardrail is narrower than the error implied.
 
 ---
 
@@ -2229,8 +2476,17 @@ bite otherwise:
   that will not overshoot by part of a shard, unlike the budget. **Single dataset only** — mixing
   two corpora risks combining different tokenizers whose vocab sizes are close enough that every
   id still looks valid, which is silent and wrong.
-- **Discover what's published**: list `s3://edullm-data/_catalog/` — `tokenizer/dolma2-bpe/v1` and
-  `pretrain/olmo-150b-dolma2/v1`.
+- **Discover what's published**: list `s3://edullm-data/_catalog/` — **31 entries as of 2026-08-05**,
+  across `pretrain` (20), `tokenizer` (6), `sft` (3), `curriculum` (1), `vendor` (1). Includes
+  `pretrain/reservoir-dolma2/v1` (the 251.2B reservoir), `pretrain/olmo-150b-dolma2/v1`, and
+  `tokenizer/dolma2-bpe/v1`. Profiles in live use: `pretrain-tokens/v1` (19), `tokenizer/v1` (6),
+  `vendored/v1` (3), `sft-conversations/v1` (3), `token-order/v1` (1), and **`text-corpus/v1` (1)**,
+  which no deployed validator registers — see Next Steps item 3.
+- **Draw a 20B mixture from the reservoir**:
+  `build_mixture("pretrain/reservoir-dolma2", "v1", sources=[MixtureSource({"source": "dclm"}, 0.4), …],
+  total=20_000_000_000, seed=42)`. Labels available: `source` (14 values). Shard granularity is
+  25,001,984 tokens, so per-source weight error is ~0.1–0.4% (≥238 shards each, except `ubuntu-irc`
+  at 71). **`ubuntu-irc` has no val split** — see `limitations[]`.
 - **Migrate a legacy corpus (proven playbook)**: broker-copy headerless `.npy`→`.u32le.bin` into
   `s3://edullm-landing/_migrate/<name>/tokens/`, ship wheel+driver+families to `_dist/`, then Batch
   submit `_dist/publish_driver.py` via the boto3 bootstrap with `PUB_*` env (incl. `PUB_HASH_WORKERS`/

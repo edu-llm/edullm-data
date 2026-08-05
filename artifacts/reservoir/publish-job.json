@@ -1,0 +1,10 @@
+{
+ "jobId": "cb685fc3-7e53-449b-a1a6-2bb4d1db0512",
+ "jobName": "rsv-publish-go",
+ "jobDefinition": "edullm-dataset-publish:1",
+ "mode": "--go",
+ "dataset_id": "pretrain/reservoir-dolma2",
+ "validator_at_submit": "edullm-validator:13 (0.9.0, image b484814529cf)",
+ "auto_promote": "EventBridge edullm-landing-manifest-created is ENABLED \u2014 this WILL promote on a Gate A pass",
+ "verify_deep": "passed 2026-08-05 job 507356db, 10049 shards re-hashed, RC=0"
+}

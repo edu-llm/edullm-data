@@ -1,0 +1,9 @@
+{
+ "jobId": "5ac04eed-a4fe-4aba-8e72-f45b520c76d2",
+ "jobName": "rsv-validate-retry-4h",
+ "jobDefinition": "edullm-validator:13",
+ "timeout_s": 14400,
+ "prior_attempt": "83a6eaeb-c384-4518-8f08-7b2053508b51 FAILED exit=137 at 122min, Gate A PASSED, promotion cut off at 6,324/10,051",
+ "why_no_code_change": "threading fix covers 10,049 of 80,392 round trips (12%); would not have saved the run",
+ "measured": "Gate A ~85min validation + ~19min promotion = ~1.8h, fits 4h"
+}
