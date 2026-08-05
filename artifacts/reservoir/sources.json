@@ -1,0 +1,129 @@
+[
+ {
+  "name": "stackv2-edu",
+  "share": "15.90%",
+  "tokens": 39778156544,
+  "documents": 42367454,
+  "license": "Blue Oak (100% permissive per-doc)",
+  "uri": "https://huggingface.co/datasets/common-pile/stackv2_edu_filtered",
+  "revision": "c354dbe88469a1153e97c6a63ac50591849654de"
+ },
+ {
+  "name": "finemath",
+  "share": "13.52%",
+  "tokens": 33827684352,
+  "documents": 21284865,
+  "license": "ODC-BY-1.0",
+  "uri": "https://huggingface.co/datasets/HuggingFaceTB/finemath",
+  "revision": "e92b25a616738fe95dc186b64dfb19f9c8525594"
+ },
+ {
+  "name": "dclm",
+  "share": "11.92%",
+  "tokens": 29827366912,
+  "documents": 23742757,
+  "license": "ODC-BY-1.0",
+  "uri": "https://huggingface.co/datasets/HuggingFaceFW/dclm_100BT",
+  "revision": "01022d378d944de6deeb1c79d08fecb4d27b2c6f"
+ },
+ {
+  "name": "finepdfs-edu",
+  "share": "11.13%",
+  "tokens": 27852210176,
+  "documents": 4946721,
+  "license": "ODC-BY-1.0",
+  "uri": "https://huggingface.co/datasets/HuggingFaceFW/finepdfs-edu",
+  "revision": "9cfabe2127faca99b3d5c4dc6d1fcb397399ebde"
+ },
+ {
+  "name": "fineweb-edu",
+  "share": "7.94%",
+  "tokens": 19876577280,
+  "documents": 19810249,
+  "license": "ODC-BY-1.0",
+  "uri": "https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu",
+  "revision": "87f09149ef4734204d70ed1d046ddc9ca3f2b8f9"
+ },
+ {
+  "name": "synthetic-finephrase-faq",
+  "share": "5.96%",
+  "tokens": 14901182464,
+  "documents": 33810845,
+  "license": "ODC-BY-1.0",
+  "uri": "https://huggingface.co/datasets/HuggingFaceFW/finephrase",
+  "revision": "78cf4a5ed0099214979c094c963e699c19163838"
+ },
+ {
+  "name": "synthetic-finephrase-math",
+  "share": "5.96%",
+  "tokens": 14901182464,
+  "documents": 48208114,
+  "license": "ODC-BY-1.0",
+  "uri": "https://huggingface.co/datasets/HuggingFaceFW/finephrase",
+  "revision": "78cf4a5ed0099214979c094c963e699c19163838"
+ },
+ {
+  "name": "synthetic-finephrase-table",
+  "share": "5.96%",
+  "tokens": 14901182464,
+  "documents": 56839223,
+  "license": "ODC-BY-1.0",
+  "uri": "https://huggingface.co/datasets/HuggingFaceFW/finephrase",
+  "revision": "78cf4a5ed0099214979c094c963e699c19163838"
+ },
+ {
+  "name": "synthetic-finephrase-tutorial",
+  "share": "5.96%",
+  "tokens": 14901182464,
+  "documents": 34492855,
+  "license": "ODC-BY-1.0",
+  "uri": "https://huggingface.co/datasets/HuggingFaceFW/finephrase",
+  "revision": "78cf4a5ed0099214979c094c963e699c19163838"
+ },
+ {
+  "name": "pes2o",
+  "share": "5.57%",
+  "tokens": 13926105088,
+  "documents": 2158793,
+  "license": "CC-BY / CC0 (mixed)",
+  "uri": "https://huggingface.co/datasets/common-pile/peS2o_filtered",
+  "revision": "297747513bfb0ff1fbf61ddad3b03319d0f04597"
+ },
+ {
+  "name": "stackexchange",
+  "share": "3.97%",
+  "tokens": 9925787648,
+  "documents": 13653330,
+  "license": "CC-BY-SA-4.0",
+  "uri": "https://huggingface.co/datasets/common-pile/stackexchange_filtered",
+  "revision": "c0ac7373830c688a43fc12d1988c4b19ccd884ab"
+ },
+ {
+  "name": "finewiki",
+  "share": "3.17%",
+  "tokens": 7920156672,
+  "documents": 6018506,
+  "license": "CC-BY-SA-4.0 AND GFDL",
+  "uri": "https://huggingface.co/datasets/HuggingFaceFW/finewiki",
+  "revision": "8bd13e72e6a002407649b3e898535f42ceb1aeb9",
+  "note": "PARTIAL: 33 planned refs unfilled; realized 7,920,156,672 train tokens = 90.0% of the 8,800,000,000 planned"
+ },
+ {
+  "name": "pubmed",
+  "share": "2.38%",
+  "tokens": 5950472192,
+  "documents": 754675,
+  "license": "CC-BY / CC0 (mixed)",
+  "uri": "https://huggingface.co/datasets/common-pile/pubmed_filtered",
+  "revision": "c156f0569a92d8f2edc33cebe1f72f7d3e1cae84"
+ },
+ {
+  "name": "ubuntu-irc",
+  "share": "0.70%",
+  "tokens": 1753677824,
+  "documents": 202720,
+  "license": "Public Domain",
+  "uri": "https://huggingface.co/datasets/common-pile/ubuntu_irc_filtered",
+  "revision": "84f88c986584f11d672befab542fa4d5123f3e8f"
+ }
+]

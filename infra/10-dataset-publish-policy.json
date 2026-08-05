@@ -1,0 +1,132 @@
+{
+  "_comment": [
+    "Permission policy for edullm-dataset-publish — the GENERAL-PURPOSE publisher role. Any dataset,",
+    "any family, one role. Supersedes the pattern of a new role per corpus.",
+    "",
+    "WHY GENERAL RATHER THAN PER-CORPUS. `edullm-prm800k-producer` hardcodes",
+    "`vendor/openai-prm800k/*` in five of its six statements, so it can publish exactly one dataset",
+    "and a second corpus needed a second role (09-reservoir-publish-*.json, now superseded by this).",
+    "That does not scale, and worse, it makes the per-corpus role the path of least resistance --",
+    "each one a fresh chance to fat-finger a Deny. One reviewed role that every publish job assumes",
+    "is both less work and less surface.",
+    "",
+    "WHAT BOUNDS IT INSTEAD OF A DATASET NAME: the §2 family enum. `contracts.validate_dataset_id`",
+    "refuses any dataset_id whose first segment is not one of the seven families below (verified:",
+    "`_ingest/evil` and `_dist/evil` both raise NamingError), so scoping the grant to those seven",
+    "prefixes means this role cannot write to the pipeline's own control prefixes -- `_ingest/`",
+    "(build staging), `_dist/` (bootstrap wheels, NO lifecycle expiry so a poisoned wheel would sit",
+    "there indefinitely), or `_catalog/`. A wildcard on `edullm-landing/*` would have granted all",
+    "three, and nothing in publish() needs them.",
+    "",
+    "THE AIRLOCK IS UNTOUCHED. All writes here are to edullm-landing. edullm-data is writable ONLY",
+    "by the validator role, enforced by a Deny in 02-bucket-policy.json, and re-Denied here so that",
+    "attaching a broad managed policy to this role later cannot quietly open it. publish() stages;",
+    "promote() -- the validator's job -- is what crosses the airlock.",
+    "",
+    "WHY IT MAY WRITE manifest.json AND dataset.json, which the BUILD roles are explicitly denied.",
+    "Those two names fire `edullm-landing-manifest-created` and reserve a version, and a builder that",
+    "could write them could fire the validator against a half-built prefix. Publishing is precisely",
+    "the step that is supposed to write them, so the Deny cannot apply here -- which is why this is a",
+    "separate identity from `edullm-reservoir-ingest` rather than a widening of it.",
+    "",
+    "STILL DENIED: the validator's terminal markers. A producer that could write `_VALIDATED.json`",
+    "could make a REJECTED upload look promoted, which is the one forgery that would silently defeat",
+    "the whole gate. Denied bucket-wide, not per-dataset.",
+    "",
+    "READS on edullm-data are needed because publish() resolves the next version from the published",
+    "catalog and binds a published tokenizer by reading its tokenizer.json. Read-only, and narrowed",
+    "to the two prefixes that serve those purposes."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "PublishAnyDatasetUnderTheSevenSection2Families",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:GetObjectAttributes",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": [
+        "arn:aws:s3:::edullm-landing/curriculum/*",
+        "arn:aws:s3:::edullm-landing/eval/*",
+        "arn:aws:s3:::edullm-landing/pretrain/*",
+        "arn:aws:s3:::edullm-landing/probe/*",
+        "arn:aws:s3:::edullm-landing/sft/*",
+        "arn:aws:s3:::edullm-landing/tokenizer/*",
+        "arn:aws:s3:::edullm-landing/vendor/*"
+      ]
+    },
+    {
+      "Sid": "ReadStagedBuildOutputToHashAndCopyIt",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectAttributes"
+      ],
+      "Resource": [
+        "arn:aws:s3:::edullm-landing/_ingest/*",
+        "arn:aws:s3:::edullm-landing/_staging/*"
+      ]
+    },
+    {
+      "Sid": "ListLandingForVersionSelectionAndSources",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::edullm-landing"
+    },
+    {
+      "Sid": "ReadPublishedCatalogAndTokenizers",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectAttributes"
+      ],
+      "Resource": [
+        "arn:aws:s3:::edullm-data/_catalog/*",
+        "arn:aws:s3:::edullm-data/tokenizer/*"
+      ]
+    },
+    {
+      "Sid": "ListDataBucketToResolveVersionsAndDependencies",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::edullm-data"
+    },
+    {
+      "Sid": "NeverWriteThePublishedBucketThatIsTheAirlock",
+      "Effect": "Deny",
+      "Action": [
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
+        "s3:PutObjectTagging"
+      ],
+      "Resource": "arn:aws:s3:::edullm-data/*"
+    },
+    {
+      "Sid": "NeverForgeAValidatorVerdictAnywhere",
+      "Effect": "Deny",
+      "Action": "s3:PutObject",
+      "Resource": [
+        "arn:aws:s3:::edullm-landing/*_VALIDATED.json",
+        "arn:aws:s3:::edullm-landing/*_REJECTED.json"
+      ]
+    },
+    {
+      "Sid": "NeverWriteThePipelinesOwnControlPrefixes",
+      "Effect": "Deny",
+      "Action": [
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::edullm-landing/_dist/*",
+        "arn:aws:s3:::edullm-landing/_ingest/*",
+        "arn:aws:s3:::edullm-landing/_staging/*",
+        "arn:aws:s3:::edullm-landing/_catalog/*"
+      ]
+    }
+  ]
+}

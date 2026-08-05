@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "Trust policy for edullm-dataset-publish — WHO may become the general-purpose publisher.",
+    "",
+    "`ecs-tasks.amazonaws.com` only, the same shape as the validator, the ingest roles, and the",
+    "prm800k producer (all verified live 2026-07-31). AWS Batch runs its containers as ECS tasks, so",
+    "that principal is what a running job needs; no human session, no EC2 instance, and no other role",
+    "can assume it.",
+    "",
+    "THIS IS THE ROLE WHERE THAT MATTERS MOST, and the reason is worth stating rather than inheriting.",
+    "This identity may write `dataset.json` and `manifest.json` under every one of the seven families",
+    "-- so it is the one role that can reserve a version and fire the validator for ANY dataset, not",
+    "just one corpus. The intern role in this account carries AdministratorAccess, so IAM is not what",
+    "keeps a human out of it; this trust policy is. Keeping it unassumable from a session is what",
+    "makes 'publishing happens only through a reviewed Batch job' a mechanism instead of a habit --",
+    "and it is why a broad grant here is acceptable in a way it would not be for a session-assumable",
+    "role.",
+    "",
+    "Deliberately NO `Condition` block, for the reason recorded on the ingest roles: Batch does not",
+    "populate `aws:SourceArn` on the ECS task-assume call the way one would expect, so a SourceArn",
+    "condition scoping this to one job queue evaluates false and every job fails to start with an",
+    "unhelpful credential error. The blast radius is bounded by the permission policy",
+    "(10-dataset-publish-policy.json): it Denies every write to edullm-data, every write to the",
+    "pipeline's own `_`-prefixed control prefixes, and any forged validator verdict."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcsTasksOnly",
+      "Effect": "Allow",
+      "Principal": {
+        "Service": "ecs-tasks.amazonaws.com"
+      },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}

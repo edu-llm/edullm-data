@@ -78,10 +78,15 @@ Not a single id. Per source:
 | **CC-BY-SA-4.0** | stackexchange, finewiki (finewiki also GFDL) |
 | Public Domain | ubuntu-irc |
 
-**`CC-BY-SA-4.0` on stackexchange + finewiki is the one that constrains downstream use** — 20.5B
-tokens (8.2%) carry share-alike. A `license={"id": ...}` naming one identifier would be false, so
-the per-source `sources[]` entries carry their own and the top-level stays as the family's honest
-`unknown` with the detail in `notes`.
+**`CC-BY-SA-4.0` on stackexchange + finewiki is the one that constrains downstream use** —
+**17,845,944,320 tokens (7.13% of train)** carry share-alike. A `license={"id": ...}` naming one
+identifier would be false, so the per-source `sources[]` entries carry their own and the top-level
+stays as the family's honest `unknown` with the detail in `notes`.
+
+> **Corrected 2026-08-05.** This previously said "20.5B tokens (8.2%)", computed from planned
+> figures. Recomputed from receipts: stackexchange 9,925,787,648 + finewiki 7,920,156,672 =
+> 17,845,944,320 = 7.13% of the realized 250,242,924,544 train tokens. The gap is `finewiki`'s 33
+> unfilled refs again. Machine-readable in `sources.json`.
 
 ## The call
 

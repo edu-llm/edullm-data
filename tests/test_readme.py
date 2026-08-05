@@ -219,3 +219,120 @@ def test_snippet_mentions_numpy_dtype_for_byte_order():
     """dtype alone is not enough to read the bytes on an arbitrary host."""
     md = render_readme(RICH)
     assert "r.numpy_dtype" in md
+
+
+# --------------------------------------------------------------------------------------
+# The token/doc column headers must agree with `scope`
+# --------------------------------------------------------------------------------------
+
+
+def test_measured_sources_are_not_labelled_upstream():
+    """A source with NO `scope` carries counts measured for THIS dataset, so the header must not say
+    "Upstream tokens" — that tells the consumer the opposite of the truth.
+
+    Found while publishing `pretrain/reservoir-dolma2`, whose per-source counts come from build
+    receipts: the numbers were right and the column heading contradicted them.
+    """
+    md = render_readme(
+        {
+            "dataset_id": "pretrain/x",
+            "version": "v1",
+            "purpose": "p",
+            "sources": [{"name": "a", "tokens": 123, "documents": 7}],
+        }
+    )
+    assert "| Tokens |" in md
+    assert "| Documents |" in md
+    assert "Upstream tokens" not in md
+    assert "Upstream docs" not in md
+
+
+def test_upstream_scoped_sources_keep_the_upstream_headers():
+    """The other half of the control: when `scope` says the figures describe the upstream
+    collection, the headers must say so, and the caveat paragraph must appear."""
+    md = render_readme(
+        {
+            "dataset_id": "pretrain/x",
+            "version": "v1",
+            "purpose": "p",
+            "sources": [
+                {
+                    "name": "a",
+                    "tokens": 123,
+                    "documents": 7,
+                    "scope": "upstream-full-collection",
+                }
+            ],
+        }
+    )
+    assert "| Upstream tokens |" in md
+    assert "| Upstream docs |" in md
+    assert "provenance, not as this dataset's mix" in md
+
+
+def test_the_upstream_link_column_is_always_called_upstream():
+    """`uri` points at where the data came from, which is upstream whether or not the counts were
+    measured locally. Only the count columns move."""
+    md = render_readme(
+        {
+            "dataset_id": "pretrain/x",
+            "version": "v1",
+            "purpose": "p",
+            "sources": [{"name": "a", "tokens": 1, "uri": "https://example.invalid/d"}],
+        }
+    )
+    assert "| Upstream |" in md
+    assert "| Tokens |" in md
+
+
+# --------------------------------------------------------------------------------------
+# `notes` must actually reach the README
+# --------------------------------------------------------------------------------------
+
+
+def test_notes_are_rendered_not_silently_dropped():
+    """`notes` was accepted by publish(), stored in dataset.json, and never rendered — so nothing a
+    producer wrote there reached a consumer.
+
+    Found while publishing `pretrain/reservoir-dolma2`, whose notes carry the mixed-license
+    disclosure (7.13% of train is CC-BY-SA-4.0 share-alike, which constrains redistribution). A
+    consumer cannot recompute that from the shards.
+    """
+    md = render_readme(
+        {
+            "dataset_id": "pretrain/x",
+            "version": "v1",
+            "purpose": "p",
+            "notes": "Licensing is MIXED and includes share-alike.",
+        }
+    )
+    assert "## Notes" in md
+    assert "Licensing is MIXED and includes share-alike." in md
+
+
+def test_absent_notes_render_no_section():
+    """The module's first design rule: never fabricate a section. An empty Notes heading would read
+    as 'there are no caveats', which is a stronger claim than 'none recorded'."""
+    md = render_readme({"dataset_id": "pretrain/x", "version": "v1", "purpose": "p"})
+    assert "## Notes" not in md
+    for blank in ("", "   ", "\n"):
+        md = render_readme(
+            {"dataset_id": "pretrain/x", "version": "v1", "purpose": "p", "notes": blank}
+        )
+        assert "## Notes" not in md, f"blank notes {blank!r} produced a section"
+
+
+def test_notes_sit_between_license_and_limitations():
+    """Ordering is deliberate: notes usually qualify the license (as they do for the reservoir, where
+    the single license id would be a lie), so they must not appear after the limitations."""
+    md = render_readme(
+        {
+            "dataset_id": "pretrain/x",
+            "version": "v1",
+            "purpose": "p",
+            "license": {"id": "unknown", "basis": "mixed"},
+            "notes": "NOTE_BODY",
+            "limitations": [{"kind": "k", "detail": "LIMITATION_BODY"}],
+        }
+    )
+    assert md.index("## License") < md.index("## Notes") < md.index("## Limitations")

@@ -78,16 +78,26 @@ def _sources_section(sources: Sequence[Mapping[str, Any]]) -> list[str]:
     show_uri = any(r.get("uri") for r in rows)
     upstream_scoped = any(str(r.get("scope", "")).startswith("upstream") for r in rows)
 
+    # The token/doc columns are labelled by SCOPE, not unconditionally "Upstream". A producer that
+    # measured its own per-source counts (from build receipts, say) and correctly omitted `scope`
+    # was getting its measured numbers printed under an "Upstream tokens" heading — which tells a
+    # consumer the opposite of the truth, and is the exact confusion `scope` exists to resolve. The
+    # caveat paragraph below already keys off `upstream_scoped`; the headers now agree with it.
+    tok_label = "Upstream tokens" if upstream_scoped else "Tokens"
+    doc_label = "Upstream docs" if upstream_scoped else "Documents"
+
     header = ["Source"]
     if show_share:
         header.append("Share")
     if show_tokens:
-        header.append("Upstream tokens")
+        header.append(tok_label)
     if show_docs:
-        header.append("Upstream docs")
+        header.append(doc_label)
     if show_license:
         header.append("License")
     if show_uri:
+        # Always "Upstream": this is the link to where the data CAME FROM, which is upstream
+        # regardless of whether the counts were measured here.
         header.append("Upstream")
 
     lines = ["## Data mix / sources", ""]
@@ -204,6 +214,27 @@ def _license_section(ds: Mapping[str, Any]) -> list[str]:
     else:
         body = f"**{lid}**" + (f" (basis: {basis})" if basis else "")
     return ["## License", "", body, ""]
+
+
+def _notes_section(ds: Mapping[str, Any]) -> list[str]:
+    """Render ``notes``. It used to be accepted by ``publish()``, stored in ``dataset.json``, and
+    then **silently dropped here** — so nothing a producer put in it ever reached a consumer.
+
+    That is not a cosmetic omission. This module's own docstring cites §3: ``notes`` and
+    ``limitations[]`` "exist because the README is generated". `publish(notes=...)` is a documented
+    parameter and `DESIGN-A-DATASET`/`edullm-dataset-design` both tell producers to use it for facts
+    like "which sources have no held-out data". Found while publishing
+    ``pretrain/reservoir-dolma2``, whose ``notes`` carries the mixed-license disclosure — 7.13% of
+    train is CC-BY-SA-4.0, i.e. share-alike, which constrains downstream redistribution. That is
+    exactly the kind of claim a consumer cannot recompute from the artifact, written into the one
+    field that was being thrown away.
+
+    Placed after License and before Limitations because in practice it qualifies the former.
+    """
+    notes = ds.get("notes")
+    if not isinstance(notes, str) or not notes.strip():
+        return []
+    return ["## Notes", "", notes.strip(), ""]
 
 
 def _limitations_section(ds: Mapping[str, Any]) -> list[str]:
@@ -324,6 +355,7 @@ def render_readme(ds: Mapping[str, Any], *, generator_version: str | None = None
     lines += _contents_section(ds)
     lines += _tokenizer_section(ds)
     lines += _license_section(ds)
+    lines += _notes_section(ds)
     lines += _limitations_section(ds)
     lines += _provenance_section(ds)
     lines += _how_to_read_section(ds)
