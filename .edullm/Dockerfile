@@ -44,7 +44,26 @@ WORKDIR /opt/edullm-data
 # infra/Dockerfile.validator names them: the two that matter are the ones a container cannot
 # work without, and a resolution failure is cheaper in its own layer than at the end of one
 # that also installed the project.
-RUN python -m pip install --no-cache-dir "boto3>=1.34" "numpy>=1.26"
+#
+# botocore's `crt` EXTRA IS THE THIRD, AND IT IS HERE BECAUSE boto3 DOES NOT BRING IT. The
+# platform commits a checkpoint by putting the payload with `ChecksumAlgorithm="CRC32C"` and
+# then a `_SUCCESS` object carrying the digest S3 attested back; its reader compares the two
+# and calls a checkpoint it cannot verify corrupt. botocore has no pure-Python CRC-32C --
+# `botocore.httpchecksum` adds the algorithm to its supported set only when `awscrt` imports
+# -- and boto3 depends on botocore without extras, so nothing here ever brought it in.
+#
+# Found in OLMo-core's image the way these things are found, at the end rather than the
+# start: run run_019fcf53 on 2026-08-05 pulled that image, trained twenty steps on a T4,
+# logged every one of them, and died on the first line after the training loop with
+# `MissingDependencyException: Using CRC32C requires an additional dependency`. A whole
+# run's compute, and nothing kept. Every image the platform builds writes its output through
+# the same protocol, so the hole was never OLMo-core's alone.
+#
+# On the same pip invocation as boto3 deliberately: one resolution then picks the botocore
+# both agree on, where a separate later install can move botocore under boto3's feet.
+# Unpinned, like the two floors beside it -- a different awscrt changes how fast a CRC-32C
+# is arrived at, not what it is, because the value is Castagnoli's and fixed by the standard.
+RUN python -m pip install --no-cache-dir "boto3>=1.34" "numpy>=1.26" "botocore[crt]"
 
 # The build context is the repository root and .dockerignore is what keeps .git out of this
 # layer. The platform's publish job strips the checkout credentials before building, so what
@@ -73,10 +92,30 @@ COPY . .
 #
 # Run from / rather than from the checkout, because a relative import of the source tree
 # beside it would prove the checkout works and say nothing about the wheel.
+#
+# THE CRC-32C PAIR IS ASSERTED HERE RATHER THAN BESIDE ITS INSTALL, because `pip install .`
+# above it is exactly the step that can move botocore, and an assertion that ran before it
+# would be checking a state the image does not ship in. Two checks rather than one, because
+# there are two ways to get this wrong. `pip install botocore[crt]` succeeding proves a
+# distribution is on disk; it does not prove botocore reached it. botocore imports awscrt
+# inside a try/except and sets HAS_CRT False on any failure -- an incompatible version, a
+# wheel built for another libc -- so an image can carry awscrt and refuse CRC32C anyway,
+# silently, until something has already been paid for.
+#
+# The first is the exact call that died: put_object with ChecksumAlgorithm="CRC32C". Stubber
+# answers it, so it costs no network, no credentials and no bucket -- but botocore resolves
+# the checksum before the stub is consulted, which is precisely the frame the failed run's
+# traceback names, so it raises that run's own MissingDependencyException when the CRT is
+# not reachable. The second is awscrt's own answer to CRC-32C of b"123456789", which the
+# standard fixes at 0xE3069283 and the platform's checkpoints.py asserts against the same
+# constant. It costs a microsecond and it is the difference between "botocore will use this"
+# and "and the number it gets is right".
 RUN set -eux; \
     python -m pip install --no-cache-dir .; \
     cd /; \
     python -c "import boto3, numpy, edullm_data; print(edullm_data.__name__)"; \
+    python -c "import boto3; from botocore import UNSIGNED; from botocore.config import Config; from botocore.stub import Stubber; client = boto3.client('s3', region_name='us-east-1', config=Config(signature_version=UNSIGNED)); stub = Stubber(client); stub.add_response('put_object', {}); stub.activate(); client.put_object(Bucket='b', Key='k', Body=b'123456789', ChecksumAlgorithm='CRC32C')"; \
+    python -c "from awscrt.checksums import crc32c; assert crc32c(b'123456789') == 0xE3069283, 'awscrt computes something other than CRC-32C'"; \
     python -c "from edullm_data.read import dataset_paths, resolve_latest; print(dataset_paths.__module__)"; \
     python -c "from pathlib import Path; import edullm_data; from edullm_data import validate; packaged = Path(edullm_data.__file__).resolve().parent / 'families'; assert validate.FAMILIES_DIR == packaged, f'families resolved to {validate.FAMILIES_DIR} rather than into the wheel, so every declared bound would fall back to a laxer constant'; print(sorted(p.name for p in packaged.iterdir()))"
 
