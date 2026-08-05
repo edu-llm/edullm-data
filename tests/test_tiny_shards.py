@@ -1,8 +1,8 @@
 """The distinct-ids floor scales with what was actually sampled.
 
-``min_distinct_ids`` was an absolute count (256 from the family, 16 as the profile fallback),
-which is unsatisfiable for a shard smaller than the bound: a 5-token shard cannot reach 256
-distinct ids, or even 16, no matter how healthy it is.
+``min_distinct_ids`` was an absolute count (the family's declared floor, 16 as the profile
+fallback), which is unsatisfiable for a shard smaller than the bound: a 5-token shard cannot
+reach 128 distinct ids, or even 16, no matter how healthy it is.
 
 Not hypothetical. The 150B corpus has 2 shards of 20 bytes / 5 tokens among 6,921. Under an
 absolute floor they are guaranteed violations, and because ``promote()`` is all-or-nothing they
@@ -91,11 +91,18 @@ def test_an_all_zeros_tiny_shard_is_still_caught():
 
 
 def test_a_degenerate_large_shard_is_still_caught_at_the_declared_bound():
-    """Above ~1 KB of sampled tokens the family's 256 applies unchanged."""
+    """Above ~1 KB of sampled tokens the family's declared floor applies unchanged.
+
+    Reads the bound out of ``families/pretrain.json`` rather than hardcoding it, so tuning the
+    family value stays a one-line edit to the family file instead of a test-and-family edit —
+    what is under test here is that the DECLARED bound is what fires, not a scaled one.
+    """
+    declared = V._family_defaults_for(DSID)["min_distinct_ids"]
     res = _validate_with_tiny([7, 8] * 5000)  # 10,000 tokens, only 2 distinct
     assert _distinct_violations(res)
     msg = str(_distinct_violations(res)[0])
-    assert "256" in msg  # the declared bound, not a scaled one
+    assert f">= {declared}" in msg  # the declared bound, not a scaled one
+    assert "scaled to this shard's sample size" not in msg
 
 
 def test_the_message_says_when_the_bound_was_scaled():
@@ -109,10 +116,10 @@ def test_the_message_says_when_the_bound_was_scaled():
 
 @pytest.mark.parametrize(
     "n,expected",
-    [(1, 1), (2, 2), (4, 2), (5, 2), (8, 2), (16, 4), (64, 16), (1024, 256), (16384, 256)],
+    [(1, 1), (2, 2), (4, 2), (5, 2), (8, 2), (16, 4), (64, 16), (512, 128), (1024, 128), (16384, 128)],
 )
 def test_the_effective_floor_is_monotone_and_never_vacuous_above_one_token(n, expected):
-    declared = 256
+    declared = 128
     effective = min(declared, max(n // 4, 2 if n > 1 else 1))
     assert effective == expected
     if n > 1:

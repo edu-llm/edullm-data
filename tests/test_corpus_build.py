@@ -25,7 +25,7 @@ PREFIX = "_ingest/test-build"
 class WordTok:
     """Whitespace tokenizer with a wide id space.
 
-    Wide on purpose: `corpus_pack._verify_shard` enforces the family's `distinct_ids_min` of 256 on
+    Wide on purpose: `corpus_pack._verify_shard` enforces the family's `distinct_ids_min` on
     a sampled window, so a toy tokenizer mapping a small alphabet produces shards that are REJECTED
     for looking degenerate. That check firing on a naive fixture is the check working; the fixture
     has to be realistic enough to clear it.
@@ -621,11 +621,11 @@ def test_a_stream_meant_to_be_consumed_WHOLE_still_raises_on_surplus():
     from edullm_data.corpus_pack import pack
 
     refs = B.bundles_of(B.plan_document([_spec(target_tokens=SHARD_TOKENS)]))[0].shards
-    # RANDOM ids, not a constant fill: `_verify_shard` enforces the family's distinct-ids floor of
-    # 256 on a sampled window and runs BEFORE the surplus gate, so np.full() fails the wrong check
+    # RANDOM ids, not a constant fill: `_verify_shard` enforces the family's distinct-ids floor
+    # on a sampled window and runs BEFORE the surplus gate, so np.full() fails the wrong check
     # and the test would pass for the wrong reason.
     # RANDOM ids with a trailing EOS, because `pack` consumes `tokenize_documents` output and
-    # `_verify_shard` checks BOTH the distinct-ids floor (256, on a sampled window) and that each
+    # `_verify_shard` checks BOTH the distinct-ids floor (on a sampled window) and that each
     # document contributes exactly one EOS. Both run before the surplus gate, so a lazier fixture
     # fails an unrelated check and the test passes for the wrong reason.
     rng = np.random.default_rng(9)
