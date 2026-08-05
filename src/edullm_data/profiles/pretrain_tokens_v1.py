@@ -198,11 +198,36 @@ def _entries(ctx: GroupContext):
             yield raw, None, Violation("bad-manifest-entry", f"unparseable manifest entry: {e}", path)
 
 
+def _observed_size(ctx: GroupContext, key: str) -> int:
+    """The object's REAL size from S3, HEADed once per key per validation run.
+
+    Every caller here wants the same fact about the same key, and each was issuing its own HEAD:
+    ``_sampled_ids`` (decode smoke) and ``check_seq_len_alignment`` both did, on top of the
+    per-entry HEAD in ``validate._validate_group``. Three HEADs per entry, so a 10,049-object
+    corpus spent ~30,000 round trips discovering 10,049 sizes. Measured live on
+    ``pretrain/reservoir-dolma2``: Gate A ran ~85 min at 0.3% CPU and ~15.8 round trips/s -- purely
+    latency-bound, which is what pushed the first promotion attempt past its 2 h timeout.
+
+    Cached in ``ctx.observations``, which exists for exactly this ("ephemeral, validator-owned facts
+    computed while checks run") and is never serialized into dataset metadata.
+
+    **Still recomputed, not trusted.** This caches an OBSERVATION of S3, never the producer's
+    declared ``entry.bytes`` -- the whole point of HEADing is that a truncated tail gets sampled and
+    checked against reality. Caching one observation per key changes the number of round trips, not
+    what is compared: both callers previously saw whatever S3 returned for that key, and one HEAD
+    within a single run returns the same size to both.
+    """
+    sizes = ctx.observations.setdefault("object_sizes", {})
+    if key not in sizes:
+        sizes[key] = int(ctx.s3.head(ctx.landing_bucket, key)["size"])
+    return int(sizes[key])
+
+
 def _sampled_ids(ctx: GroupContext, entry: ManifestEntry, dtype: "np.dtype") -> "np.ndarray":
     """Read ~64 KB at seeded offsets and decode as ``dtype``. Uses the *actual* object size
     from HEAD (not the declared ``bytes``) so a truncated tail is sampled honestly."""
     key = _object_key(ctx.prefix, entry.path)
-    size = int(ctx.s3.head(ctx.landing_bucket, key)["size"])
+    size = _observed_size(ctx, key)
     itemsize = dtype.itemsize
     if size < itemsize:
         return np.empty(0, dtype=dtype)
@@ -442,7 +467,7 @@ def check_seq_len_alignment(ctx: GroupContext) -> list[Violation]:
         if dtype is None:
             continue
         key = _object_key(ctx.prefix, entry.path)
-        size = int(ctx.s3.head(ctx.landing_bucket, key)["size"])
+        size = _observed_size(ctx, key)
         stride = dtype.itemsize * seq_len
         if stride and size % stride != 0:
             out.append(
