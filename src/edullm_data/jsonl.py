@@ -14,7 +14,7 @@ from __future__ import annotations
 import gzip
 import io
 import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from typing import Any
 
 from .s3 import S3

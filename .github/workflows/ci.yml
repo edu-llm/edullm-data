@@ -1,0 +1,176 @@
+name: CI
+
+# What this file exists to stop, stated plainly because the gap it closes was invisible.
+#
+# Until this landed, nothing in this repository ran a test, a linter or a type checker on a
+# pull request. That is easy to miss by reading directory listings: `.github/workflows/` was
+# not empty, and the one file in it does run the whole suite -- but only as a gate on the
+# image build, which fires on pushes to `edullm/**` and on nothing else. A pull request
+# touched none of it.
+#
+# #18 is what that looks like from the outside. It merged nine seconds after it opened,
+# carrying 234 new lines of tests that no machine had executed, and an unused import in
+# `jsonl.py` that `ruff check` flags in under a second. The suite passed and the import was
+# harmless, so the cost was zero this time; the point is that nothing in the repository was
+# in a position to know that, and the next one is not guaranteed to be free.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  # Every pull request, deliberately unrestricted, rather than `branches: [main]`.
+  #
+  # OLMo-core's workflows carry that restriction and it is right for OLMo-core, which is a
+  # fork tracking an upstream whose feature work merges to `main` once. The consequence is
+  # that a pull request between two feature branches there gets no CI at all. This
+  # repository is about to take pushes from thirty-five people, and a branch stacked on
+  # another branch is precisely where unreviewed code accumulates, so the restriction is
+  # not copied. An unrestricted `pull_request:` costs one runner per PR and covers the case
+  # the restricted form silently drops.
+  pull_request:
+  # And on `main` itself, so a merge that raced two green pull requests into a red tree is
+  # visible on the default branch rather than on whichever pull request opens next.
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the floor `pyproject.toml` declares, and it declares it for a reason that
+        # is a claim rather than a preference: this package has to be installable in one
+        # environment with OLMo-core, whose own floor is 3.10, and a 3.11 pin here would
+        # make the two uninstallable together. That comment says "Verified, not assumed",
+        # and until now the verification was somebody running the suite on a laptop. Running
+        # the floor here is what keeps it verified.
+        #
+        # 3.12 is the version of the registered base image the validator actually ships on
+        # (`config/repositories.yaml` pins python 3.12.13), so it is the version whose
+        # behaviour production depends on.
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # Non-editable, matching what `edullm-platform-build.yml` already installs, so this
+      # job and the image-build gate agree about what "the package" means. `pythonpath` in
+      # `[tool.pytest.ini_options]` still points collection at `src/`, so the suite reads
+      # the working tree either way -- the install is here for the dependencies.
+      - name: Install
+        run: python -m pip install --disable-pip-version-check ".[test]"
+
+      - name: Run tests
+        run: python -m pytest -q
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Pinned, and the pin is most of the value. An unpinned linter turns a repository red
+      # on a morning when nobody changed anything, and a check that fails for reasons the
+      # author did not cause is how thirty-five people learn to ignore a red check. Bump
+      # this deliberately. 0.15.22 is the version OLMo-core's build gate already pins.
+      - name: Install ruff
+        run: python -m pip install --disable-pip-version-check ruff==0.15.22
+
+      # `ruff check` with no `[tool.ruff]` table in `pyproject.toml`, which is not an
+      # oversight to correct here. The default rule set is pyflakes plus a few pycodestyle
+      # errors: dead imports, undefined names, real mistakes. It is not a style opinion,
+      # and this repository has deliberately not taken one.
+      #
+      # `ruff format --check` is NOT run, and should not be added casually: 46 of this
+      # repository's 49 Python files would be reformatted by it today. That is a decision
+      # about house style for its owners to make in a commit of its own, not a side effect
+      # of adding CI.
+      - name: Run ruff
+        run: ruff check --no-cache .
+
+  type-check:
+    name: Type check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Pinned for the same reason ruff is: a mypy release that adds one inference rule
+      # would otherwise fail this job on unchanged code.
+      - name: Install
+        run: python -m pip install --disable-pip-version-check "." "mypy==1.18.2"
+
+      # A RATCHET, NOT A GATE, AND NOT A DECORATION EITHER.
+      #
+      # `mypy src/` reports six errors on this tree today, in `read.py` (four, all one
+      # `dict | None` that flows into two helpers annotated `Mapping`) and `validate.py`
+      # (two: a `set[str]` assigned a `list[str]`, and a `dict | None` indexed without a
+      # guard). None of the six is known to be a live bug. Failing the job on them would
+      # mean landing a workflow that is red the day thirty-five people arrive, so it does
+      # not fail on them -- it fails on the SEVENTH.
+      #
+      # The alternative shape, `continue-on-error: true`, was rejected on purpose. It
+      # produces a check that reports and can never fail, which is worse than no check:
+      # it occupies the space where a real one would go and nobody reads it twice.
+      #
+      # `--ignore-missing-imports` because boto3 ships no type information at all. That is
+      # not incidental here, it is the centre of the bug this repository already carries a
+      # guard for: `boto3.client("s3")` is `Any`, `Any` satisfies `s3: S3`, and the
+      # annotation therefore bought nothing at the call site where a boto3 client was
+      # passed instead of a `Boto3S3` adapter. See `require_s3_adapter` in `s3.py`. Type
+      # checking is worth running here; what it cannot do is check that boundary, which is
+      # why the runtime guard exists and why this job is not sold as covering it.
+      #
+      # TO MAKE THIS BLOCKING: fix the six, set BASELINE to 0, and delete this paragraph.
+      # `read.py:341`/`367` want one `if partition is None: raise` before the assignment;
+      # `validate.py:642` wants `set(...)` around the right-hand side; `validate.py:878`
+      # wants the same `None` guard. It is an afternoon, not a project.
+      - name: Run mypy against the baseline
+        env:
+          BASELINE: "6"
+        run: |
+          set -uo pipefail
+          mypy --no-incremental --cache-dir=/dev/null --ignore-missing-imports src/ \
+            > mypy.log 2>&1 || true
+          cat mypy.log
+          count="$(grep -c ': error:' mypy.log || true)"
+
+          {
+            echo "## mypy"
+            echo
+            echo "Errors found: \`${count}\`. Baseline: \`${BASELINE}\`."
+            echo
+            echo '```'
+            grep ': error:' mypy.log || echo '(none)'
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+          if [ "${count}" -gt "${BASELINE}" ]; then
+            echo "::error::mypy reports ${count} errors, above the baseline of ${BASELINE}." \
+                 "This change introduced $(( count - BASELINE )) new type error(s)."
+            exit 1
+          fi
+
+          if [ "${count}" -lt "${BASELINE}" ]; then
+            echo "::notice::mypy reports ${count} errors, below the baseline of ${BASELINE}." \
+                 "Lower BASELINE in .github/workflows/ci.yml to hold the ground you just took."
+          fi
+
+          echo "mypy is at or below the baseline (${count} <= ${BASELINE})."
