@@ -30,7 +30,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=7.0"]
+# PyYAML is a TEST dependency and must not become a runtime one. Nothing under
+# `src/edullm_data` reads YAML and nothing should: the package's inputs are JSON
+# (`dataset.json`, manifests, `families/`). It is here so that
+# `tests/test_landing_lifecycle.py` can read `infra/01-buckets.yaml`, which is the file
+# that decides whether 122 GB nothing else holds survives a redeploy — a claim worth a
+# test dependency and not worth a runtime one.
+test = ["pytest>=7.0", "pyyaml>=6.0"]
 
 [project.scripts]
 # `edullm-data = "edullm_data.cli:main"` used to be declared here and `edullm_data/cli.py` HAS
