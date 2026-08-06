@@ -1,3 +1,5 @@
+@AGENTS.md
+
 # edullm-data — orientation for a fresh session
 
 You are working on **`edullm-data`**: the publisher, validator, and reader for the eduLLM dataset
