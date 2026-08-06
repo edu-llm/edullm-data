@@ -91,6 +91,80 @@ class S3(Protocol):
 
 
 # --------------------------------------------------------------------------------------
+# The boundary check
+# --------------------------------------------------------------------------------------
+
+#: The four methods every reader in :mod:`edullm_data.read` calls. Deliberately not the whole
+#: protocol: a read-only adapter that implements these and none of ``put``/``copy``/``delete``
+#: is a legitimate thing to hand a reader, and rejecting it would be this check inventing a
+#: requirement the code does not have.
+_READER_METHODS = ("get", "get_range", "head", "list")
+
+
+def require_s3_adapter(candidate: object, *, called_from: str) -> None:
+    """Refuse an object that is not an :class:`S3` adapter, before it is used.
+
+    **THIS EXISTS BECAUSE OF THE MOST MISLEADING COINCIDENCE AVAILABLE.** boto3 names its
+    generated client class after the service, so ``type(boto3.client("s3")).__name__`` is
+    literally ``S3`` -- the same name as the protocol above. Passing a boto3 client where an
+    adapter belongs therefore dies, deep inside a private helper on first use, with
+    ``AttributeError: 'S3' object has no attribute 'head'``. That message describes this
+    protocol perfectly and is about a different object entirely, so the obvious reading is
+    that ``head`` is a typo for ``head_object`` and the fix is to change the call. It is not.
+    ``head`` is on the protocol, ``Boto3S3`` implements it over ``head_object``, ``FakeS3``
+    implements it in memory, and eleven call sites depend on it.
+
+    That mistake cost four failed runs on the platform on 2026-08-01, and it shipped past
+    ``mypy --strict``: boto3 carries no type information, so ``boto3.client("s3")`` is ``Any``
+    and ``Any`` satisfies the ``s3: S3`` annotation. The annotation is right and buys nothing
+    at the call site. Nor could a test catch it, and the reason is worth stating: every test
+    runs against :class:`FakeS3`, which is a faithful implementation of the protocol, and a
+    faithful fake is exactly what cannot stand in for a caller who passes something that is
+    not an implementation at all.
+
+    So the missing guard was never a unit test. It is an assertion at the boundary where an
+    arbitrary object is accepted, which is here.
+
+    Nothing is called on ``candidate`` and no network is touched; this reads attributes.
+    """
+    missing = [name for name in _READER_METHODS if not callable(getattr(candidate, name, None))]
+    if not missing:
+        return
+
+    # A boto3 object, named rather than guessed at, because the one fact a person cannot
+    # recover from the traceback is which of the two classes called ``S3`` they are holding.
+    #
+    # THE DISCRIMINATOR IS ``meta``'S OWN MODULE, AND THE FIRST VERSION OF THIS GOT IT WRONG
+    # IN A WAY MUTATION TESTING CAUGHT. Requiring ``head_object`` alongside ``meta`` looks
+    # tighter and quietly excludes ``boto3.resource("s3")``, which has no ``head_object`` at
+    # all: a resource is at least as easy to pass here by mistake as a client, and it would
+    # have fallen through to the generic message that names neither boto3 nor ``Boto3S3``.
+    # Both a client and a resource carry ``meta``, and its type comes from ``botocore.client``
+    # or ``boto3.resources.base`` respectively, so one check covers both and matches nothing
+    # that merely happens to have an attribute called ``meta``.
+    meta_module = type(getattr(candidate, "meta", None)).__module__.split(".")[0]
+    if meta_module in {"boto3", "botocore"}:
+        raise TypeError(
+            f"{called_from} was given a boto3 object, and it needs an edullm_data S3 adapter. "
+            f"These are two different things with the same class name: "
+            f"type(boto3.client('s3')).__name__ is 'S3', exactly like the protocol in "
+            f"edullm_data.s3, so without this check the failure is "
+            f"\"AttributeError: 'S3' object has no attribute 'head'\" and reads like a missing "
+            f"method on the protocol. It is not one; head() is on the protocol and Boto3S3 "
+            f"implements it over head_object. "
+            f"Pass edullm_data.s3.Boto3S3.default() instead, or Boto3S3(client) to reuse the "
+            f"client you already hold."
+        )
+
+    raise TypeError(
+        f"{called_from} needs an edullm_data.s3.S3 adapter and was given "
+        f"{type(candidate).__module__}.{type(candidate).__name__}, which is missing "
+        f"{', '.join(f'{name}()' for name in missing)}. "
+        f"Use edullm_data.s3.Boto3S3 for real S3 or edullm_data.s3.FakeS3 for a test."
+    )
+
+
+# --------------------------------------------------------------------------------------
 # Real client
 # --------------------------------------------------------------------------------------
 
