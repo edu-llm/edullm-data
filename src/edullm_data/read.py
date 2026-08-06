@@ -20,7 +20,7 @@ from typing import Any, Mapping, Sequence
 
 from .contracts import SPLITS, is_trainable
 from .manifest import ManifestEntry, parse_shard_name
-from .s3 import S3, NotFound
+from .s3 import S3, NotFound, require_s3_adapter
 
 DATA_BUCKET = "edullm-data"
 
@@ -243,6 +243,7 @@ def dataset_paths(
     so "does this have validation data?" is a question, not an exception. A split outside the
     vocabulary is still an error.
     """
+    require_s3_adapter(s3, called_from="dataset_paths()")
     prefix = f"{dataset_id}/{version}"
     if require_validated:
         _require_validated(s3, data_bucket, prefix)
@@ -503,6 +504,7 @@ def _find_partition(group: dict[str, Any], split: str) -> dict[str, Any] | None:
 
 def resolve_latest(dataset_id: str, *, s3: S3, data_bucket: str = DATA_BUCKET) -> str | None:
     """Highest published version of a dataset per the catalog. Returns e.g. ``"v3"`` or None."""
+    require_s3_adapter(s3, called_from="resolve_latest()")
     highest = 0
     found = False
     for obj in s3.list(data_bucket, f"_catalog/{dataset_id}/"):
@@ -537,6 +539,8 @@ def verify_seal(
     Returns human-readable mismatch descriptions rather than raising, so a caller can report
     all of them at once (an fsck sweep wants the full picture, not the first failure).
     """
+    require_s3_adapter(s3, called_from="verify_seal()")
+
     import json
 
     from .contracts import sha256_bytes
@@ -712,6 +716,7 @@ def build_mixture(
     valid — semantically wrong and silent. Doing that safely needs a tokenizer-identity check
     across the datasets' ``depends_on`` pins, which is deliberately not built here.
     """
+    require_s3_adapter(s3, called_from="build_mixture()")
     if not sources:
         raise ReadError("build_mixture needs at least one source")
     if total <= 0:
