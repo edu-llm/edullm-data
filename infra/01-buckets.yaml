@@ -184,12 +184,93 @@ Resources:
         Rules:
           - ObjectOwnership: BucketOwnerEnforced
 
+      # -----------------------------------------------------------------------------------
+      # ONE RULE PER FAMILY PREFIX, AND NOT ONE RULE OVER THE WHOLE BUCKET.
+      #
+      # §10's number is 14 days and that has not changed. What has changed is what the 14
+      # days reaches. This was a single unfiltered `expire-landing-objects-14d`, which
+      # matches EVERY key in the bucket, and the bucket holds two prefixes that are not
+      # dataset payload and must not expire:
+      #
+      #   _dist/       the bootstrap wheel every Batch job pip-installs before it runs.
+      #                Expiring it breaks the validator, the publisher and fsck at once.
+      #                HANDOFF.md records this being caught before it fired.
+      #   _preserved/  operator rescue copies of corpora that were refused and therefore
+      #                never promoted, so nothing else holds them. As of 2026-08-06 that is
+      #                364 objects and 122,828,050,823 bytes of pretrain/olmo-127b v2,
+      #                which exists nowhere else on AWS.
+      #
+      # NEITHER IS PROTECTED BY ANYTHING TODAY. They survive because the DEPLOYED
+      # configuration was hand-edited away from this template into per-prefix rules and no
+      # rule happens to name them. This template was never updated to match, so
+      # `cloudformation deploy` of this file as it stood would have restored the unfiltered
+      # rule and deleted both in fourteen days. That is the realistic way this data dies:
+      # not somebody adding a broad rule, but somebody redeploying the one already here.
+      #
+      # There is no way to say "everything except" in a lifecycle filter. A prefix match is
+      # the only selector, so an exclusion has to be written as an enumeration, and the
+      # enumeration has to be held against the thing it enumerates or it drifts. The family
+      # list below is checked against `families/` by
+      # tests/test_landing_lifecycle.py::test_every_family_prefix_expires, and the two
+      # protected prefixes are checked against every rule by the test beside it. Adding a
+      # family without a rule here is a red test; adding a rule that can reach `_dist/` or
+      # `_preserved/` is a red test.
+      #
+      # A `Status: Disabled` rule naming `_preserved/` would NOT have helped, and neither
+      # would a bucket policy. Lifecycle rules do not shadow one another — a rule that
+      # matches a prefix does not exempt that prefix from any other rule — and lifecycle
+      # expiration is performed by the S3 service rather than by a principal, which is why
+      # 02-bucket-policy.json deliberately lets services past every Deny
+      # (tests/test_bucket_policy.py::test_every_deny_lets_aws_services_through). The only
+      # thing that stops a lifecycle delete from inside the bucket is Object Lock, and §10
+      # rejects Object Lock for this estate on three separate grounds.
+      #
+      # THIS DOES NOT RECONCILE THE TEMPLATE WITH WHAT IS DEPLOYED, and it is not safe to
+      # deploy on that assumption. The live configuration carries rules for `_pending/` and
+      # `_ingest/` that are not families and are not written here, so deploying this stops
+      # expiring those two. Every difference this introduces errs toward keeping bytes, which
+      # is the direction to err in. Diff it against
+      #   aws s3api get-bucket-lifecycle-configuration --bucket edullm-landing
+      # before deploying, and reconcile in a change of its own.
+      # -----------------------------------------------------------------------------------
       LifecycleConfiguration:
         Rules:
           # §10: landing expiry 14 d. Rejected bytes "expire in 14 days" (§7), and a
           # published dataset's landing copy is disposable the moment promotion succeeds.
-          - Id: expire-landing-objects-14d
+          # One rule per family because Filter.Prefix takes one string, not a list.
+          - Id: expire-curriculum-14d
             Status: Enabled
+            Prefix: curriculum/
+            ExpirationInDays: 14
+
+          - Id: expire-eval-14d
+            Status: Enabled
+            Prefix: eval/
+            ExpirationInDays: 14
+
+          - Id: expire-pretrain-14d
+            Status: Enabled
+            Prefix: pretrain/
+            ExpirationInDays: 14
+
+          - Id: expire-probe-14d
+            Status: Enabled
+            Prefix: probe/
+            ExpirationInDays: 14
+
+          - Id: expire-sft-14d
+            Status: Enabled
+            Prefix: sft/
+            ExpirationInDays: 14
+
+          - Id: expire-tokenizer-14d
+            Status: Enabled
+            Prefix: tokenizer/
+            ExpirationInDays: 14
+
+          - Id: expire-vendor-14d
+            Status: Enabled
+            Prefix: vendor/
             ExpirationInDays: 14
 
           # §10: "AbortIncompleteMultipartUpload on landing is LOAD-BEARING, not hygiene:
@@ -197,6 +278,12 @@ Resources:
           # sealed while a member is still uploading. The audit found 116 orphaned uploads
           # in one bucket, several against a prefix with zero completed objects."
           # Do not raise this number without re-reading §6 "Order".
+          #
+          # DELIBERATELY UNFILTERED, and the only rule here that is. It reaches `_dist/` and
+          # `_preserved/` too, which is both intended and harmless: aborting an upload that
+          # never completed cannot remove an object that did, so it is the one lifecycle
+          # action that is not a way to lose bytes. tests/test_landing_lifecycle.py excludes
+          # it from the protected-prefix check for exactly that reason and for no other.
           - Id: abort-incomplete-multipart-uploads-1d
             Status: Enabled
             AbortIncompleteMultipartUpload:
