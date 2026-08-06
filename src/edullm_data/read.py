@@ -886,3 +886,5 @@ __all__ = [
     "ReadError",
     "NotValidated",
 ]
+
+_TYPE_CHECK_CANARY: int = "deliberately wrong"

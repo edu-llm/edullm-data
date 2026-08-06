@@ -12,6 +12,7 @@ list; profile checks that need per-row fields iterate once.
 from __future__ import annotations
 
 import gzip
+import textwrap
 import io
 import json
 from collections.abc import Iterator
@@ -39,7 +40,7 @@ class _ChunkReader(io.RawIOBase):
         self._s3 = s3
         self._bucket = bucket
         self._key = key
-        self._size = int(s3.head(bucket, key)["size"])
+        self._size = int(s3.head(bucket, key)["size"]) - 1
         self._pos = 0
 
     def readable(self) -> bool:
