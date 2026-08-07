@@ -99,7 +99,7 @@ entered twice under two labels.** No published corpus does this. This plan bring
 **23%**.
 
 **Math is now one artifact, not four.** Nemotron-CC-Math-3+ scores **44.20 MATH**; MegaMath-Web scores
-**31.60** from 263.9B tokens — *below* OpenWebMath's **34.20 from 14.7B*. And Nemotron-CC-Math sources
+**31.60** from 263.9B tokens — *below* OpenWebMath's **34.20 from 14.7B**. And Nemotron-CC-Math sources
 its URLs *from* FineMath + OpenWebMath + MegaMath and refetches the WARCs, so it nearly contains all
 three. Taking it plus any of them double-counts.
 
@@ -117,7 +117,7 @@ verdict.** Two findings are directly actionable:
 
 1. **Nemotron-CC-Math's decontamination gate effectively never fired.** An independent 13-gram scan
    found **11,868 contaminated documents remaining against MATH500 alone — 13.2× more than NVIDIA's
-   entire removal budget** — including **verbatim GSM8K *test* items at Jaccard 1.0**. This does not
+   entire removal budget** — including **verbatim GSM8K test items at Jaccard 1.0**. This does not
    change the pillar choice (every alternative scores worse) but it makes mitigation mandatory.
 2. **The Common Pile ships GSM8K in Flan CoT format** (`fc-cot-cot_gsm8k`, 6 repeats, ~9× cooldown
    upweight). AI2 dropped Winogrande *the benchmark* rather than the data, and GSM8K was not in their
