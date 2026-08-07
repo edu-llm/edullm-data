@@ -44,8 +44,8 @@ points toward a *smaller* R_D\*, so treat every epoch multiplier as an **upper b
 | synthetic | FinePhrase weighted partition | **123.3B** | odc-by | overlap is **~1.00 pairwise**, not 0.90–0.93. Distinct fraction **0.2683** |
 | | Cosmopedia | **21.72B** | apache-2.0 | card is a **Mistral-7B** count, 15% high. Decontaminated vs **8** benchmarks |
 | | Nemotron Math-Textbooks | **27.49B** | CC-BY-4.0, ungated | card 9.5% LOW. Repo is `nvidia/Nemotron-Pretraining-Specialized-v1` (rev 1 had a nonexistent id). Passes through **Qwen model-licence** obligations |
-| math | MegaMath-Web | **241.05B** | odc-by, ungated | card's 263.9B was **8.7% optimistic**. **No decontamination documented — assume contaminated.** Union with FineMath bounded [241.1B, 297.9B] |
-| code | `common-pile/stackv2_edu_filtered` | **74.81B** | per-doc permissive | the ONLY ungated content-shipping permissive code pool. **1.0002 epochs at target — budget 2 epochs of a filtered subset** |
+| math | MegaMath-Web | **241.05B** | odc-by, ungated | card's 263.9B was **8.7% optimistic**. **No decontamination documented — assume contaminated.** **52.0% URL overlap with FineMath-3+ measured** [51.59, 52.38], so the union is **~266–272B**, not a 297.9B sum. Also **math-*adjacent*, not math-quality**: `math_score` floor is 0.40 not a threshold, only 9.4% of doc heads carry LaTeX, and real SEO spam sits at 0.67–0.73 |
+| code | `common-pile/stackv2_edu_filtered` | **74.81B** | per-doc permissive | the ONLY ungated content-shipping permissive code pool. **The 11% target was COPIED FROM THIS MEASUREMENT — zero slack** for filtering, the 14.2% Markdown share, or mixture error. Stack-v2 authenticated gives **HTTP 403** and demands a Software Heritage/INRIA bulk agreement |
 | academic | peS2o + PubMed + arXiv | **46.6B** | mixed | minus a **measured 20.14B** overlap (49.7% of peS2o bytes are PMC-derived) |
 | reference | finewiki 8.87B + pre-1929 books **17.36B** | **26.23B** | SA + **PUBLIC DOMAIN** | books card is **72% LOW** (OCR tokenizes at 0.375, not the asserted 0.25). SA share falls ~90% → **34%** |
 | QA/forum | StackExchange | **25.9B** | **92.8% CC-BY-SA** | confirmed hard ceiling; only 1.87B non-SA |
@@ -55,7 +55,7 @@ licence field**) · **MegaMath-code 28.1B** (*ships zero content* — 16/16 file
 bytes/doc) · swallow-code-v2 (74% `no_license`) · `algebraic-stack` 9.72B (**licence UNRESOLVED**) ·
 Nemotron-CC main (§2.2.2 "making available to others") · Nemotron-STEM-SFT (**MMLU-contaminated**) ·
 Nemotron-CC-Math (gated) · CK-12 (**bans AI training**) · `uspto_filtered` 144B (CARD only, 0.65%
-coverage) · essential-web-v1.0 24T (*this was rev 1's unexplained figure — a different dataset*).
+coverage) · **MegaMath-code 28.1B** (ships zero content, 16/16 files metadata at 135 B/doc) · essential-web-v1.0 24T (*this was rev 1's unexplained figure — a different dataset*).
 
 ## Synthetic: the decision that got harder
 
@@ -95,9 +95,14 @@ it **zero times**. It must run at ingest — after tokenization there is no docu
 
 1. **MegaMath-Web contamination vs GSM8K/MATH/MMLU** — undocumented and unmeasured. Assume dirty.
 2. **What fraction of MegaMath-Web survives a FineMath-grade filter** — identifiable spam at
-   classifier 0.67–0.73; admits documents to 0.40. Post-filter pool size unmeasured.
-3. **Whether R_D\* = 15.39 transfers to an MoE** — it does not, directionally. Upper bound only.
-4. **The overlap read is one file position** (`000_00000_0.parquet`) of ~6,780 per config; the
+   classifier 0.67–0.73; admits documents to 0.40. Post-filter pool size unmeasured. **This is now the
+   largest open risk in the plan**: math is 7% of the corpus and its biggest source is quality-
+   unfiltered.
+3. **The 52% math overlap rests on 0.606% MegaMath file coverage** on a snapshot-partitioned corpus.
+   +/-0.4pp is statistical; the structural exposure is larger. A 300-file stratified re-run closes it
+   in ~1 hour and should happen before ingest.
+4. **Whether R_D\* = 15.39 transfers to an MoE** — it does not, directionally. Upper bound only.
+5. **The FinePhrase overlap read is one file position** (`000_00000_0.parquet`) of ~6,780 per config; the
    mis-aligned control failed (`paths-info` IndexError). Graded MEASURED because the effect is
    exactly 1.0 on six pairs and a file artifact would show partial overlap.
-5. **This pipeline applies no decontamination of its own.**
+6. **This pipeline applies no decontamination of its own.**
