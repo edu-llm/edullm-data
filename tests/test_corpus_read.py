@@ -23,7 +23,13 @@ import json
 
 import pytest
 
-from edullm_data.corpus import MIN_DOC_TOKENS, MIN_MEAN_DOC_TOKENS, CorpusSpec, Document
+from edullm_data.corpus import (
+    MIN_DOC_TOKENS,
+    MIN_MEAN_DOC_TOKENS,
+    BuildError,
+    CorpusSpec,
+    Document,
+)
 from edullm_data.corpus_read import (
     FilterStats,
     ReadError,
@@ -1202,3 +1208,155 @@ def test_the_pinned_url_uses_the_revision_not_main():
     assert f"/resolve/{'b' * 40}/" in url and "/resolve/main/" not in url
     # Nothing pinned -> the old behaviour, so an unpinned caller is unchanged rather than broken.
     assert "/resolve/main/" in _pinned_url("acme/x", "data/f.parquet", None)
+
+
+# --------------------------------------------------------------------------------------
+# The SURROGATE document id — dossier §B12, for a source that ships no identifier
+# --------------------------------------------------------------------------------------
+
+#: Cosmopedia's real shape, MEASURED: six leaves and not one of them is a document identifier.
+_COSMO_SCHEMA = pa.schema(
+    [
+        pa.field("prompt", pa.string()),
+        pa.field("text_token_length", pa.int64()),
+        pa.field("text", pa.string()),
+        pa.field("seed_data", pa.string()),
+        pa.field("format", pa.string()),
+        pa.field("audience", pa.string()),
+    ]
+)
+
+
+def _cosmo_parquet(rows: int = 5):
+    """Parquet bytes with NO id column, and one `prompt` shared by several rows.
+
+    The shared prompt is the point: Cosmopedia generates multiple documents per seed prompt, which
+    is why §B12 rejected `prompt` as the identifier. A fixture with unique prompts would let a
+    wrong implementation pass.
+    """
+    table = pa.table(
+        {
+            "prompt": ["SEED-A", "SEED-A", "SEED-B", "SEED-B", "SEED-B"][:rows],
+            "text_token_length": [100 + i for i in range(rows)],
+            "text": [f" DOC-{i} " + "synthetic textbook prose " * 20 for i in range(rows)],
+            "seed_data": ["web"] * rows,
+            "format": ["textbook"] * rows,
+            "audience": ["college"] * rows,
+        },
+        schema=_COSMO_SCHEMA,
+    )
+    buf = io.BytesIO()
+    pq.write_table(table, buf, row_group_size=2)  # >1 group: row_index must span groups
+    buf.seek(0)
+    return buf
+
+
+def _cosmo_spec(**over) -> CorpusSpec:
+    base = {
+        "key": "cosmopedia", "category": "synthetic", "source_label": "cosmopedia",
+        "repo": "HuggingFaceTB/cosmopedia", "file_format": "parquet",
+        "text_column": "text", "id_column": "", "id_surrogate": True,
+        "revision": "0ae6ec63f91742bd2d1eaef4f02232c55d719385",
+        "target_tokens": 4_000_000_000,
+    }
+    return CorpusSpec(**{**base, **over})
+
+
+def test_a_surrogate_id_is_identical_across_two_independent_reads():
+    """Reproducibility is the ONE property the carve needs, so it is asserted, not assumed.
+
+    `is_held_out` decides the train/val split from the id alone (`corpus.py`), so an id that
+    differs between two reads of the same bytes silently re-partitions the corpus — and the
+    previously shipped leakage bug is what that costs.
+    """
+    a = list(read_parquet_documents(
+        "HuggingFaceTB/cosmopedia", "data/openstax/train-00000-of-00002.parquet",
+        _cosmo_spec(), {}, fileobj=_cosmo_parquet()))
+    b = list(read_parquet_documents(
+        "HuggingFaceTB/cosmopedia", "data/openstax/train-00000-of-00002.parquet",
+        _cosmo_spec(), {}, fileobj=_cosmo_parquet()))
+    assert [d.id for d in a] == [d.id for d in b]
+    assert len(a) == 5 and len({d.id for d in a}) == 5, "ids must be unique within a file"
+    # Row index spans row groups (2 per group here), not restarting per group.
+    assert [d.id.rsplit("#", 1)[1] for d in a] == ["0", "1", "2", "3", "4"]
+
+
+def test_a_changed_file_COUNT_changes_every_surrogate_id_loudly():
+    """§B12 chose this scheme BECAUSE upstream filenames encode their own cardinality.
+
+    `train-00000-of-00002` -> `train-00000-of-00003` when upstream re-shards, so every id moves and
+    the break is loud. The alternative it rejected — `(config, row_index)` — would keep the same ids
+    while the underlying rows moved, which is the silent version of the same event.
+    """
+    before = [d.id for d in read_parquet_documents(
+        "HuggingFaceTB/cosmopedia", "data/openstax/train-00000-of-00002.parquet",
+        _cosmo_spec(), {}, fileobj=_cosmo_parquet())]
+    after = [d.id for d in read_parquet_documents(
+        "HuggingFaceTB/cosmopedia", "data/openstax/train-00000-of-00003.parquet",
+        _cosmo_spec(), {}, fileobj=_cosmo_parquet())]
+    assert not set(before) & set(after), "a re-shard must change every id, not silently keep it"
+
+
+def test_surrogate_ids_do_not_collide_across_configs_which_is_why_the_path_not_the_basename():
+    """The correction to §B12, and the reason for it, in one assertion.
+
+    MEASURED on the shipping registry: with `config: "data"` the row spans all 8 configs, and
+    `train-00000-of-00002.parquet` exists under BOTH `data/openstax/` and `data/wikihow/`. §B12's
+    `file_basename` component would hand two different documents the same id — putting unrelated
+    documents on the same side of the carve and making them look like duplicates to the dedup pass.
+    """
+    openstax = [d.id for d in read_parquet_documents(
+        "HuggingFaceTB/cosmopedia", "data/openstax/train-00000-of-00002.parquet",
+        _cosmo_spec(), {}, fileobj=_cosmo_parquet())]
+    wikihow = [d.id for d in read_parquet_documents(
+        "HuggingFaceTB/cosmopedia", "data/wikihow/train-00000-of-00002.parquet",
+        _cosmo_spec(), {}, fileobj=_cosmo_parquet())]
+    assert not set(openstax) & set(wikihow), "basename-only ids would collide here"
+    # And the config segment is what distinguishes them — the component §B12 relied on.
+    assert all("data/openstax/" in i for i in openstax)
+    assert all("data/wikihow/" in i for i in wikihow)
+
+
+def test_the_prompt_column_is_not_the_identifier_because_it_repeats():
+    """§B12 and PLAT both rejected `prompt`; this is the measurement behind it.
+
+    Cosmopedia emits multiple documents per seed prompt, so a `prompt`-keyed id is not unique.
+    Asserted on the fixture so a future 'simplification' to `id_column: prompt` fails here rather
+    than producing colliding ids that read as duplicates.
+    """
+    docs = list(read_parquet_documents(
+        "HuggingFaceTB/cosmopedia", "data/openstax/train-00000-of-00002.parquet",
+        _cosmo_spec(), {}, fileobj=_cosmo_parquet()))
+    prompts = [d.text for d in docs]  # distinct documents...
+    assert len(set(prompts)) == 5
+    # ...over only two distinct seed prompts, which is why `prompt` cannot identify a document.
+    raw = pq.read_table(_cosmo_parquet()).to_pylist()
+    assert len({r["prompt"] for r in raw}) == 2
+    assert len({d.id for d in docs}) == 5, "the surrogate stays unique where `prompt` would not"
+
+
+def test_a_surrogate_source_must_pin_its_revision():
+    """§B12's stated condition, enforced at spec construction rather than trusted.
+
+    The id embeds the file path, so on an unpinned `main` an upstream re-shard changes every id
+    under the same ref — and the carve, being a pure function of the id, re-partitions silently.
+    """
+    with pytest.raises(BuildError, match="requires a pinned"):
+        _cosmo_spec(revision=None)
+
+
+def test_declaring_both_a_surrogate_and_an_id_column_is_refused():
+    """One of the two would be dead code and a reader could not tell which was intended."""
+    with pytest.raises(BuildError, match="mutually exclusive"):
+        _cosmo_spec(id_column="prompt")
+
+
+def test_a_drawn_row_with_neither_an_id_column_nor_a_surrogate_is_refused_at_spec_time():
+    """Wall 6, moved from a Batch container to plan time.
+
+    This is the exact crash PLAT hit — `id_column='' does not name a leaf` — but raised where it is
+    free to fix instead of on file 1 after the image build, the role assumption, the tokenizer
+    download and the decon-index load.
+    """
+    with pytest.raises(BuildError, match="id_column is empty and id_surrogate is False"):
+        _cosmo_spec(id_surrogate=False)

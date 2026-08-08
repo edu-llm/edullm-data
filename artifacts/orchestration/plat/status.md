@@ -811,6 +811,150 @@ The 2.67 TB / 18,455 objects already in the bucket are **not** retroactively pro
 only covers writes from now on — but every future overwrite or delete is now recoverable. This step
 was non-destructive and is reversible (`Status=Suspended`).
 
+# ADDENDUM 21 — ✅ `plan_id` reproduced, re-staged, **`:12` REGISTERED**, smoke #5 running
+
+## The new `plan_id` reproduces from the pushed registry — `MEASURED`
+
+```
+git show 8e2524a:artifacts/final-dataset/corpus-registry.json  -> cosmopedia config = 'data'
+plan_id=29968a2b04008a8c bundles=185 shards=39307 tokens=982,752,985,088
+```
+
+**Identical to the CEO's figure on all four values.** And I checked the other half of the input first:
+`git diff --stat 8e2524a -- src/edullm_data/` is **empty**, so my local code is byte-identical to the
+pushed commit. **That matters because `plan_id` hashes the plan, which the code produces** — a
+matching id with mismatched code would be luck, not verification.
+
+## Re-staged, verified by RECOMPUTATION
+
+| key | bytes | ETag == local md5 | expiry |
+|---|---|---|---|
+| `_ingest/final-dataset/29968a2b04008a8c/plan.json` | 1,996,613 | **`471c7c0c…a024` ✅** | 08 Sep, `expire-ingest-30d` |
+| `_ingest/final-dataset/corpus-registry.json` | 171,899 | **`1ecd6ac0…3789` ✅** | 08 Sep, `expire-ingest-30d` |
+
+Read back and confirmed the content, not just the digest: staged registry's cosmopedia `config` is
+**`'data'`**, staged plan's `plan_id` is **`29968a2b04008a8c`**, 185 bundles.
+
+> The old `68ebedaaddc7eb06/plan.json` is left in place. It is inert — nothing references it now that
+> rev 12 names the new id — and it self-expires 08 Sep under the 30-day rule. **Deliberately not
+> deleted:** it is the audit trail for why `plan_id` moved, and deleting build artifacts to tidy up is
+> how provenance gets lost.
+
+## ✅ **`edullm-reservoir-build:12` REGISTERED**
+
+**Diffed rev 12 against rev 11 field-by-field before registering: only `environment` differs**, and
+only `PLAN_ID` within it. `--tokenizer-dir /tmp/tok` present, `jobRoleArn =
+edullm-final-dataset-build`, image still digest-pinned to `sha256:1ada3f2d…8d07`, 8 vCPU / 14,336 MiB,
+64,800 s. Confirmed programmatically rather than by eye, because "identical except one field" is
+exactly the claim that silently isn't.
+
+## The second cosmopedia defect — why the line mattered
+
+The CEO reports the path fix alone would have drawn **4.0B tokens from one config, running 44% of that
+config's low-end pool** against the report's 0.18 epochs — a **buildable, green, silently different
+corpus**: one Mixtral web-rephrasing config instead of the diversified synthetic-textbook mix.
+
+**That is the concrete case for the abstract line I wrote in Addendum 20** — *"resolves 200 is not the
+same as is the source the mix intends."* Worth being precise about the asymmetry, because it
+generalises: **a 404 fails the build; a 200 on the wrong config ships a corpus.** The first is
+self-announcing, the second is only caught by someone asking what the field *means*. Every wall
+tonight was of the first kind except this one.
+
+**ENG's opt-in test asserting both *resolves* AND *lists non-empty payload files* closes the right
+gap** — and the reason given is the sharp one: a path that lists but holds no parquet returns `[]`, and
+**a child reading zero files doesn't fail, it writes a receipt over an empty bundle.** That is a
+silent-success failure mode, the worst class, and it is now mechanically excluded for all 133 rows.
+
+## 🛑 WALL 6 — cosmopedia has **no document id**, and it is the CEO's own known gap #2
+
+Smoke #5 cleared the 404 — **the config fix works** — and died one step later. `MEASURED`:
+
+```
+BUILD_START shard=0 of=185 plan=29968a2b04008a8c      <-- new plan_id in effect
+RUN_START plan=29968a2b04008a8c shard=0/185 bundles=1
+DECON index 149,777 exact + 3,097,372 ngrams
+error: id_column='' does not name a leaf in this file. leaf '' not found; leaves are
+  ['prompt','text_token_length','text','seed_data','format','audience'].
+  Refusing a bare-name fallback: `text` appears twice in FinePhrase's flat leaf list and
+  index 0 is the ORIGINAL FineWeb-Edu document, so guessing here silently ingests the
+  wrong corpus.
+BUILD_DONE_RC=2
+```
+
+**The reader reached the parquet, opened it, and read its schema** — so `config: "data"` resolved and
+the 336 files are being enumerated. **Wall 5 is genuinely cleared.**
+
+### This is not a new discovery — it is `LEDGER.md:88` arriving
+
+> *"**Three sources have no usable document id** (both DCLM repos, Cosmopedia) — a prerequisite for
+> #21 and #22, both of which depend on `sha256(id) % N`."*
+
+**The CEO logged this as an unowned gap at the start of the wave, and it has now become the blocking
+build failure.** `id_column` is `""` for cosmopedia — **1 of 133 rows**; the other 132 carry `id`
+(130) or `uuid` (2). `MEASURED` across the staged registry.
+
+**Cosmopedia's leaves are `prompt, text_token_length, text, seed_data, format, audience` — none is a
+unique document identifier.** So this is not a typo like wall 5; **the column does not exist upstream.**
+
+### Why it is load-bearing rather than cosmetic
+
+`corpus.py:487-517`: `is_held_out(doc_id, source)` = `sha256("heldout|{source}|{doc_id}")`. **The
+train/val carve is a pure function of the document id**, which is what makes the split reproducible and
+leak-free without a second pass. No id ⇒ no carve ⇒ no val split, and `corpus_read.py:532` additionally
+**refuses a null id per row** because *"the id is the join key."* The refusal is correct: guessing an
+id column is exactly the silent-wrong-corpus failure the same message warns about for FinePhrase's
+duplicate `text` leaf.
+
+### ⛔ Stopping — this needs a content decision, and it changes `plan_id` again
+
+**Three options, all requiring ENG/DATA, none mine:**
+
+1. **Synthesise a deterministic id** — e.g. `sha256(text)` — so the carve stays reproducible. Needs a
+   reader change (`id_column: "@content_hash"` or similar sentinel), i.e. **new code, new image,
+   new `plan_id`**. It is the only option that preserves a val split for cosmopedia.
+2. **Use `prompt` as the id.** ⚠️ **I recommend against it and can show why cheaply:** `prompt` is not
+   unique — Cosmopedia generates *multiple* documents per seed prompt — so collisions would put
+   sibling documents on the same side of the carve **and** trip the null/dup guards. This is the
+   "resolves but is wrong" shape again.
+3. **Drop cosmopedia from the mix** (or move it to the RESERVE row). Zero code, but it removes
+   ~4.0B synthetic tokens and **re-cuts the mix**, so the CEO's FREEZE authority applies.
+
+**Any of the three changes `plan_id` a third time.** I will re-stage and register rev 13 the moment
+ENG rules; that is ~10 minutes.
+
+**What is now proven end-to-end by six smoke tests:** role and all 7 IAM statements, image
+(PREFLIGHT_OK=10), tokenizer derivation, registry resolution and corpus identity, plan load, shard
+striding, `_file_shards`, decon index load, **and now HF file enumeration + parquet schema read.** The
+platform path is complete; **both remaining walls have been content defects in one registry row.**
+
+> **Pattern worth naming for the handoff:** walls 5 and 6 are the *same row* failing two different
+> ways, and wall 6 was **already written down** as a known gap before the build started. The 133-row
+> resolution test ENG added catches wall-5-shaped defects mechanically. **A companion check —
+> "every drawn row's `id_column` names a real leaf in a real file" — would have caught wall 6 at
+> registry-authoring time, offline, for one range-read per row.** That is the cheapest remaining
+> hardening and I recommend it for the handoff.
+
+## ▶ Smoke test #5 — job `111858b9-6ce5-4715-a9ee-234ba165a4ad`
+
+`final-build-smoke5-cosmopedia`, `SHARD=0 --of 185`, on `:12`. Shard 0 is still
+`cosmopedia--train` — **the exact bundle that failed**, so this is a direct regression test of the fix
+rather than an unrelated slice.
+
+**Five walls cleared so far, every one real:**
+
+| # | wall | fixed by |
+|---|---|---|
+| 1 | `403` — job role scoped to the reservoir prefix | new role `edullm-final-dataset-build` |
+| 2 | argparse — `--tokenizer-dir` `required=True` | rev 11 fetches + passes it |
+| 3 | wrong corpus — stale `REGISTRY_PATH` default | explicit `--registry` + corpus guard |
+| 4 | decon index `AccessDenied` | `ReadDecontaminationIndex` (one object) |
+| 5 | `404` + **the invisible wrong-config defect** | registry `config: "data"`, new `plan_id` |
+
+**`T_place` 10 min, unshortened** — fleet cold at `desiredvCpus: 0`; a scale-up is not a capacity hang,
+and `statusReason` stays null on real capacity failures so the queue's own rule cannot fire.
+
+---
+
 # ADDENDUM 20 — grant verified (7 statements), smoke test #4 running
 
 ## ✅ `ReadDecontaminationIndex` live — I re-read all 7 statements from AWS myself

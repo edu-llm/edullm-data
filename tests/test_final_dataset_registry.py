@@ -30,6 +30,11 @@ EXPECTED_TOTAL_TOKENS = 986_000_000_000
 MAX_EPOCHS = 0.99
 
 
+def rows_fixture_values(path) -> list[dict]:
+    """The rows, read straight off disk — for tests that are not fixture-scoped."""
+    return json.loads(path.read_text())["corpora"]
+
+
 @pytest.fixture(scope="module")
 def doc() -> dict:
     return json.loads(REGISTRY.read_text())
@@ -280,8 +285,14 @@ def test_every_spec_config_resolves_to_a_listable_path_with_payload_files():
     with ThreadPoolExecutor(max_workers=8) as ex:
         results = list(ex.map(probe, drawn))
 
-    broken = [(k, err) for k, n, err in results if err is not None]
+    # ⚠️ A 429 is the HOST rate-limiting us, not a bad row, and conflating the two turns a shared
+    # upstream quota into a false registry failure. Reported separately and skipped, because a test
+    # that fails on someone else's throttle teaches people to ignore it.
+    throttled = [k for k, n, err in results if err and "429" in err]
+    broken = [(k, err) for k, n, err in results if err is not None and "429" not in err]
     empty = [k for k, n, err in results if err is None and n == 0]
+    if throttled and not broken:
+        pytest.skip(f"HF returned 429 for {len(throttled)} row(s); re-run alone, not back-to-back")
     assert not broken, (
         f"{len(broken)} of {len(drawn)} registry rows do not resolve at their pinned revision: "
         f"{broken[:3]}. Each one is a build that dies on its first read inside a container."
@@ -289,4 +300,107 @@ def test_every_spec_config_resolves_to_a_listable_path_with_payload_files():
     assert not empty, (
         f"{len(empty)} row(s) resolve but list NO payload files: {empty[:3]}. A child that reads "
         f"zero files still writes a receipt, so the bundle is silently empty rather than failed."
+    )
+
+
+def test_every_drawn_row_declares_an_identifier_one_way_or_the_other():
+    """Wall 6 as an OFFLINE check. No network, so it runs on every commit.
+
+    `is_held_out` decides the train/val carve from the document id ALONE, so a row with neither a
+    real `id_column` nor `id_surrogate` has no reproducible, leak-free split — and the crash lands
+    on file 1 inside a billing container, after the image build and the tokenizer download.
+    `CorpusSpec.__post_init__` now refuses it, and this asserts the shipping registry satisfies it
+    rather than trusting that nobody re-introduces the shape.
+    """
+    for r in rows_fixture_values(REGISTRY):
+        if r["target_tokens"] > 0:
+            has_id = bool(r.get("id_column"))
+            surrogate = bool(r.get("id_surrogate"))
+            assert has_id != surrogate, (
+                f"{r['key']}: id_column={r.get('id_column')!r} id_surrogate={surrogate}. Exactly "
+                f"one must be true — a drawn row needs an identifier, and declaring both hides "
+                f"which one the build used."
+            )
+
+
+def test_surrogate_rows_are_pinned_and_flagged_as_unjoinable():
+    """A surrogate id is OUR construction, not upstream's, so a cross-source join silently drops it.
+
+    Two things are asserted because both are load-bearing: the revision pin (§B12's condition — the
+    id embeds a file path, so an unpinned ref lets an upstream re-shard re-partition the carve), and
+    that the row records the non-comparability in its own traps, so the warning travels with the
+    artifact instead of living only in a dossier.
+    """
+    surrogates = [r for r in rows_fixture_values(REGISTRY) if r.get("id_surrogate")]
+    assert surrogates, "expected at least cosmopedia; if this row went away, delete this test"
+    for r in surrogates:
+        assert r["revision"] and len(r["revision"]) == 40, f"{r['key']}: surrogate needs a pin"
+        joined = " ".join(r["traps"]).upper()
+        assert "NOT COMPARABLE ACROSS SOURCES" in joined, (
+            f"{r['key']}: the surrogate's non-comparability must be recorded in the row's traps — "
+            f"a future session joining on `id` would silently exclude this source."
+        )
+
+
+@pytest.mark.network
+def test_every_drawn_rows_id_column_names_a_real_leaf_in_a_real_file():
+    """PLAT's wall-6 hardening: the declared identifier must EXIST in the bytes.
+
+    The offline check above proves a row *declares* an identifier. This proves the declaration is
+    true of the file — the gap that let `id_column: ''` reach a container. It resolves one real file
+    per row and asks the same `_resolve_leaf` the reader uses, so a renamed or absent column fails
+    here instead of on file 1 of 6,800.
+
+    Surrogate rows are checked the other way round: they must have NO id column to resolve, which is
+    the condition that makes the surrogate legitimate rather than a workaround for a typo.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from edullm_data.corpus_build import hf_files, load_registry
+    from edullm_data.corpus_read import _resolve_leaf, _open_parquet, _hf_headers
+
+    specs, _ = load_registry(str(REGISTRY))
+    # One row per (repo, id_column) shape, not all 127: the 100 dclm rows share a repo and a schema,
+    # so probing each is 100 range-reads that prove one fact and reliably earn a 429. The distinct
+    # shapes are what carry the information.
+    seen: set[tuple[str, str, bool]] = set()
+    drawn = []
+    for sp in specs:
+        if sp.target_tokens <= 0 or sp.file_format != "parquet":
+            continue
+        shape = (sp.repo, sp.id_column, sp.id_surrogate)
+        if shape in seen:
+            continue
+        seen.add(shape)
+        drawn.append(sp)
+
+    def probe(spec):
+        try:
+            entry = hf_files(spec)[0]
+            pf, _ = _open_parquet(spec.repo, entry["path"], int(entry["size"]),
+                                  _hf_headers(), None, None, revision=spec.revision)
+            names = set(pf.metadata.schema.names)
+            if spec.id_surrogate:
+                return spec.key, None if not spec.id_column else "surrogate row names an id_column"
+            _resolve_leaf(pf.metadata, spec.id_column, what="id_column")
+            return spec.key, None
+        except Exception as exc:  # noqa: BLE001 — collect, do not raise, so one row names itself
+            return spec.key, f"{type(exc).__name__}: {str(exc)[:160]}"
+
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        results = list(ex.map(probe, drawn))
+    # 403 is the GATED-REPO condition, not a bad row: dossier B13 records that Nemotron-CC-Math
+    # gate access is per-account and our token is not authorized. The registry rows are read from
+    # `s3://edullm-landing/_src/` at build time, not from HF, so a 403 here says nothing about the
+    # build. Reported, never failed — an unactionable red test is a test people learn to ignore.
+    gated = [k for k, e in results if e and "403" in e]
+    throttled = [k for k, e in results if e and "429" in e]
+    broken = [(k, e) for k, e in results if e and "429" not in e and "403" not in e]
+    if gated:
+        print(f"\nNOTE: {len(gated)} gated row(s) unverifiable from this account: {gated}")
+    if throttled and not broken:
+        pytest.skip(f"HF returned 429 for {len(throttled)} row(s); re-run alone, not back-to-back")
+    assert not broken, (
+        f"{len(broken)} of {len(drawn)} parquet rows have an id_column that is not a real leaf: "
+        f"{broken[:3]}. Each is a build that dies on its first row inside a container."
     )

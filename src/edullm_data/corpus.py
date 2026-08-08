@@ -278,6 +278,25 @@ class CorpusSpec:
     domain_column: str | None = None
     license: str = "unknown"
     share_alike: bool = False
+    #: Build a SURROGATE document id instead of reading one from the file, for a source that ships
+    #: none. ``False`` (the default) means every row must carry a real upstream id, which is the
+    #: case for 132 of 133 rows in the shipping registry.
+    #:
+    #: **Explicit on the ROW, never inferred by the reader.** A reader that silently invented an id
+    #: when the column was missing would make "this source has no identifier" — a fact with
+    #: consequences for the val carve, dedup and every anti-join — invisible at authoring time. It
+    #: is a declaration, so it appears in review and in the artifact.
+    #:
+    #: ⚠️ **A SURROGATE ID IS NOT COMPARABLE ACROSS SOURCES** (dossier §B12). It is derived from OUR
+    #: read of the file tree, not from anything upstream published, so **any cross-source anti-join
+    #: or dedup keyed on ``id`` silently EXCLUDES a surrogate source.** Cosmopedia is not in the
+    #: FinePhrase anti-join, so there is no live interaction today — this flag is what a future
+    #: session must check before joining on ``id``.
+    #:
+    #: **Only meaningful against a PINNED revision** (§B12's stated condition), which
+    #: ``__post_init__`` enforces: the id embeds the file path, and an unpinned ``main`` can
+    #: re-shard under the same name.
+    id_surrogate: bool = False
     traps: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -295,6 +314,33 @@ class CorpusSpec:
             raise BuildError(
                 f"{self.key}: target_tokens is {self.target_tokens}; use 0 to mean RESERVE "
                 f"(specced but not drawn), never a negative"
+            )
+        # §B12's stated condition, enforced rather than trusted: a surrogate id embeds the file
+        # path, so on an unpinned `main` an upstream re-shard changes every id under the same ref —
+        # and the val carve, which is a pure function of the id, silently re-partitions the corpus.
+        if self.id_surrogate and not self.revision:
+            raise BuildError(
+                f"{self.key}: id_surrogate=True requires a pinned `revision`. The surrogate is "
+                f"(file path, row index), so without a pin an upstream re-shard changes every id "
+                f"under the same ref and is_held_out re-decides the whole train/val carve."
+            )
+        # A surrogate REPLACES the id column, so declaring both is a contradiction: one of the two
+        # is dead and a reader cannot tell which was intended.
+        if self.id_surrogate and self.id_column:
+            raise BuildError(
+                f"{self.key}: id_surrogate=True and id_column={self.id_column!r} are mutually "
+                f"exclusive. Leave id_column empty when the source ships no identifier; naming a "
+                f"column AND asking for a surrogate hides which one the build actually used."
+            )
+        # The mirror image, and the failure this flag exists for: no id and no surrogate is the
+        # wall-6 crash (`id_column='' does not name a leaf`) — but at PLAN time, not on file 1
+        # inside a billing container.
+        if not self.id_surrogate and not self.id_column and self.target_tokens > 0:
+            raise BuildError(
+                f"{self.key}: id_column is empty and id_surrogate is False. Every drawn row needs "
+                f"an identifier — is_held_out decides the train/val carve from the id alone, so "
+                f"without one there is no reproducible, leak-free split. Set id_column, or set "
+                f"id_surrogate=True to build (file path, row index) per dossier §B12."
             )
         if self.pool_tokens is not None and self.pool_tokens < self.target_tokens:
             raise BuildError(

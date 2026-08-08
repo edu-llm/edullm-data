@@ -2687,6 +2687,141 @@ resolution · plan load · shard striding · `_file_shards` honoured · decon in
 
 ---
 
+# ✅ WALL 5 CLEARED — and it was TWO defects, only one of them visible. `PLAN_ID 29968a2b04008a8c`
+
+**CEO-verified:** `1415 passed, 1 deselected`; cosmopedia `config: "data"`, pool **25.8B**, target 4.0B →
+**0.1550 epochs** against the report's 0.18; sum **986,000,000,000** unchanged; the new network test exists at
+`tests/test_final_dataset_registry.py:245` and `addopts = "-ra -m 'not network'"` keeps it **opt-in**.
+
+| | |
+|---|---|
+| **`PLAN_ID`** | **`29968a2b04008a8c`** |
+| bundles / shards / tokens | **185 / 39,307 / 982,752,985,088** — PLAT predicted all three exactly |
+| `hf_files(cosmopedia)` | **336 files, all 8 configs** (was 404) |
+
+## 🔴 DEFECT 2 — the 404 was HIDING a silent-corruption defect
+**A 4.0B draw from ONE config runs 44% of that config's low-end pool**, against the report's 0.18 epochs.
+**Fixing only the path would have produced a buildable, green, silently different corpus** — one Mixtral
+web-rephrasing config instead of the diversified synthetic-textbook mix the report priced.
+
+**This is the case that proves PLAT's line.** *"Resolves 200 is not 'is the source the mix intends'"* was
+abstract when PLAT wrote it; here the 200 would have been **wrong in a way no gate catches.** A 404 fails the
+build; a 200 on the wrong config ships a corpus.
+
+**The pool arithmetic settles intent:** all 8 configs = **25.8–32.3B** (DERIVED), bracketing the report's stated
+**21.7B**; `web_samples_v2` alone is 9.1–11.4B. **The row was costed against the whole dataset.** And ENG walked
+the repo: `/` holds only `data/`, which holds all 8 — **so `web_samples_v2` was never valid at any revision**,
+confirming my correction that `data/` is not a convention cosmopedia violated but simply where the configs live.
+
+**ENG adjudicated from the report as instructed and reported honestly that the report names no config** (`:102`
+is the mix row, `:115` a footnote) — *"but the dossier convicts me"*: row 16 says **"5 of 8 configs (a
+DECISION — see §B12)"** and ENG wrote one.
+
+## ⚖️ RULING on ENG's two escalations — `config: "data"` (all 8) STANDS
+**1. The "5 of 8" is unresolvable and does not block.** I read §B12 in full: it documents the id surrogate, the
+`prompt` trap, and the CK-12 clearance — **it never names which 5.** So there is no recorded exclusion to honour.
+Against that, three things favour all 8: the report's **21.7B is bracketed by all-8's 25.8–32.3B**, `config` is a
+single tree path so **5-of-8 would need 5 rows** (a structural change, not a field edit), and **0.155 vs 0.18
+epochs is within the noise of a 4.0B row.** **`data` stands.** If a future session finds the intended five,
+that is a `v2` with five rows — recorded, not deferred silently.
+
+**2. `auto_math_text`'s `prompt` at 58.9% is NOT an exposure here** — because the registry reads
+**`text_column: text` and never `prompt`**, which §B12 marks 🛑 and the dossier already enforces. The column
+discipline makes the config selection safe **independently** of which configs are drawn. **That is why 5-of-8
+was never load-bearing.**
+
+**3. The `openstax`/`khanacademy` licence question is CLEARED, already, in §B12:** *"`openstax` and
+`khanacademy` are Cosmopedia configs named for their SEED sources; **CK-12 is not among the 8 configs.**"*
+**Cosmopedia is Apache-2.0.** Nothing to escalate.
+
+## ✅ CI GAP CLOSED — and the test is honest about what it cannot prove
+`test_every_spec_config_resolves_to_a_listable_path_with_payload_files`, `network`-marked, opt-in, calls the
+**real `hf_files`** over all 133 rows (~16 s). **Two assertions: resolves, AND lists non-empty payload files** —
+the second because *"a path that lists but holds no parquet returns `[]`, and a child that reads zero files
+doesn't fail — it writes a receipt over an empty bundle."* **Mutation-proven:** reverting the config reproduces
+`1 of 132 rows do not resolve … HTTP Error 404`. **All 133 rows currently resolve.**
+
+⚠️ **ENG stated the residual limit itself, and it is the right caveat:** *"a 200 proves the path exists, not
+that it holds the intended content. Cosmopedia had both defects and only one was visible."* **The pool-vs-report
+cross-check caught the second, and that check lives in exactly one place — the registry test's epoch
+assertion.** That assertion is now load-bearing infrastructure, not a sanity check.
+
+---
+
+# 🛑 WALL 6 — MY OWN RECORDED GAP #2, ARRIVING AS THE BUILD FAILURE
+
+Smoke #5 **cleared wall 5** (the reader opened cosmopedia's parquet and read its schema — `config: "data"`
+works), then:
+```
+error: id_column='' does not name a leaf in this file.
+leaves are ['prompt','text_token_length','text','seed_data','format','audience'].
+Refusing a bare-name fallback...
+```
+
+**`LEDGER.md:88`, written by me before this wave started:** *"Three sources have no usable document id (both
+DCLM repos, Cosmopedia) — a **prerequisite** for #21 and #22."* **I recorded it as a gap, assigned it to DATA,
+DATA designed a surrogate in §B12 — and nobody wired it. It is now the blocking build failure.**
+**That is the failure mode this whole ledger exists to prevent: a known gap that stays written down instead of
+getting closed.** Ninth-and-a-half instance of the night's theme, and the only one that was *already documented*.
+
+**1 of 133 rows.** The other 132 carry `id` (130) or `uuid` (2). **Unlike wall 5, this is not a typo:**
+CEO-verified — none of cosmopedia's six leaves is a document identifier, and `id_column: str` (`corpus.py:259`)
+is a **required field with no surrogate mode**, so `_resolve_leaf` (`corpus_read.py:501`) refuses rather than
+guessing. **The refusal is correct behaviour.**
+
+**It is load-bearing.** CEO-verified `is_held_out` (`corpus.py:487`): *"Decide held-out membership from the
+DOCUMENT ID alone… **This is the fix for a bug this project has already shipped** — a previously published
+corpus had six held-out shards that were byte-copies of train shards, 100% leakage, and Gate A caught only five
+of six."* Two properties depend on the id: **a pure function of it** (no RNG, no ordering, so two workers cannot
+disagree) and **decided BEFORE tokenizing.** **No id ⇒ no reproducible, leak-free carve.**
+
+## ⚖️ RULING — synthesise the surrogate DATA already designed. Option 1, with its exact form.
+**Do NOT invent one.** §B12 specifies it, `MEASURED`, with the alternatives already rejected:
+> **`(config, file_basename, row_index_within_file)`** — e.g.
+> `cosmopedia/web_samples_v2/train-00000-of-00118.parquet#87676`. *"Stable because filenames encode `-of-NNNNN`,
+> so any change to the file count changes every filename — **loud, not silent**. Condition: only against the
+> PINNED revision."*
+
+**§B12 already rejected the two obvious shortcuts, and its reasons are better than mine would have been:**
+- **`sha256(text)` REJECTED** — *"the required `lstrip()` fix CHANGES the text, so the id would depend on
+  whether normalization ran before or after hashing."* **This kills PLAT's option 1 as stated.** A
+  normalization-dependent id is not reproducible, which is the one property the carve requires.
+- **`(config, row_index)` REJECTED** — *"row order is a property of upstream files, not the dataset."*
+
+**PLAT's option 2 (`prompt`) is REJECTED and its reasoning is right:** cosmopedia generates **multiple documents
+per seed prompt**, so it is not unique — collisions would put siblings on the same side of the carve and trip the
+null/dup guards. **"Resolves but is wrong," a third time in the same row.**
+
+**PLAT's option 3 (drop cosmopedia) is REJECTED as unnecessary.** It costs 4.0B synthetic tokens and re-cuts the
+mix to avoid ~a day of work already designed. The surrogate is specified; implement it.
+
+**Carry §B12's warning into the code, not just the ledger:** ⚠️ *"A surrogate id is NOT comparable across
+sources. Any cross-source anti-join or dedup keyed on `id` **silently excludes Cosmopedia**."* Cosmopedia is not
+in the FinePhrase anti-join, so no live interaction — **but the surrogate must be marked in the registry so a
+future session cannot join on it unknowingly.**
+
+## ✅ ADOPTED — PLAT's hardening recommendation, and it is the structural fix
+> *"A companion check — **every drawn row's `id_column` names a real leaf in a real file** — would have caught
+> wall 6 at registry-authoring time, offline, for one range-read per row."*
+
+**One range-read per row would have converted tonight's 6th wall into a CI failure at authoring time.** ENG's
+133-row resolution test catches wall-5 shapes; this catches wall-6 shapes. **Both walls were content defects in
+the same registry row, found only inside a Batch container.** Assigned with the surrogate work.
+
+## PLAT's verification standard, worth recording
+It checked that `plan_id` reproducing was not luck: **`git diff --stat 8e2524a -- src/edullm_data/` is empty**,
+so its code is byte-identical to the pushed commit — *"a matching id with mismatched code would be luck, not
+verification."* It also **diffed rev 12 field-by-field against rev 11** (only `environment.PLAN_ID` differs),
+re-read staged content (not just ETags), and **left the superseded `68ebedaaddc7eb06/plan.json` in place as the
+audit trail for why `plan_id` moved.**
+
+## What six smoke tests have proven
+Role + all 7 IAM statements · image `PREFLIGHT_OK=10` · tokenizer derivation · registry resolution and corpus
+identity · plan load · shard striding · `_file_shards` · decon index · **HF enumeration + parquet schema read.**
+**The platform path is COMPLETE.** Walls 5 and 6 are both content defects in **the same registry row**.
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of

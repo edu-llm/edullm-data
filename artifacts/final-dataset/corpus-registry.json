@@ -179,14 +179,16 @@
     "config is `data`, the parent of ALL 8 configs -- NOT a single config. MEASURED at the pinned revision: `/` holds only `data/`, and `data/` holds all 8, so a bare `web_samples_v2` 404s. It was never a valid path at any revision.",
     "WHY ALL 8 AND NOT ONE: the report's stated 21.7B pool is bracketed by all-8 (25.8-32.3B DERIVED at 0.28-0.35 tok/parquet-byte), while web_samples_v2 alone is 9.1-11.4B. A 4.0B draw from one config runs 44% of its low-end pool vs the report's 0.18 epochs -- buildable, green, and a DIFFERENT corpus.",
     "\u26a0\ufe0f OPEN, CEO/DATA: the dossier row 16 says '5 of 8 configs (a DECISION)' and never records WHICH 5. `data` takes all 8. If the exclusion was deliberate -- plausibly auto_math_text, whose `prompt` is 58.9% of `text` -- this needs 5 rows instead, and `config` is a single tree path so 5-of-8 is NOT expressible as one row.",
-    "BLOCKER: NO ID COLUMN in any of the 8 configs. id_column is EMPTY and the reader RAISES. The (config, file_basename, row_index) surrogate is PROPOSED in dossier B12 and NOT IMPLEMENTED. This row cannot build until it is.",
+    "NO ID COLUMN in any of the 8 configs (leaves: prompt, text_token_length, text, seed_data, format, audience) -> id_surrogate=true. The reader builds (file path, row index) per dossier B12: 'cosmopedia/data/openstax/train-00000-of-00002.parquet#87676'. B12 said file_basename, but under config 'data' basenames COLLIDE across configs (train-00000-of-00002.parquet is in BOTH openstax and wikihow, MEASURED), so the FULL path is used -- B12's design with the config segment carried by the path.",
+    "A SURROGATE ID IS NOT COMPARABLE ACROSS SOURCES. It comes from our read of the file tree, not from upstream, so any cross-source anti-join or dedup keyed on `id` SILENTLY EXCLUDES this row. Not in the FinePhrase anti-join today, so no live interaction -- check id_surrogate before ever joining.",
     "NEVER ingest `prompt`: 8-59% real web text (auto_math_text 58.9%). FinePhrase's trap in a different column.",
     "The card's 21.7B is a MISTRAL-7B count, not dolma2; the pool here is a measured-byte derivation instead.",
     "Every Cosmopedia document begins with a LEADING SPACE, MEASURED 303/303 across all 8 configs -- it changes the first token under byte-level BPE.",
     "CK-12 checked and CLEARED: not among the 8 configs. But `openstax`/`khanacademy` ARE configs named for their seed sources, so all-8 ingests their synthetic derivatives."
    ],
    "domain_column": null,
-   "share_alike": false
+   "share_alike": false,
+   "id_surrogate": true
   },
   {
    "key": "dclm-001",

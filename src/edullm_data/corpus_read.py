@@ -75,6 +75,7 @@ __all__ = [
     "filter_documents",
     "read_documents",
     "read_jsonl_gz_documents",
+    "surrogate_id",
     "read_parquet_documents",
     "reader_for_format",
 ]
@@ -121,6 +122,52 @@ class ReadError(BuildError):
 #: (`artifacts/recount/_fp_footer_leaf.py:68`), but a corpus written by an older writer will not,
 #: and hard-coding one spelling would fail on the other with an EMPTY read rather than an error.
 LIST_MARKER_SEGMENTS = frozenset({"list", "element", "item"})
+
+
+def surrogate_id(repo: str, file_path: str, row_index: int) -> str:
+    """A document id for a source that ships none: ``<repo-tail>/<file path>#<row index>``.
+
+    Dossier §B12's design, and the alternatives it REJECTED are the reason this shape and not a
+    simpler one:
+
+    * ``sha256(text)`` — rejected because *"the required ``lstrip()`` fix CHANGES the text, so the
+      id would depend on whether normalization ran before or after hashing."* An id that moves with
+      a normalization pass is not reproducible, and reproducibility is the single property
+      :func:`~.corpus.is_held_out` needs — it decides the train/val carve from the id ALONE.
+    * ``(config, row_index)`` — rejected because row order is a property of the upstream files, not
+      of the dataset: a re-conversion that repacks rows keeps the config and moves every id.
+    * the ``prompt`` column — rejected because Cosmopedia generates MULTIPLE documents per seed
+      prompt, so it is not unique; colliding ids would put unrelated documents on the same side of
+      the carve and read as duplicates to the dedup pass.
+
+    **Stability comes from the filename, deliberately.** Upstream names encode their own cardinality
+    (``train-00000-of-00118.parquet``), so any change to the file count changes EVERY filename —
+    the id breaks loudly instead of silently re-partitioning the corpus. §B12: *"loud, not silent."*
+
+    ⚠️ **Uses the file's FULL repo-relative path, not its basename — a CORRECTION to §B12 forced by a
+    later change.** §B12 wrote ``(config, file_basename, row_index)`` when the cosmopedia row named
+    ONE config. That row now reads ``config: "data"``, the parent of all 8 configs, and **basenames
+    COLLIDE across them — MEASURED: ``train-00000-of-00002.parquet`` exists under BOTH
+    ``data/openstax/`` and ``data/wikihow/``.** Basename + row index would hand two different
+    documents the same id. The full path carries the config segment that §B12 relied on, so this
+    honours the design rather than replacing it; uniqueness within a revision is then structural.
+
+    ⚠️ **NOT comparable across sources.** This id is derived from our read of the file tree, not
+    from anything upstream published, so a cross-source join keyed on ``id`` silently excludes a
+    surrogate source. :attr:`~.corpus.CorpusSpec.id_surrogate` is the flag to check first.
+
+    Only meaningful against a PINNED revision; ``CorpusSpec.__post_init__`` enforces that.
+    """
+    if row_index < 0:
+        raise ReadError(f"surrogate row_index must be >= 0, got {row_index}")
+    if not file_path:
+        raise ReadError(
+            "surrogate id needs the file path — it is the component that makes the id unique "
+            "across configs and that breaks loudly when upstream re-shards"
+        )
+    # The repo tail keeps the id readable and namespaced without embedding the owner, which is
+    # noise here: the revision pin is what fixes provenance, not the org name.
+    return f"{repo.rsplit('/', 1)[-1]}/{file_path}#{row_index}"
 
 
 def _resolve_leaf(parquet_md: Any, want: str, *, what: str) -> str:
@@ -498,15 +545,21 @@ def read_parquet_documents(
     # trap from the module docstring, and it is checked here rather than per-row so that a moved
     # schema fails on file 1 of 6,800 instead of producing a plausible corpus.
     text_leaf = _resolve_leaf(md, spec.text_column, what="text_column")
-    id_leaf = _resolve_leaf(md, spec.id_column, what="id_column")
+    # A surrogate source has NO id column to resolve — that is the whole point of the flag, and
+    # `_resolve_leaf` would (correctly) refuse an empty name. The id is built per row below from
+    # `(file path, row index)`, dossier §B12.
+    id_leaf = None if spec.id_surrogate else _resolve_leaf(md, spec.id_column, what="id_column")
     _, text_walk = _compile_walk(pf.schema_arrow, text_leaf, what="text_column")
     # The id need NOT be a string: an integer post id is legitimate upstream (StackExchange), and
     # `str(int)` is stable across a re-download, which is the only property `Document.id` requires
     # of it. The text and domain columns are held to strings because a coerced `repr` would be
     # tokenized in one case and become a permanent path segment in the other.
-    _, id_walk = _compile_walk(pf.schema_arrow, id_leaf, what="id_column", require_string=False)
+    id_walk = (
+        None if id_leaf is None
+        else _compile_walk(pf.schema_arrow, id_leaf, what="id_column", require_string=False)[1]
+    )
 
-    wanted = [text_leaf, id_leaf]
+    wanted = [text_leaf] if id_leaf is None else [text_leaf, id_leaf]
     domain_walk: tuple[str, ...] | None = None
     if spec.domain_column is not None:
         domain_leaf = _resolve_leaf(md, spec.domain_column, what="domain_column")
@@ -518,11 +571,18 @@ def read_parquet_documents(
     # this is for the reader of the request list, not for pyarrow.
     leaves = list(dict.fromkeys(wanted))
 
+    # Row index within the FILE, not within the row group: the surrogate must be stable against a
+    # re-read, and row-group boundaries are a writer's choice that a re-conversion can move.
+    row_index = 0
     for rg in range(md.num_row_groups):
         table = pf.read_row_group(rg, columns=leaves)
         for row in table.to_pylist():
             text = _walk(row, text_walk)
-            doc_id = _walk(row, id_walk)
+            if id_walk is None:
+                doc_id = surrogate_id(spec.repo, str(path), row_index)
+                row_index += 1
+            else:
+                doc_id = _walk(row, id_walk)
             if not isinstance(text, str) or not text:
                 # No rewrite for this row (an empty `rollout_results` list is legal), or a null.
                 # Skipped rather than raised; `filter_documents` is where losses get counted.

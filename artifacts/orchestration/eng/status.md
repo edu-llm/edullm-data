@@ -2086,3 +2086,108 @@ half: **a 200 proves the path exists, not that it holds the intended content.** 
 defects and only the 404 was visible. The pool-vs-report cross-check is what caught the second, and
 **that check exists in only one place — the registry test's epoch assertion.**
 
+
+---
+
+# 🔴 E18 / WALL 6 — the cosmopedia surrogate id. Implementing §B12, with ONE correction it could not have anticipated.
+
+CEO's recorded gap #2 (`LEDGER.md:88`), designed by DATA in §B12, never wired. **1 of 133 rows**; the
+other 132 carry `id` (130) or `uuid` (2).
+
+**Verified the refusal is correct, not a typo:** `id_column: str` (`corpus.py:259`) is required with no
+surrogate mode; `_resolve_leaf` (`corpus_read.py:501`) resolves **before reading a row** and refuses
+rather than guessing; and none of cosmopedia's six leaves
+(`prompt, text_token_length, text, seed_data, format, audience`) is a document identifier.
+
+**Load-bearing, confirmed in code:** `is_held_out` (`corpus.py:487`) decides the carve from the id
+**alone** — *"a pure function of the id. No shuffle, no RNG, no ordering, no state… decided BEFORE
+tokenizing"* — and its docstring records the shipped bug it exists to prevent (six held-out shards that
+were byte-copies of train, 100% leakage, Gate A caught 5 of 6). **No id ⇒ no reproducible leak-free
+carve.**
+
+## ⚠️ ONE CORRECTION TO §B12 — and it is a direct consequence of MY E17 fix
+
+§B12 specifies `(config, file_basename, row_index_within_file)`, e.g.
+`cosmopedia/web_samples_v2/train-00000-of-00118.parquet#87676`. **That was written when the row named
+ONE config.** My E17 fix changed `config` to `data`, so **one row now spans all 8 configs — and
+basenames COLLIDE across them. MEASURED:**
+
+```
+train-00000-of-00002.parquet  x2  -> data/openstax/... AND data/wikihow/...
+train-00001-of-00002.parquet  x2  -> data/openstax/... AND data/wikihow/...
+```
+
+**So `basename + row_index` would give two different documents the SAME id.** Consequences, both real:
+a collision puts unrelated documents on the same side of the carve, and `SeenHashes`/the keep-list would
+treat them as duplicates — silently dropping one. §B12's scheme is right; its **`config` component is
+what disambiguates**, and under `config: "data"` that component is no longer in the basename.
+
+**Fix: use the file's FULL REPO-RELATIVE PATH, which already contains the config segment.** So
+`cosmopedia/data/openstax/train-00000-of-00002.parquet#87676`. This is **§B12's design honoured, not
+replaced** — `(config, file, row)` with the config carried by the path rather than duplicated beside it.
+Uniqueness is then structural: HF paths are unique within a revision by construction.
+
+**I am recording this rather than silently "improving" the spec, because it is exactly the class of thing
+that should be visible: a spec written against one registry shape, applied to another.** My E17 fix
+caused it.
+
+## ✅ WALL 6 FIXED — and **`PLAN_ID` did NOT move.** `29968a2b04008a8c` stands.
+
+**The CEO predicted the id would move again. It did not, and I verified why rather than assuming:**
+the plan entry serializes `id_column` (already `""`) and **not** `id_surrogate` — checked by dumping the
+real entry's keys. **So the corpus IDENTITY is unchanged; only how the reader obtains an id changed.**
+That is the correct outcome: a surrogate is a read mechanism, not a content decision, and it should not
+re-address the corpus.
+
+⚠️ **The important corollary, verified in code:** `_cmd_run` builds specs from
+`load_registry(args.registry)` (`corpus_build.py:1402`), **not** from `plan.json` — so `id_surrogate`
+**does** reach the build even though it is absent from the plan. **PLAT must re-stage the REGISTRY, not
+only the plan.** If it staged the plan alone the flag would vanish and wall 6 would recur.
+
+| | value |
+|---|---|
+| **`PLAN_ID`** | **`29968a2b04008a8c`** (unchanged) |
+| bundles / parts | 185 / 32 |
+| shards | 39,307 |
+| tokens | 982,752,985,088 |
+| summed `target_tokens` | 986,000,000,000 |
+| determinism | True |
+| **tests** | **1424 passed, 2 deselected** (network opt-in) |
+
+## What landed
+- **`CorpusSpec.id_surrogate: bool = False`** — explicit on the row, per requirement 1, with §B12's
+  non-comparability warning in the field docstring. Three guards in `__post_init__`: a surrogate
+  **requires a pinned revision** (§B12's condition, enforced not trusted); surrogate **and** `id_column`
+  are **mutually exclusive**; and **neither** on a drawn row is refused — **that last one turns wall 6
+  into a plan-time failure** instead of a crash on file 1 after the image build and tokenizer download.
+- **`corpus_read.surrogate_id(repo, file_path, row_index)`** with §B12's three rejections recorded in
+  the docstring, and the row index counted **per FILE, not per row group** (group boundaries are a
+  writer's choice a re-conversion can move).
+- Registry row: `id_surrogate: true`, plus two traps carrying the correction and the join warning.
+
+## 7 new tests, and two of them exist because the fixture was built to break a wrong implementation
+The cosmopedia fixture gives **5 documents over only 2 distinct `prompt` values** — so an
+implementation that "simplified" to `id_column: prompt` produces colliding ids and fails. Also asserted:
+identical ids across two independent reads; a **changed file count changes every id** (§B12's loud-not-
+silent property); **openstax vs wikihow do not collide** (the E18 correction); pinned-revision required;
+both-declared refused; neither-declared refused.
+
+## Two hardening checks added — and BOTH found something real about the checks themselves
+1. **Offline:** every drawn row declares an identifier exactly one way. Runs on every commit.
+2. **Network (opt-in):** the declared `id_column` **is a real leaf in a real file** — PLAT's proposal.
+
+⚠️ **My first version of these was wrong in two ways, and both are recorded because they are the class
+of test that erodes trust:**
+- It **conflated HTTP 429 with a broken row.** Running both network tests back-to-back earned a throttle
+  and reported *"13 of 132 registry rows do not resolve"* — **a false registry failure caused by a
+  shared upstream quota.** Now 429 → skip with a reason.
+- It **conflated HTTP 403 with a broken row.** `nemotron-cc-math-3` returns 403 because
+  **gate access is per-account (dossier §B13) and our token is not authorized** — and the build reads
+  that source from `s3://edullm-landing/_src/`, not from HF, so a 403 says nothing about the build. Now
+  reported as a NOTE, never failed. **An unactionable red test is one people learn to ignore.**
+- Also reduced from 127 probes to **one per (repo, id_column, surrogate) shape** — the 100 dclm rows
+  share a repo and a schema, so probing each was 100 range-reads proving one fact and reliably earning
+  a 429.
+
+**Result: `1 gated row unverifiable from this account` reported; all other shapes verified against real
+footers.**
