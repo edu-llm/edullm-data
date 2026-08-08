@@ -328,7 +328,9 @@ the plan.
 prior attempt could not separate signal from HuggingFace preview ordering); and mean document length for 5
 unmeasured stage-2 sources.
 
-✅ **Nemotron-CC-Math is DONE (#17), by a teammate with gate access.** **134.0B under dolma2** =
+✅ **Nemotron-CC-Math's TOKEN COUNT is DONE, by a teammate with gate access.** (This closes the graph's
+**M3** node. It is **not** task #17, which is the 13-gram contamination re-scan and is still open — now
+unblocked, since the gate is accepted and the bytes are staged.) **134.0B under dolma2** =
 472,213,218,716 uncompressed text bytes (exact footers) × 0.283686 tok/byte over 1,920 random-offset
 documents at seed 42; `3` ≈ 83.6B + `4plus` ≈ 50.4B. Artifact
 `_nemotron_cc_math_dolma2_measure.json`. **No `CARD` figure remains in either mix table.** Two follow-ups

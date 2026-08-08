@@ -35,7 +35,8 @@ and Phase 0 item.
 |---|---|---|---|
 | **#26** | **Measure in-region S3 + HF CDN bandwidth. RUN THIS FIRST** — every read estimate borrows ~85 MB/s from an S3 measurement, and one reconciliation implies the CDN is ~8.4 MB/s | M1 | 10 min |
 | #14 | **Dolma 3 adult-content prevalence**, sampled at **random offsets** — a prior attempt could not separate signal from HuggingFace preview ordering. **Blocking for that source** | M2 | 1 h |
-| #17 | ~~Nemotron-CC-Math's real dolma2 count~~ ✅ **DONE 2026-08-07** — **134.0B** (472,213,218,716 bytes × 0.283686 tok/byte, 1,920 random-offset docs, seed 42; `3` ≈ 83.6B + `4plus` ≈ 50.4B). Measured by a teammate with gate access | M3 | done |
+| — | ~~Nemotron-CC-Math's real dolma2 count~~ ✅ **DONE 2026-08-07** — **134.0B** (472,213,218,716 bytes × 0.283686 tok/byte, 1,920 random-offset docs, seed 42; `3` ≈ 83.6B + `4plus` ≈ 50.4B). Measured by a teammate with gate access. **This closed the M3 node, NOT task #17** | M3 | done |
+| **#17** | **Re-run Marin's 13-gram contamination scan on Nemotron-CC-Math.** A different task from the count above, and **still open.** The original scan found **11,868 contaminated documents against MATH500 alone — 13.2× the publisher's entire reported removal budget** — including verbatim GSM8K *test* items at Jaccard 1.0. **Now unblocked:** the gate is accepted and 107+ GiB is already staged in S3, so this runs in-region against staged bytes | — | 1 job |
 | — | **Mean doc length for 5 unmeasured stage-2 sources.** The dolma3 QA source is the one plausibly near the 20-token EOS floor | M4 | 1 h |
 
 ## Deferrable — do NOT put in the first image
