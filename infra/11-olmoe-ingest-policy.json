@@ -1,0 +1,46 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "WriteOnlyOlmoeIngestPrefix",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:GetObjectAttributes",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": "arn:aws:s3:::edullm-landing/_ingest/olmoe-mix-0824/*"
+    },
+    {
+      "Sid": "NeverWriteValidatorTriggeringOrTerminalNames",
+      "Effect": "Deny",
+      "Action": "s3:PutObject",
+      "Resource": [
+        "arn:aws:s3:::edullm-landing/*manifest.json",
+        "arn:aws:s3:::edullm-landing/*dataset.json",
+        "arn:aws:s3:::edullm-landing/*_VALIDATED.json",
+        "arn:aws:s3:::edullm-landing/*_REJECTED.json"
+      ]
+    },
+    {
+      "Sid": "ListOnlyOlmoeIngestPrefix",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::edullm-landing",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "_ingest/olmoe-mix-0824/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadLifecycleToVerifyItsOwnStagingExpires",
+      "Effect": "Allow",
+      "Action": "s3:GetLifecycleConfiguration",
+      "Resource": "arn:aws:s3:::edullm-landing"
+    }
+  ]
+}

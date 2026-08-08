@@ -1,0 +1,61 @@
+{
+ "train": {
+  "starcoder": [
+   "preprocessed/starcoder/v1-decon-100_to_20k-2star-top_token_030/allenai/dolma2-tokenizer/part-000-00000.npy",
+   "preprocessed/starcoder/v1-decon-100_to_20k-2star-top_token_030/allenai/dolma2-tokenizer/part-001-00000.npy",
+   "preprocessed/starcoder/v1-decon-100_to_20k-2star-top_token_030/allenai/dolma2-tokenizer/part-002-00000.npy"
+  ],
+  "pes2o": [
+   "preprocessed/pes2o/allenai/dolma2-tokenizer/part-00-00000.npy"
+  ],
+  "proofpile-2-arxiv": [
+   "preprocessed/proof-pile-2/v0_decontaminated/arxiv/train/allenai/dolma2-tokenizer/part-00-00000.npy"
+  ],
+  "proofpile-2-open-web-math": [
+   "preprocessed/proof-pile-2/v0_decontaminated/open-web-math/train/allenai/dolma2-tokenizer/part-00-00000.npy"
+  ],
+  "proofpile-2-stack": [
+   "preprocessed/proof-pile-2/v0_decontaminated/algebraic-stack/train/allenai/dolma2-tokenizer/part-00-00000.npy",
+   "preprocessed/proof-pile-2/v0_decontaminated/algebraic-stack/train/allenai/dolma2-tokenizer/part-01-00000.npy"
+  ],
+  "wikipedia": [
+   "preprocessed/olmo-mix/danyh-compiled-v1_7/documents/wiki/allenai/dolma2-tokenizer/part-0-00000.npy",
+   "preprocessed/olmo-mix/danyh-compiled-v1_7/documents/wiki/allenai/dolma2-tokenizer/part-1-00000.npy"
+  ],
+  "dclm": [
+   "preprocessed/dclm/text_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/allenai/dolma2-tokenizer/part-000-00000.npy",
+   "preprocessed/dclm/text_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/allenai/dolma2-tokenizer/part-000-00001.npy",
+   "preprocessed/dclm/text_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/allenai/dolma2-tokenizer/part-000-00002.npy",
+   "preprocessed/dclm/text_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/allenai/dolma2-tokenizer/part-000-00003.npy",
+   "preprocessed/dclm/text_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/allenai/dolma2-tokenizer/part-000-00004.npy",
+   "preprocessed/dclm/text_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/allenai/dolma2-tokenizer/part-001-00000.npy",
+   "preprocessed/dclm/text_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/allenai/dolma2-tokenizer/part-001-00001.npy",
+   "preprocessed/dclm/text_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/allenai/dolma2-tokenizer/part-001-00002.npy",
+   "preprocessed/dclm/text_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/allenai/dolma2-tokenizer/part-001-00003.npy"
+  ]
+ },
+ "val": {
+  "proofpile-2-arxiv": [
+   "preprocessed/proof-pile-2/v0_decontaminated/arxiv/train/allenai/dolma2-tokenizer/part-02-00000.npy"
+  ]
+ },
+ "realized": {
+  "train_shards": 19,
+  "train_tokens": 49661507305,
+  "train_bytes": 198646029220,
+  "val_tokens": 1407839173,
+  "val_bytes": 5631356692,
+  "total_tokens": 51069346478,
+  "total_bytes": 204277385912,
+  "web_fraction_of_train": 0.7456898009068595,
+  "shares_of_train": {
+   "starcoder": 0.04482577585348222,
+   "pes2o": 0.06058827402319016,
+   "proofpile-2-arxiv": 0.02812195299314627,
+   "proofpile-2-open-web-math": 0.010536836282198704,
+   "proofpile-2-stack": 0.03649730900973909,
+   "wikipedia": 0.07374005093138403,
+   "dclm": 0.7456898009068595
+  }
+ }
+}
