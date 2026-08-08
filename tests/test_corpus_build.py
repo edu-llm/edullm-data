@@ -2140,9 +2140,16 @@ def test_the_shard_path_set_is_UNCHANGED_by_file_sharding_on_the_real_registry()
     specs, meta = B.load_registry(str(reg))
     drawn = [s for s in specs if s.target_tokens > 0]
 
-    flat = B.plan_document(drawn, registry_meta=meta)
-    ways = {"stackv2-edu": 7, "finepdfs-edu": 4,
-            "nemotron-cc-math-3": 3, "nemotron-cc-math-4plus": 2}
+    # ⚠️ `file_shards={}` EXPLICITLY, not omitted. The registry now carries `_file_shards`, which
+    # `plan_document` reads when the argument is absent — so omitting it once this key shipped made
+    # both sides of this comparison sharded and the test compared a plan to itself. The argument
+    # wins over the artifact, which is what makes an explicit unsharded control expressible at all.
+    flat = B.plan_document(drawn, registry_meta=meta, file_shards={})
+    ways = meta["_file_shards"]
+    assert ways == {"stackv2-edu": 7, "finepdfs-edu": 4,
+                    "nemotron-cc-math-3": 3, "nemotron-cc-math-4plus": 2}, (
+        "the registry's authorized K values moved; this test's premise is the shipping plan"
+    )
     sharded = B.plan_document(drawn, registry_meta=meta, file_shards=ways)
 
     def paths(p):

@@ -3023,5 +3023,12 @@
   }
  ],
  "_total_target_tokens": 986000000000,
- "_total_note": "986B = the report's 1,000B nominal less the 14B dolma3-QA row struck by CEO ruling. Per-source targets are the COMBINED stage-1 + stage-2 draw because a source is READ ONCE; the report's two tables are per stage and are never summed there. Nemotron-CC-Math's 61B combined is split 38/23 across configs 3 and 4plus in proportion to their measured 83.6B/50.4B pools."
+ "_total_note": "986B = the report's 1,000B nominal less the 14B dolma3-QA row struck by CEO ruling. Per-source targets are the COMBINED stage-1 + stage-2 draw because a source is READ ONCE; the report's two tables are per stage and are never summed there. Nemotron-CC-Math's 61B combined is split 38/23 across configs 3 and 4plus in proportion to their measured 83.6B/50.4B pools.",
+ "_file_shards": {
+  "stackv2-edu": 7,
+  "finepdfs-edu": 4,
+  "nemotron-cc-math-3": 3,
+  "nemotron-cc-math-4plus": 2
+ },
+ "_file_shards_basis": "CEO-authorized 2026-08-08. K parts per source for FILE-sharding: each part reads hf_files(spec)[i::K] -- a STRIDE, never a contiguous block. These four sources are FLAT upstream (0 subdirectories: 95/100/57/46 payload files MEASURED at the pinned revisions), so registry-row splitting on disjoint subdirectories cannot reach them and file-sharding is the only lever. Unsplit, stackv2-edu--train is 107.5B = 51.38 h on one 8-vCPU child and sets the whole makespan while 47 children idle. With these K: longest child 7.53 h, makespan 11.07 h at 48x8 -- 40.3 h saved. K chosen so every part clears the 9.96 h floor with headroom; striding holds worst-case load imbalance to 2.6% (contiguous would be 14.1% on stackv2-edu). VAL is what binds K, not train: stackv2-edu has 4,298 train shards but only 21 val -- verified by the CEO to yield zero empty parts at every K here. Absent this key, plan_document emits the UNSHARDED plan (2dee727972725556, 161 bundles); with it, 68ebedaaddc7eb06 / 185 bundles is authoritative."
 }

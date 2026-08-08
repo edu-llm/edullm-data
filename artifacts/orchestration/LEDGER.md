@@ -2068,6 +2068,70 @@ own number without being asked.
 
 ---
 
+# ✅✅ FILE-SHARDING SHIPPED — 51.38 h → 11.07 h. THE 40-HOUR LEVER IS REAL.
+
+**CEO-verified: `python3 -m pytest -q` → 1415 passed** (1338 → 1415, +77). Registry **133 rows / 986,000,000,000
+exact**. Nothing pushed, no S3, no Batch, no `manifest.json`.
+
+| | |
+|---|---|
+| **`PLAN_ID`** | **`68ebedaaddc7eb06`** |
+| target tokens | **986,000,000,000** |
+| bundles | **185** (32 file-sharded parts), 39,307 shards |
+| **makespan 48 × 8-vCPU** | **11.07 h** (longest child **7.53 h**) |
+
+**Re-simulated against the real merged implementation** — driven through `plan_document`/`bundles_of` with each
+part's actual `_shard_slice` stride, **not a model** — and it reproduces the pre-implementation prediction
+exactly. **40.3 h saved. Five independent methods now agree on 11–15 h. 9.96 h is not quoted.**
+
+## The line nobody owned, and why it mattered
+eng-13 fixed the grouping but flagged that **`run_bundle` never passed the part to `Receipt.from_pack_result`** —
+so every sibling would declare `(0,1)`, all K collapse onto one key, and **verify would report K duplicate
+retries AFTER the full 11 h spend.** It **refused to work around it by parsing `bundle_id`**, because eng-11 and
+eng-12 disagreed on that string's format. The line lives in `run_bundle` — **none of the three workers'
+surfaces** — so ENG wrote it itself, with a test that recomputes the receipt's part from the bundle.
+
+**End-to-end proof on the real 185-bundle plan** (synthesised receipts, no S3, no network):
+**correct set → 0 violations; one part dropped → 1 violation.** Both halves matter — zero proves the build can
+pass its own gate; one proves the gate is now **stronger than before file-sharding**, where a missing part was
+**invisible**.
+
+## Two near-misses worth more than the code
+1. **ENG nearly reported a regression that was its own harness.** `verify_bundle_set`'s `expected` is a
+   **per-bundle sequence, not a deduplicated set** — `planned_parts` counts occurrences to learn K. Passing a
+   `set` produced **8 count-conflict violations on a perfectly correct set.** *"A good check reporting a bad
+   harness."* Caught before reporting.
+2. **eng-13 DECLINED the receipt v3 I would have accepted, and was right.** `verify_receipt` short-circuits on an
+   unrecognised version and `bundle_is_done` reads receipts — so **a v3 would make every receipt in S3
+   unverifiable and every completed bundle look unbuilt.** And `to_dict` omits the key when `of == 1`, so
+   **`receipt_sha256` stays byte-stable for receipts already written.** It also found that **the naive
+   "drop a part" test does not catch the trust-declared-`of` mutation** — only the two-receipts test does.
+   **Wrong behaviour visible to 1 test of 1,372, twice in one wave.**
+
+## ✅ AUTHORIZED — add `_file_shards`. This is the last line before launch.
+`{stackv2-edu: 7, finepdfs-edu: 4, nemotron-cc-math-3: 3, nemotron-cc-math-4plus: 2}`. **CEO-verified absent**
+from the registry today, so `plan_document` currently yields `2dee727972725556`/161 bundles — **the unsharded
+plan.** With it, **`68ebedaaddc7eb06` becomes the single authoritative number.**
+**ENG was right not to author it unbidden** — it is mix content, and that discipline is exactly what kept the
+guessed-key failure from recurring. Authorized now, explicitly.
+
+## 🔍 CEO check on ENG's own open concern — K is SAFE against the val split
+ENG flagged *"val binds K, not train"*: `stackv2-edu` has 4,298 train shards but only **21 val**. I tested it:
+```
+K=7 over 21 val shards → part sizes [3,3,3,3,3,3,3]  empty_parts=0  union exact
+K=4 → [6,5,5,5]   K=3 → [7,7,7]   K=2 → [11,10]      all union-exact, no empty parts
+```
+**No empty part at any authorized K.** And the reason is `_shard_slice`'s **striding** (`items[shard::of]`), whose
+docstring gives the design rationale: contiguous blocks would hand one child mostly-large files, *"so the array's
+wall clock is set by the unluckiest child while others idle."* **Striding is what makes both the load balance
+AND the val safety hold.** An empty val part would have produced the `zero shards, short by …` refusal ENG saw
+earlier — **it does not fire here.** Concern closed, measured.
+
+**Overfill** (a part's range is a range, not a quota; `partial_source=True` discards excess, margin large) stays
+open and non-blocking.
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of

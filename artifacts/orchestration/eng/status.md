@@ -1925,3 +1925,57 @@ mine-real-sizes 11.07 · **implementation-driven 11.07** · PLAT 11.00–13.07 �
 3. **What binds K is VAL, not train:** `stackv2-edu` has 4,298 train shards but only **21 val**.
 4. **Nothing pushed. No S3 write, no Batch submit, no `manifest.json`.** All 27 commits local.
 
+
+---
+
+# ✅ `_file_shards` ADDED (CEO-authorized) — `68ebedaaddc7eb06` IS NOW THE ARTIFACT'S OWN ANSWER
+
+```
+_file_shards read from registry: {stackv2-edu: 7, finepdfs-edu: 4,
+                                  nemotron-cc-math-3: 3, nemotron-cc-math-4plus: 2}
+PLAN_ID      68ebedaaddc7eb06     schema edullm-build-plan/v2
+bundles      185  (32 file-sharded parts)      shards 39,307
+target sum   986,000,000,000                  determinism True
+```
+
+**`plan_document(s, registry_meta=m)` with NO `file_shards=` argument now yields the sharded plan** —
+the registry is self-describing, as eng-11 proposed. `_file_shards_basis` records why each K, the flat
+upstream measurements, the stride-vs-contiguous result, and that **val binds K, not train**.
+
+## ⚠️ One test caught the change — a STALE PREMISE, not a defect, and it is the right kind of failure
+
+`test_the_shard_path_set_is_UNCHANGED_by_file_sharding_on_the_real_registry` failed at
+`assert 185 > 185`. Cause: its `flat` baseline called `plan_document(drawn, registry_meta=meta)` and
+**relied on `_file_shards` being ABSENT to get an unsharded plan.** Once the key shipped, both sides of
+its comparison were sharded and **the test was comparing a plan to itself.**
+
+Fixed by making the control **explicit**: `file_shards={}`, and reading `ways` from the registry with an
+assertion that the authorized K values are what the test's premise assumes. Verified both paths:
+`file_shards={}` → `2dee727972725556`/161; registry-driven → `68ebedaaddc7eb06`/185. **The argument wins
+over the artifact, which is what makes an unsharded control expressible at all.**
+
+Worth recording as a pattern: **a test whose baseline depends on a key being missing silently inverts
+the day that key is added.** It failed loudly here only because it also asserted a bundle-count
+inequality; the path-set equality alone would have passed vacuously. That inequality was the guard.
+
+## 🟢 FINAL — READY FOR PLAT
+
+| | |
+|---|---|
+| **`PLAN_ID`** | **`68ebedaaddc7eb06`** |
+| **summed `target_tokens`** | **986,000,000,000** |
+| **bundles** | **185** (32 parts) · 39,307 shards |
+| **makespan 48 × 8-vCPU** | **11.07 h** (longest child 7.53 h; 7.79 h at 64) |
+| tests | **1415 passed** |
+
+**Quote 11–15 h. Never 9.96 h.** Caveat unchanged and unexempted: DERIVED, byte-scaled at a uniform
+72,615 tok/s/vCPU, and **PDF and code are two of the four split sources** — so the residual error lands
+on the two biggest children. **The carve is robust** (7.53 h against a 9.96 h floor; the budget is a
+ceiling `pack` stops short of, so a wrong rate moves wall clock, not correctness). **Re-measure at the
+smoke test.**
+
+**Overfill remains OPEN and non-blocking**, recorded not fixed: a part's range is a range, not a quota,
+and `partial_source=True` discards excess. Margin large (2.6% imbalance vs `_FILTER_HEADROOM` 1.5).
+
+**Nothing pushed. No S3 write, no Batch submit, no `manifest.json`.**
+
