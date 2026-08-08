@@ -1,5 +1,20 @@
 # Pipeline scale audit — can the corpus-build pipeline execute a 1.0T-token ingest?
 
+> ## ⚠️ SUPERSEDED ON ONE INPUT — the vCPU cap is 384, not 128
+>
+> **Corrected 2026-08-07** by a direct CE read (`artifacts/impl-plan/cpu-env-verification.md`):
+> `maxvCpus: 384`, EC2 quota 1,152 (1,060 free), one queue 1:1 with zero jobs, `c7i.8xlarge` in all 5 AZs.
+> **Nothing binds below 384.** This audit's finding 2 cites `INGEST-CALIBRATION.md:60` for the 128 — the
+> file whose own banner says not to size from its tables.
+>
+> **Consequences for this audit specifically:** the tokenize floor is **2.21 h, not 6.61 h**, and the wave
+> shape in the §"2.1-2.N" table (*"4-6 array waves of 16-25 children, 8-16 vCPU per child"*) is wrong in
+> **both** directions — the cap allows 12 × 32 vCPU, and **8 vCPU per child is far too little for the big
+> bundles** (DCLM at 8 vCPU is 43.4 h). Use **32 vCPU per child, 12 concurrent**.
+>
+> **Everything else stands**, including this audit's correct call that item 6 is ~100 lines rather than ~20 —
+> which the plan had wrong until this audit was re-read. See `docs/IMPLEMENTATION-PLAN.md` §8A.3 and §8B.5.
+
 **Date:** 2026-08-07
 **Auditor:** subagent (read-only; no pytest, no AWS calls, no data loaded)
 **Code under audit:** `/Users/ericwu/Developer/Capstone_LLM-worktrees/edullm-data/final-dataset/`

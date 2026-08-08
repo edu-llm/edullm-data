@@ -128,7 +128,9 @@ HellaSwag, and publish it through this repo's airlock so it arrives validated, s
 |---|---|
 | `docs/FINAL-DATASET-REPORT.md` + `.pdf` | ✅ **CURRENT — the plan of record for WHAT to build.** 13 sections, self-contained, first-time-reader framing. Its §9 is the baseline-subset recipe |
 | **`docs/IMPLEMENTATION-PLAN.md` + `.pdf`** | ✅ **CURRENT — HOW to build it.** 25 pages, 11 sections. **Five blockers, none of which fails loudly.** Also carries the wall-clock (§8A), the gigatoken verdict (§7), and two of my own retracted claims |
-| **`docs/BUILD-DEPENDENCY-GRAPH.md` + `.pdf`** | ✅ **CURRENT — WHEN to build each piece.** 34-node DAG, critical path **21.31 h** (revised from 13.31 h — that figure assumed a `BUILD` floor its own deferred item made unreachable), and an orchestrator brief in §8 that can be handed to an agent verbatim |
+| **`docs/BUILD-DEPENDENCY-GRAPH.md` + `.pdf`** | ✅ **CURRENT — WHEN to build each piece.** 35-node DAG, critical path **15.5 h** (23.5 h via the ordinal route, 54.5 h unsplit — §Answer-up-front tables all four), and an orchestrator brief in §8 that can be handed to an agent verbatim |
+| **`artifacts/impl-plan/cpu-env-verification.md`** | ✅ **NEW — the live compute facts.** Every AWS call quoted. Why the cap is 384 not 128, and why H100 is unusable despite being ENABLED |
+| **`artifacts/impl-plan/task-28-briefing.md`** | ✅ **NEW — read before implementing #28.** The registry-row route, the three traps (two silent), the 4.52× rate correction, and what splitting does *not* fix |
 | **`docs/TASKS.md`** | ✅ **NEW — the definition of every `#NN` id**, plus the crosswalk between task ids, graph nodes and Phase 0 items. These lived only in a session tool before, so three documents cited ids nothing defined |
 | `artifacts/impl-plan/*.md` | 7 audit reports, **7,769 lines**. Evidence behind the plan. `orchestrator-findings.md` is the index of my own findings and corrections — **F2 and F4 now carry superseding banners** |
 | `docs/FINAL-DATASET-MIX.md` | superseded stub pointing at the report; kept because older commits link to the filename |
@@ -356,19 +358,43 @@ Both from a dedicated read-only verification (`artifacts/impl-plan/cpu-env-verif
    SUCCEEDED jobs ever**. **Keep pricing on 8×A100 ($70k/89 days for 1.0T).** `ENABLED` is not evidence a
    shape is submittable — I got this wrong first and the account's own job history corrected me.
 
-**And the 384 vCPU finding INVERTS blocker 0's fix.** At a 2.21 h floor, 12 h of ordinal-range code lands on
-the critical path in front of a build that barely takes 2 h:
+3. **⚠️ AND THE PER-vCPU RATE IS 4.52× OPTIMISTIC — this one is easy to miss and it moves everything.**
+   Every wall-clock figure used **0.328 M tok/s/vCPU**, which is `encode_batch` **in isolation**.
+   **MEASURED end-to-end is 72,615 tok/s/vCPU** (CloudWatch `DONE` lines, plan `d5c9bcd38735e1f0`, 7 train
+   bundles = 171B of the real run). **Tokenize is only ~22% of build cost; ~78% is
+   `dedup_and_decontaminate`, single-threaded Python holding the GIL.** So the cap correction (3× better)
+   and the rate correction (4.5× worse) **nearly cancel** — the build floor is **9.96 h**, against 6.61 h
+   originally believed and 2.21 h briefly believed in between.
+   ⚠️ **This was in my own memory index (`tokenize-throughput-is-filter-bound`) and I failed to apply it.**
+
+**#28 is MANDATORY under either route** — an un-split DCLM is 49 h as one child:
 
 | | `BUILD` | code ahead | **path** |
 |---|---|---|---|
-| do nothing | 10.85 h | 4 h | **16.39 h** |
-| #28 as specified (12 h of code) | 2.21 h | 12 h | **15.75 h** — buys 0.64 h |
-| **#28 via `domain_column` (~2 h)** | 2.21 h | absorbed | **7.75 h** ✅ |
+| do nothing | **49.0 h** | 4 h | **54.54 h** |
+| #28 via ordinal ranges (12 h of code) | 9.96 h | 12 h | **23.50 h** |
+| **#28 via N REGISTRY ROWS on disjoint subdirs (~2 h)** | 9.96 h | absorbed | **15.50 h** ✅ |
 
-**Wall-clock: 3.69 h of job time, ~35.7 h as-configured, and a 7.75–15.75 h critical path** depending
-entirely on how #28 is done. **Job time is now ~3 h against a ~8 h path — code dominates the schedule**, so
-quote the path. Gate A at 5.6 h still exceeds its timeout unfixed (#10); `verify --deep` should be **deleted
-rather than threaded** (#29).
+**❌ The `domain_column` route does NOT work** — `_domain_of` (`corpus_read.py:322-345`) receives only the
+parquet row; the file entry is not in scope at its call site. An earlier version of this handoff recommended
+it. **The route that works is N registry rows pointing at disjoint subdirectories** —
+`mlfoundations/dclm-baseline-1.0-parquet` nests 10 `global-shard_NN_of_10` dirs each holding 10
+`local-shard_N_of_10` (100 total, confirmed by walking the tree), and `allocate_ordinals` gives each row its
+own dense ordinal block **at plan time**, which is exactly the mechanism the 12 h was budgeted to build.
+⚠️ **Two of its traps fail SILENTLY** (duplicate `source_label` collapses and loses a row's tokens; varying
+`domain` instead makes all N children read the same directory) — **read
+`artifacts/impl-plan/task-28-briefing.md` §2.1 before writing the rows**, and add a `source_label` uniqueness
+check to `load_registry` first (~5 lines) regardless of route.
+
+**Wall-clock: 11.44 h of job time, ~74 h as-configured, and a 15.5 h critical path** (23.5 h via the ordinal
+route, 54.5 h unsplit). **Jobs and code are now comparable — 11.0 h of jobs against a 15.5 h path** — which
+was briefly not the case, so re-check this ratio after any rate change. Gate A at 5.6 h still exceeds its
+timeout unfixed (#10); `verify --deep` should be **deleted rather than threaded** (#29), and **#10 must land
+first or #29 buys nothing**.
+
+⚠️ **And splitting does NOT fix the real ceiling: more machines cap at ~6.2×** because the filter is serial
+(the reservoir's longest single bundle was 14.4 h against 89.3 container-hours of work). **Parallelizing
+`dedup_and_decontaminate` is the follow-on to #28, not optional** — estimated 14.4 h → ~3.2 h.
 
 **Task ids `#NN` are defined in `docs/TASKS.md`** — they used to live only in a session task tool, so three
 documents referenced ids that a fresh agent could not resolve. That file is also the crosswalk to the graph

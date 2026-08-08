@@ -20,7 +20,7 @@ produces a corpus that passes every gate while being wrong.
 
 | # | blocker | consequence if unfixed | fix | task |
 |---|---|---|---|---|
-| **0** | **⚠️ One bundle cannot be split, and at the measured 384 vCPU cap it is 4.9× the floor** | `--shard/--of` strides **bundles** (`corpus_build.py:676`), so DCLM's 410B is ONE child — **10.85 h even given an entire 32-vCPU instance**, against a **2.21 h** aggregate floor. A Batch child cannot exceed one instance, so no vCPU allocation fixes it. FineWeb-Edu's 252B is second at 6.67 h | **a synthetic `domain_column` fan-out (~2 h, path 7.75 h)** — the 12 h ordinal-range route buys only 0.64 h (§8A.3) | **#28** |
+| **0** | **⚠️ One bundle cannot be split — 49 h as one child against a 9.96 h floor** | `--shard/--of` strides **bundles** (`corpus_build.py:676`), so DCLM's 410B is ONE child — **49.0 h even given an entire 32-vCPU instance**, 4.9× the floor. A Batch child cannot exceed one instance, so no vCPU allocation fixes it. FineWeb-Edu's 252B is second at 30.1 h | **N registry rows on disjoint subdirectories (~2 h, path 15.5 h)** — NOT the `domain_column` route, which does not work (§8A.3) | **#28** |
 | 1 | **Ordinals shift when a source is added** | adding one 4B source renames **98% of shards** and voids **882B tokens** | freeze the full plan first — **0 code** | #20 |
 | 2 | **The FinePhrase de-dup predicate is never called** | the report already specifies the fix — **36B from ONE partition** — and the code cannot express it. Draw 36B from all four configs and exposure returns at ~2.4× on ~15B distinct documents (§0's detail below) | ~5 lines, at the reader | #21 |
 | 3 | **The dedup set OOMs at 1T** | **27.92 GB for the DCLM bundle** in a 15.03 GB container — 1.44× worse than the bundle an earlier draft named, and **absent from that draft's table** (§5.2a) | flat `np.uint64` → 2.60 GB | #22 |
@@ -40,18 +40,18 @@ leading space, which changes its first token under byte-level BPE.
 
 | | as configured today | with the fixes | floor |
 |---|---|---|---|
-| **job time, end to end** | **~35.7 h**, and two stages fail their timeouts outright | **3.69 h** | 2.21 h of tokenize at the **measured 384 vCPU** cap |
-| **critical path** (incl. the code ahead of the jobs) | — | **7.75 h** cheap route / 15.75 h expensive | 3.25 h of jobs on the path |
+| **job time, end to end** | **~74 h**, and two stages fail their timeouts outright | **11.44 h** | 9.96 h of build at 384 vCPU and the MEASURED end-to-end rate |
+| **critical path** (incl. the code ahead of the jobs) | — | **15.5 h** registry route / 23.5 h ordinal route | 11.0 h of jobs on the path |
 
-**Read those two rows as answering different questions.** 3.69 h is the sum of job durations once the flags
-are passed. **7.75 h is the earliest the corpus can exist**, because ~4.5 h of code and image build sit ahead
+**Read those two rows as answering different questions.** 11.44 h is the sum of job durations once the flags
+are passed. **15.5 h is the earliest the corpus can exist**, because ~4.9 h of code and image build sit ahead
 of the first job.
 
 ⚠️ **Both "fixed" figures dropped sharply on 2026-08-07, and it was a measurement, not an optimization.**
 They were ~10 h and 21.31 h, computed at a **128 vCPU** cap that turned out to be **384** (§8B.5 — quota
 1,152, one queue 1:1, all 5 AZs) and with `verify --deep` still in the path (§8.3a retires it). **The 3×
 capacity correction also inverted blocker 0's fix** — see §8A.3 — which is why the path is quoted as a range:
-the cheap route gives 7.75 h, the originally-specified one 15.75 h, and doing nothing 16.39 h.
+the registry route gives 15.5 h, the ordinal-range route 23.5 h, and doing nothing **54.5 h**.
 
 The 3.7× job-time gap is **entirely flags** — no new architecture. Five threading facilities
 exist in the package and work; **every default is 1**, and the registered job definitions do not pass
@@ -1031,6 +1031,26 @@ it is the same shape as Amdahl's law elsewhere in this plan. `VD1` and `GA1` bot
 duration outright. Recomputed on the real DAG rather than subtracted: `PR1` now waits on `GA1`'s 0.32 h
 instead of `VD1`'s 1.49 h. **Deleting a parallel branch buys the difference, not the branch.**
 
+**⚠️ Retiring `--deep` retires ONE TIER, not the `verify` command.** `corpus_receipt.py:30-50` documents two,
+and conflating them would be a serious misreading:
+
+| tier | what it does | after this change |
+|---|---|---|
+| **cheap** (always runs) | one `head` per shard — presence, `ContentLength`, `tokens × 4 == bytes`, `bytes % (4 × SEQ_LEN) == 0`, a conservation cross-check re-derived from the sizes S3 reports — **plus the pure checks: duplicate digests within a bundle, foreign shard keys, unpinned upstream revisions, the `PackResult` identity, and `bundle-set-mixed-wheel-versions`** | **KEEP ALL OF IT — unchanged** |
+| **deep** (`--deep`, opt-in) | `s3.hash_object` re-reads every shard and compares to the receipt | **retire for corpora we produce** |
+
+**This is what makes the change safe.** The reservoir's live publish blocker is
+`bundle-set-mixed-wheel-versions` (`HANDOFF.md` START HERE) — a **provenance** check in the *cheap* tier that
+reads no payload. **Retiring the deep tier does not weaken it or any other cheap check.** Anyone reading
+"retire `verify --deep`" as "stop running `verify`" has misread this section.
+
+**And the deep tier's own stated purpose is exactly what the checksum closes.** Its docstring: *"A corrupted
+payload that preserves length passes **every** cheap check here and every check at Gate A. Only the deep tier
+sees it before promotion."* True — and **a declared `ChecksumSHA256` makes that payload unable to exist**,
+because S3 rejects the PUT outright. The tier detects after the fact what the checksum prevents. The same
+docstring also says the intended use is *"once on a sampled subset of bundles, or on any bundle whose cheap
+tier looked suspicious"* — **not on every publish**, which is how the job definition currently runs it.
+
 **What to keep it for.** `verify --deep` is the right tool for a **vendored** corpus, where the claim is
 "these bytes are byte-for-byte what the upstream published" and no local digest was ever declared to S3.
 `publish.py:706` already scopes exactly this and says so: the destination re-hash *"closes the source-hash
@@ -1230,11 +1250,11 @@ behind it** — raising it is a config change, not an AWS support ticket.
 
 | | at 128 vCPU (the old assumption) | **at 384 vCPU (measured)** |
 |---|---|---|
-| 1.0T tokenize floor | 6.61 h | **2.21 h** |
+| 1.0T build floor | 6.61 h | **9.96 h** at the measured rate |
 | concurrent `c7i.8xlarge` children | 4 | **12** |
 
 ⚠️ **But this does NOT dissolve blocker 0 — it sharpens it.** A single Batch child still cannot exceed one
-instance, so DCLM's 410B is **still 10.85 h on its 32 vCPU**. Against a 2.21 h aggregate floor that child is
+instance, so DCLM's 410B is **49.0 h on its 32 vCPU**. Against the 9.96 h aggregate floor that child is
 now **4.9× the floor**, where before it was 1.6×. **More total capacity makes the un-splittable bundle a
 worse bottleneck, not a better one**, because the floor drops while the child does not. Blocker 0 and
 task #28 get *more* important, not less.
@@ -1352,63 +1372,136 @@ That was a 3× understatement and it propagated into every figure below.**
 
 Tokenization is CPU-bound, so at A1's measured per-vCPU rate:
 
-| vCPU | rate | 1.0T tokenize |
+| vCPU | 1.0T at 0.328 M/vCPU (isolated encode) | **1.0T at 72,615/vCPU (measured end-to-end)** |
 |---|---|---|
-| 32 (one instance) | 10.5 M tok/s | 26.46 h |
-| 64 | 21.0 M tok/s | 13.23 h |
-| 128 (**the withdrawn figure**) | 42.0 M tok/s | ~~6.61 h~~ |
-| **384 (the real cap)** | **126.0 M tok/s** | **2.21 h** |
+| 32 (one instance) | 26.46 h | **119.5 h** |
+| 128 (**the withdrawn cap**) | ~~6.61 h~~ | ~~29.9 h~~ |
+| **384 (the real cap)** | ~~2.21 h~~ | **9.96 h** ← use this |
 
-**2.21 h is the tokenize floor for 1.0T**, and the cap allows **12 concurrent `c7i.8xlarge` children**.
+**9.96 h is the build floor for 1.0T**, and the cap allows **12 concurrent `c7i.8xlarge` children** at 32
+vCPU each. **The right-hand column is the one to quote** — see the rate correction below; the left column is
+`encode_batch` in isolation and understates the build by 4.52×.
 
-⚠️ **This makes blocker 0 WORSE, not better, and that is the counter-intuitive part.** Slicing still does
-not lower the aggregate floor — but the floor just dropped 3× while the largest **un-splittable child did
-not move at all**. DCLM's 410B is still 10.85 h on one instance's 32 vCPU:
+⚠️ **This makes blocker 0 WORSE, not better, and that is the counter-intuitive part.** Splitting still does
+not lower the aggregate floor — but the floor dropped while the largest **un-splittable child did not move at
+all**. At the measured rate DCLM's 410B is **49.0 h** on one instance's 32 vCPU:
 
-| | old (128 vCPU) | **new (384 vCPU)** |
+| | old (128 vCPU, isolated rate) | **384 vCPU, measured rate** |
 |---|---|---|
-| aggregate floor | 6.61 h | **2.21 h** |
-| DCLM as one child | 10.85 h | **10.85 h** — unchanged |
+| aggregate floor | 6.61 h | **9.96 h** |
+| DCLM as one child | 10.85 h | **49.0 h** |
 | **child ÷ floor** | 1.6× | **4.9×** |
 
+The ratio is unchanged at 4.9× — both numbers grew — so **the shape of blocker 0 is the same and its absolute
+cost is far higher.**
+
 **More capacity buys nothing until the un-splittable bundle is split.** Without task #28, `BUILD` is
-10.85 h regardless of the cap, and the extra 256 vCPU sit idle waiting for one child.
+49.0 h regardless of the cap, and the extra 352 vCPU sit idle waiting for one child.
 
-#### ⚠️ But the 384 vCPU finding INVERTS how task #28 should be done, and this is the important part
+#### ⚠️ 2026-08-08: the per-vCPU RATE above is 4.52× optimistic, and it changes this section's conclusion
 
-At 128 vCPU, item 3b was unambiguous: 12 h of ordinal-range code to turn a 16.8 h `BUILD` into 6.6 h.
-**At 384 vCPU the arithmetic flips, because the 12 h of code now lands on the critical path in front of a
-`BUILD` that is only 2.21 h.** Computed on the real DAG, not subtracted:
+**Every figure in this section and §8A.5 used 0.328 M tok/s/vCPU** — which is `encode_batch` **in
+isolation**, not end-to-end build throughput. **MEASURED-LIVE end-to-end is 72,615 tok/s/vCPU**, from
+CloudWatch `DONE` lines (`/aws/batch/sbsandbox-intern-edullm-cpu`, plan `d5c9bcd38735e1f0`, 7 train bundles =
+171B of the real 251.2B run, 8-vCPU containers). Evidence:
+`artifacts/impl-plan/task-28-briefing.md` §3.1.
 
-| approach | `BUILD` | code ahead of it | **critical path** |
-|---|---|---|---|
-| **do nothing** — DCLM stays one child | 10.85 h | A2a 4 h | **16.39 h** |
-| **item 3b as specified** — plan-time ordinal ranges, ~12 h | 2.21 h | C3b 12 h | **15.75 h** |
-| **the `domain_column` alternative** (§8A.5a), ~2 h | 2.21 h | absorbed by A2a's 4 h | **7.75 h** ✅ |
+**Why: tokenize is only ~22% of build cost.** The other ~78% is `dedup_and_decontaminate` — pure-Python,
+per document a sha256 dedup hash, a second sha256 for the decon exact test, then up to `len(words)−12`
+`blake2b` window hashes against a 3.1M-entry frozenset (~122B window hashes over the sample). **It holds the
+GIL, so it serializes the pipeline regardless of container size.** §3.3 of this plan already flagged the
+scan's cost as unmeasured and warned that attributing all build CPU to tokenization might be wrong. **It
+was.**
 
-**The 12 h version buys 0.64 h. The 2 h version buys 8.64 h.** Break-even for item 3b is about **11.5 h of
-code** — so as specified it is within noise of not doing it at all, and the entire value of splitting DCLM
-now lives in doing it *cheaply*.
+| | at 0.328 M (isolated encode) | **at 72,615 (measured end-to-end)** |
+|---|---|---|
+| 1.0T aggregate floor, 384 vCPU | 2.21 h | **9.96 h** |
+| DCLM 410B, one child, 32 vCPU | 10.85 h | **49.0 h** |
+| DCLM 410B, one child, 8 vCPU | 43.4 h | **196 h** |
 
-**This changes the wave-0 instruction.** §8A.5a already noted the alternative — give DCLM a synthetic
-`domain_column` derived from its 27,938-file index so `allocate_ordinals` fans it out with no new mechanism —
-and flagged it as "worth considering because it may be free." **It is no longer an aside; it is the
-recommendation.** The agent on stream 4 should:
+**And the two corrections push in opposite directions and nearly cancel:** the cap was 3× better than
+assumed, the rate is 4.5× worse. Net, the floor moves 6.61 h → **9.96 h** — *worse* than the plan's original
+figure, not better.
 
-1. **Try the `domain_column` fan-out first**, and time-box it. If it works, the path is ~7.75 h.
-2. **Only fall back to plan-time ordinal ranges if that fails** — and if the fallback looks like more than
-   ~11 h, **stop and reconsider doing nothing**, because at that point it is not paying for itself.
+#### The C3b decision, redone at the measured rate
 
-**The cost of the `domain_column` route is a schema smell, not compute:** a `domain` label that is not
-semantically a domain (a file-index bucket), inside `PATH_LABEL_KEYS` and therefore inside
-`manifest_sha256` and unbackfillable. That is a real objection — it makes every per-domain predicate on DCLM
-meaningless. **Weigh it against 8.6 h of wall-clock and a 10 h reduction in Phase 0 code**, and decide
-before `FREEZE`, since both routes change the plan.
+**The "12 h of code buys only 0.64 h" conclusion is WITHDRAWN.** It was computed from the isolated-encode
+rate. At the real rate:
 
-⚠️ **All three rows assume `BUILD` reaches the 2.21 h aggregate floor once DCLM is split.** That requires
-the *other* large bundles to fit too — FineWeb-Edu at 252B is 6.67 h on one instance and also needs ≥5-way
-splitting (§8A.5a's table). **Splitting DCLM alone leaves FineWeb-Edu as the new binding child at 6.67 h**,
-which puts the path at ~12.2 h rather than 7.75 h. **Whichever route is chosen must cover both.**
+| approach | `BUILD` | code ahead | **critical path** | buys |
+|---|---|---|---|---|
+| **do nothing** — DCLM stays one child at 32 vCPU | 49.0 h | A2a 4 h | **54.54 h** | — |
+| ordinal-range route, ~12 h of code | 9.96 h | C3b 12 h | **23.50 h** | 31.04 h |
+| **registry-row split, ~2 h** (§8A.5a) | **9.96 h** | absorbed by A2a | **15.50 h** ✅ | **39.04 h** |
+
+**Splitting is now mandatory under either route** — 54.54 h against 15.50 h. The cheap route is still
+preferred by 8 h, but **the expensive one is no longer close to worthless**, so an agent that finds the
+registry route blocked should proceed with ordinal ranges rather than reconsidering doing nothing.
+
+**Ways needed** at the measured rate — and the count depends on the child size, which is why two different
+figures circulate:
+
+| bundle | at 8 vCPU | ways | at 32 vCPU | ways |
+|---|---|---|---|---|
+| **DCLM 410B** | 196 h | **20** | 49.0 h | **5** (160 vCPU of 384) |
+| **FineWeb-Edu 252B** | 120.5 h | **13** | 30.1 h | **4** (128 vCPU) |
+| code 108B | 51.6 h | 6 | 12.9 h | 2 |
+
+**Both columns are correct.** The briefing's "≥20 ways" assumes 8-vCPU children; at 32 vCPU it is 5. **Say
+which child size you mean.** At 32 vCPU, DCLM's 5 ways and FineWeb-Edu's 4 together consume 288 of 384 vCPU,
+which fits.
+
+#### ❌ And the `domain_column` route does NOT work — my earlier recommendation was wrong
+
+§8A.5a said a synthetic `domain_column` "derived from the file index" would fan DCLM out for free. **It
+cannot be derived from the file index.** `_domain_of(row, spec, domain_map=, walk=)`
+(`corpus_read.py:322-345`) receives only the parquet **row**; its call site at `:521` is inside the per-row
+loop and **the file entry is not in scope.** Making it available means threading the entry through
+`corpus_read` — which is code, not a free carve. A *real* column would need a counting pass first to build
+`domain_map`, or every distinct value becomes a permanent directory.
+
+**The route that actually works is a REGISTRY EDIT, and it is neither of the two I described.** Split DCLM
+into N rows, each pointing at a **disjoint subdirectory** via `config`, each with `target_tokens = 410B/N`.
+`plan_document` then emits N streams → N bundles → `_shard_slice` spreads them, and **`allocate_ordinals`
+hands each its own dense ordinal block at plan time** — which is precisely the mechanism the 12 h was
+budgeted to build. `mlfoundations/dclm-baseline-1.0-parquet` nests
+`global-shard_01_of_10 … _10_of_10` (10 disjoint dirs) each holding `local-shard_0_of_10 … _9_of_10`
+(100 total), **confirmed by walking the tree**, and `hf_files` resolves such a `config` and paginates on the
+`Link` header (`corpus_build.py:813-829`).
+
+⚠️ **Three traps, two of which fail silently — read `task-28-briefing.md` §2.1 before writing the rows:**
+
+1. **Each row needs a distinct `source_label`.** `corpus_build.py:238` keys `targets` by
+   `(source_label, dom, "train")`, so two rows sharing a label **collapse to one and the first row's tokens
+   vanish with no error** (executed and confirmed in the briefing). `load_registry` has no uniqueness check.
+2. **Do NOT keep one label and vary `domain` instead** — `spec_by_label` (`:251`) also collapses, and it
+   supplies `config` to every bundle, so **all N children would read the same subdirectory: N× duplicate
+   data, silently.**
+3. **The label is permanent and consumer-visible.** `dclm-01`…`dclm-20` appear in the shard path, inside
+   `manifest_sha256`, so a consumer selecting `source=dclm` sees twenty labels. Same pollution I charged to
+   the `domain_column` route, moved to the source segment. **A deliberate decision, before `FREEZE`.**
+
+**⚠️ Also unreconciled:** the registry's current `dclm-baseline` row points at `HuggingFaceFW/dclm_100BT`
+(`config: "data"`, 100 **flat** files, no subdirectories) — **not** the nested `-parquet` repo §4.1 says to
+use. **The free carve exists only in the nested repo.** Settle which repo the 410B row names before sizing
+anything.
+
+**First action regardless of route:** add a `source_label` uniqueness check to `load_registry`
+(~5 lines). Trap 1 is live today, and silent token loss under a green build is exactly the failure class
+this repo's golden rule exists to catch.
+
+#### ⚠️ What splitting does NOT fix — the filter becomes the constraint
+
+**More machines cap at ~6.2×.** The reservoir's longest single bundle was **14.4 h** with the filter
+unparallelized against 89.3 container-hours of total work. Splitting bundles buys the ability to *use* 384
+vCPU; **it makes no single vCPU faster.** Parallelizing `dedup_and_decontaminate` (multiprocessing over
+document chunks, or the 13-gram hashing in Rust) is estimated at 14.4 h → ~3.2 h. **Ordering: parallelize the
+filter before buying machines** — and it is the follow-on to #28, not optional.
+
+**And splitting narrows dedup scope, which is a correctness change rather than a free win.** `SeenHashes` is
+per-bundle, so 20 parts means 20 independent dedup sets and cross-part duplicates survive. It *does* relieve
+the OOM (27.92 GB ÷ 20 ≈ 1.4 GB fits) — but **the flat `np.uint64` global pre-pass (#22) is what actually
+fixes dedup. Splitting only stops it crashing; it does not close #22.**
 
 ⚠️ **`desiredvCpus` is 0 and no probe has ever demonstrated 12 concurrent instances** (the agent flagged
 this itself). The quota and AZ coverage support it; obtainability is UNVERIFIED. **Request the full wave
@@ -1420,19 +1513,20 @@ shape once in the Phase 2 smoke test** — the same job that already de-risks th
 |---|---|---|---|
 | Pass 0 — stage 4.21 TB to S3 | 3.0 h | **0.5 h** | parallel copy children |
 | Pass 1 — dedup pre-pass (hash only) | 1.0 h | **0.3 h** | reads staged text in-region |
-| Pass 2 — build (read+filter+tokenize+pack) | 10.85 h | **2.21 h** | split the big bundles; **2.21 h is the floor at the measured 384 vCPU** (§8A.3) |
+| Pass 2 — build (read+filter+tokenize+pack) | **49.0 h** | **9.96 h** | split the big bundles; **9.96 h is the floor at 384 vCPU and the MEASURED end-to-end rate** (§8A.3) |
 | Publish both stages (40,001 objects) | 2.0 h | **0.3 h** | `copy_workers` / `hash_workers` > 1 |
 | **Gate A validate** | **5.6 h** ❌ | **0.36 h** | thread the profile checks + raise the pool |
 | **`verify --deep`** | **13.0 h** ❌ | **1.66 h**, or **0 h** | `--hash-workers 8` (**measured 7.82×**) — **or retire it entirely (§8.3a)** |
 | promote | 0.2 h | 0.02 h | already threaded |
-| **TOTAL** | **~35.7 h** | **~3.7 h** of job time | |
+| **TOTAL** | **~74 h** | **11.44 h** of job time | |
 
 **The "fixed" column moved on 2026-08-07** — it was ~10 h, computed at the withdrawn 128 vCPU cap and with
 `verify --deep` still in the path. At the measured 384 vCPU (§8A.3) and with the re-hash retired (§8.3a) the
-job total is **3.69 h**. The as-configured column is unchanged at **35.65 h** — its `BUILD` row was already
-the real single-child cost, so the cap correction does not touch it.
+job total is **11.44 h**. Both columns moved again on 2026-08-08 when the per-vCPU rate was corrected 4.52×
+(§8A.3).
 
-**Quote the critical path, not this total.** At 3.69 h of job time, **code now dominates the schedule**: the
+**Quote the critical path, not this total.** At 11.44 h of job time against a 15.5 h path, **jobs and code are
+now comparable** — which was not true an hour ago and is worth re-checking after any rate change: the
 path is **7.75–15.75 h depending on how task #28 is done** (§8A.3), and the spread between those two is
 entirely one implementation choice. A ~10× ratio between path and job time is the signal that the remaining
 work is engineering, not compute.
@@ -1467,7 +1561,7 @@ so a child alternates between fetching and encoding in one generator chain.
 The largest bundle at 1.0T is `stackv2-edu` at 6,361 shards = **159B tokens**. At A1's measured
 **0.328 M tok/s/vCPU**, its tokenize time depends entirely on how many vCPU that one child gets:
 
-| vCPU for this child | tokenize | read (10 Gbit/s) | total | fits the **2.21 h** floor? |
+| vCPU for this child | tokenize *(at the ISOLATED 0.328 M rate — see §8A.3, the real figure is 4.52× higher)* | read (10 Gbit/s) | total | fits the **9.96 h** floor? |
 |---|---|---|---|---|
 | **8** (the wave shape an earlier draft specified) | **16.83 h** | 0.16 h | **16.99 h** | **NO — 7.6× over** |
 | 16 | 8.42 h | 0.16 h | 8.58 h | no |
@@ -1478,8 +1572,9 @@ The largest bundle at 1.0T is `stackv2-edu` at 6,361 shards = **159B tokens**. A
 
 **⚠️ Corrected twice, and the second correction reverses the first's verdicts.** The original draft computed
 4.21 h at 32 vCPU while specifying 8 vCPU per child — inconsistent, and at 8 vCPU the bundle is 16.83 h.
-**Then the 384 vCPU measurement moved the floor from 6.61 h to 2.21 h, which flipped the "32 vCPU → yes"
-rows to `no`:** one whole instance is now 1.9× over the floor. **Since 32 vCPU is the per-child ceiling, the
+**Then two further corrections landed: the cap (3× better) and the per-vCPU rate (4.52× worse), which nearly
+cancel** — the floor is **9.96 h**. At the measured rate this bundle is 67.6 h on one instance, so the
+"32 vCPU → yes" rows are `no` by a wide margin. **Since 32 vCPU is the per-child ceiling, the
 only remaining lever is splitting** — which is the same conclusion §8A.5a reaches for DCLM, arrived at from
 the opposite direction.
 
@@ -1492,14 +1587,14 @@ reaches. **Both numbers are bandwidth. Leave the constant at 9.0.**
 **The resolution, and it changes what task #25 means.** Two things are true at once and the earlier draft
 conflated them:
 
-- **Aggregate:** 1.0T ÷ (**384** vCPU × 0.328 M/s) = **2.21 h** (§8A.3 — the cap is 384, not the 128 an
-  earlier draft used).
+- **Aggregate:** 1.0T ÷ (**384** vCPU × **72,615**/s) = **9.96 h** (§8A.3 — the cap is 384, and the rate is
+  the MEASURED end-to-end one, not `encode_batch` in isolation).
 - **Per child:** one bundle's duration is *its own* tokens ÷ *its own* vCPU, and **a Batch child cannot
   exceed one instance (32 vCPU)**. A 159B bundle is 15.9% of the corpus, so it needs ≥15.9% of 384 —
   **at least 61 vCPU, which is more than one instance holds.** It therefore *must* be split; no allocation
   suffices.
 
-So the split is **not** an optimization that buys 2.21 h → less. It is what makes **2.21 h reachable at
+So the split is **not** an optimization that buys 9.96 h → less. It is what makes **9.96 h reachable at
 all**. And because the cap is 3× what this section assumed, **the per-child problem got worse, not better**:
 the floor fell while no single child moved.
 
@@ -1536,22 +1631,22 @@ earlier draft implied.
 **And `stackv2-edu` is not the binding case — DCLM is, by a wide margin.** §5.2a puts DCLM at **410B
 tokens in one bundle**, because its `domain_column` is `None` so it does not fan out. Even given an
 **entire `c7i.8xlarge` to itself — all 32 vCPU, the whole compute environment's instance type** — that one
-child takes **10.85 h**:
+child takes **10.85 h** at the isolated rate — **49.0 h at the measured one** (§8A.3):
 
-| bundle | B tokens | at 8 vCPU | at 32 vCPU (a whole instance) | ways needed to reach the **2.21 h** floor |
+| bundle | B tokens | at 8 vCPU *(isolated rate)* | at 32 vCPU *(isolated rate)* | ways needed — **see §8A.3 for the measured-rate figures (20 / 13 at 8 vCPU)** |
 |---|---|---|---|---|
-| **DCLM-baseline** | **410.0** | **43.4 h** | **10.85 h** | **≥ 5 ways** |
-| **FineWeb-Edu** | **252.0** | 26.7 h | **6.67 h** | **≥ 4 ways** |
+| **DCLM-baseline** | **410.0** | **43.4 h** | **10.85 h** | **≥ 5 ways at 32 vCPU** (20 at 8 vCPU) |
+| **FineWeb-Edu** | **252.0** | 26.7 h | **6.67 h** | **≥ 4 ways at 32 vCPU** (13 at 8 vCPU) |
 | code (`stackv2`) | 108.0 | 11.4 h | 2.86 h | ≥ 2 ways |
 | FinePhrase, one partition | 36.0 | 3.8 h | 0.95 h | 1 (fits) |
 
-**Three bundles need splitting, not one.** The last column is against the **2.21 h** floor at 32 vCPU per
-child; an earlier draft computed it against 6.6 h and so understated the requirement. **Splitting DCLM alone
-leaves FineWeb-Edu binding at 6.67 h and the critical path at 12.21 h** rather than 7.75 h.
+**Three bundles need splitting, not one**, and this table uses the ISOLATED rate so it understates every
+duration by 4.52×. **§8A.3 has the measured-rate version.** **Splitting DCLM alone
+leaves FineWeb-Edu binding — 30.1 h at the measured rate — so the split must cover both.
 
 **So this is not an optimization at any wave shape.** The 384 vCPU cap is *on one instance type*, and a
 single Batch child cannot exceed one instance, so **no vCPU allocation makes a 410B single-child bundle fit
-the 2.21 h floor.** Splitting it is the only lever — and at 384 vCPU that is *more* true than at 128, because
+the 9.96 h floor.** Splitting it is the only lever — and at 384 vCPU that is *more* true than at 128, because
 the floor fell while the child did not. That is why item 3b matters and item 3 (val bundles) is deferrable.
 
 ⚠️ **One alternative worth considering before writing the code**, because it may be free: DCLM has a
@@ -1705,13 +1800,13 @@ wave shape** once to prove **12 concurrent `c7i.8xlarge`** is obtainable — con
 never demonstrated — and **deliberately corrupt one declared `ChecksumSHA256`** to confirm S3 returns
 `BadDigest`, which is the evidence that lets `verify --deep` be retired.
 
-### Phase 3 — the build, in waves — **2.21–10.85 h**
+### Phase 3 — the build, in waves — **9.96–49.0 h**
 
 ~100 bundles at **32 vCPU each = 12 concurrent** under the **measured 384 vCPU** cap (§8B.5). Per-bundle
 resume already works: `bundle_is_done` re-HEADs and compares sizes, and re-running a lost bundle is
 byte-identical (verified — nine bundles reproduced identical digests).
 
-**2.21 h is the CPU floor** (§8A.3). **The 10.85 h upper figure is what an un-split run costs, and it is set
+**9.96 h is the build floor** (§8A.3). **The 49.0 h upper figure is what an un-split run costs, and it is set
 by DCLM's 410B in one bundle** — not by `stackv2-edu`, which an earlier draft named. FineWeb-Edu at 6.67 h is
 next. **Three bundles need splitting to reach the floor** (§8A.5a).
 

@@ -19,3 +19,16 @@
 - **Shape:** two stages — 900B bulk at 77% web, then a 100B cooldown at 32% web that concentrates
   math, code, QA and reasoning traces.
 - **The baseline model reuses the same corpus** at a different ratio vector. No second dataset.
+
+## Build numbers, so this stub does not send anyone to a stale figure
+
+| | value |
+|---|---|
+| **critical path** | **15.5 h** (23.5 h via the ordinal route; 54.5 h if DCLM is not split) |
+| job time on the path | 11.0 h — jobs and code are comparable |
+| CPU compute cap | **384 vCPU** `c7i.8xlarge` (MEASURED; **not** 128) |
+| build floor, 1.0T | **9.96 h** — 384 vCPU × 72,615 tok/s/vCPU MEASURED |
+| largest GPU shape that **runs** | **`gpu-8xa100`** — H100 is ENABLED but has never placed a job |
+
+**`docs/IMPLEMENTATION-PLAN.md` §8A/§8B and `docs/BUILD-DEPENDENCY-GRAPH.md` are authoritative for all of
+these.** `docs/TASKS.md` defines the `#NN` ids.

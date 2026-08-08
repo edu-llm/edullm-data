@@ -1,5 +1,36 @@
 # Wall-clock audit of the 251.2B reservoir build, and a 1.0T projection
 
+> ## ⚠️ SUPERSEDED ON ONE INPUT — the vCPU cap is 384, not 128, so every floor here is 3× too high
+>
+> **Corrected 2026-08-07** by a direct read of the compute environment
+> (`artifacts/impl-plan/cpu-env-verification.md`): `sbsandbox-intern-edullm-cpu` has **`maxvCpus: 384`**,
+> EC2 quota **1,152** with 1,060 free, **one** queue targeting it 1:1 with **zero** jobs queued, and
+> `c7i.8xlarge` offered in **all 5** of its AZs. **Nothing binds below 384.**
+>
+> This audit's **R1** takes "128 vCPU" from `INGEST-CALIBRATION.md:60` and grades it
+> `MEASURED-ELSEWHERE`. Right grade, wrong source: **`INGEST-CALIBRATION.md` is the file whose own
+> retraction banner says not to size anything from its tables**, and its cap figure was never read back from
+> the CE. That banner *"keeps"* the 128 while retracting the timeout beside it — so the retraction is what
+> lent the number false credibility.
+>
+> | this audit says | actual |
+> |---|---|
+> | 128 vCPU cap (R1) | **384** |
+> | 6.61 h tokenize floor at 1.0T | **2.21 h** |
+> | 7.19 h for the 1.087T encode | **2.40 h** |
+>
+> **Everything else here stands** — the anchors, the self-inflicted-slowness findings, the fix ranking, and
+> its refutation of my read-amplification claim are unaffected, because they are per-vCPU rates and code
+> facts rather than capacity claims. **Only figures derived from the cap move.**
+>
+> ⚠️ **And the correction makes one conclusion WORSE:** a 3× lower aggregate floor with an unchanged
+> per-child ceiling (32 vCPU = one instance) leaves the un-splittable DCLM bundle at **4.9×** the floor
+> rather than 1.6×. See `docs/IMPLEMENTATION-PLAN.md` §8A.3.
+>
+> **The lesson is this audit's own, turned on itself:** *a throughput measurement that does not record what
+> limited it invites exactly that error.* A capacity figure inherited from a retracted document is not a
+> measurement either.
+
 **Written** 2026-08-07. **Scope:** every measured wall-clock number in
 `/Users/ericwu/Developer/Capstone_LLM-worktrees/edullm-data/final-dataset/`, a
 self-inflicted-slowness audit, a fix ranking, and a 1.0T projection twice over

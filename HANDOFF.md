@@ -13,6 +13,13 @@ untouched and readable.
 > That check is correct — do not waive it. Then re-verify, require `VERIFY_DONE_RC=0`, and publish per
 > `artifacts/reservoir/PUBLISH-SPEC.md`. Full detail in **Next Steps item 1**.
 >
+> ⚠️ **`bundle-set-mixed-wheel-versions` is a CHEAP-tier check, and nothing on the `final-dataset` branch
+> touches it.** That branch recommends retiring the **deep** tier — the payload re-hash — once the shard
+> upload declares a `ChecksumSHA256` (`docs/IMPLEMENTATION-PLAN.md` §8.3a). The tiers are separate
+> (`corpus_receipt.py:30-50`): the wheel-version check, duplicate digests, foreign shard keys, unpinned
+> upstream revisions and the `PackResult` identity are **all cheap-tier and all stay.** **This blocker does
+> not go away, and must not be waived on the strength of that recommendation.**
+>
 > 1. **This file's "Next Steps"** — what to do next, in order. Item 1 is the only blocker.
 > 1b. **`artifacts/reservoir/PUBLISH-SPEC.md`** — both irreversible decisions, confirmed by the owner,
 >    plus the exact `publish()` call and the three pre-publish gates.

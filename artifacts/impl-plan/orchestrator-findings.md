@@ -1,5 +1,28 @@
 # Orchestrator's own code findings (verified by reading, not delegated)
 
+> ## ⚠️ TWO LATER MEASUREMENTS OVERTURN INPUTS USED THROUGHOUT THIS FILE
+>
+> Both landed 2026-08-07, after everything below was written. Evidence:
+> `artifacts/impl-plan/cpu-env-verification.md`.
+>
+> 1. **The CPU compute cap is 384 vCPU, not 128.** Quota 1,152 (1,060 free), one queue 1:1 with zero jobs,
+>    `c7i.8xlarge` in all 5 AZs — **nothing binds below 384.** Every tokenize floor computed at 128 is 3× too
+>    high: **2.21 h at 1.0T, not 6.61 h.** ⚠️ And this makes the un-splittable-bundle problem **worse** — the
+>    floor fell while the 32-vCPU per-child ceiling did not, so DCLM's 410B single child is now **4.9×** the
+>    floor. It also **inverts the fix**: 12 h of ordinal-range code buys 0.64 h, while a ~2 h
+>    `domain_column` fan-out buys 8.64 h.
+> 2. **H100 is ENABLED but has never run a job** — `InsufficientInstanceCapacity` in every AZ, zero
+>    SUCCEEDED, P quota 768 (so not a quota problem). **`state: ENABLED` is not evidence a shape can run**,
+>    and an inventory built from `describe-compute-environments` overstates reality.
+>
+> **Also decided since:** `verify --deep` (the payload re-hash **tier**, not the `verify` command) is
+> retirable once the shard upload declares a `ChecksumSHA256`, because S3 rejects a mismatched PUT
+> server-side. The cheap tier — including `bundle-set-mixed-wheel-versions` — **stays entirely**.
+> See `docs/IMPLEMENTATION-PLAN.md` §8.3a, §8A.3, §8B.
+>
+> **Current numbers live in the plan, not here.** This file is the record of how they were reached,
+> including the parts that were wrong.
+
 ## F1 — SHARD SIZE: the report and the code disagree
 - `corpus.py:89`: `SHARD_TOKENS = 3052 * SEQ_LEN` = **25,001,984** (100.0 MB/shard).
 - `docs/FINAL-DATASET-REPORT.md` §11 claims **50,003,968** (~20,000 objects).

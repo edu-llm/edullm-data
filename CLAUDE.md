@@ -14,7 +14,7 @@ newer than anything in `HANDOFF.md`. Four documents, answering four different qu
 | 1 | **`HANDOFF-FINAL-DATASET.md`** | **STATE** — what is done, what is next, what I got wrong |
 | 2 | **`docs/FINAL-DATASET-REPORT.md`** (+PDF) | **WHAT** to build — mix, sources, metrics, baseline recipe |
 | 3 | **`docs/IMPLEMENTATION-PLAN.md`** (+PDF) | **HOW** — six silent blockers, wall-clock, tokenizer verdict |
-| 4 | **`docs/BUILD-DEPENDENCY-GRAPH.md`** (+PDF) | **WHEN** — the DAG, the **7.75 h** critical path (15.75 h if #28 takes the expensive route), an orchestrator brief |
+| 4 | **`docs/BUILD-DEPENDENCY-GRAPH.md`** (+PDF) | **WHEN** — the DAG, the **15.5 h** critical path, an orchestrator brief |
 | 5 | **`docs/TASKS.md`** | **WHICH** — every `#NN` id, and the crosswalk to graph nodes and Phase 0 items |
 
 **If you are about to write code or launch a job, 3 and 4 are not optional.** The report says what the
@@ -26,6 +26,18 @@ tool that no longer exists.
 **Evidence** for 3 and 4 is in `artifacts/impl-plan/` (7 reports, 7,769 lines).
 `orchestrator-findings.md` indexes it, **including every claim of mine that was later refuted.**
 
+**The numbers a fresh agent most often needs, so they are not reconstructed from stale text:**
+
+| | value | note |
+|---|---|---|
+| **critical path** | **15.5 h** | 23.5 h via the ordinal route; **54.5 h if DCLM is not split** |
+| job time on that path | **11.0 h** | jobs and code are comparable; neither dominates |
+| all job rows summed | 11.44 h fixed / ~74 h as-configured | the gap is flags, not architecture |
+| **CPU compute cap** | **384 vCPU** (`c7i.8xlarge`) | MEASURED 2026-08-07. **Not 128** — that was a 3× understatement |
+| **build floor, 1.0T** | **9.96 h** | 384 vCPU × **72,615 tok/s/vCPU MEASURED end-to-end** — NOT the 0.328 M of `encode_batch` alone, which is 4.52× optimistic because ~78% of build cost is the serial Python filter |
+| largest GPU shape that **works** | **`gpu-8xa100`** | H100 is ENABLED but has **never run a job** — capacity, not quota |
+| shard size | **25,001,984** tokens → ~40,000 objects | `SHARD_TOKENS`, `corpus.py:89` |
+
 **Three things to know before touching any number:**
 
 - **Maple is a separate experiment; its configs must not be read or cited** (owner instruction). Any
@@ -36,6 +48,14 @@ tool that no longer exists.
   All three substantive errors found in the 2026-08-07 consistency audit were scope errors, not wrong
   measurements: a per-child duration read as an aggregate, the reservoir's mix read as this corpus's, a
   throughput gap read as a price. **`FINAL-DATASET-REPORT.md` §11 is the single cost anchor.**
+- **`state: ENABLED` is NOT evidence a shape can run.** `gpu-1xh100` is `ENABLED`/`VALID` in the API and
+  removed from the submission form, with zero successful jobs ever. **An inventory built from
+  `describe-compute-environments` overstates reality** — check job history, not configuration. This is the
+  error I made on 2026-08-07 and the account's own logs corrected.
+- **A capacity-starved job hangs FOREVER, silently.** Every queue declares
+  `CAPACITY:INSUFFICIENT_INSTANCE_CAPACITY → CANCEL after 1800s`, but Batch leaves `statusReason` null for
+  capacity failures so **the rule never matches**. Reading the queue config tells you the opposite. Set your
+  own wall-clock expectation per job. (`IMPLEMENTATION-PLAN.md` §8B.7)
 - **Do NOT act on the older "ingest source by source, each separately approved" advice.** Executed
   literally it renames **98% of shards** and voids **882B tokens** per added source. Freeze the
   complete plan first.

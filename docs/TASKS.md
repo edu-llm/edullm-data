@@ -8,11 +8,29 @@ and Phase 0 item.
 
 **Nothing here has been submitted to AWS.** Every job needs a platform submission and a human release.
 
+**The schedule these tasks add up to**, so nobody re-derives it from a stale figure:
+
+| | value |
+|---|---|
+| **critical path** | **15.5 h** if #28 uses registry rows · 23.5 h via ordinal ranges · **54.5 h if DCLM is not split** |
+| job time on the path | **11.0 h** — jobs and code are now comparable |
+| CPU compute cap | **384 vCPU** (`c7i.8xlarge`), MEASURED — **not** the 128 older text assumes |
+| **build floor, 1.0T** | **9.96 h** — 384 vCPU × **72,615 tok/s/vCPU MEASURED**; ~78% of cost is the serial Python filter, so `encode_batch`'s 0.328 M is 4.52× optimistic |
+
+**Two coupling rules that are easy to miss and change what "done" means:**
+
+- **#10 before #29.** Retiring `verify --deep` exposes `GA1`; unthreaded that is 5.08 h and the path is
+  24.90 h whether the re-hash is there or not, so **#29 measures as nothing until #10 lands.**
+- **#28 is MANDATORY, and its route is a decision.** Un-split, DCLM is **49 h as one child** against a 9.96 h
+  floor. **N registry rows on disjoint subdirectories (~2 h) is the route that works** — the `domain_column`
+  fan-out does **not** (`_domain_of` never sees the file entry). **Two of its traps fail silently** — read
+  `artifacts/impl-plan/task-28-briefing.md` §2.1. **And it must cover FineWeb-Edu (30.1 h) as well as DCLM.**
+
 ## Wave 0 — the critical-path code
 
 | # | task | graph | Phase 0 | changes the plan? | est |
 |---|---|---|---|---|---|
-| **#28** | **Split the BIG bundles — the ROUTE matters more than the task.** `--shard/--of` strides *bundles*, so DCLM's 410B is one child at **10.85 h even on a whole 32-vCPU instance**; FineWeb-Edu's 252B is 6.67 h. **Try the synthetic `domain_column` fan-out first (~2 h → path 7.75 h); the 12 h ordinal-range route buys only 0.64 h over doing nothing** (break-even ~11.5 h) | **C3b** | **3b** | **YES** | **~2 h**, or 1–2 d |
+| **#28** | **Split the BIG bundles — MANDATORY, and the ROUTE matters.** `--shard/--of` strides *bundles*, so DCLM's 410B is one child at **49 h even on a whole 32-vCPU instance** against a 9.96 h floor; FineWeb-Edu's 252B is 30.1 h. **Use N registry rows on disjoint subdirectories (~2 h → path 15.5 h).** ❌ The `domain_column` fan-out does **not** work. Fallback is ordinal ranges (12 h → 23.5 h). ⚠️ **Two traps fail silently — read `artifacts/impl-plan/task-28-briefing.md` §2.1 first**, and add a `source_label` uniqueness check to `load_registry` before anything | **C3b** | **3b** | **YES** | **~2 h**, or 1–2 d |
 | #22 | **Replace the dedup set with a flat `np.uint64` pre-pass.** The `set` needs **27.92 GB** for DCLM in a 15.03 GB container (§5.2a) | A2a + A2b | 4 | no | 1 d |
 | #21 | **Wire the FinePhrase id partition** into `_reader_for`. Cannot be retrofitted after tokenization. **Ships with the budget correction or not at all** | C1 | 1 | **YES** | ~5 lines |
 | #9 | **Decide `SHARD_TOKENS`.** Code says 25,001,984; the report now agrees. Confirm and stop carrying two values | B6 | 11 | **YES** | 1 h |

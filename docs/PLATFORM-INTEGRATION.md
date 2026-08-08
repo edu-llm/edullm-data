@@ -8,6 +8,29 @@ not need any prior conversation, and nothing in `edullm-data` needs to change fo
 read back from the account rather than from a template. Where a figure in circulation disagrees
 with what the repository or the API actually says, the disagreement is named in place.
 
+> ## ⚠️ STALE COMPUTE FACTS — re-verified 2026-08-07, and two statements below have moved
+>
+> This document was written 2026-08-01 and its **compute-profile** claims are the part that aged. Re-read
+> from the account on 2026-08-07 (`batch describe-compute-environments` / `describe-job-queues` /
+> `service-quotas`; evidence in `artifacts/impl-plan/cpu-env-verification.md`):
+>
+> | this document says | live on 2026-08-07 |
+> |---|---|
+> | `gpu-8xa100` raises `UnprovisionedComputeProfileError` / `provisioned: false` | the **CE and its queue are both ENABLED**, `p4d.24xlarge` + `p4de.24xlarge`, with **6 instances running now**. It is the one large-GPU shape with real capacity |
+> | — (not covered) | **two H100 CEs now exist** (`p5.4xlarge`, `p5.48xlarge`), both ENABLED — and **neither has ever run a job**: `InsufficientInstanceCapacity` in every AZ, zero SUCCEEDED, `desiredvCpus: 0`. The P quota is 768, so it is capacity, not quota |
+> | — (not covered) | the CPU CE `sbsandbox-intern-edullm-cpu` is **384 vCPU**, not the 128 that other documents assumed |
+>
+> **The infrastructure moved; whether the platform *form* still refuses `gpu-8xa100` is a separate question
+> this document is the authority on, and I did not re-check it.** Read the `provisioned: false` statements as
+> *"true of the form on 2026-08-01, and the underlying CE is live now"* — confirm at submission time rather
+> than trusting either date.
+>
+> **⚠️ And `state: ENABLED` is not evidence a shape can run** — `gpu-1xh100` is ENABLED/VALID in the API
+> while removed from the submission form. Check job history, not configuration.
+>
+> The corpus-side reader of these numbers is **`docs/IMPLEMENTATION-PLAN.md` §8B**, which carries the
+> current values and the wall-clock that rests on them.
+
 ---
 
 > ## ✅ READ THIS FIRST — this change request has been FULFILLED (2026-08-01)

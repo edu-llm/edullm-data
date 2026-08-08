@@ -4,29 +4,37 @@
 long each step takes. This document says **what may run at the same time**, and it is written to be
 handed to an orchestrating agent.
 
-**The answer up front:** the critical path is **7.75 h if task #28 is done cheaply, 15.75 h if it is done as
-originally specified**, against **~36 h** run as written today. **Only 3.25 h of that is jobs on the path —
-code now dominates the schedule**, which is a change from every earlier version of this document.
+**The answer up front:** the critical path is **15.5 h** if task #28 splits DCLM via registry rows, **23.5 h**
+via the ordinal-range route, and **54.5 h** if it is not split at all — against **~74 h** run as written today.
+**11.0 h of that is jobs on the path.**
 
 **⚠️ Two 2026-08-07 findings reshaped this graph. Both are MEASURED; neither was known when it was written.**
 
-1. **The CPU cap is 384 vCPU, not 128** (`IMPLEMENTATION-PLAN.md` §8B.5 — quota 1,152, one queue 1:1, all 5
-   AZs offer the type). **The tokenize floor is 2.21 h, not 6.61 h**, and 12 `c7i.8xlarge` children fit
-   rather than 4.
+1. **The CPU cap is 384 vCPU, not 128** (§8B.5 — quota 1,152, one queue 1:1, all 5 AZs offer the type), **and
+   the per-vCPU rate is 72,615 tok/s end-to-end, not the 0.328 M of `encode_batch` in isolation** (§8A.3,
+   MEASURED from the real run's CloudWatch logs — tokenize is only ~22% of build cost; ~78% is the
+   single-threaded Python filter). **These nearly cancel: the build floor is 9.96 h**, against 6.61 h
+   originally and a briefly-believed 2.21 h.
 2. **`verify --deep` is retirable** (§8.3a) — a verified PUT is rejected server-side on digest mismatch, so
    the re-hash re-establishes a guarantee the write path already enforces. Needs `B7` first (~5 lines).
 
-**And together they INVERT the C3b recommendation**, which is the single most important thing on this page:
+**C3b is now MANDATORY under either route** — an un-split DCLM is 49 h as one child:
 
 | scenario | `BUILD` | code ahead of it | **critical path** |
 |---|---|---|---|
 | the graph as first written — C3b deferred, `BUILD` assumed 6.6 h | 6.6 h | A2a 4 h | 13.31 h ❌ **never achievable** |
-| **do nothing** — DCLM stays one un-splittable child | 10.85 h | A2a 4 h | **16.39 h** |
-| **C3b as specified** — plan-time ordinal ranges, ~12 h of code | 2.21 h | **C3b 12 h** | **15.75 h** — buys only 0.64 h |
-| **C3b via the `domain_column` fan-out**, ~2 h of code | 2.21 h | absorbed by A2a | **7.75 h** ✅ |
+| **do nothing** — DCLM stays one un-splittable child | **49.0 h** | A2a 4 h | **54.54 h** |
+| **C3b via ordinal ranges**, ~12 h of code | 9.96 h | **C3b 12 h** | **23.50 h** |
+| **C3b via N REGISTRY ROWS on disjoint subdirectories**, ~2 h | 9.96 h | absorbed by A2a | **15.50 h** ✅ |
 
-**Break-even for C3b is ~11.5 h of code.** As originally specified (12 h) it is within noise of not doing it
-at all; done cheaply it is worth 8.6 h. **The instruction to stream 4 changes accordingly — see §6.**
+**⚠️ An earlier version of this table said the 12 h route "buys only 0.64 h." That is WITHDRAWN** — it was
+computed from the isolated-encode rate. At the measured rate the ordinal route buys **31 h** and the registry
+route **39 h**. Splitting is no longer optional, and an agent blocked on the registry route should proceed
+with ordinal ranges rather than reconsidering doing nothing.
+
+**❌ And the `domain_column` route does NOT work** — `_domain_of` receives only the parquet row, so a
+file-index-derived domain is not expressible without threading the file entry through `corpus_read`. See
+`artifacts/impl-plan/task-28-briefing.md` §2.2. **The instruction to stream 4 changes accordingly — §6.**
 
 **The full history of this number, because it moved three times and each move had a cause:**
 
@@ -35,19 +43,20 @@ at all; done cheaply it is worth 8.6 h. **The instruction to stream 4 changes ac
 | as first written | 6.6 h | 13.31 h ❌ | assumed a floor its own deferred item made unreachable |
 | after blocker 0 | 6.6 h | 21.31 h | C3b added at 12 h, on the path |
 | after `B7` / retiring `VD1` | 6.6 h | 20.14 h | −1.17 h (not −1.49: `GA1` was parallel and gets exposed) |
-| **after the 384 vCPU measurement** | **2.21 h** | **7.75 h** ✅ / 15.75 h | the floor fell 3×, which **inverted** how C3b should be done |
+| after the 384 vCPU measurement | 2.21 h | 7.75 h | the floor appeared to fall 3× |
+| **after the RATE correction (4.52×)** | **9.96 h** | **15.50 h** ✅ / 23.50 h | the two corrections nearly cancel; splitting became mandatory |
 
-**Read the last row carefully: `BUILD` got 3× cheaper, so 12 h of code to protect it stopped being worth
-it.** The 7.75 h figure requires the *cheap* route; the 15.75 h figure is the same graph with the expensive
-one.
+**Read the last two rows together.** The 2.21 h row was believed for about an hour and produced a conclusion
+("12 h of code buys 0.64 h") that the rate correction reversed. **The lesson: a capacity fact and a
+throughput fact multiply, so correcting one without the other can move a decision twice.**
 
-**The job-time floor is 3.25 h** — `SMOKE` 0.4 + `BUILD` 2.21 + `PUB1` 0.3 + `GA1` 0.32 + `PR1` 0.02, the
-jobs actually on the path once `VD1` is retired and `BUILD` runs at the measured 384 vCPU. (Earlier versions
-of this line said 8.41 h, then 8.81 h, then 7.64 h, each summing a different set at a different cap; §5
-derives it explicitly so it cannot drift again.)
+**The job-time floor is 11.0 h** — `SMOKE` 0.4 + `BUILD` 9.96 + `PUB1` 0.3 + `GA1` 0.32 + `PR1` 0.02, the
+jobs actually on the path once `VD1` is retired. (Earlier versions said 8.41, 8.81, 7.64, then 3.25 h — each
+summing a different set at a different cap or rate; §5 derives it explicitly so it cannot drift again.)
 
-**Everything above 3.25 h on the critical path is code and the image build** — which is why the C3b
-implementation choice, not any job flag, is now the largest single lever in this document.
+**Jobs and code are now comparable — 11.0 h of jobs against a 15.5 h path.** The C3b route choice is still
+the largest single lever (39 h), but the build itself is no longer negligible, which it briefly appeared to
+be.
 
 ---
 
@@ -58,7 +67,7 @@ Most parallelization mistakes here come from mixing these up.
 | currency | unit | what buys more of it | what caps it |
 |---|---|---|---|
 | **agent-hours** | code items | more agents in more worktrees | **file contention** (§3), not logic |
-| **wall-hours** | AWS jobs | more array children, more workers | **384 vCPU** compute environment (MEASURED; it was never 128) |
+| **wall-hours** | AWS jobs | more array children, more workers | **384 vCPU** — but capped at **~6.2×** by the single-threaded filter (§9) |
 | **calendar** | human gates | nothing — you wait | approval latency, license acceptance |
 
 A code item and a job of the same nominal duration are **not** substitutable: 8 agent-hours of code can
@@ -85,7 +94,7 @@ graph LR
         A2b["A2b · keep-list consumer<br/>in run_bundle<br/><b>4 h</b> · owns run_bundle"]
         C1["C1 · FinePhrase id partition<br/>in _reader_for<br/><b>2 h</b> · CHANGES THE PLAN"]
         B6["B6 · shard-size decision<br/>SHARD_TOKENS in corpus.py<br/><b>1 h</b> · CHANGES THE PLAN"]
-        C3b["C3b · split the BIG bundles<br/>TRY domain_column fan-out FIRST (2 h)<br/>ordinal ranges = 12 h and buys only 0.64 h<br/>DCLM 410B + FineWeb-Edu 252B"]
+        C3b["C3b · split the BIG bundles · MANDATORY<br/>N REGISTRY ROWS on disjoint dirs (~2 h)<br/>fallback: ordinal ranges (12 h)<br/>domain_column does NOT work<br/>DCLM 49 h unsplit + FineWeb-Edu 30 h"]
     end
 
     subgraph CODE_PAR["CODE OFF THE CRITICAL PATH — fully parallel, distinct files"]
@@ -107,7 +116,7 @@ graph LR
     STAGE["STAGE · copy 4.21 TB → S3<br/><b>0.5 h</b> parallel children"]
     PASS1["PASS1 · global dedup pre-pass<br/>256 partitions · <b>0.3 h</b>"]
 
-    BUILD["BUILD · ~100 bundles in waves<br/>12 children × 32 vCPU<br/><b>2.21 h</b> · 384-vCPU FLOOR (measured)"]
+    BUILD["BUILD · ~100 bundles in waves<br/>12 children × 32 vCPU<br/><b>9.96 h</b> · 384 vCPU × 72.6k tok/s/vCPU<br/>~78% is the SERIAL Python filter"]
 
     PUB1["PUB1 · publish stage1<br/>36k obj · <b>0.3 h</b>"]
     PUB2["PUB2 · publish stage2<br/>4k obj · <b>0.03 h</b>"]
@@ -246,23 +255,28 @@ Adding a source after the plan is generated renames **98% of shards** and voids 
 (`IMPLEMENTATION-PLAN.md` §0). So the mix must be final first. **Its duration is a decision, not a
 computation** — it is the one node whose length no amount of parallelism touches.
 
-### S3 — `BUILD` is capped at **384 vCPU** (measured; it was never 128)
-**2.21 h** is the tokenize floor at the real cap: 1.0T ÷ (384 × 0.328 M tok/s/vCPU). Verified 2026-08-07 —
-`maxvCpus: 384`, EC2 quota 1,152, one queue 1:1, `c7i.8xlarge` offered in all 5 of the CE's AZs
-(`IMPLEMENTATION-PLAN.md` §8B.5). The cap allows **12 concurrent children**, not 4.
+### S3 — `BUILD` is **9.96 h**: 384 vCPU (measured) × 72,615 tok/s/vCPU (measured)
+Two facts, both MEASURED, and they nearly cancel: the cap is **384** not 128 (`maxvCpus: 384`, EC2 quota
+1,152, one queue 1:1, `c7i.8xlarge` in all 5 of the CE's AZs), and the rate is **72,615 tok/s/vCPU
+end-to-end** not the 0.328 M of `encode_batch` in isolation — because **~78% of build cost is
+`dedup_and_decontaminate`, a single-threaded Python generator that holds the GIL.**
+`IMPLEMENTATION-PLAN.md` §8A.3 and §8B.5. The cap allows **12 concurrent children** at 32 vCPU.
 
-**⚠️ But the floor is only reachable if the big bundles are split, and more capacity makes that WORSE.**
-Per-child duration is *that child's* tokens ÷ *that child's* vCPU, and a Batch child cannot exceed one
-instance. **DCLM is 410B in one non-fanning-out bundle — 10.85 h on its 32 vCPU, unchanged by the cap.**
-Against a 2.21 h aggregate floor that child is now **4.9× the floor**, where at 128 vCPU it was 1.6×.
+**⚠️ The floor is only reachable if the big bundles are split.** Per-child duration is *that child's* tokens
+÷ *that child's* vCPU, and a Batch child cannot exceed one instance. **DCLM is 410B in one non-fanning-out
+bundle — 49.0 h on its 32 vCPU, 4.9× the floor and unchanged by the cap.** **FineWeb-Edu is second at
+30.1 h.** Whichever route stream 4 takes must cover both.
 
-**FineWeb-Edu is the second one, and it is easy to forget:** 252B = **6.67 h** on one instance. **Splitting
-DCLM alone leaves FineWeb-Edu binding at 6.67 h and the path at 12.21 h**, not 7.75 h. Whichever route
-stream 4 takes must cover both.
+**Ways needed depends on child size, so say which you mean:** at 32 vCPU, DCLM needs **5** and FineWeb-Edu
+**4** (288 of 384 vCPU together). At 8 vCPU it is **20** and **13**.
 
-**And `--shard/--of` strides *bundles*, so the capability does not exist in the code** — see
-`IMPLEMENTATION-PLAN.md` §8A.5a, including the cheap `domain_column` alternative that now decides whether
-this whole item is worth 0.64 h or 8.64 h.
+**And `--shard/--of` strides *bundles*, so the capability does not exist in the code.** The route that works
+is **N registry rows on disjoint subdirectories** (§8A.3) — the `domain_column` alternative an earlier draft
+recommended **does not work**, because `_domain_of` never sees the file entry.
+
+⚠️ **More machines cap at ~6.2× regardless**, because the filter is serial: the reservoir's longest single
+bundle was 14.4 h against 89.3 container-hours of total work. **Parallelizing the filter is the follow-on to
+splitting, and it is what would take 14.4 h → ~3.2 h.**
 
 ### S4 — ~~`VD1` cannot start until `PUB1` finishes~~ → **delete `VD1` instead**
 `verify --deep` re-hashes published objects, so it is strictly after publish. At 8 workers it is 1.49 h and
@@ -277,7 +291,7 @@ write path already enforces.
 the re-hash *is* the only thing behind those bytes. **Ship `B7` (~5 lines) first, then delete `VD1`.** Never
 the reverse.
 
-**Effect: critical path 21.31 h → 20.14 h.** Note that is **1.17 h, not the 1.49 h `VD1` costs** — `VD1` and
+**Effect: critical path 16.67 h → 15.50 h.** Note that is **1.17 h, not the 1.49 h `VD1` costs** — `VD1` and
 `GA1` run in parallel between `PUB1` and `PR1`, so deleting the longer branch **exposes** the shorter one.
 Deleting a parallel branch buys the *difference*, not the branch. Recomputed on the DAG, not subtracted.
 
@@ -288,35 +302,36 @@ Deleting a parallel branch buys the *difference*, not the branch. Recomputed on 
 
 ## 5. The critical path, and everything with slack
 
-**Critical path — 7.75 h** with the cheap C3b route and `VD1` retired. The expensive C3b route gives 15.75 h; the difference is 12 h of code minus 2 h, sitting in front of `IMG`.
+**Critical path — 15.50 h** with the registry-row C3b route and `VD1` retired. The ordinal-range route gives
+**23.50 h**; the difference is 12 h of code minus 2 h, sitting in front of `IMG`.
 
 | from → to | node | why it cannot move |
 |---|---|---|
-| 0.00 → 4.00 | **A2a** hash pre-pass driver | the longest *unavoidable* code item; **C3b's cheap route hides inside this 4 h** |
+| 0.00 → 4.00 | **A2a** hash pre-pass driver | the longest *unavoidable* code item; **C3b's registry route (~2 h) hides inside this 4 h** |
 | 4.00 → 4.50 | **IMG** image build | S1 — one push, `edullm/**` only |
 | 4.50 → 4.90 | **SMOKE** live-HF smoke test | mandatory; the path has never run |
-| 4.90 → 7.11 | **BUILD** ~100 bundles | S3, the **384 vCPU** floor — 2.21 h |
-| 7.11 → 7.41 | **PUB1** publish stage 1 | after build |
-| 7.41 → 7.73 | **GA1** Gate A stage 1 | recomputes from bytes in a **different process** — the one gate that is not a tautology (`IMPLEMENTATION-PLAN.md` §8.3b) |
-| 7.73 → 7.75 | **PR1** promote stage 1 | after the gate |
+| 4.90 → 14.86 | **BUILD** ~100 bundles | S3 — 384 vCPU × the measured 72,615 tok/s/vCPU = **9.96 h** |
+| 14.86 → 15.16 | **PUB1** publish stage 1 | after build |
+| 15.16 → 15.48 | **GA1** Gate A stage 1 | recomputes from bytes in a **different process** — the one gate that is not a tautology (`IMPLEMENTATION-PLAN.md` §8.3b) |
+| 15.48 → 15.50 | **PR1** promote stage 1 | after the gate |
 
-**With the expensive C3b route, `C3b`'s 12 h replaces `A2a`'s 4 h at the head** and everything shifts +8 h.
-That single substitution is the whole 7.75 h ↔ 15.75 h spread.
+**With the ordinal-range route, `C3b`'s 12 h replaces `A2a`'s 4 h at the head** and everything shifts +8 h.
+That single substitution is the whole 15.50 h ↔ 23.50 h spread.
 
-**Where the 3.25 h job floor comes from**, stated as a sum so it cannot drift from the headline again:
+**Where the 11.0 h job floor comes from**, stated as a sum so it cannot drift from the headline again:
 
 | node | h | on the path? |
 |---|---|---|
 | SMOKE | 0.40 | ✅ |
-| **BUILD** | **2.21** | ✅ — at 384 vCPU, was 6.60 at the withdrawn 128 |
+| **BUILD** | **9.96** | ✅ — 384 vCPU at the MEASURED rate (6.60 at the withdrawn 128; 2.21 at the isolated rate) |
 | PUB1 | 0.30 | ✅ |
 | GA1 | 0.32 | ✅ — **it inherits VD1's slot on the path** |
 | PR1 | 0.02 | ✅ |
-| **subtotal — the job floor** | **3.25** | |
+| **subtotal — the job floor** | **11.00** | |
 | STAGE 0.5 · PASS1 0.3 · PLAN 0.05 | 0.85 | ❌ absorbed by the code prefix's slack |
 | PUB2/GA2/PR2 | 0.08 | ❌ parallel to stage 1's tail |
 | ~~VD1 1.49 · VD2 0.17~~ | ~~1.66~~ | **retired — S4** |
-| **all remaining job rows summed** | **4.18** | — |
+| **all remaining job rows summed** | **11.93** | — |
 
 ⚠️ **`GA1` moved onto the critical path by deletion, not by getting slower.** It always ran in parallel with
 `VD1` between `PUB1` and `PR1`; removing the 1.49 h branch exposes the 0.32 h one. **That is why the saving
@@ -446,16 +461,26 @@ Hand this to the agent that runs wave 0. It encodes the constraints above as rul
 >
 >   | route | code | critical path |
 >   |---|---|---|
->   | **synthetic `domain_column` fan-out** — DCLM's parquet mirror is 27,938 files; a file-index-derived `domain` makes `allocate_ordinals` emit separate bundles **with no new mechanism** | **~2 h** | **7.75 h** ✅ |
->   | plan-time ordinal ranges, as originally specified | ~12 h | 15.75 h |
->   | do nothing | 0 | 16.39 h |
+>   | **N REGISTRY ROWS on disjoint subdirectories** — `global-shard_NN_of_10` (10) or `local-shard_N_of_10` (100), CONFIRMED present in `mlfoundations/dclm-baseline-1.0-parquet`. `plan_document` emits N streams and `allocate_ordinals` gives each a dense block **at plan time** — the exact mechanism the 12 h was budgeted to build | **~2 h** | **15.50 h** ✅ |
+>   | plan-time ordinal ranges, as originally specified | ~12 h | 23.50 h |
+>   | do nothing | 0 | **54.54 h** |
 >
->   **The expensive route buys 0.64 h over doing nothing. The cheap one buys 8.64 h.** Break-even is ~11.5 h
->   of code. **Try the cheap route first and time-box it.** Its cost is a schema smell — a `domain` label
->   that is not semantically a domain, inside `manifest_sha256` and unbackfillable — which is a real
->   objection worth raising with the owner, not a reason to silently pick the 12 h route.
->   **If the fallback looks like more than ~11 h, stop and say so:** at that point doing nothing is
->   competitive, and that is a finding rather than a failure.
+>   **❌ Do NOT attempt the synthetic `domain_column` route** an earlier version of this brief recommended.
+>   `_domain_of` (`corpus_read.py:322-345`) receives only the parquet **row**; the file entry is not in scope
+>   at its call site (`:521`), so a file-index-derived domain is not expressible without threading the entry
+>   through `corpus_read`. **It is code, not a free carve.**
+>
+>   **⚠️ Read `artifacts/impl-plan/task-28-briefing.md` §2.1 before writing the rows — two traps fail
+>   SILENTLY.** (1) Each row needs a **distinct `source_label`**: `corpus_build.py:238` keys `targets` by
+>   `(source_label, dom, split)`, so duplicate labels collapse and **the first row's tokens vanish with no
+>   error.** (2) **Do not keep one label and vary `domain`** — `spec_by_label` (`:251`) also collapses and
+>   supplies `config` to every bundle, so **all N children read the same subdirectory: N× duplicate data,
+>   silently.** (3) The labels are permanent and consumer-visible (`dclm-01`…), inside `manifest_sha256`.
+>
+>   **First, regardless of route: add a `source_label` uniqueness check to `load_registry`** (~5 lines).
+>   Trap 1 is live today. **Then reconcile which DCLM repo the 410B row names** — the registry currently
+>   points at `HuggingFaceFW/dclm_100BT`, which is **100 flat files with no subdirectories**, so the free
+>   carve exists only in the nested `-parquet` repo.
 > - **5:** the flat-`np.uint64` hash pre-pass. Owns `corpus_filter.py`. **Size it for DCLM at 325M
 >   documents / 27.92 GB as a `set` (§5.2a), not for `finephrase-table`** — the plan's own table omitted
 >   the worst bundle.
