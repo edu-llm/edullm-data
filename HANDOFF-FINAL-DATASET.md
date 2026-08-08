@@ -150,6 +150,19 @@ worktree.** Before touching the mix, read `16` (regime), `17` (the reversal red-
   **Ask for this explicitly in the brief.**
 - **Verifying peer claims instead of relaying them.** MegaMath checked out. The Qwen3 "36T" figure did
   not — it is a whole-family corpus size, not one model's budget.
+- **Reading an agent's EVIDENCE section, not its summary.** The dedup audit's notification said the
+  decontamination rule is "tuned to report clean" and the code must change; its own `F13` graded the
+  same finding *"cosmetic-to-quality-degrading"* and said nobody has measured the alternative. **When a
+  summary outruns its evidence section, the evidence section is right.** Its key citation also appeared
+  nowhere in the artifact — `grep` settled it.
+- **Making agents audit each other.** The wall-clock audit demolished a headline blocker I had already
+  written into the plan and opened a task for; the source audit corrected my boundary-marker advice.
+  Neither would have surfaced from one pass. **Four of six audits corrected something of mine.**
+- **Simulating a defect instead of describing it.** "Adding a source shifts ordinals" is easy to
+  under-rate; running the real stage-1 mix through `allocate_ordinals` produced *"98% of shards, 882B
+  tokens, 23 h of tokenize"* — which is what made it the plan's first blocker.
+- **Checking whether execution reaches the code I was reading.** Adopted only after it caught me twice
+  (see below). A budget constant is not a byte count until a consumer drains it.
 
 ## What Didn't Work — my own errors, each with the fix
 
@@ -172,6 +185,28 @@ paper**, whose one *controlled* test shrinks the gap to **+0.6 with FineWeb-Edu 
 average; and my "18× the data, worse result" framing was **backwards** because the Nemotron anneal *is*
 token-matched at 30% per arm. **DCLM-over-FineWeb-Edu survives in direction only — never quote the
 magnitudes.**
+
+### From the 2026-08-07 implementation review — four more of mine, caught by my own audits
+
+**Read these before trusting a number in `IMPLEMENTATION-PLAN.md`; two of them were in that document
+as findings until an audit refuted them.**
+
+| claim of mine | what was wrong |
+|---|---|
+| **"The pipeline reads 18 TB to fetch 4.21 TB"** — a headline blocker, with a task opened | **Wrong twice over.** `val_fraction` **cancels** out of the read algebraically (val tokens `want×VF` over divisor `VF`), and the budget is a **ceiling never reached** — verified on the real run, 26 of 27 bundles filled every shard. So the `_CHARS_PER_TOKEN` fix I proposed saves **zero bytes** and starves bundles if applied. Real over-read is 2.02× |
+| **"Gate A is 6 round trips per object"** | It is **8**. 8 gives 15.76 rt/s against the measured 15.8, and a call-counting spy recorded 80,392 trips for 10,049 objects. I had "explained" the gap with LISTs that *were* the missing calls |
+| **"Extend the boundary-marker rewrite table"** | Under dolma2 **only the end-of-text token is a document boundary**; the other 21 added tokens are ordinary ids. I conflated a quality concern with a corpus-splitting one. The single-entry table is correct — the real defect is the two-character prefix guard, which makes any addition a silent no-op |
+| **`stackv2-edu` as the OOM example** | Used a stale 155 B/entry figure that predates the int narrowing. At the current 85.9 B it fits; **`synthetic-finephrase-table` (225.6M docs) is the one that OOMs.** Conclusion unchanged, example wrong |
+
+**And one agent claim I rejected rather than relayed:** an audit asked me to retract a citation because
+"arXiv:2604.13977 does not exist." It resolves — full record, 12 authors, COLM 2026. The fetch tool had
+flagged its April 2026 date as "the future"; today is 2026-08-07. **"This looks like it's from the
+future" is a claim about the checker's calendar, not the paper.**
+
+**The transferable lesson**, and it is the same one `INGEST-CALIBRATION.md` teaches about the reservoir:
+**a formula is not a measurement, and a model that needs a hand-waved remainder to match a measurement
+is not a model yet.** Both of my retracted numbers came from reading code arithmetic without checking
+whether execution reaches it.
 
 ## Key Decisions
 
@@ -203,6 +238,30 @@ magnitudes.**
   ~400B MCF threshold (8B/1T) gives +0.2/−1.1.
 - **The baseline model reuses the same corpus** at a different ratio vector (report §9) — shed
   knowledge-shaped data, raise reasoning-shaped. **No second dataset, no re-ingest.**
+
+### Build-side decisions, from the 2026-08-07 review (details in `IMPLEMENTATION-PLAN.md`)
+
+- **Publish TWO datasets**, `pretrain/final-stage1-900b` and `-stage2-100b`, not one. `build_mixture`
+  is scoped to one group of one dataset and `PATH_LABEL_KEYS` is exactly two levels deep, so "stage"
+  cannot be a third path segment. A cooldown is sequential anyway, so nothing needs a mixture spanning
+  both — and stage 2 at 4,000 objects **validates in 0.56 h today with no code change.**
+- **Interleaving is TRAINER-side, and this is now settled.** `labels` is one dict per shard path, and
+  Gate A recomputes it from the key by full dict equality, so an interleaved shard **cannot** carry
+  per-source labels. The micro-batch fix is `MoELoadBalancingLossGranularity`, not the data.
+- **Keep 13-gram / `minimum_hits=2` decontamination** and document the divergence from the design doc's
+  5-gram. Two audits split on this; the asymmetry decides it — a false negative leaves one benchmark
+  item in 1T, while a false positive at 5-gram risks the mechanism that cost DCLM 11.8 MMLU. **Fix the
+  5-shot-render defect first: it breaks decontamination at any `n`.**
+- **Do not put gigatoken on the critical path for this build.** Its pretokenizer regex is
+  byte-identical to dolma2's and the repo's own parity fixture is semantically our tokenizer — but CI
+  runs **no tests**, Unicode divergence from HF is WONTFIX, and tokenization is ~$38 and not the
+  bottleneck. Gate it (`IMPLEMENTATION-PLAN.md` §7.5) and revisit for the *next* build, where
+  re-tokenization is the point.
+- **One agent owns one FUNCTION, never one file.** Five code items edit `corpus_build.py`; inside it
+  they cluster into `_reader_for` and `run_bundle`. This is the binding constraint on parallelism —
+  file contention, not logic.
+- **Batch all pre-job code into ONE image.** Images build only from `edullm/**`, and a measured
+  comparison put a two-image scheme **0.1 h worse** because the second build lands on the critical path.
 
 ## Next Steps
 
