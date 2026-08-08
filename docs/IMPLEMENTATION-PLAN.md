@@ -1684,13 +1684,14 @@ is reachable."*
 
 | projection | what would double it |
 |---|---|
-| tokenize 6.61 h | **linear vCPU scaling is an ASSUMPTION.** A1 was measured at 32 vCPU only; 128 vCPU on one host may contend on memory bandwidth. Never measured at the cap |
+| **build 9.96 h** | **linear vCPU scaling is an ASSUMPTION**, and the extrapolation is now **12×** (32 → 384 vCPU) rather than 4×. Never measured at the cap, and **12 concurrent `c7i.8xlarge` has never been demonstrated** (`desiredvCpus` is 0). ⚠️ **And the rate itself was 4.52× wrong until 2026-08-08** — it is now the MEASURED end-to-end 72,615 tok/s/vCPU, but only for the *reservoir* mix; per-bundle spread there was **3×**, and DCLM is unmeasured |
 | **read 0.26–4.0 h** | **the most likely 2×, and possibly 10×.** Every read figure borrows ~85 MB/s from a *single-stream S3* measurement. Reconciling the measured 8 h reservoir build instead implies **HF CDN throughput near 8.4 MB/s** — an order of magnitude lower. Our only other datapoint is 0.8 MiB/s *out of region* |
 | the 13-gram decon scan | **~193 billion Python-level `blake2b` calls, NEVER measured.** I attributed all CPU in the build to tokenization; this is a second CPU consumer of unknown size and plausibly explains unaccounted hours |
 | **publish** | **no in-region `publish()` duration has EVER been measured**, and it is the one stage pulling ~4 TB through a client. The only datapoints are 0.8 MiB/s from a laptop off-region and a 125 GB Batch publish that **timed out at 3600 s** single-threaded with 31 of 32 vCPU idle |
 | Gate A 0.36 h | threading gains are capped by `max_pool_connections` (default **10**); at 16 workers it self-throttles unless the pool is raised too |
 | `verify --deep` 1.66 h | 7.82× was measured at 1.005 TB; at 4.0 TB the read may saturate the NIC before 8 streams. **Where that 7.82× was measured is not recorded** |
-| all of it | **the 128 vCPU cap is a queue property, not a physical one.** If the queue is shared, effective concurrency drops and everything scales inversely |
+| all of it | **the 384 vCPU cap is a config value, not a physical one** — 1,060 vCPU of quota sit behind it, so it can be raised, but that buys nothing until the big bundles split. ⚠️ **And a non-Batch "lane" path draws on the same quota while being invisible to `batch list-jobs`** (§8B.7), so an empty queue is not free capacity |
+| **the ~6.2× parallelism ceiling** | the filter is single-threaded Python holding the GIL, so **no amount of machines goes past it.** Splitting bundles buys the ability to *use* 384 vCPU; it makes no vCPU faster. This is the ceiling behind every figure above |
 
 **Never measured at the target scale:** Gate A beyond 10,049 objects, `verify --deep` beyond 1.005 TB,
 tokenize beyond 32 vCPU, `publish()` in-region at all, the decontamination scan's CPU cost at all, and

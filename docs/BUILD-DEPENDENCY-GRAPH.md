@@ -384,7 +384,7 @@ while stage 1 is still verifying, so stage 2 contributes **nothing** to the crit
 | 1 | **M1 bandwidth measurement** | job — **do this first, it recalibrates the rest** |
 | 2 | M2 Dolma3 sample + M4 doc lengths | job |
 | 3 | ~~Ask the owner to accept the Nemotron licence gate~~ ✅ **DONE** — measured at **134.0B** by a teammate with access | — |
-| 4 | **C3b + B6** — split the big bundles **and** the shard-size constant. **Owns `corpus.py`'s plan surface: `allocate_ordinals`, `plan_document`, `SHARD_TOKENS`.** **Try the cheap route first — it is worth 8.64 h; the expensive one is worth 0.64 h** | agent, worktree |
+| 4 | **C3b + B6** — split the big bundles **and** the shard-size constant. **Owns `corpus.py`'s plan surface: `allocate_ordinals`, `plan_document`, `SHARD_TOKENS`.** **MANDATORY — unsplit is 54.5 h. Registry rows (~2 h) → 15.5 h; ordinal ranges (12 h) → 23.5 h** | agent, worktree |
 | 5 | **A2a** hash pre-pass driver (owns `corpus_filter.py`) | agent, worktree |
 | 6 | **A2b** keep-list consumer (owns `run_bundle`) | agent, worktree |
 | 7 | **C1** FinePhrase id partition (owns `_reader_for`) + **B5** rebuild the decon index (external repo) | agent, worktree |
