@@ -436,15 +436,52 @@ naively yield. The collapse is the set de-duplicating the shared preamble and fi
 across ~1,090 items per subject — so what survives as distinct entries are the windows **spanning the
 target question and its choice**. The question does get indexed, at ~21 windows rather than ~438.
 
-**Consequence 3 — the short-item hole is on the index side too.** A benchmark question under ~14 words
-yields windows only in combination with template words (`Question:`, `Answer:`, the previous
-demonstration's tail), so it can match only a document that reproduces the template. This is worse
-than the usual framing, which notes only that short *documents* yield zero windows.
+**Consequence 3 — the short-item hole is on the index side too, and it is now quantified.** A benchmark
+question under ~14 words yields windows only in combination with template words (`Question:`, `Answer:`,
+the previous demonstration's tail), so it can match only a document reproducing the template. Worse than
+the usual framing, which notes only that short *documents* yield zero windows.
+
+**The bound, from GPT-3 Table C.1:** 5th-percentile benchmark item lengths are **11 / 12 / 13 words**.
+So **at least 5% of ARC and HellaSwag items are shorter than a single 13-gram** — reachable only by the
+exact-hash half, which Consequence 1 shows is inert for exactly those suites. Both halves fail on the
+same items. That makes this **corpus-corrupting for ARC and HellaSwag specifically**, not merely a
+theoretical gap.
 
 **FIX: rebuild the index from raw benchmark fields** — question alone, question + each choice, question
 + correct answer — **in addition to** the rendered form. One CPU job, no GPU, using the pinned
 `ai2-olmo` checkout. DERIVED cost: a bare ~30-word MMLU question yields ~18 windows × 62,102 items ≈
 **1.1M new n-grams, about +36% index size and +18 MB**. Cheap, and it restores the exact-hash half.
+
+### 6.2a The n-gram size: keep 13, and do not relitigate it without a measurement
+
+The design doc specifies `allenai/decon` at **`ngram_size 5`**; the code shipped a reimplementation at
+**13-gram with `minimum_hits = 2`**. Two independent audits in this review reached **opposite verdicts**
+on that divergence, so here is the reconciliation.
+
+**Both agree DCLM's famous −11.8 MMLU is a deduplication result, not a decontamination one.** From v4
+Table 19: `min_ngram` 5 gives MMLU **32.5**, `min_ngram` 13 gives **44.3**, while Core moves only
+45.3 → 44.5. The two rows also differ in shard count, so it is **not a clean single-variable ablation**.
+
+**The argument for keeping 13 is a mechanism, not the number.** Short-n-gram collision causes mass
+removal of MMLU-relevant material, and that mechanism is identical whether the match set is other
+corpus documents (dedup) or benchmark items (decontamination). Decontamination is arguably *worse*: its
+match set is deliberately concentrated on exactly the knowledge MMLU tests, so the collisions are
+**aimed at the metric** rather than random with respect to it. Independent corroboration: non-member
+**7-gram** overlap has been measured at **32.5–77%** depending on domain; 5-gram collision is higher.
+
+**The counter-argument, which is real:** `allenai/decon` at 5-gram weights matches by **IDF** and
+requires **cluster expansion**, which suppresses precisely the common-phrase collisions that would sink
+a naive 5-gram filter. So the design doc's 5-gram is **not the same object** as DCLM's 5-gram row. That
+difference may well be sufficient — **but nobody has measured it**, and adopting it bets the project's
+headline metric on an untested assumption.
+
+**Decision: keep 13/2 for this build and document the divergence.** The asymmetry decides it — a false
+negative leaves one benchmark item in a 1T corpus, while a false positive at 5-gram risks the mechanism
+that cost DCLM 11.8 MMLU. **Nobody has measured 13/2 against 5/0.8 on our corpus; that is a finding,
+not a gap.** Revisit only with that measurement.
+
+**⚠️ And fix §6.2 first regardless.** The rendered-prompt defect is a defect at *any* n-gram size, so
+tuning `n` before rebuilding the index is tuning the wrong parameter.
 
 ### 6.3 Three coverage gaps worth naming
 

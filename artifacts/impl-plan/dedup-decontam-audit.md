@@ -19,7 +19,7 @@ corrections are marked inline.
 
 ---
 
-## READ THIS FIRST — the five things that matter
+## READ THIS FIRST — the six things that matter
 
 1. **`reservoir_ids.keeps_id` and `IdSet.contains` are fully implemented, tested, and have ZERO callers
    in the build path.** The four FinePhrase sources hold only **0.2683 distinct documents** per declared
@@ -38,16 +38,32 @@ corrections are marked inline.
 5. **`FilterStats` never reaches the receipt**, so the duplicate and contamination rates of our own
    corpus are unrecoverable from artifacts. This blocks most quantitative claims below. (F8)
 
+6. **The shipped 13-gram / `minimum_hits=2` rule is the LEAST sensitive corner of the parameter space
+   anyone has swept — on both axes at once.** ConTAM (arXiv:2411.03923) measured that n=8→10 alone
+   *halves* detection (67.9%→33.8% on PiQA), that `mincount>1` is *strictly harmful*, and that the
+   13-gram family is "likely too strict… which may explain why they seemed to find that contamination has
+   little effect." The design doc specified `allenai/decon` at **ngram_size 5**; the code shipped 13/2.
+   **The design doc was right.** (F13, reversed twice — read the SECOND REVERSAL section)
+
+⚠️ **READ THE ORDER OF REVISIONS BEFORE ACTING.** Three findings changed direction mid-audit, twice in
+one case:
+- **F13** — I first said "code and doc disagree, unmeasured", then "the code is right" (wrong — I applied
+  a *dedup* result to *decontamination*, the exact error `HANDOFF-FINAL-DATASET.md:159` had already
+  retracted), then finally **"the design doc was right, change the code."** The loss functions differ by
+  four orders of magnitude: a decontam false positive costs 0.007% of the corpus; a dedup false positive
+  cost −11.8 MMLU. **Only the last verdict stands.**
+- **F4** — "quality-degrading, bounded" → **corpus-corrupting for ARC and HellaSwag.** GPT-3 Table C.1
+  supplies the bound I declined to fabricate: **≥5% of ARC-Easy, ARC-Challenge and HellaSwag items are
+  shorter than one 13-gram** (5th-percentile lengths 11, 12, 13 words).
+- **F10** — "add URL-key dedup" → **retracted**, because FineMath measured that removing exactly that
+  overlap *hurts*.
+
 **F1 is a CONFIRMATION, not a discovery.** A prior session in this worktree found it independently,
 measured it better (**0.2683 distinct on a complete-column read of 287,000 ids**, not my DERIVED 18.6B),
-and already lists it as blocker #1 — verified on the deployed branch. See "PRIOR WORK" at the end, and
-read `artifacts/1t-research/11-decontamination-audit.md` (294 KB, which I did not read) before acting on
-the plan. Genuinely new here: **F2, F3, F4, F5, F6-reason-3, F8, F12, L2.**
-
-**Two of my own recommendations were retracted or resolved by the literature sweep** — F10 (URL-key
-dedup: downgraded to "measure first", because FineMath measured that removing exactly that overlap
-*hurts*) and F13 (13-gram vs 5-gram: resolved in the code's favour by DCLM Table 19's −11.8 MMLU). See
-"REVISIONS" before acting on anything in the findings list.
+and already lists it as blocker #1 — verified on the deployed branch. See "PRIOR WORK" near the end, and
+read `artifacts/1t-research/11-decontamination-audit.md` (294 KB, which I did **not** read) before acting
+on the plan. Genuinely new in this audit: **F2, F3, F4, F5, F6-reason-3, F8, F12, L2, and the F13
+reversal.**
 
 **Scale note:** the registry and the built corpus are **252B, not 1T**. DCLM is 30B (11.9%) and
 FineWeb-Edu 20B (7.9%) — not the 378B/252B in the audit brief. All 1T figures are DERIVED by scaling the
@@ -1573,9 +1589,11 @@ engineering.**
 ⚠️ **Prerequisite:** read `artifacts/1t-research/11-decontamination-audit.md` (293,645 bytes) first — I
 did not, and it may already answer this. It certainly constrains it. See "PRIOR WORK" below.
 
-### Step 1 — Rebuild the decontamination index. (F2 + F3 + F4 + F12; ~1 day eng, <$5 compute)
+### Step 1 — Rebuild the decontamination index AND change n from 13 to 8, min_hits 2 to 1. (F2 + F3 + F4 + F12 + F13-reversed; ~1 day eng, <$5 compute)
 
-The highest value per dollar in the audit, and it fixes four findings at once.
+**BLOCKING**, and it now fixes five findings at once. ⚠️ **The sub-steps are ORDERED** — raw fields must
+land before `minimum_hits=1`, because template n-grams from the current 5-shot render would become
+single-hit false-positive triggers (F2/G4.5). Sequence: **raw fields → n=8 → min_hits=1.**
 
 - Add **raw** benchmark fields alongside the 5-shot renders: bare question; question+each choice; and
   **question+correct-answer** (which is ≥14 words for nearly every item, closing F4's short-item hole).
@@ -1583,8 +1601,15 @@ The highest value per dollar in the audit, and it fixes four findings at once.
 - Add GSM8K **train** (F3 sub-finding).
 - **Vendor the builder into `edullm-data`** while you are in there (F12) — the artifact that adjudicates
   the corpus should not live in a sibling repo behind a pinned `ai2-olmo` SHA.
-- **Memory:** index grows from 0.45 GB resident by ~+36% (DERIVED: ~1.1 M new 13-grams ≈ +18 MB on
-  disk) → **~0.61 GB**. Fits the 14 GiB container trivially.
+- **Change the defaults** to `ngram_size = 8` (ConTAM's measured optimum; 5 if matching `allenai/decon`
+  exactly is preferred) and `minimum_hits = 1`. **The shipped 3,097,372-entry artifact is 13-gram-specific
+  and cannot be reused at n=8** — the rebuild is mandatory, not optional.
+- **Memory:** raw fields add ~+36% (DERIVED: ~1.1 M new n-grams); moving 13→8 adds ~5 windows per item,
+  so DERIVED **~1.6× total ≈ 5 M entries ≈ 80 MB on disk, ~0.7 GB resident.** Fits 14 GiB trivially.
+- ⚠️ **Validate `minimum_hits=1` for false positives before shipping it.** The measured flag rates say
+  the cost is negligible (DCLM 0.007%, FLUX 3.9×10⁻⁶ — at our scale a 0.007% rate is 21,580 docs /
+  0.018B tokens), but that is an argument for accepting *some* false positives, not for skipping the
+  check.
 - **Compute:** one CPU job over ~150 K benchmark items. Minutes.
 - **Verify before shipping:** re-run `tests/test_corpus_filter.py:252-284` against the new artifact, and
   add the same shape of test for **each** benchmark in Step 0 — a verbatim item must be caught, ordinary
@@ -1717,8 +1742,8 @@ like an answer and is not one.
 | **URL-key dedup** | **Retracted mid-audit (F10 revision).** I recommended it on the strength of our own 52% URL-overlap measurement, then found FineMath measured that removing *that exact overlap* reduces performance. Revisit only if Step 9 says removal helps. |
 | **Semantic / embedding dedup** | ~$1,788 at 252B (~$7,000 at 1T), "scored *below* the no-filter baseline in DCLM Table 4, second-worst of 19 samplers in the Ask-LLM benchmark, shipped by **zero** flagship corpora" (`DATASET-DESIGN-reservoir.md:361-362`). |
 | **LLM-judge decontamination** | ~$200 at 60B → ~$800 at 1T. Do Steps 4+5 first — they address the same hole structurally for ~$40 and, unlike an LLM pass, they fix the 4× amplification too. Revisit only if a benchmark score comes in implausibly high. |
-| **Lowering `minimum_hits` to 1** | 2 hits is well calibrated (40/40 GSM8K caught, 0/2 prose false-positive, `tests/test_corpus_filter.py:265-284`) and L3's −11.8 MMLU shows what over-aggressive n-gram matching costs. Leave it. |
-| **Switching decontam to 5-gram per the design doc** | L3 measures min_ngram 5 vs 13 at **MMLU 32.5 vs 44.3**. The shipped 13-gram rule is better supported. **Correct the design doc instead** (F13 revision). |
+| ~~**Lowering `minimum_hits` to 1**~~ | ⚠️ **REVERSED — now RECOMMENDED (Step 1).** ConTAM measured `mincount>1` as *strictly harmful*: it "increased false negatives more than it reduced false positives." My original reason (L3's −11.8 MMLU) was a **dedup** result misapplied to decontamination. |
+| ~~**Switching decontam to 5-gram per the design doc**~~ | ⚠️ **REVERSED — now RECOMMENDED (Step 1), at n=8.** ConTAM: n=8→10 alone halves detection; 13 is two steps worse. `allenai/decon` ships n=5. The design doc was right and the code is the thing to change. See SECOND REVERSAL. |
 
 ### Documentation owed regardless of what gets funded ($0, do it this week)
 
@@ -1866,7 +1891,33 @@ Dolma §5.4's 53.2% / 14.9% / 18.7% (arXiv:2402.00159); C4 §2.2 (arXiv:1910.106
 global 90%-of-20-grams rule (arXiv:2506.05209); Zyda-2 Table I's **13.0%** DCLM↔FineWeb-Edu overlap
 (arXiv:2411.06068); and the upstream dedup status of all 14 registry sources from their cards.
 
-### RELAYED from `DATASET-DESIGN-reservoir.md` and NOT independently verified in this audit
+### ⚠️ STATUS UPDATE — most of this list was VERIFIED after it was written
+
+The decontamination literature sweep returned after this ledger was drafted and **cleared most of it**.
+Now verified (MEASURED-PUBLISHED, primary source read): **arXiv:2311.04850** (title/id correct, all three
+claims confirmed, HumanEval overlap **8.5–18.9%**, and the new decisive number — rephrased-item F1 goes
+**0.926 → 0.000**); **`allenai/decon` defaults** (`ngram_size` **5**, stride 10, threshold 0.8,
+whole-record removal, plus two short-item gates); **OLMo 3's** GSM8K "complete leakage" and ">60,000 DROP"
+(verified verbatim, §3.5.3–3.5.4 — with the caveat that `decon` ran on **midtraining only, not
+pretraining**); **`lm-sys/llm-decontaminator`** (embedding top-k → GPT-4 judge, F1 0.960–0.995);
+**Min-K% Prob** (confirmed: needs per-token logprobs from the trained model, so post-hoc only, AUC 0.72);
+**DCLM's 51.8→52.7** (exact, but at a **0.007%** flag rate — see the SECOND REVERSAL for why the design
+doc misuses it); and **ConTAM (arXiv:2411.03923)**, which is new to this project and reverses F13.
+
+One correction to the ledger's own framing: **DCLM's SemDedup row has no no-filter comparator**, so
+`DATASET-DESIGN-reservoir.md:361-362`'s "scored *below* the no-filter baseline" is **unsupported**. The
+correct framing is "below the *heuristic* baseline (27.1/13.8 vs fastText 30.2/15.4), worst-but-one of
+eight" — and it is a **dedup** result, not decontamination, abandoned as "infeasible" at scale.
+
+Still relayed and NOT independently verified:
+
+- **Hernandez et al. arXiv:2205.10487**'s damage threshold of **100 exposures**
+  (`DATASET-DESIGN-reservoir.md:719`). F7's whole argument is scaled against this number.
+- **Muennighoff et al. arXiv:2305.16264**'s `R_D* ≈ 15.39` (`corpus.py:422-427`).
+- **Pythia**: dedup gave "no clear benefit" at 70M–12B equi-token (`DATASET-DESIGN-reservoir.md:726`).
+- The **~$200-for-60B** cost estimate for `llm-decontaminator` (`:776`); my ~$800-at-1T scales it.
+
+### (original list, retained for the audit trail — see the status update above)
 
 These appear in my Q5/Q6 reasoning and in the "NOT in the plan" table. They are the design doc's
 citations, and I did not open the primary source. **Treat as UNVERIFIED until someone does:**
@@ -1902,11 +1953,175 @@ citations, and I did not open the primary source. **Treat as UNVERIFIED until so
 
 ### Measurements I explicitly declined to fabricate
 
-- **The fraction of MMLU / ARC-Easy / ARC-Challenge / HellaSwag items under 14 words** (F4). I gave a
-  clearly-labelled DERIVED estimate (ARC plausibly 10–25%, MMLU plausibly <10%) and stated it is not a
-  measurement. One CPU-minute over the HF datasets settles it. **Do not quote my estimate as a number.**
+- **The fraction of MMLU / ARC-Easy / ARC-Challenge / HellaSwag items under 14 words** (F4). ⚠️ **PARTLY
+  RESOLVED after this was written** — GPT-3 Table C.1's `N` column is the **5th-percentile example length
+  in words**: HellaSwag 13, ARC-Challenge 12, ARC-Easy 11, OpenBookQA 8, PIQA 8. So **≥5% of those items
+  are shorter than one 13-gram** — a published floor, not the exact fraction. My earlier DERIVED estimate
+  (ARC 10–25%, MMLU <10%) remains unmeasured; **quote the ≥5% floor, not my estimate.** One CPU-minute
+  over the HF datasets still settles the exact value.
 - **The false-positive RATE of `minimum_hits=2`** (Q5). The code's evidence is a 2-item sample
   (`tests/test_corpus_filter.py:265-284`), which is not a rate. I bounded the mechanism (template
   n-grams from the 5-shot render are the real false-positive source) and left the magnitude UNVERIFIED.
 - **The duplicate and contamination rate of our own corpus** (F8). Unrecoverable from artifacts by
   construction; it is why Step 2 of the plan comes before any re-run.
+
+---
+
+# ⚠️⚠️ SECOND REVERSAL — F13 AND F4 FLIP AGAIN. THE 13-GRAM RULE IS WRONG, AND I MADE THE PROJECT'S OWN RETRACTED ERROR
+
+The decontamination literature sweep landed after the "REVISIONS" section above and **overturns it**.
+I am recording the full chain because I got this wrong in the same way this project already got it wrong
+once, and the audit trail is the useful artifact.
+
+### What I did wrong
+
+In "REVISIONS → F13" I wrote that DCLM Table 19's **−11.8 MMLU** at `min_ngram` 5-vs-13 "weighs in favour
+of the code's 13-gram rule and against the design doc's 5-gram spec," and told the reader to correct the
+design doc rather than the code.
+
+**That is the exact error `HANDOFF-FINAL-DATASET.md:159` already retracted** — I even quoted the
+retraction in my own PRIOR WORK section ("That is a **deduplication** result (DCLM Table 19), not
+decontamination") and then reasoned as if it transferred anyway, on the grounds that "the mechanism is
+the same." **The mechanism is not the same, and the direction of harm is opposite:**
+
+- In **dedup**, a short n-gram makes you **delete real training data** — matching generic prose. Cost:
+  lost tokens, measured at −11.8 MMLU.
+- In **decontamination**, a short n-gram makes you **delete slightly more suspect documents**, from an
+  index of ~150 K benchmark items. DERIVED against our corpus: DCLM's measured decontam flag rate is
+  **0.007%** and FLUX's `decon` run over 62M docs flagged **3.9×10⁻⁶**. At those rates a false positive
+  costs **21,580 docs / 0.018B tokens (0.007%)** — noise. Even a hypothetical 1% false-positive rate
+  costs 2.5B of 251B tokens.
+
+**The loss functions are asymmetric by four orders of magnitude, so a result about one does not
+transfer to the other.** I asserted transfer without checking the magnitudes. That was the error.
+
+### What the literature actually measures on the decontamination axis — both parameters, both against us
+
+**ConTAM (arXiv:2411.03923)**, the only paper that sweeps this directly — n ∈ {8,10,13,20} ×
+mincount ∈ {1,5,10,20,100}, 13 benchmarks × 7 models. MEASURED-PUBLISHED:
+
+1. **n=8 → n=10 alone HALVES detection**: 67.9% → 33.8% of PiQA examples get nonzero contamination
+   scores. **13 is two steps worse than 10.**
+2. **`mincount > 1` is strictly harmful**, verbatim: "discounting overlapping strings that occurred more
+   than once **increased false negatives more than it reduced false positives**."
+3. Optimal published setting: **n=8, mincount=1, skip_budget=0.**
+4. Their verdict on the GPT-3/PaLM 13-gram family: "likely too strict… **which may explain why they
+   seemed to find that contamination has little effect**."
+
+**So our shipped rule — 13-gram, minimum_hits=2 — is the least sensitive corner of the space anyone has
+swept, on both axes simultaneously.** And `allenai/decon`, which the design doc specified, ships
+**ngram_size 5**.
+
+### REVISED-AGAIN verdict on F13: the DESIGN DOC WAS RIGHT. The code is the thing to change.
+
+**Retract my "correct the design doc, not the code" recommendation entirely.** `DATASET-DESIGN-reservoir.md:741,775`
+specified `allenai/decon` at `ngram_size 5`, threshold 0.8, whole-doc removal. The shipped
+reimplementation at 13/2 is **strictly less sensitive on both parameters than the spec it replaced**, the
+substitution is undocumented, and `corpus_filter.py:39-41` defends it with a false-positive argument
+that the measured flag rates (0.007%) show costs almost nothing.
+
+**REVISED SEVERITY: quality-degrading → corpus-corrupting.** This is now a top-3 finding, not a
+cosmetic one. It means the decontamination gate we ship is tuned to *report clean* — which is exactly
+what ConTAM says about the 13-gram family, and exactly the failure mode the audit brief named.
+
+**REVISED FIX:** change `DecontaminationIndex` defaults to **`ngram_size = 8`** (ConTAM's optimum; 5 if
+matching `decon` exactly is preferred) and **`minimum_hits = 1`**, then **rebuild the index at the new
+n** — the shipped 3,097,372-entry artifact is 13-gram-specific and cannot be reused at n=8. Bundle with
+Step 1. Cost: still <$5 of CPU, but the index grows: DERIVED, an 8-gram index over the same texts yields
+~5 more windows per item than a 13-gram one, so expect **~1.6× the n-gram count ≈ 5 M entries ≈ 80 MB,
+~0.7 GB resident** — still trivial inside 14 GiB.
+⚠️ **`minimum_hits = 1` must be validated against false positives before it ships**, because template
+n-grams from the 5-shot render (F2/G4.5) become single-hit triggers. **Fixing F2 first is a prerequisite,
+not an option** — with raw-field entries replacing rendered ones, the template-boilerplate false-positive
+source largely disappears. Order matters: **F2 rebuild, then n=8, then min_hits=1.**
+
+### F4 is REVERSED TOO — and it was never a "13-word floor," it is a 14-word floor made worse by TWO gates
+
+My F4 said the short-item hole is "quality-degrading, bounded." Two new measurements make it larger:
+
+1. **GPT-3 Table C.1's `N` column is the 5th-percentile example length in words** (MEASURED-PUBLISHED,
+   extracted directly from the PDF): **HellaSwag 13, ARC-Challenge 12, ARC-Easy 11, OpenBookQA 8,
+   PIQA 8.** So **≥5% of ARC-Easy, ARC-Challenge and HellaSwag items are shorter than a single 13-gram**
+   and are structurally undetectable on question text at our n. **This is the published bound I said I
+   would not fabricate in F4 — it exists, and it confirms the hole is real.** The exact
+   fraction-under-14-words is still unpublished; ≥5% is a floor, not the value.
+2. **`allenai/decon` has TWO short-item gates we would inherit**: under 20 tokens only a perfect 1.0
+   match counts (`perfect_match_decay_start/end: 20/50`), and **`eval_min_token_length: 20` drops
+   sub-20-token eval entries from the reference index entirely**. So adopting `decon` naively would
+   *also* silently drop short eval items — a different mechanism reaching the same blind spot.
+   **Check this against the Step 0 suite before trusting any clean report from it.**
+
+Three independent sources note short items evading n-gram decontamination verbatim: **Latxa** ("test
+items of equal or bigger size"; EusProficiency median question = **4 words**), **OLMo 3** (DROP broke
+"due to its short-question-about-a-passage format"), and the 13-/20-token floors themselves.
+**REVISED SEVERITY of F4: quality-degrading → corpus-corrupting for ARC and HellaSwag**, two of the four
+benchmarks this program steers on.
+
+### The paraphrase premise is now VERIFIED, and it is worse than the design doc says
+
+arXiv:2311.04850 — **title and id correct** (so my UNVERIFIED flag is cleared, and no fabrication here).
+All three relayed claims MEASURED: bypass verbatim; HumanEval overlap **8.5–18.9%** (RedPajama-1T 8.5%,
+StarCoder-Data 15.9%, The Stack 18.9%); synthetic contamination confirmed (CodeAlpaca 12.8%,
+MATHInstruct 15.4%, FLAN CoT 0.5%). **The decisive number the design doc omits: F1 against rephrased
+items goes 0.926 verbatim → 0.000 on rephrased EN and 0.000 on rephrased ZH.** Not degraded — **zero**.
+And the rule it defeated was a **10-gram**, i.e. already more sensitive than ours.
+
+**This makes F11's "no detection defense" verdict MEASURED rather than DERIVED**, and it makes Step 5
+(decontaminate the source, inherit by id) the *only* mechanism in the plan that addresses rephrased
+leakage at all — because it never n-gram-checks rephrased text.
+
+### Contamination DOES hurt — the dose-response curve exists, and my Q6 hedging was too soft
+
+The design doc leans on DCLM's 51.8→52.7 as evidence contamination is benign. **Verified exactly
+(MMLU 51.8→52.7, HellaSwag 77.9→78.4) — but at a flag rate of 0.007% of the corpus, so removing
+0.007% of documents should not move a score either way. +0.9 is plausibly noise, and it is evidence
+their pipeline was already clean, NOT that contamination is harmless.** Do not cite it the way
+`DATASET-DESIGN-reservoir.md:765-766` cites it.
+
+The real dose-response measurements (all MEASURED-PUBLISHED, all new to this project):
+
+- **Bordt et al. (arXiv:2410.03249)**, Chinchilla-optimal 774M: holdout → 4× → 12× → 32× → 144×
+  insertions = **49.16 → 64.76 → 81.30 → 92.95 → 96.05**. Extrapolates to **~3 points per single
+  insertion**, at an injection footprint of ~0.003% of tokens. Larger models exploit contamination more
+  (124M +5pp vs 1.6B +20pp on identical data). **Forgettable, though**: 12× contamination is back inside
+  the holdout CI by 15× Chinchilla, and OLMo-7B lost 87% of a 17pp gain over 25k clean steps.
+- **Hubble (arXiv:2605.24818)**, 8B/500B: MMLU inflation **1.8 / 6.4 / 13.1** at low/mid/high dose;
+  hard items far worse (MMLU error by bin **0.5 / 10.3 / 29.2**).
+- **GSM8K specifically hurt, twice, independently** — OLMo 3 (complete leakage, better decontaminated)
+  and Marin 32B (54.71→69.1, confounded with a shuffle fix + math-source swap). Mechanism in both:
+  contaminated *formatting* mismatched the eval format.
+- **The near-null (Jiang et al. arXiv:2401.06059) is MCQ-specific and self-refuting**: MMLU 22.87→23.13
+  at factor 1 (inside noise) while CNN/DM ROUGE-1 went 24.76→28.80 — **and their clean/dirty splits
+  failed to detect contamination the authors had injected themselves.** So passing a
+  GPT-3/Llama-2-style clean/dirty check proves nothing.
+- **No clean "+Y points per X% overlap" slope exists**, because it is not monotonic in overlap volume:
+  NaturalQuestions at 52% overlap gives ~0 while HellaSwag at 85% gives +14.8 (Llama 3 Table 15). What
+  governs it is **whether the leak carries the answer and matches the eval format** — which is precisely
+  why F2's fix (index question+correct-answer, not the 5-shot render) is the right shape.
+
+### Corrections owed to the repo, added to the documentation list
+
+6. **`DATASET-DESIGN-reservoir.md:765-766` misuses DCLM's 51.8→52.7.** It reads as "contamination barely
+   matters"; the flag rate was 0.007%, so it is evidence of a clean pipeline, not of harmlessness.
+7. **`corpus_filter.py:39-41`'s defense of `minimum_hits=2` is contradicted by ConTAM** — mincount>1
+   "increased false negatives more than it reduced false positives." Rewrite or remove.
+8. **`DATASET-DESIGN-reservoir.md:774`'s `allenai/decon` row is right about `ngram_size 5`** but omits the
+   two short-item gates (`perfect_match_decay_start/end: 20/50`, `eval_min_token_length: 20`) that would
+   silently shrink the reference index. Add them.
+9. **`corpus_filter.py:32-35`'s claim that OLMo 3's `decon` is the model for this module needs one
+   caveat**: OLMo 3 ran `decon` on **midtraining only, not pretraining**. We are applying it to
+   pretraining, which is a stronger claim than theirs.
+10. **Three corpora we ingest or benchmark against do NO decontamination at all** — FineWeb, RefinedWeb,
+    C4. Worth stating in `limitations[]` alongside the FineWeb-Edu note.
+
+### Net effect on the plan
+
+**Step 1 (rebuild the index) is now doing three jobs, not one, and its priority rises from "highest value
+per dollar" to "blocking":** add raw fields (F2), add the Step 0 benchmarks (F3), **and change n from 13
+to 8 with `minimum_hits` 1 (F13-reversed)**. Same job, same <$5, but the order inside it is now
+constrained: **raw fields first, because `minimum_hits=1` is only safe once template n-grams are out of
+the index.**
+
+Everything else in the plan stands. Steps 4 and 5 (the id partition and source-decontaminate-inherit) are
+*more* justified now, because the paraphrase F1 of 0.000 means they are the only defenses that work on
+rephrased text.

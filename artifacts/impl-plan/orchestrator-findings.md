@@ -375,3 +375,55 @@ quota amplification** (resolving a signed CDN URL per range read instead of once
 timeout" was **our own setting**, not an AWS limit. It also contains a self-flagged **16x unit error**
 (wall-seconds vs worker-seconds per file) that propagated into `RUN-THE-INGEST.md:35`. After the CDN
 fix the same pass took **67 s**. Do not size anything from that file's tables.
+
+## F20 — reconciling two audits that reached opposite verdicts on 13-gram vs 5-gram
+
+The dedup/decontam audit's *notification summary* claimed "the shipped decontamination rule is tuned
+to report clean" and that "the design doc was right; the code is what to change." **I did not
+propagate that, for three reasons.**
+
+**1. Its own written finding is much weaker than its summary.** `F13` in the file itself grades the
+divergence **"cosmetic-to-quality-degrading"** and concludes: *"Nobody has measured 13/2 vs 5/0.8 on
+our corpus — that is a finding, not a gap I can close by reading code. Cheapest resolution: document
+the divergence ($0); measure only if a leak is suspected."* That is the honest version and it does
+not reverse anything. **When an agent's summary is stronger than its own evidence section, trust the
+evidence section.**
+
+**2. The ConTAM claim is undocumented.** `grep ConTAM` in the audit file returns **zero hits** — the
+paper, its n=8→10 halving figure, and the `mincount>1` quote exist only in the notification, not in
+the artifact. An unrecorded citation cannot be checked or cited by a successor.
+
+**3. Prior art already engaged this question and reached the opposite conclusion, with a mechanism.**
+`artifacts/1t-research/11-decontamination-audit.md` (294 KB, which the agent stated it did NOT read)
+calls `ngram_size 5` **"the most dangerous number in this whole audit"** at line 88. Both audits agree
+DCLM Table 19 is a *dedup* result — but the prior one goes further and explains why it transfers:
+
+> *"The mechanism is n-gram collision at short lengths causes mass removal of MMLU-relevant material,
+> and that mechanism is identical whether the match set is other documents in the corpus (dedup) or
+> benchmark items (decontamination). Decontamination is arguably worse: the match set is deliberately
+> concentrated on exactly the knowledge MMLU tests, so the collisions are not random with respect to
+> the metric — they are aimed at it."*
+
+It also supplies independent corroboration (Duan et al. measured non-member **7-gram** overlap at
+32.5-77% by domain; 5-gram collision is higher still) and the v4 table numbers verbatim
+(min_ngram 5 → MMLU 32.5, min_ngram 13 → 44.3, Core 44.5 vs 45.3), while noting the two rows also
+differ in shard count so it is **not a clean single-variable ablation**.
+
+**And it names the detail the newer audit never addresses:** `allenai/decon` at 5-gram weights by
+**IDF** and requires **cluster expansion**, which suppresses exactly the common-phrase collisions
+that would sink a naive 5-gram filter. So the design doc's 5-gram is not the same object as DCLM's
+5-gram row. *"That is a real difference and it may well be sufficient — but nobody has measured it,
+and adopting it means betting the project's headline metric on an untested assumption."*
+
+**VERDICT: keep 13/2 for this build, and document the divergence.** The asymmetry decides it — a
+decontamination false negative leaves one benchmark item in a 1T corpus, while a false positive at
+5-gram risks the mechanism that cost DCLM 11.8 MMLU. Revisit only with a measurement on our own
+corpus, and record the ConTAM citation properly first so it can be checked.
+
+**The one thing both audits agree on, and it is the real fix:** the index is built over 5-shot
+RENDERED prompts, which is a defect at *any* n-gram size (task #24). Fix that before touching `n`.
+
+**Also accepted from this audit:** GPT-3 Table C.1 gives the bound I had left unquantified — 5th-percentile
+benchmark item lengths are **11/12/13 words**, so **≥5% of ARC and HellaSwag items are shorter than a
+single 13-gram** and are reachable only by the exact-hash half, which F2 shows is inert for those
+suites. That makes the short-item hole concrete rather than theoretical.
