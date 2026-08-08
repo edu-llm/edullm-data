@@ -2822,6 +2822,529 @@ identity · plan load · shard striding · `_file_shards` · decon index · **HF
 
 ---
 
+# ✅ WALL 6 DOWN — and `plan_id` did NOT move. My prediction was wrong.
+
+**CEO-verified:** `1424 passed, 2 deselected` (+9); cosmopedia row now `config='data'`, `id_column=''`,
+**`id_surrogate=True`**; sum **986,000,000,000**; **`PLAN_ID 29968a2b04008a8c` UNCHANGED.**
+
+I told ENG *"report the new `PLAN_ID` (it will move again)."* **It doesn't**, and ENG verified why rather than
+accepting my framing: the plan entry serializes `id_column` (already `""`) and **not** `id_surrogate`. So corpus
+**identity** is unchanged — **correct, because a surrogate is a READ MECHANISM, not a content decision.** That
+distinction is right and I had it wrong.
+
+## 🔴 The corollary PLAT MUST act on — CEO-verified, and it would silently recur wall 6
+`corpus_build.py:1402`: `specs = {s.key: s for s in load_registry(args.registry)[0]}` — **`_cmd_run` builds specs
+from the REGISTRY, not from `plan.json`.** So **`id_surrogate` reaches the build ONLY via the registry.**
+**Staging the plan alone drops the flag and wall 6 recurs identically** — same error, same file, and it would
+look like the fix simply didn't work. **PLAT must re-stage the registry, not only the plan.**
+
+## 🔧 §B12's surrogate had a collision it could not have anticipated — and MY ruling caused it
+§B12 specified `(config, file_basename, row_index)`. **Written when the row named ONE config.** My E17 ruling
+made it `config: "data"`, spanning all 8 — and **basenames collide across configs**: `MEASURED`,
+`train-00000-of-00002.parquet` exists under **both** `data/openstax/` and `data/wikihow/`. Basename + row index
+would hand **two different documents the same id** — putting unrelated documents on the same side of the carve
+and making them read as **duplicates**.
+
+**ENG's fix: the full repo-relative path**, which already carries the config segment §B12 relied on. **Design
+honoured, not replaced** — and ENG recorded that my E17 change caused it rather than quietly "improving" the
+spec. **That is the second time tonight a correct fix created the precondition for the next defect** (the first:
+dropping `_dist/*` after the wheel became unnecessary). **A fix changes the premises of every spec written
+against the old state.**
+
+`id_surrogate` is explicit on the row with three guards: **pinned revision required** (§B12's condition, now
+enforced rather than documented), **mutually exclusive with `id_column`**, and **neither-on-a-drawn-row is
+refused** — which turns wall 6 into a **plan-time failure instead of a crash on file 1.**
+
+## 🏆 The hardening checks caught something about THEMSELVES
+ENG's first versions were wrong in two ways and it flagged them unprompted as *"the class of test that erodes
+trust"*:
+- **HTTP 429 read as a broken row** — running both network tests back-to-back reported *"13 of 132 rows do not
+  resolve"*, **a false registry failure from a shared upstream throttle.** Now skips with a reason.
+- **HTTP 403 read as a broken row** — `nemotron-cc-math-3` 403s because **gate access is per-account (§B13)** and
+  the build reads that source from **`_src/`**, not HF. Now a NOTE, never a failure.
+> **"An unactionable red test is one people learn to ignore."**
+
+**And it cut 127 probes to one per `(repo, id_column, surrogate)` shape** — the 100 dclm rows share a repo and
+schema, so probing each was *"100 range-reads proving one fact and reliably earning a 429."*
+**Result: 1 gated row reported as unverifiable; every other shape verified against real footers.**
+
+**This is the correct resolution of a tension I had not named:** a check that fails on infrastructure noise is
+worse than no check, because it trains people to ignore red. ENG built the check I ordered **and** made it
+trustworthy enough to act on.
+
+---
+
+# 🔧 CEO ERROR #10 — "rev 12 stands" was WRONG. The surrogate is CODE, and no image has it.
+
+**PLAT refused to re-stage and was right.** CEO-verified:
+```
+git grep -c "id_surrogate" 69667ed -- src/edullm_data/  → ZERO   ← what rev 12's image was built from
+git grep -c "id_surrogate" 8e2524a -- src/edullm_data/  → ZERO   ← the wall-5 config-fix commit
+git grep -c "id_surrogate" e38d007 -- src/edullm_data/  → corpus.py:8, corpus_read.py:2
+git diff --stat 8e2524a..e38d007 -- src/edullm_data/    → 110 insertions
+```
+**Rev 12 pins `sha256:1ada3f2d…8d07`, built from `69667ed` — a commit where `id_surrogate` does not appear
+anywhere.** That image reads `id_column: ""`, finds no leaf, and raises **the identical wall-6 error.**
+**Re-staging alone would have looked exactly like the fix failing** — the outcome I warned PLAT about, arriving by
+a route I created.
+
+**Where my reasoning broke, precisely.** My `plan_id` logic was correct — the plan serializes `id_column`, not
+`id_surrogate`, so identity is untouched. **But "no new plan is needed" does not imply "no new image is
+needed."** I inferred the second from the first. Rev 12 is right in its `PLAN_ID`, registry path, role, and
+tokenizer, and **wrong in its image digest — the one field a `plan_id` check cannot see.**
+> **PLAT's framing, which is the night's recurring shape stated exactly: "the artifact that changed is not the
+> artifact that was checked."**
+
+**The near-miss is instructive:** `8e2524a` (10:01) is **newer** than what rev 12 pins and **does** carry the
+wall-5 fix — so pinning it would clear wall 5 **and still fail wall 6.** **Two adjacent commits, two fixes, only
+the older one deployed.** An image chosen by recency rather than content would have failed in a way that looked
+like the surrogate being broken.
+
+## ✅ AUTHORIZED under A5 — build from `e38d007`, then rev 13
+PLAT stopped because my instruction said "rev 12 stands" and an image build was not in it. **Correct, and the
+tenth consecutive time that rule has caught something real.** A5 covers image builds; this is squarely inside it.
+1. **Build from `e38d007`** (A5 Option-B per-build overrides; generator already written).
+2. **Preflight: the 10 assertions PLUS two new ones PLAT proposed** — `id_surrogate` present in `corpus_read`
+   source, **and behaviourally that a spec with `id_surrogate=True` / `id_column=''` yields a stable id.**
+   **The behavioural one is what matters** — the source-presence check is a version string in disguise.
+3. **Register rev 13** — identical to rev 12 except the digest.
+4. **Re-stage plan + registry**, reading back `id_surrogate` from the staged registry.
+5. Smoke #6.
+
+## 🏆 THE PATTERN, NAMED — worth more than any single fix tonight
+PLAT's synthesis, and I am adopting it verbatim for the handoff:
+> **A fix that widens a scope invalidates every uniqueness assumption inside the old scope.**
+
+**Three instances tonight, all of them mine:**
+1. I dropped `_dist/*` once the wheel was unnecessary → **removed the decon index** the build must read.
+2. I ruled `config: "data"` to span all 8 cosmopedia configs → **basenames collide across configs**, so §B12's
+   `(config, basename, row_index)` would have given unrelated documents the same id.
+3. I said "rev 12 stands" because `plan_id` held → **the image was built before the code existed.**
+
+**Each fix was correct. Each invalidated a premise something else was written against.** The lesson is not
+"be more careful"; it is that **a scope change requires re-deriving every assumption that referenced the old
+scope**, and the ledger is where that re-derivation has to happen.
+
+**Verified by PLAT before stopping, so nothing is re-derived:** `e38d007` on the remote ✅ · cosmopedia
+`config='data'`, `id_column=''`, `id_surrogate=True` ✅ · **exactly 1 of 133** rows ✅ · total
+986,000,000,000 unchanged ✅ · its local `src/` byte-identical to `e38d007` ✅
+
+---
+
+# ✅ `PREFLIGHT_OK=13` — the `e38d007` image is CLEARED. CEO-read from the log.
+
+PLAT handed off mid-flight, low on context, with the preflight still RUNNABLE and **explicitly refusing to assert
+whether `T_place` had been breached** because its own elapsed-time arithmetic was inconsistent across calls.
+**I resolved it with a trusted clock and its own discriminator:**
+
+```
+job 8a14c35a-c2a3-4e88-ae06-6084fbe7d2df
+created 10:43:31 · started 10:46:16 · stopped 10:46:17 · exit 0 · SUCCEEDED
+→ placed in 2.75 min — BENIGN COLD START, not capacity starvation. T_place NOT breached.
+```
+**PLAT's caution was right and its refusal to guess was right.** The discriminator it left behind
+(`desiredvCpus` moving off 0 ⇒ scaling; staying 0 with a job queued >10 min ⇒ starvation) resolved this in one
+call. **A handoff that hands over the *test* rather than the *conclusion* is what made that possible.**
+
+**And exit 0 was not acceptance.** Reading `preflight13/default/709338547a9f47fd855aa2b49785ce2f`:
+```
+OK 1 version=0.9.1                     OK 8  _resolve_file_shards reads _file_shards
+OK 2 B3 threaded profile checks         OK 9a _file_shards HONOURED (round-trip)
+OK 3 B7 verified sink                   OK 9b unknown key REFUSED
+OK 4 pins tokenizers=0.22.2 pyarrow=25  OK 10a surrogate_id present
+OK 5 numpy=2.4.6                        OK 10b surrogate_id stable + COLLISION-FREE:
+OK 6 families eos=0.05 …                    cosmopedia/data/openstax/train-00000-of-00002.parquet#0
+OK 7 C3b duplicate source_label raises  OK 10c1/2/3 pinned-rev · mutual-exclusion · neither-REFUSED
+PREFLIGHT_OK=13
+```
+**`sha256:4df94c4c…babcae` provably contains the surrogate.** Provenance was `UNVERIFIED` (a concurrent session
+pushed the tag at 10:38:43, before PLAT's own build reached its push) — **so the preflight decided it, for the
+third time tonight. Contents proven, name irrelevant.**
+
+**10b is the assertion that matters**, and it encodes ENG's basename discovery as a permanent test:
+`data/openstax/train-00000-of-00002.parquet` must yield a different id from `data/wikihow/…`. **It fails loudly
+if anyone ever "simplifies" the id back to a basename** — the defect my own E17 scope-widening created.
+**10c3 turns wall 6 into a plan-time failure**, so it can never again surface as a crash on file 1.
+
+## ECR tag immutability, twice tonight
+Second time it prevented two concurrent sessions from clobbering each other's image. **A protection nobody
+designed for this workflow, doing real work** — the same shape as the airlock Deny and the `NeverWrite…` Deny.
+
+---
+
+# ✅ ALL SIX WALLS DOWN — smoke #6 RUNNING and healthy
+
+**CEO-verified live:**
+```
+edullm-reservoir-build:13   image sha256:4df94c4c…babcae ✅   PLAN_ID 29968a2b04008a8c ✅
+smoke #6 "final-build-smoke6-surrogate"  def9e49e-fead-4868-bac6-80f5effaf0ef  RUNNING
+```
+The log reaches `DECON index 149,777 exact + 3,097,372 ngrams` **and continues** — where smoke #5 raised
+`id_column=''` immediately after that same line. **`cosmopedia--train`, the bundle that failed BOTH wall 5 and
+wall 6, is now reading documents with surrogate ids.**
+
+## 🔧 CEO ERROR #11 — I briefed a fresh executive from a STALE handoff note
+PLAT-1 did more before exhausting context than its handoff note recorded. I spawned **PLAT-EXEC-2** with
+instructions to *"register rev 13"* and *"re-stage both artifacts"* — **both already done.** Following my brief
+would have created a **redundant rev 14** (making "which revision is authoritative" ambiguous, the exact
+confusion the cite-by-number rule prevents) and submitted a **second smoke test** competing for a cold-starting
+CE. **Caught by verifying live state before the new agent acted; corrected in flight.**
+**Standing rule, now applied to myself: verify current live state before acting on any instruction — including
+mine. A handoff note describes the moment it was written, not the moment it is read.**
+
+## 🔑 PLAT-1 corrected its own reasoning about the silence, and it changes the watchdog
+It asserted the post-`DECON` silence was expected, **then read `_cmd_run` instead of leaving it an assumption**:
+`DONE` **fires ONCE, after the entire bundle completes** — `run_bundle` emits nothing per shard.
+```
+DECON index  →  [~1.9 h of TOTAL SILENCE]  →  DONE cosmopedia--train
+```
+**Two consequences, both now load-bearing for the 48-wide launch:**
+1. **CloudWatch silence carries NO information for up to ~7.5 h on the longest child.** A hung child and a
+   working child are **indistinguishable in the logs.** Only `describe-jobs` status and `desiredvCpus` are live
+   signals. **Poll status, not logs.**
+2. **`T_run` must be enforced externally from `startedAt` — and now for a SECOND, STRONGER reason than the null
+   `statusReason`: the application emits no heartbeat at all.** A watchdog waiting for log lines to *stop* would
+   **never fire, because only one ever arrives.** The §8B.7 design was right for a reason nobody had stated.
+
+**`DONE` is where the throughput number lives** (`tokens=…` + elapsed) — **one line, and it is the first real
+rate measurement for this corpus.** Projection for shard 0: **1.90 h**, `T_run` 3.80 h.
+
+## 🟡 Observability gap filed, not fixed
+**`info["length"]` — the short-document attrition that killed the dolma3 QA row — is computed, returned, and
+NEVER PRINTED.** The source says so outright. **On the Batch path that attrition is invisible**, which will
+matter to whoever tries to explain a token shortfall. Recorded for the handoff; **not fixed tonight** (it is
+observability, not correctness, and the build is mid-flight).
+
+---
+
+# 🔴 CEO ERROR #12 — my brief would have silently discarded ~80% of the corpus. PLAT-2 caught it pre-launch.
+
+**CEO-verified independently:**
+```
+_shard_slice = items[shard::of],  --of 185 baked into rev 13
+array size=48  → bundles built  48/185   union==plan: FALSE   (137 NEVER built)
+array size=185 → bundles built 185/185   union==plan: TRUE
+```
+**And it exits 0.** 48 SUCCEEDED jobs, zero errors, **787,237,470,208 of 982,752,985,088 tokens = 80.1% never
+read** — surfacing only at Gate A **after the full spend.** *"It does not fail"* is the whole danger.
+
+**Root cause, in PLAT-2's words:** *"the `48 × 8` ruling is correct about the CONTAINER SHAPE and was transposed
+onto the ARRAY SIZE. 48 is concurrency; 185 is the work decomposition."* **Two different quantities.** This is
+the `N_BUNDLES=27` rev-9 failure in a new dress — **and I wrote it into the brief.** Eighth hit of *"was this
+sized on the reservoir?"*, and the **third** time the stop-and-ask rule caught **my instruction** rather than an
+agent's.
+
+## ✅ RULING — LAUNCH A: `--array-properties size=185`. It is also 7.9 h FASTER.
+| shape | coverage | makespan |
+|---|---|---|
+| **A. `size=185`, `--of 185`** ← **AUTHORIZED** | **185/185, each exactly once, union == plan** | **11.70–11.91 h** |
+| B. `size=48` (as I briefed) | **48/185 — 80.1% lost, exit 0** | — |
+| C. `size=48` + `N_BUNDLES=48` | 185/185 | 19.57 h, needs a rev 14 |
+
+**A keeps the 48-wide shape** — `maxvCpus 384 / 8 = 48`, so **the CE caps concurrency at 48 regardless of array
+size**; the extra 137 children queue and **backfill**. **That backfilling is why A beats C:** 185 units bin-pack
+into 48 slots far better than 48 fixed strides (**longest bundle 7.84 h vs a 19.57 h child**). Aggregate 491.3
+container-hours; perfect-packing floor 10.24 h; **A is 14–16% above floor — consistent with "quote 11–15 h."**
+**Nothing about the 48-wide ruling is abandoned.**
+
+**PLAT-2 refused to substitute its own array size**, correctly: *"A3 covers submitting build jobs; it does not
+cover me deciding the work decomposition, and this sets what fraction of the corpus exists."*
+
+# 📊 FIRST REAL RATE — MEASURED, and it corroborates the anchor to 4.4%
+```
+5 shard intervals: 43,44,49,46,43 s → mean 45.00 s      (CEO-recomputed)
+25,001,984 tok / 45.00 s = 555,600 tok/s/container = 69,450 tok/s/vCPU
+vs the 72,615 anchor = 0.956×          startedAt → first shard = 51.7 s
+```
+**Within 4.4% of an anchor measured on a different mix, different hardware, months apart** — strong corroboration
+of the number the entire 11.07 h estimate rests on.
+⚠️ **Scope, stated by PLAT-2 unprompted:** this is **cosmopedia — synthetic prose, the easiest case.** **DCLM,
+PDF and code remain UNMEASURED**, and PDF+code are two of the four split sources, so the residual error lands on
+the biggest children. **Keep quoting 11–15 h.**
+
+**WALL 6 IS DOWN BY EXECUTION, not by absence of an error:** **six token shards in S3, each exactly
+100,007,936 B** = 25,001,984 × 4 B — `tokens × dtype_size == file bytes`, exact. **Shard 0 IS `cosmopedia--train`,
+the bundle that failed both wall 5 and wall 6. There is no wall 7.**
+
+## 🔧 Two of my claims corrected by PLAT-2, both by reading the DEPLOYED artifact
+1. **`info["length"]` IS printed.** I recorded it as *"computed, returned, never printed."* PLAT-2 checked
+   **`e38d007` — the exact commit rev 13's image was built from** — and found executable code at
+   `corpus_build.py:1454-1455`. **True pre-Wave-0, false now. Short-doc attrition WILL appear in this build's
+   logs.** Gap **closed**, and the earlier ledger entry is superseded. **It verified against the artifact that
+   will run, not the claim I relayed.**
+2. **"CloudWatch silence carries no information" is refutable, correctly scoped.** True of CloudWatch, **false of
+   the build: shards land in S3 continuously with server-clock `LastModified`.** **A hung child IS
+   distinguishable — shards stop appearing.** Better than logs or `describe-jobs`, and it makes the ~2 h window
+   observable rather than blind. **Adopted as the primary progress signal.**
+
+---
+
+# 🚀 THE BUILD IS LAUNCHED AND RUNNING AT FULL CAP — CEO-verified live
+
+```
+job    422972f4-7dd6-4bb2-b20f-0b4ca5660c4d   name final-dataset-build-185
+jobdef edullm-reservoir-build:13 (by NUMBER)   arrayProperties.size = 185 ✅
+state  RUNNING=47  RUNNABLE=138  FAILED=0  SUCCEEDED=0
+CE     desiredvCpus 0 → 384 (== maxvCpus, FULL CAP), "ComputeEnvironment Healthy"
+S3     263 token shards, EVERY ONE exactly 100,007,936 B   (26,306,252,901 B total)
+```
+
+**OPTION A'S CENTRAL CLAIM IS CONFIRMED BY EXECUTION: 47 concurrent children against an array of 185.** The CE
+caps concurrency at 48, **not** the array size — so **the 48-wide shape is preserved exactly** while the
+137-bundle coverage gap is gone, and the extra children backfill as slots free. **The fix I nearly shipped as
+`size=48` would have lost 80.1% of the corpus with 48 green exit codes.**
+
+**Ordinal allocation verified live, and this was the non-negotiable condition:** `dclm-001/train-00159`,
+`dclm-002/train-00322`, `dclm-003/train-00485` — **disjoint blocks striding 163, no reuse across 47 concurrent
+children.** I confirmed it myself across 44 dclm prefixes in the listing. ENG's plan-time allocation holds under
+real concurrency.
+
+# 🟢 DCLM MEASURED FOR THE FIRST TIME — the 3× band collapses to 0.911×
+```
+dclm-001: 42, 51 s     dclm-002: 42, 54 s     mean 47.25 s/shard   (n=4, 2 independent children)
+→ 529,143 tok/s/container = 66,143 tok/s/vCPU = 0.911× the 72,615 anchor
+```
+**MEASURED, server clock.** **DCLM is 410B tokens — the largest source in the corpus — and its throughput has
+been UNMEASURED all night**, carrying a stated 3× uncertainty band from the reservoir's per-bundle spread.
+**That band collapses to 0.911×, and it lands favourably.** Biggest single reduction in uncertainty available.
+
+# 🔍 A REAL CONTENTION EFFECT — separable only because PLAT-2 let smoke #6 live
+Same bundle, same shape, before vs during the ramp:
+
+| window | s/shard | tok/s/container |
+|---|---|---|
+| `train-00000..00017` **uncontended** | **43.41** | 575,926 |
+| `train-00018..00023` **during 47-way** | **48.60** | 514,444 |
+
+**1.120× slowdown at full cap.** **Not CPU** — each child owns 8 dedicated vCPU. Shared **S3 request rate**,
+**instance NIC** (4 children per `c7i.8xlarge`), **HF egress**. **This is the term 11.07 h omitted entirely.**
+
+**Revised: DCLM rate → 12.51 h; contended → 12.87 h; longest child 8.46 h against an 18 h timeout.**
+**Best estimate 12.5–12.9 h — inside "quote 11–15 h", and NOT 11.07 h.** PDF and code remain **UNMEASURED** and
+hold the longest children (`finepdfs-edu--train--p00of04` sets the makespan).
+
+## Judgement call — smoke #6 NOT terminated, and it paid for itself
+It is still building `cosmopedia--train` = array index 0, so **index 0 has two writers.** PLAT-2 let both run on
+three grounds: **(1)** a terminate is a mutation I did not name and was not transitively required; **(2)** the
+build is **deterministic**, so both write the same keys with the same bytes — an **idempotent overwrite**;
+**(3)** `bundle_is_done` (`corpus_build.py:892`) **re-heads every shard and compares sizes**, its docstring
+explicit that *"the receipt alone is not evidence."* Cost **~$2.74** of duplicated container.
+**And it produced the uncontended control that made the contention finding possible** — $2.74 for the only clean
+baseline we will ever get of this corpus at 1-way. **Correct call, and better than terminating would have been.**
+
+# 🔴 PLAT-2'S OWN WATCHDOG WAS FAIL-OPEN — caught on its first event
+It reported `RUNNING=0 RUNNABLE=0 desiredvCpus= shards=0` while 3 children were RUNNING and 18 shards existed.
+**Root cause: a bare `aws` in an agent session has no credentials** — every call returned `NoCredentials`, and
+**every one was suppressed by its own `2>/dev/null`.**
+
+**It failed OPEN in the exact way that matters:** with `desiredvCpus=""` the starvation test `[ "$D" = "0" ]` is
+**permanently false**, so **a genuinely starved 185-child array would have hung forever, silently** — *the
+precise failure the watchdog exists to catch.* `SUC+FAI>=185` was also permanently false, so it would never have
+reported terminal state either. **It would have emitted cheerful zeros for 11 hours.**
+
+**This is a documented failure REPRODUCED** — PLAT-1 hit exactly this on the mirror `_README` verify recipe.
+**Reading about it was not enough.** Same shape as `ReadStats.problems()` and the `families/` bug: **passes in
+the harness, protects nothing in production.** **Eleventh instance of the night's theme, and the first where an
+agent re-created a failure it had read the write-up of.**
+
+Rewritten fail-closed. **The harness classifier then blocked the automated path and PLAT-2 did not route around
+it.** Monitoring stays on explicit broker calls — manual, but *"given my first watchdog was fail-open, a manual
+path I trust beats an automated one I do not."* **Correct trade.**
+
+---
+
+# 🛑 A STEP WAS MISSING FROM MY SEQUENCE — `publish()`. CEO ERROR #13.
+
+**Every remaining-sequence message I sent read `_backup/` → Gate A → promote. `publish()` was never named, and
+without it Gate A has nothing to read.** PLAT-2 found it **during** the build rather than 12 h from now.
+
+**The build deliberately produces NO manifest** — correct by design: `edullm-final-dataset-build` carries
+`NeverWriteValidatorTriggeringOrTerminalNames`, the Deny we preserved byte-for-byte. So the build yields **token
+shards + receipts under `_ingest/final-dataset/29968a2b04008a8c/data/`**, while **Gate A validates a published
+dataset with a `manifest.json` under `pretrain/<name>/vN/`.** **`publish()` is the converter** — it stream-hashes
+every object, writes the manifest and `dataset.json`, and copies into `pretrain/`. **I omitted the one step that
+makes the other three possible.**
+
+## 🔴 The publisher def is reservoir-hardwired — the trap's EIGHTH costume
+`edullm-dataset-publish:1`, MEASURED live, **four independent reservoir bindings**: driver path under
+`_ingest/reservoir-dolma2/build/PUBLISH/`, `sources.json`/`realized-tokens.json` from that same prefix (a
+different corpus's mix metadata), a preflight asserting **`__version__=='0.7.5'`** against our cleared **0.9.1**
+(fails closed — good), and an image `sha256:055ff803…f354` that is **not** the preflight-cleared
+`4df94c4c…babcae` and contains no Phase-0 work.
+**Same root cause as rev 9, `_scratch/`, the split list, `REGISTRY_PATH`, the job role, the CodeBuild project, and
+my Nemotron amendment.**
+
+## 🟢 PLAT-2 read the POLICY instead of inferring from the name — NO IAM CHANGE NEEDED
+```
+PublishAnyDatasetUnderTheSevenSection2Families  Allow → landing/{pretrain,curriculum,eval,probe,sft,tokenizer,vendor}/*
+ReadStagedBuildOutputToHashAndCopyIt           Allow → landing/_ingest/*  _staging/*
+NeverWriteThePublishedBucketThatIsTheAirlock    Deny  → edullm-data/*     ← airlock intact
+NeverForgeAValidatorVerdictAnywhere             Deny  → *_VALIDATED.json *_REJECTED.json
+```
+**The role can already read `_ingest/final-dataset/*` and write `pretrain/*` — the Sid literally says
+"PublishAnyDataset."** **A job-definition problem, not a permissions problem — the exact inverse of wall 1.**
+**This is the boundary lesson applied correctly**: last time an `AccessDenied` naming a boundary looked absolute
+and wasn't; here a reservoir-named role looked scoped and isn't. **Read the policy, not the name.**
+
+⚠️ **And the consequence PLAT-2 flagged: the publisher CANNOT write `_backup/`** — it is in none of its Allows,
+and `NeverWriteThePipelinesOwnControlPrefixes` denies `_ingest/`/`_staging/` writes. **So the backup needs a
+different principal than the publisher.** Settle before step 3.
+
+# ⚖️ RULING — the two dataset ids, and the naming rule is VERBATIM AGAINST "final"
+**CEO-verified at `docs/dataset-creation/DATASET-STANDARD.md:271`:**
+> **"no version tokens — `v2`, `final`, `new`, `latest`, `fixed` (version is a separate segment)"**
+
+and `:307` lists **`eval/mcq-v2-fixed-final`** as a bad example with *"three version tokens."*
+**So `pretrain/final-dataset` is FORBIDDEN**, and PLAT-2 was right to refuse to choose it. The internal working
+name must not become the published address.
+
+The rule also requires kebab-case, 2–5 words, **"what the data is plus the one axis that distinguishes it from
+its siblings,"** no dates, no relative words. Siblings in `pretrain/` are `dolma2-150b`, `datamix1`. The
+distinguishing axis here is **token budget**, exactly as `dolma2-150b` uses it. Stages are **900B / 100B**
+(report §Stage 1/§Stage 2).
+
+| stage | **dataset_id** | why |
+|---|---|---|
+| **1 (bulk, 900B)** | **`pretrain/edu-mix-900b`** | *what*: an education-weighted mixture; *axis*: the 900B budget. Mirrors `dolma2-150b`'s corpus+budget form. |
+| **2 (anneal, 100B)** | **`pretrain/edu-mix-anneal-100b`** | same corpus family, distinguished by **role** (anneal) and **budget** — so the two are tellable apart without opening them, which is the standard's own test. |
+
+**Both pass the rule:** kebab-case, 3–4 words, no dates, no version tokens, no relative words, no person names.
+**Both pass the standard's test** — *"if two people independently made this dataset, would they land on the same
+name?"* and *"could you tell it apart from its five nearest siblings without opening it?"*
+
+**Frozen forever once published.** `v1` is the version segment; a re-cut is `v2`, never a rename.
+
+## Two further rulings PLAT-2 asked for
+- **`publish()` MUST run in-region on Batch.** It **PULLS every byte** to wherever it runs — the ledger records
+  0.8 MiB/s from a laptop = **9 days for 587 GiB**. Non-negotiable.
+- **Stage 2 publishes FIRST, and it is itself the calibration** for stage 1's hashing cost — the same logic that
+  put stage-2 promote first. **~4,000 objects before ~36,000.** A mistake costs a `v2` on the small stage.
+
+---
+
+# 🛑 CEO ERROR #14 — my two-stage naming ruling rests on a split that DOES NOT EXIST
+
+**PLAT-2 stopped before registering and was right.** CEO-verified from the registry, **verbatim** (`_total_note`):
+> *"Per-source targets are the **COMBINED stage-1 + stage-2 draw because a source is READ ONCE**; the report's
+> two tables are per stage and are never summed there."*
+
+**That is ENG's own 940B→986B correction, and I never carried its consequence forward.** The plan has **no stage
+field**; splits are **`train`/`val` only**. **The build produces ONE undifferentiated 982.75B corpus, not a 900B
+set plus a 100B set.** `_corpus` records the *intent* ("~1.0T, two-stage"); **no artifact downstream of the
+registry records which tokens belong to which stage.** So `pretrain/edu-mix-900b` +
+`pretrain/edu-mix-anneal-100b` name two things that do not exist as separable byte sets.
+
+**And PLAT-2 killed every mechanical shortcut, correctly:** `build_plan` (`publish.py:305`) *does* take an
+explicit `files` list — **the mechanism exists; the content does not.** Not `val` (0.005 → ~4.9B held-out, not a
+100B anneal stage). Not "these sources" — **my own ruling is that stage 2 is a DIFFERENT MIXTURE** (bulk 75–80%
+web, anneal 30–45%), i.e. a per-source re-weighting. Not a shard range — ordinals are per-source, so an arbitrary
+cut has no mixture meaning.
+> **"Slicing 982.75B into 900B + 100B by shard selection yields two datasets whose mixtures are BOTH wrong — the
+> 'anneal' set would carry the bulk mix."**
+
+**That is wall 5's defect 2 in a new place: it would look correct and be silently wrong.**
+
+## ⚖️ RULING — OPTION 1. Publish ONE dataset. `pretrain/edu-mix-1t` is REJECTED; the name is **`pretrain/edu-mix-983b`**.
+**One corpus, stage selection reader-side.** Reasons: the registry already treats this as **one read**;
+`build_mixture` **cannot span groups** (real/synthetic had to be fused into the `source` label for exactly this
+reason); **OLMo-core takes a per-path token budget**, so a training run draws its own anneal mix from the
+published corpus; and **nothing is lost** — `source` is a path segment Gate A recomputes, so all downstream
+re-weighting stays available.
+
+**On the name, PLAT-2 flagged the trap itself: "a size in the name should match."** `edu-mix-1t` would claim 1T
+for **982,752,985,088** tokens — a **1.75% overstatement baked into a frozen address**, and the standard's rule
+is that the name carries *"the one axis that distinguishes it,"* not a rounded aspiration. `dolma2-150b` is the
+precedent and it means 150B. **`pretrain/edu-mix-983b`** — kebab-case, 3 words, no version token, no date, no
+relative word, and **the number is true to 0.03%.** `v1` is the version segment.
+
+## 🔧 "Stage 2 calibrates first" is DEAD as literally stated — replaced, not abandoned
+There is no small stage-2 dataset to rehearse on. **PLAT-2 offered three substitutes; I rule the `val` split:**
+**publish/Gate-A/promote the `val` group first (~4.9B, ~200 objects).** It is a **real group in the same
+dataset**, so it exercises the identical code path at ~1/180th the object count, and it is the group whose
+correctness we care most about — the corpus this project already shipped had **six held-out shards that were
+byte-copies of train**, caught only by digest. **The cheap rehearsal and the highest-value check are the same
+object set.** Report its measured promote rate before the train group follows.
+
+# ✅ THE `_backup/` QUESTION IS RESOLVED — CEO-verified, and no IAM change is needed
+I read `publish.py` rather than reasoning from the plan. **`publish()` DOES delete from the source prefix** —
+`s3.delete(landing_bucket, f"{source_prefix}/{rel}")` at **`:1056`**. But it is **guarded**:
+```
+:1053   if source_kind == "local":          ← the delete fires ONLY here
+:945    source_kind = "s3"      when source starts with "s3://"
+:950    source_kind = "local"   otherwise (a local dir staged into _staging/)
+```
+**Our source is `s3://edullm-landing/_ingest/final-dataset/29968a2b04008a8c/data/` — so `source_kind = "s3"` and
+the delete NEVER FIRES.** Its own comment calls it *"best-effort… staging cleanup is not load-bearing."*
+
+**Therefore the staged shards in `_ingest/` SURVIVE publish, and they ARE the owner's safety net** — the exact
+thing they asked for: *"even if the promotion fails or whatever happens, I still have something in the staging
+bucket that I can deal with tomorrow."* **`_ingest/` carries the 30-day rule** (vs `pretrain/`'s 14), so it
+outlives the build by four weeks. **No `_backup/` copy, no new principal, no IAM change, and ~4 TB of duplicate
+copying avoided.**
+⚠️ **Condition: `publish()` must be invoked with the `s3://` source form, never a local path.** If anyone ever
+passes a local dir, the delete fires and the safety net evaporates. **That is now a hard requirement on the
+publish invocation, and it must be asserted, not remembered.**
+
+---
+
+# ⚖️ RULING 2 IS WITHDRAWN — `val` is not a group. And a val-only publish would have WEAKENED the check it was for.
+
+## Both structural claims CEO-verified
+```
+publish.py:295  _group_of(rel) = rel.split("/",1)[0]   "the group … = its first path segment"
+corpus.py:141   GROUP = "tokens"
+→ tokens/cosmopedia/train-00000…  and  tokens/finewiki/val-00003…  are the SAME GROUP
+publish()'s 23 parameters: ZERO named `files`  (it enumerates the prefix itself, _enumerate_s3 :953)
+```
+**There is exactly ONE group in this corpus.** The split lives in the **filename** (`train-NNNNN`/`val-NNNNN`),
+which `parse_shard_name` and Gate A recompute. **`build_plan` takes a `files` list; `publish()` never exposes
+it** — so a val-only publish means calling `build_plan` directly and reimplementing reservation + copy + manifest
+around it: **new publish code on the irreversible path, which is the opposite of a rehearsal.**
+
+**PLAT-2 traced the false premise to its own earlier message** — it had told me a subset publish "is technically
+expressible" because `build_plan` takes `files`. **True of `build_plan`, false of the publisher.** Same shape as
+`put_file_verified` (real, wrong signature for the sink) and `promote()`'s docstring (says 2 round trips, code
+does 3). **I built ruling 2 on that premise without checking the caller.** Error #15.
+
+Also corrected: val is **102 shards / 2.55B tokens = 0.26%** of the corpus, not the ~200 objects / 4.9B I stated.
+
+## 🔴 The decisive point — my rehearsal would have DISABLED the defect it was chosen for
+I picked `val` because this project shipped a corpus with **six held-out shards that were byte-copies of train**.
+**PLAT-2's refutation, quoting this ledger back at me:** *"Gate A catches 5 of 6 by digest, **only because it's
+ONE group**."* **A duplicate-digest check can only fire when both shards are in the same manifest. A val-only
+publish has no train shards to compare against — it could not catch that defect at all.**
+**So publishing train and val together is strictly stronger, and the sequence already does it.** My "cheapest
+rehearsal = highest-value check" reasoning was exactly inverted.
+
+## 🔧 And PLAT-2 pre-refuted its own fallback before I could act on it
+It was about to recommend `--dry-run` as the rehearsal, **then read the branch instead of trusting its own
+sentence:** `:146-148` returns **before** the `from edullm_data.publish import publish` at `:150`. So a dry run
+**never enumerates S3, never groups a path, never hashes a byte** — it prints assembled kwargs and exits. Worth
+running to validate the driver's own mix table (whose docstring notes it *"has already been retyped wrong
+once"*), **but it is not a rehearsal of the publish path.** Its own words: *"I claimed behaviour from a flag's
+name with the file already open."* **Twelfth instance of the night's theme, self-caught pre-report.**
+
+## ✅ RULINGS 1 and 3 CONFIRMED IN CODE
+```
+validate_dataset_id('pretrain/edu-mix-983b')  → OK
+validate_dataset_id('pretrain/final-dataset') → REJECTED: "word 1 ('final') is a version token"
+```
+**The corpus's own working name is unpublishable by the validator** — the naming caution was load-bearing, not
+pedantry. Size accuracy: **`983b` = +0.03%**, `1t` = +1.75%, `900b` = −8.42%. (Validator lives at
+`contracts.py:383`, not `manifest.py` — noted for the record.)
+Ruling 3's guard re-confirmed at `:1053`/`:945`; **PLAT-2 will ASSERT `str(SOURCE).startswith("s3://")` in the
+driver**, since a local path would destroy the safety net *as a side effect of an argument's form*.
+
+## ⚖️ RULING — drop the rehearsal. Publish once, and the FIRST publish is the first real exercise of that path.
+**Accepted, on PLAT-2's reversibility argument, which is correct:** `publish()` writes **only to
+`edullm-landing`**, it **cannot promote** (the `NeverForgeAValidatorVerdict` Deny plus a separate job def), and
+**the staged shards survive** (ruling 3). **Freezing happens at promote, which stays gated.** So the risk of
+exercising publish for the first time on the real corpus is bounded to a landing-prefix write we can redo.
+**The promote-rate calibration is unaffected** — Gate A + promote is the measurement either way, and it is
+reported before anything follows.
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of

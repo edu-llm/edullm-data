@@ -1,0 +1,43 @@
+{
+  "jobDefinitionName": "edullm-dataset-publish",
+  "type": "container",
+  "platformCapabilities": [
+    "EC2"
+  ],
+  "propagateTags": true,
+  "retryStrategy": {
+    "attempts": 1
+  },
+  "timeout": {
+    "attemptDurationSeconds": 28800
+  },
+  "containerProperties": {
+    "image": "<ACCT>.dkr.ecr.us-east-1.amazonaws.com/sbsandbox-intern-edullm-data@sha256:4df94c4c1caaf0f46ed72dfb42a173ec00b54bb4c63f08a814d05218e4babcae",
+    "vcpus": 16,
+    "memory": 32768,
+    "jobRoleArn": "arn:aws:iam::<ACCT>:role/edullm-dataset-publish",
+    "executionRoleArn": "arn:aws:iam::<ACCT>:role/sbsandbox-intern-edullm-batch-execution",
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/aws/batch/sbsandbox-intern-edullm-cpu",
+        "awslogs-stream-prefix": "publish-edu-mix-983b"
+      }
+    },
+    "environment": [
+      {
+        "name": "PUBLISH_MODE",
+        "value": "--dry-run"
+      },
+      {
+        "name": "TOKENIZERS_PARALLELISM",
+        "value": "true"
+      }
+    ],
+    "command": [
+      "sh",
+      "-lc",
+      "set -e; python -c \"import inspect, edullm_data, edullm_data.profiles.registry as R, edullm_data.publish as P; assert edullm_data.__version__=='0.9.1', 'WRONG IMAGE VERSION: '+edullm_data.__version__; assert 'hash_workers' in inspect.signature(P.publish).parameters, 'NO HASH WORKERS'; m=R.get_profile('pretrain-tokens/v1'); assert m.NAME=='pretrain-tokens/v1', m.NAME; s=inspect.getsource(P); assert 'source_kind == \\\"local\\\"' in s, 'DELETE GUARD MISSING -- staged shards at risk'; assert 'startswith(\\\"pretrain-tokens/\\\")' in s, 'PROFILE BRANCH MISSING'; print('PREFLIGHT_OK=6 version='+edullm_data.__version__+' profile='+m.NAME)\"; python -c \"import boto3; s=boto3.client('s3'); s.download_file('edullm-landing','_ingest/final-dataset/PUBLISH/publish_driver.py','/tmp/publish_driver.py'); s.download_file('edullm-landing','_ingest/final-dataset/corpus-registry.json','/tmp/corpus-registry.json'); print('FETCH_OK')\"; cd /tmp && echo PUBLISH_START mode=${PUBLISH_MODE}; set +e; python /tmp/publish_driver.py ${PUBLISH_MODE}; RC=$?; echo PUBLISH_DONE_RC=${RC}; exit ${RC}"
+    ]
+  }
+}
