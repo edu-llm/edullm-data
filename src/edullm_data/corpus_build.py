@@ -85,6 +85,7 @@ from .corpus import (
     allocate_ordinals,
     carve,
 )
+from .corpus_read import READABLE_FORMATS
 from .ingest_reservoir import (
     FINEPHRASE_REPO,
     IngestError,
@@ -98,6 +99,7 @@ from .reservoir_ids import FINEPHRASE_FORMATS, N_PARTITIONS, keeps_id
 __all__ = [
     "DEFAULT_BUCKET",
     "DEFAULT_PREFIX",
+    "READABLE_FORMATS",
     "REGISTRY_PATH",
     "BuildDriverError",
     "Bundle",
@@ -120,15 +122,25 @@ DEFAULT_PREFIX = "_ingest/reservoir-dolma2/build"
 REGISTRY_PATH = "artifacts/reservoir/corpus-registry.json"
 
 
-#: Formats `corpus_read` can actually consume. A registry row naming anything else is a
-#: PLAN-TIME error, not a run-time one: discovering it mid-run means other bundles have already
-#: been built and paid for, and the corpus quietly lacks a whole category.
-#:
-#: This fired for real. `dclm-baseline` pointed at `mlfoundations/dclm-baseline-1.0`, which ships
-#: `.jsonl.zst` while the row claimed `parquet` — a 30B hole. It was resolved by re-sourcing to
-#: `HuggingFaceFW/dclm_100BT` (parquet, and where the pool measurement came from anyway), not by
-#: adding a zstd dependency, so every drawn source is readable today.
-READABLE_FORMATS = frozenset({"parquet", "json.gz"})
+# `READABLE_FORMATS` is imported from `corpus_read` at the top of this module, NOT defined here.
+#
+# It names the formats `corpus_read` can actually consume, and a registry row naming anything else
+# is a PLAN-TIME error rather than a run-time one: discovering it mid-run means other bundles have
+# already been built and paid for, and the corpus quietly lacks a whole category.
+#
+# That fired for real. `dclm-baseline` pointed at `mlfoundations/dclm-baseline-1.0`, which ships
+# `.jsonl.zst` while the row claimed `parquet` — a 30B hole. It was resolved by re-sourcing to
+# `HuggingFaceFW/dclm_100BT` (parquet, and where the pool measurement came from anyway), not by
+# adding a zstd dependency, so every drawn source is readable today.
+#
+# ⚠️ IT USED TO BE A HAND-WRITTEN `frozenset({"parquet", "json.gz"})` HERE, and that was a live
+# defect. Three tables named the readable formats — this gate, a private dict inside `_reader_for`
+# (which is what actually ran), and `corpus_read._READERS`. Only the third listed `jsonl.gz`, so a
+# `jsonl.gz` row was refused by `_assert_readable` **although `read_jsonl_gz_documents` handles
+# that spelling and is registered for it**: a whole source droppable by a check that looked
+# entirely correct. Synchronising three lists would have left them free to diverge on the next
+# edit, which is how this arose, so the gate is now DERIVED from the reader registry — the one
+# table that cannot lie about which formats have a reader, because it holds them.
 
 
 def load_registry(path: str | None = None) -> tuple[list[CorpusSpec], dict[str, Any]]:
@@ -321,14 +333,21 @@ def _assert_readable(specs: Sequence[CorpusSpec]) -> None:
     Fails at PLAN time by design. The alternative — skipping the row, or letting `run` discover it
     — produces a corpus that is quietly missing a whole category while every bundle that did run
     reports success, which is the failure mode this driver's `verify` exists to prevent.
+
+    The admitted set is `corpus_read.READABLE_FORMATS`, which is the key set of the reader
+    registry itself. This gate therefore admits a format if and only if a reader is registered for
+    it — it cannot refuse a row `corpus_read` could have read, which it previously could and did
+    for `jsonl.gz`.
     """
     bad = [(s.key, s.file_format) for s in specs if s.file_format not in READABLE_FORMATS]
     if bad:
         listing = ", ".join(f"{k} ({f})" for k, f in bad)
         raise BuildDriverError(
             f"{len(bad)} source(s) have no reader: {listing}. `corpus_read` handles "
-            f"{sorted(READABLE_FORMATS)}. Either add support (zstd needs a `zstandard` dependency "
-            f"this package does not declare) or drop the row from the plan deliberately with "
+            f"{sorted(READABLE_FORMATS)}. Either add support — a reader function plus its entry in "
+            f"`corpus_read._READERS`, which is the ONLY place this set is written and widens this "
+            f"gate automatically; note `.zst` would also need a `zstandard` dependency this "
+            f"package does not declare — or drop the row from the plan deliberately with "
             f"--allow-unreadable, which EXCLUDES it from the corpus rather than failing."
         )
 
@@ -1185,7 +1204,44 @@ def _wheel_version() -> str:
 
 #: Payload extensions per registry `file_format`. `ingest_reservoir.hf_tree` filters to `.parquet`
 #: only, so the Common Pile `.json.gz` sources need their own listing.
-_PAYLOAD_EXT = {"parquet": (".parquet",), "json.gz": (".json.gz", ".jsonl.gz")}
+#:
+#: ⚠️ **A FOURTH format-keyed table, and it must cover every format the reader registry admits.**
+#: This is a listing filter, not a reader, so it is genuinely separate data — the extensions on
+#: disk are not the `file_format` string, and both gzip spellings appear under either. But a key
+#: MISSING here turns a plan-time refusal into a run-time one: `hf_files` raises inside a Batch
+#: container, after the job is billing, which is precisely what `_assert_readable` exists to
+#: prevent. Both gzip spellings therefore map to the same extension pair, exactly as both map to
+#: the same reader. `_assert_payload_extensions_cover_readers` below makes the coverage an
+#: import-time invariant instead of a comment.
+_PAYLOAD_EXT = {
+    "parquet": (".parquet",),
+    "json.gz": (".json.gz", ".jsonl.gz"),
+    "jsonl.gz": (".json.gz", ".jsonl.gz"),
+}
+
+
+def _assert_payload_extensions_cover_readers() -> None:
+    """Every readable format must have a payload extension, checked AT IMPORT.
+
+    Registering a reader widens `READABLE_FORMATS` automatically, which is the point of deriving
+    it — but `hf_files` cannot list files for a format `_PAYLOAD_EXT` does not name, and it fails
+    where failure is most expensive: mid-run, on Batch, after the read budget has been spent. A
+    format that is admitted but unlistable is a worse defect than one that is honestly refused, so
+    the two tables are reconciled here rather than left to agree by inspection.
+
+    Import time, not first call: a mismatch is a packaging error the developer who introduced it
+    should see immediately, and it costs one set difference.
+    """
+    missing = sorted(set(READABLE_FORMATS) - set(_PAYLOAD_EXT))
+    if missing:  # pragma: no cover - unreachable while the two agree; the test forces it
+        raise BuildDriverError(
+            f"{missing} have a reader in corpus_read._READERS but no entry in _PAYLOAD_EXT, so "
+            f"_assert_readable would ADMIT such a row at plan time and hf_files would then fail "
+            f"mid-run on Batch. Add the payload extensions, or remove the reader."
+        )
+
+
+_assert_payload_extensions_cover_readers()
 
 
 def hf_files(spec: CorpusSpec, *, headers: Mapping[str, str] | None = None) -> list[dict]:
@@ -1341,13 +1397,23 @@ def _reader_for(spec: CorpusSpec, bundle: Bundle) -> Iterable[Document]:
     single-bundle `run --of <n_bundles>` against the smallest source (`ubuntu-irc`, 1.87B) before
     committing a full array.
     """
-    from .corpus_read import read_jsonl_gz_documents, read_parquet_documents
+    # Reading goes through `corpus_read.read_documents`, that module's own dispatch seam. This was
+    # a dict literal HERE — a THIRD format table, and the one that actually ran — which omitted
+    # `jsonl.gz` while `corpus_read._READERS` had it, so a row that reader could serve was refused
+    # upstream by `_assert_readable`. Routing through the seam has two consequences: the gate at
+    # plan time and the dispatch at run time are now the same set by construction, and
+    # `read_documents` stops being DEAD CODE. It had zero callers in `src/`, which is why the one
+    # table that was right was the one nothing on the build path read. This package has been bitten
+    # by exactly that shape before — `keeps_id` was green and uncalled for weeks while the 4x
+    # FinePhrase over-exposure it prevents went unprevented. The build path now exercises this seam
+    # on every file of every bundle, so it cannot silently rot again.
+    from .corpus_read import read_documents
 
-    reader = {
-        "parquet": read_parquet_documents,
-        "json.gz": read_jsonl_gz_documents,
-    }.get(spec.file_format)
-    if reader is None:
+    # Checked against the DERIVED set before reading, so the diagnostic stays specific: reaching
+    # here with an unreadable format means the plan-time GATE let it through, which is a different
+    # bug from a registry row naming a format nobody implemented. `read_documents` would raise its
+    # own `ReadError` a moment later, but it cannot know the gate exists.
+    if spec.file_format not in READABLE_FORMATS:
         raise BuildDriverError(
             f"{spec.key}: no reader for {spec.file_format!r} — this should have been caught at "
             f"plan time by _assert_readable"
@@ -1379,7 +1445,7 @@ def _reader_for(spec: CorpusSpec, bundle: Bundle) -> Iterable[Document]:
     budget = int(bundle.tokens * _CHARS_PER_TOKEN * _FILTER_HEADROOM / keep_rate)
     seen_chars = 0
     for entry in hf_files(spec):
-        for doc in reader(spec.repo, entry, spec):
+        for doc in read_documents(spec.repo, entry, spec):
             # Charged against the budget BEFORE the partition drops it. The budget is denominated
             # in characters READ, not characters kept, and the `/ N_PARTITIONS` above is what turns
             # one into the other — counting only survivors here would apply the correction twice

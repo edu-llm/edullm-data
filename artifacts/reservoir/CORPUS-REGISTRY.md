@@ -152,6 +152,12 @@ inside. *Licensing notes are research findings, not legal advice.*
   `HuggingFaceFW/dclm_100BT` (parquet) removed the need rather than the dependency. **Every drawn
   source is parquet or `.json.gz`**, and `corpus_build`'s `_assert_readable` fails at PLAN time if
   that ever stops being true.
+  **Correction, 2026-08-08:** the readable set also includes **`jsonl.gz`**, and always could —
+  `read_jsonl_gz_documents` is registered for both gzip spellings. Three tables named the readable
+  formats and only `corpus_read._READERS` listed `jsonl.gz`, so the gate refused a spelling its own
+  reader handles. The gate is now DERIVED from that registry (`corpus_read.READABLE_FORMATS`), so
+  the admitted set is exactly what has a reader. **No registry row is affected** — all 17 rows are
+  `parquet` (10) or `json.gz` (7), and the plan_id is unchanged at `d5c9bcd38735e1f0`.
 - **`id_column`** is `UNVERIFIED` on 13 of 17 rows. Confirmed present as `id` for the three Common
   Pile repos whose records I read, but not yet pinned per row. It matters most where the id is a
   join key — the FinePhrase partition and the FineWeb-Edu anti-join.

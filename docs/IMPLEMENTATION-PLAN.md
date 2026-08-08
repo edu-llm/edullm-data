@@ -289,10 +289,20 @@ The plan wants **378B tokens**. Three repositories exist and they differ in form
 | `mlfoundations/dclm-baseline-1.0` | **`.jsonl.zst`** | ~3,764B DERIVED | ❌ **unreadable** |
 | `mlfoundations/dclm-baseline-1.0-parquet` | parquet, 27,938 shards | ~3,764B DERIVED | ✅ **use this** |
 
-**VERIFIED IN CODE:** `READABLE_FORMATS = frozenset({"parquet", "json.gz"})`
-(`corpus_build.py:127`), and `_assert_readable` rejects anything else **at plan time** (`:171`).
-`corpus_read.py:774-775` states it directly: *"`.zst` is NOT among them … needs a zstandard
-dependency this package does not declare."* `pyproject.toml` declares only `boto3` and `numpy<2.5`.
+**VERIFIED IN CODE (updated 2026-08-08):** `READABLE_FORMATS` is now
+`frozenset({"parquet", "json.gz", "jsonl.gz"})`, and it is **DERIVED, not written** — it is
+`frozenset(corpus_read._READERS)` (`corpus_read.py:777`), re-exported by `corpus_build`
+(`corpus_build.py:87`). `_assert_readable` (`corpus_build.py:329`) rejects anything else **at plan
+time**. `read_documents` states the `.zst` position directly: *"`.zst` is NOT among them … needs a
+zstandard dependency this package does not declare."* `pyproject.toml` still declares no
+`zstandard` — the DCLM gap was closed by re-sourcing to parquet, not by adding the dependency.
+
+⚠️ The earlier text here — `frozenset({"parquet", "json.gz"})` at `corpus_build.py:127`,
+`_assert_readable` at `:171` — was **both stale in line numbers and wrong in content**. It listed
+one of THREE disagreeing tables; only `corpus_read._READERS` carried `jsonl.gz`, so a `jsonl.gz`
+row was refused at plan time although its reader exists and works. The three are now one. **No
+registry row changes and the plan_id is unchanged (`d5c9bcd38735e1f0`)**; the effect is on future
+rows and re-sourcings.
 
 **Two traps in the parquet mirror:**
 
