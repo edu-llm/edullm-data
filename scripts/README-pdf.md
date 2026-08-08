@@ -41,3 +41,39 @@ Zero is the expected answer. Then read the PDF itself; do not trust a script tha
 extract its text. Chrome writes subset fonts with a `ToUnicode` map, and a naive
 `re.findall(r'\((.*?)\)')` over the decompressed streams returns **nothing** even when the
 document is perfect — which looks exactly like a blank render. Open the file.
+
+## Mermaid diagrams
+
+`md2html.py` renders a ```` ```mermaid ```` fence into a live diagram, and the support is opt-in per
+document: the `<script>` tag is injected **only** when a fence is actually present, so a document with
+no diagram stays self-contained and offline-usable.
+
+```bash
+python3 scripts/md2html.py docs/BUILD-DEPENDENCY-GRAPH.md \
+  --out /tmp/dep-graph.html --tag "Parallelization plan · 2026-08-07"
+
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --headless --disable-gpu --no-pdf-header-footer \
+  --virtual-time-budget=20000 \
+  --print-to-pdf=docs/BUILD-DEPENDENCY-GRAPH.pdf \
+  file:///tmp/dep-graph.html
+```
+
+**Three things are load-bearing, and each was found by a render that looked fine and was not:**
+
+1. **`--virtual-time-budget=20000` is REQUIRED.** Mermaid renders in JavaScript, and without this
+   Chrome prints before the SVG exists — producing a PDF with the diagram **missing and no error
+   anywhere**. Same failure shape as the font-extraction trap above: silent.
+2. **`startOnLoad:false` plus an explicit `mermaid.run()`** on the load event. The default async path
+   can race the print.
+3. **The diagram gets its own LANDSCAPE page** via a named `@page landscape` rule, while the prose
+   stays portrait. A `graph LR` diagram is wider than tall, and at portrait text-column width the node
+   labels are unreadable. Rotating the element with a CSS `transform` was tried first and is worse:
+   sideways text and broken centring.
+
+**Prefer `graph LR` over `graph TD`** for a pipeline. `TD` produced a wide shallow sprawl that wasted
+most of the sheet; `LR` matches both the page and the direction the work actually flows.
+
+**Check the diagram rendered before shipping.** Open the PDF and look at it — the text-extraction
+caveat above applies doubly here, since a missing SVG and a rendered one are indistinguishable to a
+script.

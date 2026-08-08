@@ -100,13 +100,25 @@ def render(md: str) -> str:
             continue
 
         if s.startswith("```"):
+            lang = s[3:].strip().lower()
             i += 1
             body: list[str] = []
             while i < n and not lines[i].strip().startswith("```"):
                 body.append(lines[i])
                 i += 1
             i += 1
-            out.append("<pre><code>" + html.escape("\n".join(body), quote=False) + "</code></pre>")
+            if lang == "mermaid":
+                # A mermaid fence needs a live renderer, so it is emitted verbatim inside
+                # `<pre class="mermaid">` and mermaid.js converts it to SVG at load time. Still
+                # escaped: node labels contain `<br/>`, and mermaid reads the element's text
+                # content, so escaping is both safe here and necessary for any `&` or `<`.
+                out.append(
+                    '<pre class="mermaid">' + html.escape("\n".join(body), quote=False) + "</pre>"
+                )
+            else:
+                out.append(
+                    "<pre><code>" + html.escape("\n".join(body), quote=False) + "</code></pre>"
+                )
             continue
 
         if re.fullmatch(r"-{3,}|\*{3,}", s):
@@ -189,9 +201,36 @@ def main() -> int:
     if a.tag:
         body = f'<div class="tag">{html.escape(a.tag)}</div>\n' + body
     title = a.source.stem.replace("-", " ")
+
+    # Mermaid support is opt-in per document, and deliberately so: the renderer is a ~3 MB script
+    # loaded from a CDN, which makes the page non-self-contained and useless offline. A document
+    # with no diagram must not pay that, so the tag is injected only when a fence was actually
+    # found. `startOnLoad: false` plus an explicit `run()` is what makes Chrome's --print-to-pdf
+    # work: the default async path can begin printing before the SVG exists, which yields a PDF
+    # with the diagram missing and no error anywhere.
+    head_extra = ""
+    if 'class="mermaid"' in body:
+        head_extra = (
+            '<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>'
+            "<script>mermaid.initialize({startOnLoad:false,theme:'base',"
+            "flowchart:{useMaxWidth:true,htmlLabels:true}});"
+            "window.addEventListener('load',()=>mermaid.run());</script>"
+            # A dependency graph is unreadable at a third of a page, so it gets a LANDSCAPE page of
+            # its own via a named @page rule — the prose stays portrait. A `graph LR` diagram is
+            # wider than it is tall, so landscape is what makes the labels legible; rotating the
+            # element with a transform was tried first and is worse (sideways text, bad centring).
+            "<style>@page landscape{size:A4 landscape;margin:10mm}"
+            "pre.mermaid{page:landscape;background:none;border:none;padding:0;text-align:center;"
+            "page-break-before:always;break-before:page;"
+            "page-break-after:always;break-after:page;"
+            "page-break-inside:avoid;break-inside:avoid;"
+            "width:100vw;max-width:none;margin-left:calc(50% - 50vw)}"
+            "pre.mermaid svg{width:99%;height:auto}</style>"
+        )
+
     a.out.write_text(
         "<!doctype html><html><head><meta charset='utf-8'>"
-        f"<title>{html.escape(title)}</title><style>{CSS}</style></head>"
+        f"<title>{html.escape(title)}</title><style>{CSS}</style>{head_extra}</head>"
         f"<body>{body}</body></html>",
         encoding="utf-8",
     )
