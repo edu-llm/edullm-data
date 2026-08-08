@@ -266,6 +266,7 @@ def validate_dataset(
     *,
     data_bucket: str | None = None,
     head_workers: int = 1,
+    check_workers: int | None = None,
 ) -> ValidationResult:
     """Run Gate A against ``s3://landing_bucket/prefix/``. Reads only via ``s3``; never
     promotes. ``data_bucket`` is only needed if the dataset declares ``depends_on`` (the
@@ -278,6 +279,18 @@ def validate_dataset(
     ``if result.violations``, i.e. a property of the SET, and the decision loop still runs serially
     in manifest order so even the violation ORDER is unchanged. Default 1 is the original strictly
     sequential path, which is what keeps a previously written ``_VALIDATED.json`` meaningful.
+
+    ``check_workers`` is the same for the PROFILE checks, which is where **seven of Gate A's eight
+    round trips per object live** -- so ``head_workers`` alone threads 1/8th of the work and
+    Amdahl's law caps it at a ~12% saving no matter how high it goes.
+
+    **It defaults to ``head_workers``, not to 1, and that is deliberate.** The live job definition
+    ``edullm-validator:14`` passes ``--head-workers 16`` and nothing else (MEASURED 2026-08-08); a
+    separate knob defaulting to 1 would have left the entire profile-check fan-out switched off in
+    production until somebody re-registered the job definition -- and the failure mode of that is a
+    job that merely stays slow, with no error to notice. Inheriting means the operator asks for
+    concurrency once and gets it everywhere the gate waits on S3. Pass ``check_workers=1``
+    explicitly to keep the profile checks sequential while the head loop threads.
     """
     prefix = prefix.strip("/")
     v: list[Violation] = []
@@ -408,6 +421,7 @@ def validate_dataset(
             data_bucket=data_bucket,
             collect_paths=group_manifest_paths,
             head_workers=head_workers,
+            check_workers=head_workers if check_workers is None else check_workers,
         )
         if gres is None:
             # missing manifest: incomplete for frozen, fine otherwise
@@ -593,6 +607,7 @@ def _validate_group(
     data_bucket: str | None,
     collect_paths: dict[str, set[str]] | None = None,
     head_workers: int = 1,
+    check_workers: int = 1,
 ) -> tuple[int, int, _ValidatedGroup | None] | None:
     """Validate one group. Returns (objects, bytes) or None if the group's manifest is
     absent (incomplete). Appends Violations to ``v`` in place."""
@@ -844,6 +859,11 @@ def _validate_group(
                 family_defaults=_family_defaults_for(dataset_id),
                 resolved=resolved,
                 observations=observations,
+                # Seven of Gate A's eight round trips per object are issued by these checks, so
+                # this is where the fan-out has to reach. Threading is the profile's business;
+                # the orchestrator only says how wide, because the orchestrator is what sized the
+                # connection pool the threads share.
+                check_workers=check_workers,
             )
             for check in profile.CHECKS:
                 try:
@@ -2457,6 +2477,19 @@ def main(argv: list[str] | None = None) -> int:
             "pass into a fail or reorder a report."
         ),
     )
+    ap.add_argument(
+        "--check-workers",
+        type=int,
+        default=None,
+        help=(
+            "threads for the PROFILE checks' S3 reads (default: follow --head-workers). This is "
+            "where SEVEN of Gate A's EIGHT round trips per object are issued -- the npy sniff and "
+            "the four decode windows -- so --head-workers alone threads one eighth of the work and "
+            "Amdahl's law caps it near 12%%. Reads are prefetched in bounded batches and every "
+            "check still DECIDES sequentially in manifest order, so no worker count can change a "
+            "verdict or reorder a report. Pass 1 to keep the profile checks strictly sequential."
+        ),
+    )
     ap.add_argument("--promote", action="store_true")
     ap.add_argument(
         "--promote-workers",
@@ -2473,23 +2506,24 @@ def main(argv: list[str] | None = None) -> int:
 
     from .s3 import Boto3S3
 
-    # Size the HTTP pool to the concurrency we actually ask for. `Boto3S3.default()` passes no
-    # botocore Config, so `max_pool_connections` is the default 10 -- and botocore does not pass
-    # `block=True` to urllib3, so exceeding it neither raises nor waits: urllib3 DISCARDS the surplus
-    # connection and logs "Connection pool is full". A `--head-workers 16 --promote-workers 16` run
-    # against a 10-connection pool therefore pays a fresh TLS handshake per object past the tenth and
-    # silently caps the speedup the operator asked for, with no error anywhere. Only build a custom
-    # client when we need more than the default, so the ordinary single-threaded path is untouched.
-    want_pool = max(args.head_workers, args.promote_workers)
-    if want_pool > 8:
-        import boto3
-        from botocore.config import Config
-
-        s3 = Boto3S3(
-            boto3.client("s3", config=Config(max_pool_connections=want_pool + 2))
-        )
-    else:
-        s3 = Boto3S3.default()
+    # Size the HTTP pool to the concurrency we actually ask for. Unsized, `max_pool_connections` is
+    # botocore's default 10 -- and botocore does not pass `block=True` to urllib3, so exceeding it
+    # neither raises nor waits: urllib3 DISCARDS the surplus connection and logs "Connection pool is
+    # full". A `--head-workers 16` run against a 10-connection pool therefore pays a fresh TLS
+    # handshake per object past the tenth and silently caps the speedup the operator asked for, with
+    # no error anywhere. Only size it when we need more than the default, so the ordinary
+    # single-threaded path builds exactly the client it always built.
+    #
+    # `--check-workers` is in the max because the profile checks fan out over the SAME client and
+    # issue seven of the eight round trips; leaving it out would size the pool to a quarter of the
+    # concurrency actually in flight, which is the self-throttle this exists to prevent.
+    effective_check_workers = (
+        args.head_workers if args.check_workers is None else args.check_workers
+    )
+    want_pool = max(args.head_workers, args.promote_workers, effective_check_workers)
+    s3 = Boto3S3.default(
+        **({"max_pool_connections": want_pool + 2} if want_pool > 8 else {})
+    )
     prefixes = (
         [args.prefix] if args.prefix else discover_pending(args.landing_bucket, s3)
     )
@@ -2505,6 +2539,7 @@ def main(argv: list[str] | None = None) -> int:
             s3,
             data_bucket=args.data_bucket,
             head_workers=args.head_workers,
+            check_workers=effective_check_workers,
         )
         if result.incomplete:
             print(

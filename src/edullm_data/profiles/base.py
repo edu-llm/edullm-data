@@ -64,6 +64,21 @@ class GroupContext:
       ``resolved``, these are about landing objects themselves.  A profile may record a
       content hash plus stable ETag here so promotion can condition its later server-side copy
       on the exact object Gate A inspected.  This is never serialized into dataset metadata.
+    * ``check_workers`` — how many threads a check may use for its own S3 reads.  ``1`` (the
+      default) means strictly sequential, which is what every check did before this existed and
+      what every direct-construction test still gets.
+
+      This is here rather than read from a global because a check must not decide its own
+      concurrency: the orchestrator owns the connection pool (``Boto3S3.default(
+      max_pool_connections=…)``) and threading past it silently self-throttles rather than
+      failing.  Whoever sizes the pool therefore also sizes the fan-out.
+
+      **A worker count must never change a verdict.**  A check that threads has to collect its
+      violations in *submission* order, not completion order, so the returned list is
+      element-for-element identical at any worker count — the same discipline
+      ``validate._prefetch_heads`` and ``corpus_receipt._run_deep_rehashes`` already follow.  The
+      gate's pass/fail is a property of the violation SET, but the report a human reads top-down
+      is an ordered list, and a nondeterministic report is not reproducible evidence.
     """
 
     dataset_id: str
@@ -77,6 +92,7 @@ class GroupContext:
     family_defaults: Mapping[str, Any] = field(default_factory=dict)
     resolved: Mapping[str, Any] = field(default_factory=dict)
     observations: dict[str, Any] = field(default_factory=dict)
+    check_workers: int = 1
 
 
 # A check recomputes something and returns any violations it finds. Empty list = clean.

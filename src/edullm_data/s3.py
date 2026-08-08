@@ -190,10 +190,44 @@ class Boto3S3:
         self._c = client
 
     @classmethod
-    def default(cls, region: str = "us-east-1") -> "Boto3S3":
+    def default(
+        cls, region: str = "us-east-1", *, max_pool_connections: int | None = None
+    ) -> "Boto3S3":
+        """The ordinary client, optionally sized for a threaded caller.
+
+        ``max_pool_connections=None`` (the default) builds exactly the client this classmethod
+        always built — no ``botocore.config.Config`` at all — so every existing single-threaded
+        caller is byte-for-byte unchanged.
+
+        **Why the parameter has to exist here rather than at each call site.** Without a
+        ``Config``, botocore's ``max_pool_connections`` is **10** (recomputed, not assumed:
+        ``botocore.config.Config().max_pool_connections == 10`` on botocore 1.43.56, and
+        ``tests/test_s3_pool.py`` re-asserts it so a botocore change is a failing test rather than
+        a silent regression). botocore does **not** pass ``block=True`` to urllib3, so exceeding
+        the pool neither raises nor waits: urllib3's ``_put_conn`` DISCARDS the surplus connection
+        and logs "Connection pool is full". Workers 11..N therefore pay a fresh TLS handshake on
+        every request and the fan-out silently caps itself, with no error anywhere — the failure
+        mode is a *number that does not improve*, which is the hardest kind to notice.
+
+        This mattered enough that the same six lines of ``Config`` construction were written twice
+        already, at ``validate.py:main`` and ``corpus_build._s3``, each with its own copy of the
+        explanation. Any threaded caller that forgets is not wrong, just slow — which is why the
+        knob belongs on the constructor everyone already uses.
+        """
         import boto3  # local import so the package imports without boto3 for pure-logic tests
 
-        return cls(boto3.client("s3", region_name=region))
+        if max_pool_connections is None:
+            return cls(boto3.client("s3", region_name=region))
+
+        from botocore.config import Config
+
+        return cls(
+            boto3.client(
+                "s3",
+                region_name=region,
+                config=Config(max_pool_connections=max_pool_connections),
+            )
+        )
 
     def _wrap_not_found(self, err: Exception) -> Exception:
         code = getattr(err, "response", {}).get("Error", {}).get("Code")
