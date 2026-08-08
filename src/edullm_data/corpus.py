@@ -52,6 +52,8 @@ __all__ = [
     "BuildError",
     "shard_key",
     "allocate_ordinals",
+    "partition_ordinals",
+    "MAX_FILE_SHARDS",
     "is_held_out",
     "carve",
     "epochs_for",
@@ -394,6 +396,87 @@ def allocate_ordinals(
             refs.append(ShardRef(source=source, domain=domain, split=split, ordinal=nxt + i))
         ordinal_by_split[split] = nxt + n_shards
     return refs
+
+
+#: Most file-shard parts one stream may be split into. Two digits, because the part index goes into
+#: ``bundle_id`` as ``p{index:02d}of{of:02d}`` and a truncated index would collide two parts — the
+#: same silent-loss shape ``split_source_rows``' ``label_width`` guard exists for. Nothing about the
+#: mechanism needs a limit; the FORMAT does, so the limit is on the format.
+MAX_FILE_SHARDS = 99
+
+
+def partition_ordinals(refs: Sequence[ShardRef], parts: int) -> list[list[ShardRef]]:
+    """Cut one stream's ALREADY-ALLOCATED ordinal block into ``parts`` disjoint sub-blocks.
+
+    **This function allocates nothing.** That is its entire reason for existing as a separate
+    primitive rather than a keyword on :func:`allocate_ordinals`. The K children of one bundle need
+    ordinal ranges that no other child holds, and the safe way to get them is to PARTITION a block
+    the plan already owns — never to hand a second allocator to K workers and hope their counters
+    agree. Reuse is the failure this module's header calls invisible: two shards named
+    ``tokens/stackv2-edu/train-00000.u32le.bin``, one ``PutObject`` overwriting the other, and
+    nothing in ``validate.py`` comparing ordinals across sources to notice.
+
+    ``refs`` must be ONE stream's refs — same ``(source, domain, split)`` — because a part is a
+    slice of a stream's work, not of the corpus. Mixed streams raise: silently regrouping them
+    would produce parts whose "range" is not a range at all.
+
+    **The cut is contiguous, and that is deliberate even though the FILE cut is a stride.** The two
+    partitions are of different things and want opposite shapes:
+
+    * The FILE cut strides (``ingest_reservoir._shard_slice``) because file sizes vary and the big
+      ones cluster, so a contiguous file slice hands one child mostly-large files.
+    * The ORDINAL cut is contiguous because a contiguous block is the one property a human can
+      check by eye — ``shards == max - min + 1`` for the part, exactly as
+      :func:`allocate_ordinals`' docstring promises for the stream. A strided ordinal block would
+      be just as disjoint and just as correct, and unreadable in a listing.
+
+    Sizes are ``n // parts`` with the first ``n % parts`` parts taking one extra, so the result is a
+    pure function of ``(len(refs), parts)`` — no data dependence, no ordering dependence, nothing a
+    child observes. **Every part is non-empty**: ``parts > len(refs)`` raises rather than emitting
+    an empty part, because a part with no refs has no destination and ``pack`` would find
+    ``orphan_streams`` — the same reason ``corpus_pack.shard_plan`` refuses a zero-shard stream.
+
+    ⚠️ **A part is a range, not a quota.** How many of its refs a child actually FILLS depends on
+    the tokens its files hold, and files are not equal. An underfilled part is fine and is recorded:
+    ``pack`` leaves the surplus refs ``unfilled``, ordinal gaps are legal, and the receipt carries
+    the list. An OVERfilled part is the dangerous direction — ``corpus_pack._drain_surplus`` refuses
+    a leftover of one whole shard unless ``partial_source=True``, which the build driver passes
+    precisely because ``_reader_for``'s budget deliberately over-delivers. So the asymmetry is
+    already handled; the invariant this function must supply is only that the RANGES do not
+    overlap.
+    """
+    if parts < 1:
+        raise BuildError(f"parts must be at least 1, got {parts}")
+    if parts > MAX_FILE_SHARDS:
+        raise BuildError(
+            f"{parts} file-shard parts exceeds MAX_FILE_SHARDS ({MAX_FILE_SHARDS}); the part index "
+            f"is two digits in the bundle id and a truncated index collides two parts."
+        )
+    refs = list(refs)
+    streams = {(r.source, r.domain, r.split) for r in refs}
+    if len(streams) > 1:
+        raise BuildError(
+            f"partition_ordinals takes ONE stream's refs; got {len(streams)} "
+            f"({sorted(str(s) for s in streams)}). A part is a slice of one stream's work, so "
+            f"mixing streams would produce parts whose ordinals are not a contiguous range of "
+            f"anything."
+        )
+    if parts > len(refs):
+        raise BuildError(
+            f"cannot cut {len(refs)} shard(s) into {parts} parts — {parts - len(refs)} part(s) "
+            f"would get no refs at all. A part with no ordinals has nowhere to write, so pack() "
+            f"would report it as a stream with no refs and drop its documents in full. Lower the "
+            f"part count, or raise this stream's target."
+        )
+    ordered = sorted(refs, key=lambda r: r.ordinal)
+    base, extra = divmod(len(ordered), parts)
+    out: list[list[ShardRef]] = []
+    at = 0
+    for i in range(parts):
+        take = base + (1 if i < extra else 0)
+        out.append(ordered[at:at + take])
+        at += take
+    return out
 
 
 # --------------------------------------------------------------------------------------

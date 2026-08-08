@@ -1993,3 +1993,475 @@ def test_cmd_run_prints_no_attrition_line_for_a_healthy_bundle(monkeypatch, caps
     # The length line is UNCONDITIONAL, though — a healthy bundle's attrition rate is a number the
     # pool arithmetic wants too, not only a failing one's.
     assert "drop=0.0%" in out and "short=0" in out
+
+
+# --------------------------------------------------------------------------------------
+# FILE-SHARDING — §8A.5a. K children of ONE bundle, disjoint PLAN-ASSIGNED ordinal ranges
+#
+# The anti-pattern named for this feature: "a test asserting the function exists, or that K
+# children ran, is decoration." So every test below RECOMPUTES the union of what the children
+# produce — from `s3._store` where children really run, from the emitted paths otherwise — and
+# compares it to the set the unsharded plan would have written. Never a count.
+# --------------------------------------------------------------------------------------
+
+
+def _fs_spec(**over) -> CorpusSpec:
+    """40 planned shards, all train — 0.5% of 40 is 0.2 of a shard, so no val split is emitted.
+
+    40 because ``40 % 7 == 5``: the K values under test include one that does NOT divide it
+    evenly, which is the off-by-one case `_shard_slice`'s docstring warns about.
+    """
+    base = dict(key="stackv2-edu", source_label="stackv2-edu",
+                target_tokens=SHARD_TOKENS * 40, pool_tokens=SHARD_TOKENS * 4000)
+    base.update(over)
+    return _spec(**base)
+
+
+def _ordinals(paths) -> list[int]:
+    """Ordinals recomputed from real shard KEYS, via the same parser the pipeline uses.
+
+    Through `parse_shard_name` rather than a slice of the string, because that function IS the
+    thing whose blindness makes reuse invisible — it happily returns `('train', 0)` for two
+    different sources' `train-00000`. A test that parsed the path its own way would be checking a
+    different function from the one production trusts.
+    """
+    from edullm_data.manifest import parse_shard_name
+
+    out = []
+    for p in paths:
+        parsed = parse_shard_name(p)
+        assert parsed is not None, f"{p} does not parse as a shard name"
+        out.append(parsed[1])
+    return out
+
+
+@pytest.mark.parametrize("k", [1, 2, 3, 7])
+def test_K_children_of_one_bundle_write_EXACTLY_the_unsharded_ordinal_set(k):
+    """THE test. K children, one bundle: the union of the ordinals they really write must equal
+    the set the unsharded plan would have written — no gaps, no overlaps, no reuse.
+
+    Recomputed from `s3._store`, i.e. from objects that exist, after running every child end to
+    end through `run_bundle`. Not from the plan, and not from a count: a count is satisfied by two
+    children writing the same ordinal twice while a third writes none, which is exactly the
+    failure — one `PutObject` overwrites the other and `parse_shard_name` cannot tell.
+
+    K=7 does not divide 10 shards evenly, which is deliberate: `_shard_slice`'s own docstring warns
+    that an off-by-one in a stride "silently drops files ... and a smaller-than-expected id set
+    does not look like an error."
+
+    Each child is given a DIFFERENT document set, the way a real file slice would — so a child that
+    wrote into a sibling's range would be writing genuinely different bytes there, which is the
+    live failure rather than a harmless duplicate.
+    """
+    spec = _fs_spec(target_tokens=SHARD_TOKENS * 10)
+    flat = B.plan_document([spec])
+    expected = sorted(_ordinals(p for b in flat["bundles"] for p in b["shards"]))
+    assert len(expected) == 10
+
+    plan = B.plan_document([spec], file_shards={spec.key: k})
+    assert len(plan["bundles"]) == len(flat["bundles"]) * k
+
+    s3 = FakeS3()
+    for bundle in B.bundles_of(plan):
+        _run(bundle, plan, spec, s3,
+             docs=_docs(n=1200, words=200, seed=100 + bundle.file_shard_index))
+
+    written = sorted(_ordinals(
+        key for (b, key) in s3._store if b == BUCKET and key.endswith(".u32le.bin")
+    ))
+    assert written == expected, (
+        f"K={k}: the union of what {k} children wrote is not the unsharded set. "
+        f"missing={sorted(set(expected) - set(written))} "
+        f"extra={sorted(set(written) - set(expected))} "
+        f"reused={sorted(o for o in set(written) if written.count(o) > 1)}"
+    )
+    # Stated separately because equality of sorted lists already forbids duplicates, and the
+    # duplicate is the one failure a reader of this test will want named.
+    assert len(written) == len(set(written)), "two children wrote the same ordinal"
+
+
+@pytest.mark.parametrize("k", [1, 2, 3, 7])
+def test_the_PLAN_hands_out_disjoint_ranges_before_any_child_runs(k):
+    """The same union property at PLAN time, which is where the CEO's condition actually binds:
+    a child must never allocate an ordinal, so the disjointness has to exist in the artifact.
+
+    Also asserts each part's block is CONTIGUOUS. Disjointness alone would be satisfied by a
+    strided cut, which is just as correct and unreadable — `allocate_ordinals` promises
+    "shards == max - min + 1" and a part should keep that property.
+    """
+    spec = _fs_spec()
+    flat = B.plan_document([spec])
+    expected = sorted(_ordinals(p for b in flat["bundles"] for p in b["shards"]))
+
+    plan = B.plan_document([spec], file_shards={spec.key: k})
+    got = sorted(_ordinals(p for b in plan["bundles"] for p in b["shards"]))
+    assert got == expected, "file-sharding must not change WHICH shards the corpus contains"
+
+    for b in plan["bundles"]:
+        ords = _ordinals(b["shards"])
+        assert ords == list(range(ords[0], ords[0] + len(ords))), (
+            f"{b['bundle_id']} block is not contiguous: {ords}"
+        )
+        assert b["file_shard"]["of"] == k
+        assert 0 <= b["file_shard"]["index"] < k
+
+
+def test_a_K_that_does_not_divide_evenly_still_partitions_every_shard():
+    """Off-by-one in a stride is the classic failure, so the uneven case is asserted by size.
+
+    40 train shards over 7 parts is 6,6,6,6,6,5,5 — the first `n % K` parts take one extra. A
+    floor-only cut would emit 7x5 = 35 and DROP five shards; a ceil-only cut would emit 7x6 = 42
+    and reuse two ordinals. Both are checked here by the exact size vector, not by a total.
+    """
+    spec = _fs_spec()
+    plan = B.plan_document([spec], file_shards={spec.key: 7})
+    train = [b for b in plan["bundles"] if b["split"] == "train"]
+    sizes = [len(b["shards"]) for b in sorted(train, key=lambda b: b["file_shard"]["index"])]
+    assert sizes == [6, 6, 6, 6, 6, 5, 5], sizes
+    assert sum(sizes) == len(B.plan_document([spec])["bundles"][0]["shards"])
+
+
+def test_the_shard_path_set_is_UNCHANGED_by_file_sharding_on_the_real_registry():
+    """Corpus-content neutrality, on the shipping 133-row registry rather than a fixture.
+
+    This is what makes file-sharding safe to add before FREEZE: the set of object keys the build
+    writes is byte-identical with and without it. Only the grouping into units of work changes,
+    so no consumer-visible label, path, or token count moves. `source_label` is untouched — the
+    difference from `split_source_rows`, which publishes `dclm-01 ... dclm-NN` permanently inside
+    `manifest_sha256`.
+    """
+    import pathlib
+
+    # The 1.0T `final-dataset` registry, not the reservoir one `REGISTRY_PATH` defaults to: these
+    # four sources are the flat, un-fanned-out ones this feature exists for, and they only appear
+    # in that file.
+    reg = (pathlib.Path(__file__).resolve().parents[1]
+           / "artifacts" / "final-dataset" / "corpus-registry.json")
+    specs, meta = B.load_registry(str(reg))
+    drawn = [s for s in specs if s.target_tokens > 0]
+
+    flat = B.plan_document(drawn, registry_meta=meta)
+    ways = {"stackv2-edu": 7, "finepdfs-edu": 4,
+            "nemotron-cc-math-3": 3, "nemotron-cc-math-4plus": 2}
+    sharded = B.plan_document(drawn, registry_meta=meta, file_shards=ways)
+
+    def paths(p):
+        return sorted(x for b in p["bundles"] for x in b["shards"])
+
+    assert paths(sharded) == paths(flat), "file-sharding changed which objects the build writes"
+    assert len(paths(sharded)) == len(set(paths(sharded)))
+    assert len(sharded["bundles"]) > len(flat["bundles"])
+    # And the biggest unit of work really did shrink — that is the entire point (51.38 h -> ~11 h).
+    biggest = lambda p: max(len(b["shards"]) for b in p["bundles"])  # noqa: E731
+    assert biggest(sharded) < biggest(flat) / 3
+
+
+def test_every_part_gets_its_OWN_bundle_id_because_receipts_are_keyed_on_it():
+    """Sharing a `bundle_id` is a K-1x silent data loss, not a naming preference.
+
+    `receipt_key` is `.../_receipts/{bundle_id}.json`, so two parts with one id write ONE receipt —
+    the second overwrites the first — and `bundle_is_done` then reports every part matching that
+    receipt as DONE. K-1 children are skipped without ever running and the corpus is short their
+    shards, discovered at training time. Asserted through `receipt_key` itself, not through the
+    ids, because the key is what actually collides.
+    """
+    spec = _fs_spec()
+    plan = B.plan_document([spec], file_shards={spec.key: 7})
+    ids = [b["bundle_id"] for b in plan["bundles"]]
+    assert len(ids) == len(set(ids)), "two parts share a bundle_id"
+    keys = [B.receipt_key(PREFIX, plan["plan_id"], i) for i in ids]
+    assert len(keys) == len(set(keys)), "two parts collide on one receipt key"
+
+    # An unsharded stream's id is UNCHANGED, so the schema bump costs nothing on the ~157 streams
+    # nobody is splitting — and every existing receipt key still resolves.
+    plain = B.plan_document([spec])
+    assert [b["bundle_id"] for b in plain["bundles"]] == ["stackv2-edu--train"]
+    # Including a domain-bearing stream, whose id has a different shape.
+    dom = B.plan_document([spec], domain_map={spec.key: {"a": "python"}})
+    assert [b["bundle_id"] for b in dom["bundles"]] == ["stackv2-edu--python--train"]
+    dom_split = B.plan_document([spec], domain_map={spec.key: {"a": "python"}},
+                                file_shards={spec.key: 2})
+    assert [b["bundle_id"] for b in dom_split["bundles"]] == [
+        "stackv2-edu--python--train--p00of02", "stackv2-edu--python--train--p01of02"]
+
+
+def test_a_part_id_survives_the_round_trip_into_a_real_receipt_key():
+    """The part suffix must satisfy `_assert_safe_key`, which `receipt_key` enforces.
+
+    A `bundle_id` that fails it raises at receipt-write time — i.e. after the bundle's full
+    billable work, which is the end-of-run failure shape this package has already been bitten by
+    twice (`_drain_surplus`, `_check_keep_accounting`).
+    """
+    spec = _fs_spec()
+    plan = B.plan_document([spec], file_shards={spec.key: 12})
+    for b in plan["bundles"]:
+        key = B.receipt_key(PREFIX, plan["plan_id"], b["bundle_id"])
+        assert key.endswith(f"{b['bundle_id']}.json")
+        assert "of" in b["bundle_id"] and b["bundle_id"].split("--")[-1].startswith("p")
+
+
+def test_a_part_reads_its_own_file_slice_and_the_union_of_files_is_the_whole_source():
+    """The plan's half of the reader contract: `(index, of)` reaches each part as a 2-tuple.
+
+    `Bundle.file_shard` is deliberately never `None`, so a reader can write
+    `idx, of = bundle.file_shard` unconditionally — `(0, 1)` is `_shard_slice`'s identity
+    (`items[0::1] == items`), i.e. exactly today's whole-source behaviour. Recomputed here by
+    actually striding a file list with each part's own pair and unioning the result.
+    """
+    from edullm_data.ingest_reservoir import _shard_slice
+
+    spec = _fs_spec()
+    plan = B.plan_document([spec], file_shards={spec.key: 7})
+    train = [b for b in B.bundles_of(plan) if b.split == "train"]
+
+    files = [f"data/{i:05d}.parquet" for i in range(95)]   # stackv2-edu's real file count
+    seen: list[str] = []
+    for b in sorted(train, key=lambda b: b.file_shard_index):
+        assert isinstance(b.file_shard, tuple) and len(b.file_shard) == 2
+        assert b.is_file_sharded and b.file_shard_count == 7
+        seen += _shard_slice(files, b.file_shard_index, b.file_shard_count)
+
+    assert sorted(seen) == files, "the parts' file slices are not a partition of the source"
+    assert len(seen) == len(set(seen)), "two parts read the same file — silent duplicate data"
+
+    # An unsharded bundle's pair is the identity, so the same reader code path is today's.
+    plain = B.bundles_of(B.plan_document([spec]))[0]
+    assert plain.file_shard == (0, 1)
+    assert not plain.is_file_sharded
+    assert _shard_slice(files, *plain.file_shard) == files
+
+
+def test_each_part_carries_its_OWN_token_budget_so_a_reader_must_not_divide_again():
+    """`Bundle.tokens` is derived from the part's OWN refs, so it is already 1/K of the stream.
+
+    The consumer-side trap: a reader that divides its budget by K a second time reads 1/K**2 of
+    the text it needs, every part underfills, and the failure surfaces only as unfilled refs at
+    the end of a multi-hour run. Asserted as conservation — the parts' tokens must sum to the
+    unsharded bundle's, not each equal it.
+    """
+    # Big enough to earn a val split too, so BOTH streams are checked — a val part is the one most
+    # likely to be mis-sized, since it is 0.5% of the source.
+    spec = _fs_spec(target_tokens=SHARD_TOKENS * 1460, pool_tokens=SHARD_TOKENS * 20000)
+    whole = B.bundles_of(B.plan_document([spec]))
+    parts = B.bundles_of(B.plan_document([spec], file_shards={spec.key: 7}))
+    assert {b.split for b in whole} == {"train", "val"}
+
+    for split in ("train", "val"):
+        w = next(b for b in whole if b.split == split)
+        ps = [b for b in parts if b.split == split]
+        assert sum(b.tokens for b in ps) == w.tokens, f"{split}: tokens are not conserved"
+        assert max(b.tokens for b in ps) < w.tokens, f"{split}: no part is smaller than the whole"
+
+
+def test_the_plan_stays_a_pure_deterministic_content_address_under_file_sharding():
+    """No clock, no environment: same arguments, byte-identical document and `plan_id`.
+
+    And a DIFFERENT K must give a different id — the plan is what tells a child which files to
+    read, so two builds that disagree about K are different builds and must not share an address.
+    """
+    spec = _fs_spec()
+    a = B.plan_document([spec], file_shards={spec.key: 7})
+    b = B.plan_document([spec], file_shards={spec.key: 7})
+    assert json.dumps(a, sort_keys=True) == json.dumps(b, sort_keys=True)
+    assert a["plan_id"] == b["plan_id"]
+
+    assert B.plan_document([spec], file_shards={spec.key: 4})["plan_id"] != a["plan_id"]
+    assert B.plan_document([spec])["plan_id"] != a["plan_id"]
+    # K=1 is not "sharded 1 way", it is unsharded — same document, same address.
+    assert B.plan_document([spec], file_shards={spec.key: 1}) == B.plan_document([spec])
+
+
+def test_the_file_shard_field_is_on_EVERY_bundle_including_unsharded_ones():
+    """Mandatory, never optional. A reader that has to supply a default reads the wrong files
+    whenever its default disagrees with the plan, and nothing downstream can see that: the
+    documents are real, the tokens are real, and the counts still add up."""
+    spec = _fs_spec()
+    plan = B.plan_document([spec, _spec()], file_shards={spec.key: 3})
+    assert plan["schema"] == B.PLAN_SCHEMA
+    for b in plan["bundles"]:
+        assert "file_shard" in b, b["bundle_id"]
+        assert set(b["file_shard"]) == {"index", "of"}
+    tiny = [b for b in plan["bundles"] if b["source"] == "tiny"]
+    assert tiny and all(b["file_shard"] == {"index": 0, "of": 1} for b in tiny)
+
+
+def test_a_v2_plan_missing_the_field_is_REFUSED_rather_than_defaulted():
+    """The one place a default would be catastrophic, so it is the one place that raises.
+
+    `from_plan_entry` must tolerate an absent field — a v1 plan could not express a part, and
+    "not sharded" is the correct reading of one. But a v2 plan that dropped the field on a bundle
+    that IS a part would hand that child the WHOLE file list against 1/K of the ordinals: a K-fold
+    over-read whose only symptom is surplus, and `partial_source=True` ignores surplus by design.
+    """
+    spec = _fs_spec()
+    plan = B.plan_document([spec], file_shards={spec.key: 3})
+    del plan["bundles"][1]["file_shard"]
+    with pytest.raises(BuildError, match="file_shard"):
+        B.bundles_of(plan)
+
+    # A v1 plan (no such schema tag) still parses, and reads as unsharded.
+    legacy = B.plan_document([spec])
+    legacy["schema"] = "edullm-build-plan/v1"
+    for b in legacy["bundles"]:
+        b.pop("file_shard")
+    assert all(b.file_shard == (0, 1) for b in B.bundles_of(legacy))
+
+
+def test_more_parts_than_shards_is_refused_because_an_empty_part_has_nowhere_to_write():
+    """A part with no ordinals is the `shard_plan` zero-shard failure in miniature: `pack` finds
+    no refs for the stream and drops its documents in full, while every token count still adds up.
+
+    The VAL stream is what binds in practice — it is 0.5% of the source, so a source with 40 train
+    shards has 0 or a handful of val shards and a 7-way split asks for more parts than exist.
+    """
+    spec = _fs_spec(target_tokens=SHARD_TOKENS * 3)
+    with pytest.raises(BuildError, match="only 3 shard"):
+        B.plan_document([spec], file_shards={spec.key: 4})
+
+    from edullm_data.corpus import partition_ordinals
+
+    refs = B.bundles_of(B.plan_document([spec]))[0].shards
+    with pytest.raises(BuildError, match="would get no refs"):
+        partition_ordinals(refs, 4)
+
+
+def test_a_bad_file_shards_map_is_refused_at_plan_time_not_discovered_hours_in():
+    """An unknown key is the dangerous one: a typo leaves the 51 h bundle unsplit while the
+    operator believes it was split seven ways, and the only symptom is a build that takes K times
+    as long."""
+    spec = _fs_spec()
+    with pytest.raises(BuildError, match="not a drawn registry row"):
+        B.plan_document([spec], file_shards={"stackv2-edy": 7})
+    with pytest.raises(BuildError, match="must be an int"):
+        B.plan_document([spec], file_shards={spec.key: 0})
+    with pytest.raises(BuildError, match="must be an int"):
+        B.plan_document([spec], file_shards={spec.key: True})
+    with pytest.raises(BuildError, match="MAX_FILE_SHARDS"):
+        B.plan_document([spec], file_shards={spec.key: 100})
+
+
+def test_the_map_can_come_from_the_registry_metadata_rather_than_the_call():
+    """`_file_shards` is TOP-LEVEL registry metadata, not a row field, so `CorpusSpec` and the row
+    schema are untouched and an old registry plans exactly as it did before."""
+    spec = _fs_spec()
+    from_meta = B.plan_document([spec], registry_meta={"_file_shards": {spec.key: 3}})
+    from_arg = B.plan_document([spec], file_shards={spec.key: 3})
+    assert [b["bundle_id"] for b in from_meta["bundles"]] == \
+           [b["bundle_id"] for b in from_arg["bundles"]]
+    # The explicit argument WINS, so an operator can override the registry without editing it.
+    override = B.plan_document([spec], registry_meta={"_file_shards": {spec.key: 3}},
+                               file_shards={})
+    assert len(override["bundles"]) == len(B.plan_document([spec])["bundles"])
+
+
+def test_the_disjointness_guard_catches_a_plan_that_reuses_an_ordinal():
+    """The guard is not a restatement of `partition_ordinals`' contract — it checks the ASSEMBLED
+    document, which is where string-formatted ids and paths can still collide.
+
+    Both halves are exercised by mutating a correct plan the way a real bug would.
+    """
+    spec = _fs_spec()
+    plan = B.plan_document([spec], file_shards={spec.key: 3})
+
+    reused = json.loads(json.dumps(plan))
+    reused["bundles"][1]["shards"][0] = reused["bundles"][0]["shards"][0]
+    with pytest.raises(BuildError, match="claimed by both"):
+        B._assert_plan_is_disjoint(reused)
+
+    collided = json.loads(json.dumps(plan))
+    collided["bundles"][1]["bundle_id"] = collided["bundles"][0]["bundle_id"]
+    with pytest.raises(BuildError, match="bundle_id"):
+        B._assert_plan_is_disjoint(collided)
+
+
+def test_partition_ordinals_refuses_refs_from_two_different_streams():
+    """A part is a slice of ONE stream's work. Mixed refs would produce "ranges" that are not a
+    range of anything, and silently regrouping them would hide the caller's mistake."""
+    from edullm_data.corpus import ShardRef, partition_ordinals
+
+    mixed = [ShardRef(source="a", domain=None, split="train", ordinal=0),
+             ShardRef(source="b", domain=None, split="train", ordinal=1)]
+    with pytest.raises(BuildError, match="ONE stream"):
+        partition_ordinals(mixed, 2)
+
+
+def test_an_out_of_range_file_shard_pair_is_refused_when_the_bundle_is_built():
+    """`items[index::of]` with a bad index returns the WRONG files or none, and a shorter file
+    list does not look like an error — `_shard_slice`'s own docstring says so."""
+    plan = B.plan_document([_fs_spec()], file_shards={"stackv2-edu": 3})
+    entry = json.loads(json.dumps(plan["bundles"][0]))
+    entry["file_shard"] = {"index": 3, "of": 3}
+    with pytest.raises(BuildError, match="not a valid"):
+        B.Bundle.from_plan_entry(entry)
+    entry["file_shard"] = {"index": -1, "of": 3}
+    with pytest.raises(BuildError, match="not a valid"):
+        B.Bundle.from_plan_entry(entry)
+
+
+def test_K_children_are_distributed_across_array_children_by_the_EXISTING_stride():
+    """The mechanism `--shard/--of` already has: parts are bundles, so `_shard_slice` spreads them
+    with no new machinery. This is why file-sharding is a plan change and not a driver change.
+
+    Recomputed as a partition of the bundle ids, because `_shard_slice`'s failure mode is dropping
+    items, and a smaller-than-expected set does not look like an error.
+    """
+    from edullm_data.ingest_reservoir import _shard_slice
+
+    spec = _fs_spec()
+    plan = B.plan_document([spec], file_shards={spec.key: 7})
+    everything = B.bundles_of(plan)
+
+    for of in (1, 3, 5, 16):
+        got = [b.bundle_id for c in range(of) for b in _shard_slice(everything, c, of)]
+        assert sorted(got) == sorted(b.bundle_id for b in everything)
+        assert len(got) == len(set(got)), "one part landed on two array children"
+
+
+def test_verify_bundle_set_REJECTS_a_correct_file_sharded_build___KNOWN_GAP():
+    """⚠️ **BLOCKER, PINNED HERE SO IT CANNOT BE FORGOTTEN. Not this stream's surface to fix.**
+
+    `corpus_receipt._check_set_shards` and the duplicate-stream check group receipts by
+    `(source, domain, split)` and raise `bundle-set-duplicate-stream` when more than one claims a
+    stream — and K parts share one stream BY CONSTRUCTION. So a perfectly correct file-sharded
+    build runs to completion and then FAILS its own `verify`, which exits non-zero.
+
+    Reproduced free (no `s3=`), which is the cheap tier `verify_bundle_set`'s docstring advertises.
+    This test asserts the CURRENT WRONG BEHAVIOUR so that the fix has a failing test to flip: when
+    `Receipt` learns `file_shard` and the check becomes file-shard-aware, this test must be
+    inverted, not deleted.
+
+    Do NOT "fix" it by grouping on `bundle_id` — that would weaken the genuine
+    retry-that-did-not-replace case, which is the real defect the check exists to catch.
+    """
+    from edullm_data.corpus_receipt import Receipt, ShardReceipt, verify_bundle_set
+
+    spec = _fs_spec()
+    plan = B.plan_document([spec], file_shards={spec.key: 3})
+    parts = [b for b in B.bundles_of(plan) if b.split == "train"]
+
+    receipts = [
+        Receipt(
+            plan_id=plan["plan_id"], bundle_id=b.bundle_id, prefix=PREFIX,
+            source=b.source, domain=b.domain, split=b.split,
+            shards=tuple(
+                ShardReceipt(path=r.path, sha256=f"{r.ordinal:064x}", bytes=4 * r.tokens,
+                             tokens=r.tokens)
+                for r in b.shards
+            ),
+            documents=1, tokens_in=b.tokens, tokens_out=b.tokens, tail_dropped=0,
+            surplus_dropped=0, max_eos_fraction=0.01, wheel_version="0.9.1",
+        )
+        for b in parts
+    ]
+    # Every shard path is distinct and every digest is distinct — this build is CORRECT.
+    paths = [s.path for r in receipts for s in r.shards]
+    assert len(paths) == len(set(paths))
+
+    codes = [v.code for v in verify_bundle_set(receipts, [b.stream for b in parts])]
+    assert "bundle-set-duplicate-stream" in codes, (
+        "if this no longer fires, the file-shard-aware fix has landed — INVERT this test rather "
+        "than deleting it, and assert that a correct file-sharded set verifies clean."
+    )
+    assert "bundle-set-shard-path-collision" not in codes, (
+        "the ordinal ranges really are disjoint; only the STREAM grouping is confused"
+    )
