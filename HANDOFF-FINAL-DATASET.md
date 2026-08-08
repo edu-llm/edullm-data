@@ -79,6 +79,28 @@ Branch `final-dataset`, worktree
 > sets.** Our own best evidence was produced on data derived from the benchmarks we steer on. The
 > holdout was by problem *family*, so the result stands — but this is exactly the contamination vector
 > n-grams cannot catch after augmentation.
+>
+> ### ⚠️ AND THE MEASUREMENT ITSELF IS BROKEN BELOW ~400B TOKENS
+>
+> **OLMES (arXiv:2406.08446) Fig 1 caption, verbatim:** *"During early training, there is good signal
+> from CF while MCF is random. **Around 400B tokens, the model starts gaining the ability on the MCF
+> format.**"* Multiple-choice answering is a **separately-acquired skill.**
+>
+> This separates the uninformative nulls from the informative zeros across the whole literature — and
+> it invalidates part of our own plan: **P1's probes ran 300M–10B tokens, far inside the dead zone**,
+> so any MMLU column from a probe at that budget measures nothing. Score **CF (cloze)** or use **BPB**
+> (which P1 in fact did — its 1.6062/1.6329 figures are bits-per-byte). The relationship **inverts**
+> at the top end (93.7% MCF vs 69.0% CF on ARC-C), so this is scale-dependent, not a blanket rule.
+>
+> **Consequently the honest central estimate for adding QA data is MMLU +0.** The decisive experiment
+> is Nemotron-CC (arXiv:2412.02595) at **8B/1T**, where MMLU is live (48–53) and synthetic QA still
+> gives **+0.2 / −1.1**. The famous Nemotron-CC "+5.6 MMLU" is **classifier selection, not QA
+> synthesis** — do not cite it for QA. A realistic 7B–13B-class band is MMLU +2 to +4 / ARC +2 to +7 /
+> GSM8K +20 to +40, **minus the LR anneal, which alone gave +2.0 MMLU in OLMo 2** and is routinely
+> misattributed to the data.
+>
+> **HellaSwag is negative in four independent papers** — QA data costs us there, and it is also where
+> contamination persists longest while measuring 0.00% n-gram-dirty.
 
 ---
 
