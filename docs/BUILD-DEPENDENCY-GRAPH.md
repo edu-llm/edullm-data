@@ -204,7 +204,7 @@ agent `corpus.py`'s plan surface entirely.
 
 ## 4. The four hard serialization points
 
-Nothing parallelizes past these. They are why 13.3 h is the floor and not 8.41 h.
+Nothing parallelizes past these. They are why the path is 21.31 h and not the 8.81 h of job time inside it.
 
 ### S1 — the image build gates every AWS job
 Container images build **only from `edullm/**` branches** (`.github/workflows/edullm-platform-build.yml:9-10`).

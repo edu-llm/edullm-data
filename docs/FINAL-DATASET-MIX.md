@@ -12,7 +12,8 @@
 
 - **Models:** 20.0B total / 96 experts (2 shared + top-4) and 7.11B total / 32 experts (2 shared +
   top-4). Both activate 6 experts, so **active params are 1.876B and 1.873B — 0.17% apart.**
-- **Corpus:** ~1.0T unique tokens, dolma2, 50,003,968-token shards.
+- **Corpus:** ~1.0T unique tokens, dolma2, **25,001,984**-token shards (`SHARD_TOKENS` in `corpus.py:89`)
+  → ~40,000 objects. *(This line said 50,003,968 until 2026-08-07; that value was in no commit.)*
 - **Training:** 1.25–2.0T tokens = 1.25–2.0 epochs. The corpus size and the training budget are
   deliberately different numbers; see the report's §5.
 - **Shape:** two stages — 900B bulk at 77% web, then a 100B cooldown at 32% web that concentrates

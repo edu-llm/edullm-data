@@ -433,8 +433,9 @@ between what we measured and what we inherited is worth keeping visible.
 > writing code or launching a job:**
 > - **`docs/IMPLEMENTATION-PLAN.md`** — build mechanics, and **five defects that would silently corrupt
 >   or discard the work.** None of them fails loudly.
-> - **`docs/BUILD-DEPENDENCY-GRAPH.md`** — the execution DAG, the **13.31 h** critical path, and what
+> - **`docs/BUILD-DEPENDENCY-GRAPH.md`** — the execution DAG, the **21.31 h** critical path, and what
 >   may run in parallel.
+> - **`docs/TASKS.md`** — every `#NN` id, and the crosswalk to graph nodes and Phase 0 items.
 
 1. **Confirm the model shape** (d_model, layers, expert width) so §2's active-parameter figures and
    every downstream token and cost number can be re-derived against the real config.
