@@ -128,7 +128,7 @@ HellaSwag, and publish it through this repo's airlock so it arrives validated, s
 |---|---|
 | `docs/FINAL-DATASET-REPORT.md` + `.pdf` | ✅ **CURRENT — the plan of record for WHAT to build.** 13 sections, self-contained, first-time-reader framing. Its §9 is the baseline-subset recipe |
 | **`docs/IMPLEMENTATION-PLAN.md` + `.pdf`** | ✅ **CURRENT — HOW to build it.** 25 pages, 11 sections. **Five blockers, none of which fails loudly.** Also carries the wall-clock (§8A), the gigatoken verdict (§7), and two of my own retracted claims |
-| **`docs/BUILD-DEPENDENCY-GRAPH.md` + `.pdf`** | ✅ **CURRENT — WHEN to build each piece.** 33-node DAG, critical path **13.31 h**, and an orchestrator brief in §8 that can be handed to an agent verbatim |
+| **`docs/BUILD-DEPENDENCY-GRAPH.md` + `.pdf`** | ✅ **CURRENT — WHEN to build each piece.** 34-node DAG, critical path **21.31 h** (revised from 13.31 h — that figure assumed a `BUILD` floor its own deferred item made unreachable), and an orchestrator brief in §8 that can be handed to an agent verbatim |
 | **`docs/TASKS.md`** | ✅ **NEW — the definition of every `#NN` id**, plus the crosswalk between task ids, graph nodes and Phase 0 items. These lived only in a session tool before, so three documents cited ids nothing defined |
 | `artifacts/impl-plan/*.md` | 7 audit reports, **7,769 lines**. Evidence behind the plan. `orchestrator-findings.md` is the index of my own findings and corrections — **F2 and F4 now carry superseding banners** |
 | `docs/FINAL-DATASET-MIX.md` | superseded stub pointing at the report; kept because older commits link to the filename |

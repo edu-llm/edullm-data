@@ -1242,7 +1242,7 @@ promise** — the *ordering* of the fixes is far better evidenced than their abs
 
 ## 9. The job plan
 
-> **→ For the parallel execution order, see `docs/BUILD-DEPENDENCY-GRAPH.md`** — a 33-node DAG with the
+> **→ For the parallel execution order, see `docs/BUILD-DEPENDENCY-GRAPH.md`** — a 34-node DAG with the
 > critical path computed (**21.31 h**, against ~36 h as configured, and 23.54 h if item 3b is skipped),
 > plus an orchestrator brief that can be handed to an agent verbatim. Its central finding is that the
 > binding constraint on parallelism is **file contention, not logic**: five code items edit
