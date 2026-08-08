@@ -4,10 +4,27 @@
 long each step takes. This document says **what may run at the same time**, and it is written to be
 handed to an orchestrating agent.
 
-**The answer up front:** the critical path is **13.3 hours** with correct parallelization, against
-**~36 h** if the work is run as written today and **17.3 h** if it is parallelized naively. The
-irreducible floor is **8.41 h** of pure job time — so only ~4.9 h of code and setup can ever sit ahead
-of the jobs. **Everything beyond that is either waiting on a human or wasted.**
+**The answer up front:** the critical path is **21.3 hours**, against **~36 h** if the work is run as
+written today. **8.81 h of that is jobs on the path; the other 12.5 h is code and the image build.**
+
+**⚠️ Revised upward from 13.31 h on 2026-08-07, and the reason is a defect, not a re-estimate.** The
+earlier figure assumed `BUILD` = 6.6 h with the big-bundle file-shard *deferred*. Those are incompatible:
+DCLM is **410B tokens in one non-fanning-out bundle**, which is **10.85 h even given an entire 32-vCPU
+instance to itself**, so 6.6 h was unreachable without work the graph had marked deferrable. Both repairs
+are now in the graph as **C3b**:
+
+| scenario | `BUILD` | critical path |
+|---|---|---|
+| the old graph — C3b deferred, `BUILD` assumed 6.6 h | 6.6 h | 13.31 h ❌ **not achievable** |
+| C3b deferred, `BUILD` at its real single-child cost | ~16.8 h | **23.54 h** |
+| **C3b done (12 h of code, off to the side)** | **6.6 h** | **21.31 h** ✅ |
+
+So C3b buys **2.2 h of wall-clock** and, more importantly, it is what makes the 6.6 h floor a real number
+instead of an aspiration. See `IMPLEMENTATION-PLAN.md` §8A.5a.
+
+**The job-time floor is 8.81 h** — `SMOKE` 0.4 + `BUILD` 6.6 + `PUB1` 0.3 + `VD1` 1.49 + `PR1` 0.02, the
+jobs actually on the path. An earlier version of this line said **8.41 h** and summed a different set; §5
+now derives it explicitly so the two figures cannot drift again.
 
 ---
 
@@ -45,6 +62,7 @@ graph LR
         A2b["A2b · keep-list consumer<br/>in run_bundle<br/><b>4 h</b> · owns run_bundle"]
         C1["C1 · FinePhrase id partition<br/>in _reader_for<br/><b>2 h</b> · CHANGES THE PLAN"]
         B6["B6 · shard-size decision<br/>SHARD_TOKENS in corpus.py<br/><b>1 h</b> · CHANGES THE PLAN"]
+        C3b["C3b · file-shard the BIG bundles<br/>plan-time ordinal ranges<br/><b>12 h</b> · WITHOUT IT BUILD IS 16.8 h"]
     end
 
     subgraph CODE_PAR["CODE OFF THE CRITICAL PATH — fully parallel, distinct files"]
@@ -52,8 +70,8 @@ graph LR
         B2["B2 · boundary-marker guard<br/>corpus_pack.py + its test · <b>1 h</b>"]
         B3["B3 · thread Gate A + raise pool<br/>pretrain_tokens_v1.py + s3.py · <b>4 h</b>"]
         B4["B4 · drop data_provenance<br/>registry json · <b>0.2 h</b>"]
-        B5["B5 · rebuild decon index<br/>raw fields, external repo · <b>4 h</b>"]
-        C3["C3 · file-shard val bundles<br/>_reader_for · <b>3 h</b> · DEFERRABLE"]
+        B5["B5 · rebuild decon index<br/>raw fields, external repo · <b>4 h</b><br/>GATES FREEZE · only 0.9 h slack"]
+        C3["C3 · file-shard VAL bundles<br/>_reader_for · <b>3 h</b> · DEFERRABLE<br/>NOT the same as C3b"]
         C11["C11 · wire bytes_fetched<br/>corpus_read.py · <b>2 h</b> · DEFERRABLE"]
     end
 
@@ -85,6 +103,7 @@ graph LR
     A2b --> IMG
     C1 --> IMG
     B6 --> IMG
+    C3b --> IMG
     B1 --> IMG
     B2 --> IMG
     B3 --> IMG
@@ -92,6 +111,7 @@ graph LR
 
     C1 --> PLAN
     B6 --> PLAN
+    C3b --> PLAN
     M2 --> FREEZE
     M3 --> FREEZE
     M4 --> FREEZE
@@ -134,7 +154,7 @@ graph LR
     classDef job fill:#2e7d32,color:#fff,stroke:#1b5e20
     classDef defer fill:#616161,color:#fff,stroke:#424242
 
-    class A2a,A2b,IMG,SMOKE,BUILD,PUB1,VD1,PR1 crit
+    class A2a,A2b,C3b,IMG,SMOKE,BUILD,PUB1,VD1,PR1 crit
     class B1,B2,B3,B4,B5,M1,M2,M4 par
     class C3,C11,IMG2 defer
     class G1,FREEZE human
@@ -155,13 +175,19 @@ functions**:
 |---|---|---|
 | `_reader_for` | **C1**, C3, C11 | one owner, or three-way conflict |
 | `run_bundle` | **A2b**, C7 | one owner |
-| `corpus.py` | **B6**, C3 | different constants, but same file — merge risk |
+| **`allocate_ordinals` / `plan_document`** | **C3b**, B6 | **one owner — and it is the critical-path item** |
+| `corpus.py` | **B6**, **C3b**, C3 | 3 — different constants and functions, same file |
 
 | file | items | contention |
 |---|---|---|
 | `corpus_build.py` | C1, C3, C4→A2b, C7, C11 | **5 — hottest file in the plan** |
-| `corpus.py` | C3, B6 | 2 |
+| **`corpus.py`** | **B6, C3b, C3** | **3 — and C3b is critical, so a conflict here costs image time** |
 | everything else | 1 each | none |
+
+**⚠️ C3b and B6 belong to the same agent.** Both change what `plan_document` emits — B6 changes
+`SHARD_TOKENS`, C3b adds per-child ordinal ranges — and both therefore change every `plan_id`. Splitting
+them across two agents means two conflicting rewrites of the plan schema on the critical path. Give one
+agent `corpus.py`'s plan surface entirely.
 
 **Rules for the orchestrator:**
 
@@ -195,8 +221,18 @@ Adding a source after the plan is generated renames **98% of shards** and voids 
 computation** — it is the one node whose length no amount of parallelism touches.
 
 ### S3 — `BUILD` is capped at 128 vCPU
-6.6 h is the tokenize floor at the cap. Slicing bundles does not lower it; it only prevents a long tail
-(the 159B-token `stackv2-edu` bundle is a 4.37 h single child unless file-sharded).
+6.6 h is the tokenize floor at the cap: 1.0T ÷ (128 × 0.328 M tok/s/vCPU).
+
+**⚠️ But 6.6 h is only reachable if the big bundles are file-sharded, and an earlier version of this graph
+had that backwards.** Per-child duration is *that child's* tokens ÷ *that child's* vCPU. The 159B-token
+`stackv2-edu` bundle is **15.9%** of the corpus, so at the wave shape of 8 vCPU × 16 children it takes
+**16.83 h** — longer than the entire as-configured build, and 2.6× past the floor. It needs **≥21 vCPU**
+just to finish when the aggregate does.
+
+So **C3b (file-shard the big bundles) is a prerequisite of `BUILD` = 6.6 h**, not an optimization on top of
+it. Without it, `BUILD` is ~16.8 h and the critical path is **~23.5 h**, not 13.31 h. See
+`IMPLEMENTATION-PLAN.md` §8A.5 and §8A.5a — and note that `--shard/--of` strides **bundles**, so the
+capability does not exist in the code yet.
 
 ### S4 — `VD1` cannot start until `PUB1` finishes
 `verify --deep` re-hashes published objects, so it is strictly after publish. At 8 workers it is 1.49 h,
@@ -207,30 +243,53 @@ its timeout**, which is the single highest-value flag in the plan.
 
 ## 5. The critical path, and everything with slack
 
-**Critical path — 13.31 h:**
+**Critical path — 21.31 h:**
 
 | from → to | node | why it cannot move |
 |---|---|---|
-| 0.00 → 4.00 | **A2a** hash pre-pass driver | nothing to parallelize with; `PASS1` needs it |
-| 4.00 → 4.50 | **IMG** image build | S1 |
-| 4.50 → 4.90 | **SMOKE** live-HF smoke test | mandatory; the path has never run |
-| 4.90 → 11.50 | **BUILD** ~100 bundles | S3, the 128 vCPU floor |
-| 11.50 → 11.80 | **PUB1** publish stage 1 | after build |
-| 11.80 → 13.29 | **VD1** verify --deep stage 1 | S4 |
-| 13.29 → 13.31 | **PR1** promote stage 1 | after both gates |
+| 0.00 → 12.00 | **C3b** file-shard the big bundles | **the longest code item, and `BUILD` = 6.6 h is false without it** (S3) |
+| 12.00 → 12.50 | **IMG** image build | S1 |
+| 12.50 → 12.90 | **SMOKE** live-HF smoke test | mandatory; the path has never run |
+| 12.90 → 19.50 | **BUILD** ~100 bundles | S3, the 128 vCPU floor |
+| 19.50 → 19.80 | **PUB1** publish stage 1 | after build |
+| 19.80 → 21.29 | **VD1** verify --deep stage 1 | S4 |
+| 21.29 → 21.31 | **PR1** promote stage 1 | after both gates |
+
+**Where the 8.81 h job floor comes from**, stated as a sum so it cannot drift from the headline again:
+
+| node | h | on the path? |
+|---|---|---|
+| SMOKE | 0.40 | ✅ |
+| BUILD | 6.60 | ✅ |
+| PUB1 | 0.30 | ✅ |
+| VD1 | 1.49 | ✅ |
+| PR1 | 0.02 | ✅ |
+| **subtotal — the job floor** | **8.81** | |
+| STAGE 0.5 · PASS1 0.3 · PLAN 0.05 | 0.85 | ❌ absorbed by C3b's 12 h of slack |
+| GA1 0.32 · PUB2/GA2/VD2/PR2 0.25 | 0.57 | ❌ parallel to VD1 |
+| **all job rows summed** | **10.23** | — |
+
+**The remaining 12.5 h of the path is C3b (12.0) + IMG (0.5)** — code and image, not jobs. An earlier
+version of this document quoted an **8.41 h** floor that matched neither the job subtotal nor the full sum;
+this table replaces it.
+
+⚠️ **`A2a` is no longer the path's head.** At 4 h it now finishes inside C3b's 12 h, so the pre-pass has
+**8 h of slack** — but it must still land before `IMG`, so it is not deferrable, merely no longer critical.
 
 **Everything else has slack and should be started at t=0 regardless:**
 
 | node | duration | slack | note |
 |---|---|---|---|
 | M1 bandwidth | 0.2 h | large | **but run it first anyway** — it calibrates every other estimate |
-| M2 / M4 samples | 1.0 h each | ~3 h | gate `FREEZE`, not the build |
-| M3 footer count | 0.1 h | ~3.9 h | blocked on a **human** licence acceptance (G1) |
-| A2b keep-list consumer | 4 h | 0 h — **joint-critical** | must finish before IMG, same as A2a |
-| B3 thread Gate A | 4 h | 7.5 h | only `GA1`/`GA2` need it |
-| B5 rebuild decon index | 4 h | ~0.9 h — **nearly critical** | gates `FREEZE`; start it early |
+| M2 / M4 samples | 1.0 h each | ~11 h | gate `FREEZE`, not the build |
+| M3 footer count | 0.1 h | ~11.9 h | blocked on a **human** licence acceptance (G1) |
+| **A2a** hash pre-pass driver | 4 h | **8 h** | was the path's head at 13.31 h; C3b displaced it |
+| A2b keep-list consumer | 4 h | 8 h | must finish before IMG, same as A2a |
+| B3 thread Gate A | 4 h | ~15.5 h | only `GA1`/`GA2` need it |
+| B5 rebuild decon index | 4 h | **~8.9 h** | gates `FREEZE`. **Was ~0.9 h at the old critical path — start it early anyway**, the slack is a by-product of C3b being long, not of B5 being cheap |
 | B1 / B2 / B4 | ≤1 h | large | trivially parallel |
-| **C3 / C11** | 5 h combined | **∞ — deferrable** | pure optimization + instrumentation. **Do not put them in the first image** |
+| **C3** file-shard **VAL** bundles | 3 h | **∞ — deferrable** | pure read-volume saving. **Not the same item as C3b**, which is critical |
+| **C11** wire `bytes_fetched` | 2 h | **∞ — deferrable** | instrumentation. **Do not put it in the first image** |
 
 **Stage 2 is entirely parallel to stage 1's tail.** `PUB2`/`GA2`/`VD2`/`PR2` total 0.25 h and finish
 while stage 1 is still verifying, so stage 2 contributes **nothing** to the critical path.
@@ -244,15 +303,19 @@ while stage 1 is still verifying, so stage 2 contributes **nothing** to the crit
 |---|---|---|
 | 1 | **M1 bandwidth measurement** | job — **do this first, it recalibrates the rest** |
 | 2 | M2 Dolma3 sample + M4 doc lengths | job |
-| 3 | **Ask the owner to accept the Nemotron licence gate** | human |
-| 4 | **A2a** hash pre-pass driver (owns `corpus_filter.py`) | agent, worktree |
-| 5 | **A2b** keep-list consumer (owns `run_bundle`) | agent, worktree |
-| 6 | **C1 + B6** (owns `_reader_for` + `SHARD_TOKENS`) | agent, worktree |
-| 7 | **B5** rebuild the decon index (external repo) | agent |
+| 3 | ~~Ask the owner to accept the Nemotron licence gate~~ ✅ **DONE** — measured at **134.0B** by a teammate with access | — |
+| 4 | **C3b + B6** — file-shard the big bundles **and** the shard-size constant. **Owns `corpus.py`'s plan surface: `allocate_ordinals`, `plan_document`, `SHARD_TOKENS`.** **START THIS FIRST — it is the critical path** | agent, worktree |
+| 5 | **A2a** hash pre-pass driver (owns `corpus_filter.py`) | agent, worktree |
+| 6 | **A2b** keep-list consumer (owns `run_bundle`) | agent, worktree |
+| 7 | **C1** FinePhrase id partition (owns `_reader_for`) + **B5** rebuild the decon index (external repo) | agent, worktree |
 | 8 | B1 + B2 + B3 + B4 (four distinct files) | agent(s) |
 
+**⚠️ Stream 4 is new and it is the longest item.** An earlier version of this table had no node for it and
+assumed `BUILD` = 6.6 h anyway. It cannot be split from B6 — both rewrite what `plan_document` emits.
+
 **Do not launch C3 or C11 in wave 0.** They are deferrable, they contend with C1 on `_reader_for`, and
-including them adds ~5 h of agent time to the critical path for zero wall-clock benefit.
+including them adds ~5 h of agent time to the critical path for zero wall-clock benefit. **Note C3 (val
+bundles) and C3b (big bundles) are different items** — the first is deferrable, the second is critical.
 
 ### Wave 1 — merge, then one push
 Merge in order `_reader_for` → `run_bundle` → the rest. Push to an `edullm/**` branch. **One image.**
@@ -297,22 +360,36 @@ Hand this to the agent that runs wave 0. It encodes the constraints above as rul
 > separate signal from HuggingFace preview ordering), plus mean document length for the 5 unmeasured
 > stage-2 sources.
 >
-> **Stream 3 (human):** ask the owner to accept the Nemotron-CC-Math licence gate. Its text and id
-> columns are **UNVERIFIED** and it is the only stage-1 source whose text column we cannot name.
+> **Stream 3 — CLOSED.** The Nemotron-CC-Math licence gate is accepted and the count is **MEASURED at
+> 134.0B** under dolma2 (`3` ≈ 83.6B + `4plus` ≈ 50.4B). **Two things remain: record the exact `text_column`
+> and id column names in writing before the registry row is written** (§4.2 is the cautionary case — two
+> plausible `text` columns, wrong one picked silently), and **keep `4plus_MIND` out of the pool** — it is a
+> rewrite of `4plus`, so including both double-counts.
 >
-> **Streams 4–6 (code, one worktree each, one function each — NOT one file each):**
-> - **4:** the flat-`np.uint64` hash pre-pass. Owns `corpus_filter.py`.
-> - **5:** the keep-list consumer. Owns `run_bundle` in `corpus_build.py`.
-> - **6:** the FinePhrase id partition + the shard-size constant. Owns `_reader_for` in
->   `corpus_build.py` and `SHARD_TOKENS` in `corpus.py`.
+> **Streams 4–7 (code, one worktree each, ONE FUNCTION each — NOT one file each):**
+> - **4 — START FIRST, THIS IS THE CRITICAL PATH:** file-shard the big bundles **and** settle
+>   `SHARD_TOKENS`. Owns **`corpus.py`'s plan surface** — `allocate_ordinals`, `plan_document`,
+>   `SHARD_TOKENS`. Both change every `plan_id`, so they cannot be two agents.
+>   **Why it exists:** `--shard/--of` strides *bundles*, so DCLM's 410B is one child at **10.85 h even on a
+>   whole 32-vCPU instance**, against a 6.6 h floor. Read `IMPLEMENTATION-PLAN.md` §8A.5a first — **and
+>   evaluate the cheap alternative it names** (give DCLM a synthetic `domain_column` so it fans out with no
+>   new mechanism) before writing ordinal-range code.
+> - **5:** the flat-`np.uint64` hash pre-pass. Owns `corpus_filter.py`. **Size it for DCLM at 325M
+>   documents / 27.92 GB as a `set` (§5.2a), not for `finephrase-table`** — the plan's own table omitted
+>   the worst bundle.
+> - **6:** the keep-list consumer. Owns `run_bundle` in `corpus_build.py`.
+> - **7:** the FinePhrase id partition. Owns `_reader_for` in `corpus_build.py`. **Ship it together with
+>   the reader-budget division by the keep fraction** — separately, every bundle finishes and then fails
+>   `verify` on unfilled refs. **And do not "fix" `_CHARS_PER_TOKEN` while you are in there; that change is
+>   withdrawn and points the opposite way** (§3.1).
 >
-> **⚠️ Streams 5 and 6 both edit `corpus_build.py` in different functions.** Tell each about the other.
+> **⚠️ Streams 6 and 7 both edit `corpus_build.py` in different functions.** Tell each about the other.
 > Worktree convention: `../Capstone_LLM-worktrees/edullm-data/<agent-id>--<task-slug>` on
-> `agent/<agent-id>/<task-slug>`. Merge order is **stream 6 → stream 5 → the rest.**
+> `agent/<agent-id>/<task-slug>`. Merge order is **stream 4 → stream 7 → stream 6 → the rest.**
 >
-> **Stream 7 (code):** rebuild the decontamination index from **raw** benchmark fields (question alone,
-> question + each choice, question + correct answer) **in addition to** the rendered form. External
-> repo, no conflict. **It gates the mix freeze — do not let it start late.**
+> **Also stream 7 (code, external repo, no conflict):** rebuild the decontamination index from **raw**
+> benchmark fields (question alone, question + each choice, question + correct answer) **in addition to**
+> the rendered form. **It gates the mix freeze — do not let it start late.**
 >
 > **Stream 8 (code, four distinct files, no coordination needed):** pin `tokenizers` in
 > `pyproject.toml`; fix the boundary-marker prefix guard in `corpus_pack.py` **and** the test that

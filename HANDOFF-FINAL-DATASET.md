@@ -129,7 +129,8 @@ HellaSwag, and publish it through this repo's airlock so it arrives validated, s
 | `docs/FINAL-DATASET-REPORT.md` + `.pdf` | ✅ **CURRENT — the plan of record for WHAT to build.** 13 sections, self-contained, first-time-reader framing. Its §9 is the baseline-subset recipe |
 | **`docs/IMPLEMENTATION-PLAN.md` + `.pdf`** | ✅ **CURRENT — HOW to build it.** 25 pages, 11 sections. **Five blockers, none of which fails loudly.** Also carries the wall-clock (§8A), the gigatoken verdict (§7), and two of my own retracted claims |
 | **`docs/BUILD-DEPENDENCY-GRAPH.md` + `.pdf`** | ✅ **CURRENT — WHEN to build each piece.** 33-node DAG, critical path **13.31 h**, and an orchestrator brief in §8 that can be handed to an agent verbatim |
-| `artifacts/impl-plan/*.md` | 7 audit reports, **7,769 lines**. Evidence behind the plan. `orchestrator-findings.md` is the index of my own findings and corrections |
+| **`docs/TASKS.md`** | ✅ **NEW — the definition of every `#NN` id**, plus the crosswalk between task ids, graph nodes and Phase 0 items. These lived only in a session tool before, so three documents cited ids nothing defined |
+| `artifacts/impl-plan/*.md` | 7 audit reports, **7,769 lines**. Evidence behind the plan. `orchestrator-findings.md` is the index of my own findings and corrections — **F2 and F4 now carry superseding banners** |
 | `docs/FINAL-DATASET-MIX.md` | superseded stub pointing at the report; kept because older commits link to the filename |
 | `scripts/measure_finephrase_overlap.py` + `.sbatch` + README | FarmShare census of FinePhrase id overlap. **Selftest passes locally.** Now confirmatory only — the overlap was measured directly (0.2683 distinct on a complete-column read of 287,000 ids) |
 | `scripts/md2html.py` + `README-pdf.md` | Markdown→PDF via headless Chrome. **Now renders mermaid too** — `--virtual-time-budget=20000` is REQUIRED or the diagram is silently missing |
@@ -198,6 +199,33 @@ as findings until an audit refuted them.**
 | **"Extend the boundary-marker rewrite table"** | Under dolma2 **only the end-of-text token is a document boundary**; the other 21 added tokens are ordinary ids. I conflated a quality concern with a corpus-splitting one. The single-entry table is correct — the real defect is the two-character prefix guard, which makes any addition a silent no-op |
 | **`stackv2-edu` as the OOM example** | Used a stale 155 B/entry figure that predates the int narrowing. At the current 85.9 B it fits; **`synthetic-finephrase-table` (225.6M docs) is the one that OOMs.** Conclusion unchanged, example wrong |
 
+### From the 2026-08-07 consistency audit — the owner found 23 more, and 3 were substantive
+
+**The owner cross-checked the four documents by arithmetic and found 23 inconsistencies. All 23 verified.**
+Most were denominators or stale labels. **Three changed a number somebody would have acted on:**
+
+| what was wrong | mechanism |
+|---|---|
+| **`BUILD` = 6.6 h was unreachable, and the graph said so without noticing** | 6.6 h is the *aggregate* floor at 128 vCPU. Per-child duration is that child's tokens ÷ its own vCPU — and `--shard/--of` strides **bundles**, so DCLM's 410B is one child at **10.85 h even on a whole 32-vCPU instance**. The graph marked the fix DEFERRABLE while depending on it. **Critical path 13.31 h → 21.31 h**, and the file-shard is a prerequisite, not an optimization |
+| **§5's OOM table scaled the wrong mix, and omitted the worst bundle** | It scaled the *reservoir* (23.82% synthetic) instead of this corpus (4.3%). Redone with each source's own measured tok/doc, the worst bundle is **DCLM at 325M docs / 27.92 GB**, not `finephrase-table` at 19.37 GB — **1.44× worse, and absent from the table**, because the reservoir drew only 29.8B of DCLM. `orchestrator-findings.md` F4 had named DCLM correctly with the wrong arithmetic; I propagated the arithmetic and dropped the bundle |
+| **Two cost figures 1.46× apart, in one document** | §2 said 400B ≈ $41k/52 d; §11 said 1.0T = $70k/89 d. Both imply **$32.8/hr**, so it is a throughput disagreement, not a price one. §11 survives (it postdates the H100 retraction). §11 is now labelled the single anchor |
+
+**Plus one that was invisible rather than wrong: `#NN` task ids appeared in three documents and were
+defined in none of them** — they lived only in a session task tool. Now `docs/TASKS.md`, which is also the
+crosswalk between task ids, graph nodes and Phase 0 items. **Three numbering schemes with no crosswalk is
+how B5 and B6 got left out of Phase 0 entirely** while the graph treated both as gating.
+
+**The lesson, and it is the same one twice now:** every one of the three substantive errors is a
+**denominator or scope error** — a per-child figure read as aggregate, a reservoir mix read as this mix, a
+throughput read as a price. None was a wrong measurement. **When two numbers for one quantity disagree,
+check what each divides by before deciding which is stale.**
+
+**And one process point worth keeping:** the graph's own §9 said *"durations for code items are estimates"*
+and *"`BUILD`'s 6.6 h assumes linear vCPU scaling."* Both caveats were present and neither caught the
+defect, because the problem was not the estimate — it was that **6.6 h and "C3b is deferrable" could not
+both be true**, and nothing checked pairs of claims against each other. A caveat on a number does not
+protect against an inconsistency between numbers.
+
 **And one agent claim I rejected rather than relayed:** an audit asked me to retract a citation because
 "arXiv:2604.13977 does not exist." It resolves — full record, 12 authors, COLM 2026. The fetch tool had
 flagged its April 2026 date as "the future"; today is 2026-08-07. **"This looks like it's from the
@@ -216,7 +244,11 @@ whether execution reaches it.
   `.u32le.bin`** — verified by range-read: no NumPy magic, valid ids <100,278 from byte 0. Their 5.93T
   is a **copy, not a re-tokenization.** ⚠️ Four of the nine reasons in `09-tokenizer-decision.md` are
   broken; `13-redteam-tokenizer-free.md` names them.
-- **Shard size 50,003,968 tokens** → ~20,000 objects at 1.0T. Both of my objections retracted (above).
+- **Shard size 25,001,984 tokens** (`SHARD_TOKENS = 3052 × 8192`, `corpus.py:89`) → **~40,000 objects** at
+  1.0T. **Corrected 2026-08-07:** this entry previously said 50,003,968 → ~20,000, a value that appeared in
+  no commit; the report said one thing and the code another, and eight places carried the disagreement. The
+  companion "0.33% worst-case mixture error" was the same quantity at the withdrawn size — at the real size
+  it is **0.007%–0.278%**. Both of my original objections stay retracted; the *constant* was the error.
 - **Math is ONE artifact.** Nemotron-CC-Math-3+ refetches WARCs for URLs harvested from FineMath +
   OpenWebMath + MegaMath, so it nearly *contains* them; taking it plus any of them double-counts.
 - **Code 10% of stage 1, 18% of the cooldown** (the report's tables are authoritative). Aryabumi
@@ -275,10 +307,11 @@ silently discards work or produces a corpus that passes every gate while being w
 
 | # | blocker | consequence | fix | task |
 |---|---|---|---|---|
+| 0 | **⚠️ NEW — one bundle cannot be split, so `BUILD` is 16.8 h not 6.6 h** | `--shard/--of` strides *bundles*, so DCLM's 410B is ONE child — **10.85 h even given a whole 32-vCPU instance.** The graph's 6.6 h floor was unreachable | plan-time ordinal ranges, **or** give DCLM a synthetic `domain_column` so it fans out for free | **#28** |
 | 1 | **Ordinals shift when a source is added** | one 4B source renames **98% of shards**, voids **882B tokens** | freeze the FULL plan first — **0 code** | #20 |
-| 2 | **The FinePhrase de-dup predicate is never called** | 59.8B declared synthetic is **~18.5B distinct**; `epochs_for` reports green at ~4× true exposure | ~5 lines, at the reader | #21 |
-| 3 | **The dedup set OOMs at 1T** | `synthetic-finephrase-table` needs 19.37 GB in a 15.03 GB container | flat `np.uint64` → 1.80 GB | #22 |
-| 4 | **The decon index is built from 5-shot RENDERS** | 149,777 exact hashes are **dead** for MMLU/ARC/HellaSwag; ≥5% of ARC/HellaSwag items are shorter than one 13-gram | rebuild from raw fields | #24 |
+| 2 | **The FinePhrase de-dup predicate is never called** | the report already specifies the fix (36B from **one** partition); the code cannot express it. Draw 36B from all four and exposure returns at ~2.4× | ~5 lines, at the reader | #21 |
+| 3 | **The dedup set OOMs at 1T** | **DCLM needs 27.92 GB** in a 15.03 GB container — 1.44× worse than the bundle the plan named, and it was missing from the plan's table entirely | flat `np.uint64` → 2.60 GB | #22 |
+| 4 | **The decon index is built from 5-shot RENDERS** | 149,777 exact hashes are **dead** for MMLU/ARC/HellaSwag; and `minimum_hits=2` needs **≥14 words**, which ≥5% of items in the 11- and 12-word suites do not have | rebuild from raw fields | #24 |
 | 5 | **43% of bytes moved is the val split** | serving 0.39% of tokens | file-shard val bundles | #25 |
 
 **Plus two that would embarrass us:** `tokenizers` is **not a declared dependency** while
@@ -292,17 +325,29 @@ build implies the HF CDN may be **~8.4 MB/s**. If so, staging becomes the most v
 the plan.
 
 **Then the blocking measurements:** Dolma 3 adult-content prevalence at **random offsets** (#14 — a
-prior attempt could not separate signal from HuggingFace preview ordering); Nemotron-CC-Math's real
-dolma2 count (#17, and **it is gated — a human must accept the licence** before its text column can
-even be named); and mean document length for 5 unmeasured stage-2 sources.
+prior attempt could not separate signal from HuggingFace preview ordering); and mean document length for 5
+unmeasured stage-2 sources.
+
+✅ **Nemotron-CC-Math is DONE (#17), by a teammate with gate access.** **134.0B under dolma2** =
+472,213,218,716 uncompressed text bytes (exact footers) × 0.283686 tok/byte over 1,920 random-offset
+documents at seed 42; `3` ≈ 83.6B + `4plus` ≈ 50.4B. Artifact
+`_nemotron_cc_math_dolma2_measure.json`. **No `CARD` figure remains in either mix table.** Two follow-ups
+that are not the count: **write down the exact `text_column` and id column** before the registry row exists,
+and **keep `4plus_MIND` out of the pool** (it is a rewrite of `4plus`; including both double-counts).
 
 **Then**: freeze the mix → generate the plan → stage sources → **mandatory single-bundle smoke test**
 (`_reader_for` has never run against live HuggingFace from a Batch container, and the code says so) →
 build in waves → publish as **two datasets** → Gate A → `verify --deep` → promote.
 
-**Wall-clock: ~10 h fixed, ~36 h as-configured, 13.31 h critical path with correct parallelism.** Two
-stages don't merely run slowly today — Gate A at 5.6 h and `verify --deep` at 13.0 h each **exceed
-their job timeouts**, so the corpus could not be promoted at all.
+**Wall-clock: ~10 h of job time, ~36 h as-configured, and a 21.31 h critical path** — revised up from
+13.31 h on 2026-08-07 because that figure assumed `BUILD` = 6.6 h with blocker 0 unfixed, which is not
+achievable. With #28 done the path is **21.31 h**; without it, **23.54 h**. Two stages also don't merely run
+slowly today — Gate A at 5.6 h and `verify --deep` at 13.0 h each **exceed their job timeouts**, so the
+corpus could not be promoted at all.
+
+**Task ids `#NN` are defined in `docs/TASKS.md`** — they used to live only in a session task tool, so three
+documents referenced ids that a fresh agent could not resolve. That file is also the crosswalk to the graph
+nodes (`C3b`, `A2a`, `B5`…) and the Phase 0 item numbers.
 
 Regenerate any PDF after editing with the commands in `scripts/README-pdf.md`.
 

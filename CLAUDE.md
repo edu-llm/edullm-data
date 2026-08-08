@@ -9,25 +9,33 @@ orients you, it is not the spec.
 This worktree is the **corpus build for the 96-expert flagship / 32-expert baseline MoEs**, which is
 newer than anything in `HANDOFF.md`. Four documents, answering four different questions:
 
-| # | read | answers | length |
-|---|---|---|---|
-| 1 | **`HANDOFF-FINAL-DATASET.md`** | **STATE** — what is done, what is next, what I got wrong | 258 lines |
-| 2 | **`docs/FINAL-DATASET-REPORT.md`** (+PDF) | **WHAT** to build — mix, sources, metrics, baseline recipe | 373 lines |
-| 3 | **`docs/IMPLEMENTATION-PLAN.md`** (+PDF) | **HOW** — 5 silent blockers, wall-clock, tokenizer verdict | 1,140 lines |
-| 4 | **`docs/BUILD-DEPENDENCY-GRAPH.md`** (+PDF) | **WHEN** — the DAG, the 13.31 h critical path, an orchestrator brief | 350 lines |
+| # | read | answers |
+|---|---|---|
+| 1 | **`HANDOFF-FINAL-DATASET.md`** | **STATE** — what is done, what is next, what I got wrong |
+| 2 | **`docs/FINAL-DATASET-REPORT.md`** (+PDF) | **WHAT** to build — mix, sources, metrics, baseline recipe |
+| 3 | **`docs/IMPLEMENTATION-PLAN.md`** (+PDF) | **HOW** — six silent blockers, wall-clock, tokenizer verdict |
+| 4 | **`docs/BUILD-DEPENDENCY-GRAPH.md`** (+PDF) | **WHEN** — the DAG, the **21.31 h** critical path, an orchestrator brief |
+| 5 | **`docs/TASKS.md`** | **WHICH** — every `#NN` id, and the crosswalk to graph nodes and Phase 0 items |
 
 **If you are about to write code or launch a job, 3 and 4 are not optional.** The report says what the
-corpus should contain; it does **not** contain the five defects that would silently corrupt or discard
-the work.
+corpus should contain; it does **not** contain the defects that would silently corrupt or discard the work.
+
+**Read 5 before citing any `#NN`.** Those ids appear throughout 1, 3 and 4 and were defined in a session
+tool that no longer exists.
 
 **Evidence** for 3 and 4 is in `artifacts/impl-plan/` (7 reports, 7,769 lines).
 `orchestrator-findings.md` indexes it, **including every claim of mine that was later refuted.**
 
 **Three things to know before touching any number:**
 
-- **Maple is a separate experiment; its configs must not be read or cited** (owner instruction).
+- **Maple is a separate experiment; its configs must not be read or cited** (owner instruction). Any
+  `M20` / `1.279B-active` / `15.63:1` figure came from there and is void.
 - The model shape in the report is **derived**, not given — confirm d_model and layer count with the
   owner before relying on any token or cost figure.
+- **When two numbers for one quantity disagree, check the DENOMINATOR before deciding which is stale.**
+  All three substantive errors found in the 2026-08-07 consistency audit were scope errors, not wrong
+  measurements: a per-child duration read as an aggregate, the reservoir's mix read as this corpus's, a
+  throughput gap read as a price. **`FINAL-DATASET-REPORT.md` §11 is the single cost anchor.**
 - **Do NOT act on the older "ingest source by source, each separately approved" advice.** Executed
   literally it renames **98% of shards** and voids **882B tokens** per added source. Freeze the
   complete plan first.

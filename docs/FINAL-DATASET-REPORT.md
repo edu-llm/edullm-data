@@ -21,6 +21,17 @@ The corpus ships in **two stages**, because no comparable published run used a s
 - **Stage 2 — cooldown, 100B, 32% web.** Concentrated math, code, QA and reasoning traces. **At our
   scale this is where the benchmark numbers actually move.**
 
+> **"Web" here means DCLM + FineWeb-Edu + FinePDFs-Edu.** Stated once, because the comparisons in §6 are
+> against other labs' own definitions and the term is not standard. **FinePDFs-Edu is counted as web** — it
+> is PDFs harvested from Common Crawl, so the provenance is web even though the format is not HTML.
+> **Excluding it, stage 1 is 70%** (378 + 252 of 900). Stage 2 is 32% under either reading, since its only
+> web source is DCLM.
+>
+> **§9's baseline "70%" is the same convention, not the exclusive one** — it is 38 + 26 + 6 including
+> FinePDFs, and it coincidentally equals stage 1's exclusive figure. Excluding FinePDFs the baseline is 64%.
+> **Every percentage in this document includes FinePDFs-Edu.** When comparing to OLMo 2's 95.1% or Olmo 3's
+> 76.1%, note those are *their* definitions of web, which we have not normalized against ours.
+
 Every token is stored as headerless raw `uint32` little-endian under the **dolma2 tokenizer**. No
 source exceeds **0.90 epochs**, so nothing repeats within the corpus itself.
 
@@ -43,8 +54,15 @@ drawing different ratios over the same labelled shards. §9 explains how.
 count, expert width and top-k; only the expert *count* differs. Three consequences the team should
 hold onto:
 
-1. **Per-token compute is identical.** The baseline is not cheaper to train per token. At 400B tokens
-   both cost roughly **$41k / 52 days on 8×A100**. The baseline is cheaper in *memory*.
+1. **Per-token compute is identical.** The baseline is not cheaper to train per token — at any budget,
+   both cost the same. **At the plan's 1.25–2.0T that is $88k–$140k and 111–178 days on 8×A100**, scaled
+   from §11's anchor. The baseline is cheaper in *memory*, not in compute.
+
+   ⚠️ **Corrected 2026-08-07.** This line previously read *"At 400B tokens both cost roughly $41k / 52
+   days."* That is **1.46× off** §11's anchor of 1.0T = $70k / 89 days — the two imply the same
+   **$32.8/hr** for 8×A100 but different throughput, so one of them is stale. §11's is the survivor,
+   because it was re-derived after the H100 retraction; the 400B figure predates it. **Take every cost and
+   duration in this document from §11's table and scale linearly.**
 2. **What differs is knowledge capacity, not reasoning capacity.** Memorization tracks *total*
    parameters; reasoning tracks *active* ones. The baseline holds 2.81× less total, so it forgets more
    and reasons the same.
@@ -66,7 +84,7 @@ hold onto:
 | FineWeb-Edu | 28% | 252.0B | 1,583.1B | 0.16 | MEASURED |
 | `common-pile/stackv2` (code) | 10% | 90.0B | 707.0B | 0.13 | DERIVED |
 | FinePDFs-Edu | 7% | 63.0B | 70.0B | 0.90 | CORRECTED |
-| Nemotron-CC-Math-3+ | 5% | 45.0B | 133.0B | 0.34 | CARD ⚠️ |
+| Nemotron-CC-Math-3+ | 5% | 45.0B | **134.0B** | 0.34 | **MEASURED** ✅ |
 | FinePhrase, one partition (synthetic) | 4% | 36.0B | 123.3B | 0.29 | MEASURED |
 | academic — peS2o + PubMed + arXiv | 2% | 18.0B | 46.6B | 0.39 | MEASURED |
 | reference — Wikipedia + pre-1929 books | 1% | 9.0B | 26.2B | 0.34 | MEASURED |
@@ -78,7 +96,7 @@ hold onto:
 |---|---|---|---|---|
 | DCLM-baseline | 32% | 32.0B | 744.6B | 0.04 |
 | `common-pile/stackv2` (code) | 18% | 18.0B | 707.0B | 0.03 |
-| Nemotron-CC-Math-3+ | 16% | 16.0B | 133.0B | 0.12 |
+| Nemotron-CC-Math-3+ | 16% | 16.0B | **134.0B** | 0.12 |
 | **AI2 dolma3 midtraining mix** (QA-bearing) | 14% | 14.0B | 100.0B | 0.14 |
 | reasoning traces / worked examples | 8% | 8.0B | ~50B | 0.16 |
 | Cosmopedia (synthetic) | 4% | 4.0B | 21.7B | 0.18 |
@@ -87,13 +105,49 @@ hold onto:
 | reference | 2% | 2.0B | 26.2B | 0.08 |
 
 **Combined, 1,000B:** DCLM 41.0% · FineWeb-Edu 25.2% · code 10.8% · FinePDFs 6.3% · math 6.1% ·
-synthetic 4.3% · QA/reference/academic 6.3%. **Max epoch 0.90.**
+synthetic 4.3% · QA/reference/academic 6.3%.
+
+⚠️ **Those buckets close to 100.0% but two of them are not the sum of the rows above.** Stated so nobody
+re-derives them and finds a gap:
+
+| bucket | 41.0 | what it actually contains |
+|---|---|---|
+| synthetic 4.3% | | FinePhrase 3.6% + Cosmopedia 0.4% + **Nemotron Math-Textbooks 0.3%** — which §4 lists as its own row, not as synthetic |
+| QA/reference/academic 6.3% | | dolma3 QA 1.4 + reasoning 0.8 + academic 2.1 + reference 1.1 + **StackExchange 0.9** — StackExchange has its own row in §3 |
+
+Both are defensible groupings; neither is stated. **If you re-cut these buckets, re-derive from the two
+tables above, not from this line.**
+
+### The epoch columns are PER STAGE and are never summed — sum them yourself
+
+Every `epochs` figure in §3 and §4 divides that stage's draw by the full pool. **Seven sources appear in
+both stages, so their true total exposure is the sum.** The "max epoch 0.90" claim survives only because
+FinePDFs-Edu — the source at 0.90 — appears in stage 1 alone.
+
+| source | stage 1 | stage 2 | **total** |
+|---|---|---|---|
+| DCLM-baseline | 0.51 | 0.04 | **0.55** |
+| **Nemotron-CC-Math** | 0.34 | 0.12 | **0.46** |
+| academic | 0.39 | 0.06 | **0.45** |
+| reference | 0.34 | 0.08 | **0.42** |
+| code (`stackv2`) | 0.13 | 0.03 | **0.16** |
+| **FinePDFs-Edu** | **0.90** | — | **0.90** ← still the max |
+| FineWeb-Edu | 0.16 | — | 0.16 |
+
+**So "max epoch 0.90" is correct, and it is the right thing to check — but it is one arithmetic accident
+away from being wrong.** Any reweighting that adds FinePDFs-Edu to the cooldown, or raises Nemotron-CC-Math
+past ~2.2× its current draw, breaks the under-1-epoch property that this corpus's whole no-repetition
+claim rests on. **Re-derive this table after any share change.**
 
 **Grade key**, because not every number here carries the same weight. `MEASURED` = counted under
 dolma2 from exact parquet-footer byte totals × sampled tokens-per-byte. `DERIVED` = byte total measured,
 token count from a measured ratio. `CORRECTED` = a published figure we checked and found wrong, replaced
-with our own. `CARD` = the dataset card's claim, **tokenizer unnamed** — the one figure in the plan still
-needing a real count before it drives arithmetic.
+with our own. `CARD` = the dataset card's claim, **tokenizer unnamed**.
+
+✅ **As of 2026-08-07 no `CARD` figure remains in either table.** The last one, Nemotron-CC-Math, was
+measured under dolma2 from exact footers (472,213,218,716 bytes) × 0.283686 tok/byte sampled over 1,920
+random-offset documents at seed 42 = **134.0B** — splitting 83.6B (config `3`) + 50.4B (config `4plus`).
+The card's 133B was close. Artifact: `_nemotron_cc_math_dolma2_measure.json`.
 
 ---
 
@@ -301,16 +355,35 @@ on. Keeping dolma2 has a second benefit — **AI2's pre-tokenized shards are byt
 format** (verified by range-read: no NumPy header, valid token ids from byte 0), so their 5.93T corpus
 is a byte copy rather than a re-tokenization.
 
-**Shards: 50,003,968 tokens each → about 20,000 objects.** Mixture error from whole-shard selection is
-bounded by 1 ÷ shards-per-component, which is **0.33% in the worst case here.**
+**Shards: 25,001,984 tokens each → about 40,000 objects.** This is `SHARD_TOKENS = 3052 × 8192` in
+`corpus.py:89` — the value the code actually uses, and the one every figure in
+`IMPLEMENTATION-PLAN.md` is computed at. An earlier draft of this line said *50,003,968 → ~20,000
+objects*; that number appeared in no code and is withdrawn.
+
+Mixture error from whole-shard selection is bounded by 1 ÷ shards-per-component, which at this shard
+size is **0.007%–0.278%** across the stage-1 sources. (The **0.33%** figure quoted earlier is the same
+quantity computed at the withdrawn 50M size.) Either way it is far below the level at which it would
+constrain the design — see `IMPLEMENTATION-PLAN.md` §8.3.
+
+⚠️ **The larger shard is still worth choosing deliberately, on a different basis.** Halving the object
+count halves Gate A, which is `objects × 8 × latency`. That trade is settled in `IMPLEMENTATION-PLAN.md`
+§8.3: thread the profile checks instead, and then shard size stops being forced by the validator at all.
+**Do not change `SHARD_TOKENS` without re-deriving §8's object counts and every wall-clock figure that
+rests on them.**
 
 **Compute, on hardware that is actually provisioned.** H100 shapes are **not** currently available in
 this account; live profiles are T4 / L4 / L40S / A10G / 8×A100.
 
 | training budget | 8×A100 (today) | 8×H100 (if unblocked) |
 |---|---|---|
+| 400B tokens | $28k / 36 days | $15k / 11 days |
 | 1.0T tokens | **$70k / 89 days** | $37k / 28 days |
+| **1.25T (the plan's floor)** | **$88k / 111 days** | $46k / 35 days |
 | 2.0T tokens | **$140k / 178 days** | $73k / 56 days |
+
+**This table is the single cost anchor for the whole document** — §2's per-token-compute point scales from
+it. All rows are linear in tokens at **$32.8/hr** for the 8×A100 shape. The 400B row is included only
+because §2 previously carried a conflicting figure for that budget; see the correction there.
 
 **Unblocking H100 access is worth more than any budget decision available to us.**
 
@@ -343,7 +416,7 @@ between what we measured and what we inherited is worth keeping visible.
 - **FinePDFs-Edu's ~70B** is byte-derived rather than directly counted. A widely-circulated 161.07B
   figure for it is wrong by 2.3× — it implies a byte-per-token ratio that is not physically possible for
   English prose on this tokenizer.
-- **Gate A's validation cost at ~20,000 objects** is an extrapolation from a measured 85 minutes at
+- **Gate A's validation cost at ~40,000 objects** is an extrapolation from a measured 85 minutes at
   10,049 objects. Never tested at scale.
 - **MegaMath-Web's post-filter pool size** is unmeasured; its quality score floor admits documents at
   0.40 and only 9.4% of document heads carry LaTeX.
@@ -368,9 +441,13 @@ between what we measured and what we inherited is worth keeping visible.
 2. **Wire the synthetic de-duplication predicate into the build path.** It exists and is tested on
    287,000 document ids, but is called from nothing that writes corpus data — so declared synthetic
    volume currently rests on about 28% as many distinct documents.
-3. **Fix the load-balancing scope** (§11) and **the missing end-of-sequence token** in the superword
-   tokenizer, where an empty special-token list makes the validator's EOS check skip silently in two
-   already-published corpora.
+3. **Fix the load-balancing scope** (§11) — a trainer setting, before training starts.
+
+   *Separately, and **not** a blocker for this corpus:* the **missing end-of-sequence token** in the
+   **SuperBPE** tokenizer, where an empty special-token list makes the validator's EOS check skip silently.
+   **That affects two already-published corpora and does not apply here** — this corpus is dolma2, whose
+   `eos_token_id` is 100257 and whose EOS check therefore runs. It is listed only so the defect is not
+   forgotten; fixing it changes nothing about `final-dataset`.
 4. **Drop the source that ships GSM8K in chain-of-thought format** — 0.51% of tokens (§10).
 5. **Decide the label schema** (§11) — this one is unbackfillable.
 6. **Measure the three blocking unknowns** (§12), and measure **in-region bandwidth** first — ten

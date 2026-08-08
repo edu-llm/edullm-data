@@ -6,17 +6,29 @@
 - At 1.0T: code gives **39,997 objects**, report gives 19,998. Task #9 ("decide shard size") is
   marked complete but the decision never landed in code.
 - VERDICT: the report is aspirational; the code is authoritative. One of the two must change.
+- ✅ **RESOLVED 2026-08-07: the report changed.** `FINAL-DATASET-REPORT.md` §11 now says 25,001,984 →
+  ~40,000 objects, matching the code. The 50,003,968 value appeared in no commit and is withdrawn. Its
+  companion "0.33% worst-case mixture error" is the same quantity at the withdrawn size; at the real size
+  it is 0.007%–0.278%.
 
 ## F2 — Gate A does not fit the validator timeout at either shard size
+> ⚠️ **The call count here is CORRECTED to 8 by F22 below.** The 6 listed are the ones I could name in the
+> profile checks; the measured total is 8 (a call-counting spy recorded 80,392 trips ÷ 10,049 objects =
+> exactly 8). **The wall-clock figures below are unaffected**, because they scale from the measured
+> 507.5 ms/object rather than from the call count. Left as written because F22 explains the error.
+
 - MEASURED anchor: 10,049 objects -> 85 min => **507.5 ms/object**.
-- Per object the profile checks issue **6 SERIAL round trips**: 1 HEAD (`_observed_size`) +
-  4 ranged GETs (`_N_WINDOWS = 4`, `pretrain_tokens_v1.py:240`) + 1 8-byte npy sniff (`:438`).
+- Per object the profile checks issue **6 SERIAL round trips** *(of the 8 real ones)*: 1 HEAD
+  (`_observed_size`) + 4 ranged GETs (`_N_WINDOWS = 4`, `pretrain_tokens_v1.py:240`) + 1 8-byte npy
+  sniff (`:438`).
 - Extrapolated: 20,000 objects = **2.82 h**; 40,000 = **5.64 h**. The cap is **7200 s (2.0 h)**.
 - So Gate A is OVER at BOTH candidate shard sizes. Shard size is forced by the validator, not by
   mixture error (which is only 1/shards_per_component).
 
 ## F3 — the cause is probably connection pooling, not latency
 - 507.5 ms / 6 = **84.6 ms per round trip**, far above a normal in-region ranged GET (~10-25 ms).
+  *(At F22's corrected 8 calls it is **63.4 ms** — still well above a normal ranged GET, so this finding
+  holds; it gets slightly weaker, not refuted.)*
 - `validate.py:2477` says `max_pool_connections` is "the default 10"; `s3.py:196`
   (`Boto3S3.from_region`) builds `boto3.client("s3")` with **no Config at all**.
 - `validate.py:577` DOES thread the size sweep (`head_workers`), but grep finds **zero** threading
@@ -34,6 +46,19 @@
   - DCLM alone (378B tok) = 862M docs = **74.05 GB** in ONE bundle (`domain_column: None`, so it
     does not fan out).
 - Bloom filter at n=2.28B, fp=1e-6: **8.20 GB, k=20**. This is the only affordable global option.
+
+> ⚠️ **BOTH numbers in the two lines above are SUPERSEDED — see the CORRECTION below and
+> `IMPLEMENTATION-PLAN.md` §5.2a.** 438.5 tok/doc is the *synthetic* mean, not the corpus mean; the real
+> mix is **1,041 tok/doc → 960M documents**. And *"the only affordable global option"* was true only against
+> a global `set` at 195.9 GB — the **flat `np.uint64` pre-pass is 7.68 GB global and exact**, which the
+> Bloom filter is not. **Bloom is the fallback, not the plan.**
+>
+> **The one thing this finding got RIGHT that the plan got wrong:** DCLM is the worst single bundle, because
+> `domain_column: None` means it does not fan out. §5's bundle table omitted DCLM entirely (it scaled the
+> reservoir mix, where DCLM was only 29.8B). Re-derived at the report's real 410B share and DCLM's own
+> measured 1,261.5 tok/doc: **325M documents = 27.92 GB**, still the largest, and 1.44× worse than the
+> `finephrase-table` figure the plan called the blocker. **This finding located the right bundle with the
+> wrong arithmetic.**
 
 ## F5 — interleaving (task #15) is TRAINER-side. Definitively.
 - `manifest.py:233`: `labels` is a field of `ManifestEntry` — **one dict per shard path**, not per

@@ -22,7 +22,7 @@ produces a corpus that passes every gate while being wrong.
 |---|---|---|---|
 | 1 | **Ordinals shift when a source is added** | adding one 4B source renames **98% of shards** and voids **882B tokens** | freeze the full plan first — **0 code** |
 | 2 | **The FinePhrase de-dup predicate is never called** | 59.8B declared synthetic is **~18.5B distinct**; the epoch guard reports green at ~4× true exposure | ~5 lines, at the reader |
-| 3 | **The dedup set OOMs at 1T** | 19.37 GB for one bundle in a 15.03 GB container | flat `np.uint64` → 1.80 GB |
+| 3 | **The dedup set OOMs at 1T** | **27.92 GB for the DCLM bundle** in a 15.03 GB container (§5.2a) | flat `np.uint64` → 2.60 GB |
 | 4 | **The decontamination index is built from 5-shot renders** | 149,777 exact hashes are **dead** for MMLU/ARC/HellaSwag | rebuild from raw fields, one CPU job |
 | 5 | **43% of all bytes moved is the val split**, serving 0.39% of the tokens | 2.02× over-read; intrinsic to a per-document hash carve, not a formula bug | file-shard val bundles, ~30 lines |
 
@@ -71,6 +71,37 @@ label. No deduplication method catches this, at any scope, because four rephrasi
 are four different strings. And the epoch guard reports deep green while it happens: `epochs_for`
 divides by the *declared* pool size, so a mixture drawing 0.25 from each of four synthetic sources
 reads 0.33–0.50 epochs on the dashboard while true per-document exposure is about **4×**.
+
+**⚠️ Two things to hold straight here, because four different percentages circulate for this and they are
+not four findings.**
+
+**First, the distinct fraction is ONE measurement expressed two ways.** All of these describe the same
+corpus:
+
+| figure | what it is | grade |
+|---|---|---|
+| **91.0–92.9%** | **pairwise id overlap between configs — the INPUT, not a distinct fraction** | MEASURED |
+| **26.83% distinct** | complete-column read of 287,000 ids | **MEASURED — cite this one** |
+| ~28% | the same 26.83%, rounded, in `FINAL-DATASET-REPORT.md` §13 | same measurement |
+| 30.9% (18.5 ÷ 59.8) | the same finding derived from token mass instead of id counts | DERIVED |
+
+They agree: four configs over one parent set would give exactly **25.0%** if the overlap were total, and
+26.83% is a little above that. **26.83% and 30.9% are the same result by two methods, bracketing ~1/4 to
+~1/3.** Nothing here disagrees with anything else.
+
+**Second — and this is the one that misleads — 59.8B is the RESERVOIR's synthetic pool, not this corpus's
+draw.** `FINAL-DATASET-REPORT.md` §3 already applies the fix and takes **36.0B from a single FinePhrase
+partition**, which is why its table reads *"FinePhrase, one partition."*
+
+| | tokens | distinct | why the difference |
+|---|---|---|---|
+| the reservoir, as built | 59.8B across **4 configs** | ~18.5B | the defect: four rephrasings of one parent set |
+| **this corpus, as planned** | **36.0B from 1 partition** | **~36.0B** | one config, so nothing to overlap with |
+
+**So blocker 2 is not "the corpus is 4× over-exposed" — it is "the code cannot yet express the plan the
+report already specifies."** The report's 36B/one-partition design is correct on paper; `keeps_id` is what
+makes it true in the bytes, and it has **zero production callers**. If the partition is not wired in and
+someone draws 36B from all four configs, the exposure defect returns at ~2.4× on ~15B distinct documents.
 
 A passing verification artifact for a code path production does not execute is the most dangerous
 shape a gap can take, because every audit looks green.
@@ -318,10 +349,15 @@ is where duplicates actually cluster."
 
 ### 5.2 Why it does not scale unchanged
 
+**⚠️ Read 5.2a before this section's bundle table.** The per-bundle figures below are the RESERVOIR mix
+scaled 3.981×, which is **not** this corpus's mix. 5.2a redoes them against the report's actual shares
+and reaches a different worst bundle. The *conclusion* — the `set` OOMs, use a flat array — survives
+both, which is why the section is ordered this way.
+
 Document count is **MEASURED**, not estimated: 308,291,107 documents for 251,218,001,920 tokens =
-**814.9 tokens/document** (`artifacts/reservoir/realized-tokens.json`, 27 receipts). At 1.0T that is
-**1.23B documents**, with 2.0B as a planning bound if the mix shifts toward synthetic (FinePhrase
-averages 263–442 tok/doc against pubmed's 7,918 — a 30× spread).
+**814.9 tokens/document** (`artifacts/reservoir/realized-tokens.json`, 27 receipts). At 1.0T *scaled from
+the reservoir* that is **1.23B documents**, with 2.0B as a planning bound if the mix shifts toward
+synthetic (FinePhrase averages 263–442 tok/doc against pubmed's 7,918 — a 30× spread).
 
 **⚠️ And the current design does not merely miss cross-source duplicates — it runs out of memory.**
 This is the third blocker, and it appears in no design document.
@@ -341,18 +377,66 @@ The largest bundle *by document count* at 1T is not the largest by tokens: it is
 Dedup is only one resident structure: add ~0.45 GB for the decontamination index, 0.4 GB tokenizer,
 0.5 GB pyarrow row group, plus the interpreter — so the usable budget is closer to **13.6 GB**.
 
-**Which bundles fail, precisely** (this corrects an earlier draft that named `stackv2-edu`):
+**Which bundles fail, at the RESERVOIR mix scaled 3.981×** (this corrects an earlier draft that named
+`stackv2-edu` from a stale 155 B/entry figure):
 
-| bundle @1.0T | documents | `set[int]` @85.9 B | verdict |
+| bundle, reservoir mix @1.0T | documents | `set[int]` @85.9 B | verdict against 13.6 GB usable |
 |---|---|---|---|
 | **`synthetic-finephrase-table`** | **225.6 M** | **19.37 GB** | **OOM** |
 | `synthetic-finephrase-math` | 191.9 M | 16.48 GB | **OOM** |
-| `synthetic-finephrase-tutorial` | 137.3 M | 11.79 GB | over the usable budget |
-| `synthetic-finephrase-faq` | 134.6 M | 11.56 GB | over the usable budget |
-| `stackv2-edu` | 168.1 M | 14.44 GB | fits the container, not the budget |
+| `stackv2-edu` | 168.1 M | 14.44 GB | **OOM** |
+| `synthetic-finephrase-tutorial` | 137.3 M | 11.79 GB | fits, 1.8 GB of headroom |
+| `synthetic-finephrase-faq` | 134.6 M | 11.56 GB | fits, 2.0 GB of headroom |
+
+**Corrected 2026-08-07:** an earlier version of this table labelled the last two rows *"over the usable
+budget"* and `stackv2-edu` *"fits the container, not the budget."* Both were wrong against this section's
+own 13.6 GB figure — 11.79 and 11.56 are under it, 14.44 is over it. The three OOM rows are what carries
+the argument, and they are unaffected.
 
 The FinePhrase bundles dominate because their mean document is **263 tokens** against `pubmed`'s 7,918
 — a 30× spread — so they hold the most *documents* despite not holding the most tokens.
+
+### 5.2a ⚠️ But that table is the wrong mix, and the right one moves the worst bundle to DCLM
+
+The figures above are the reservoir's 27 bundles scaled by 3.981×. **The reservoir is 23.82% synthetic;
+this corpus is 4.3%** (report §4). So the table over-weights exactly the bundles that dominate it. Redone
+against the report's combined shares, using each source's own **MEASURED** tokens/document from the same
+27 receipts:
+
+| component @1.0T | B tokens | tok/doc | M documents | `set[int]` @85.9 B | basis for tok/doc |
+|---|---|---|---|---|---|
+| **DCLM-baseline** | **410.0** | **1,261.5** | **325.0** | **27.92 GB** | MEASURED (`dclm`) |
+| FineWeb-Edu | 252.0 | 1,007.1 | 250.2 | 21.49 GB | MEASURED |
+| FinePhrase, one partition | 36.0 | 263.0 | 136.9 | 11.76 GB | MEASURED, shortest config |
+| code (`stackv2`) | 108.0 | 943.0 | 114.5 | 9.84 GB | MEASURED (`stackv2-edu`) |
+| Nemotron-CC-Math | 61.0 | 1,596.3 | 38.2 | 3.28 GB | PROXY (`finemath`) |
+| dolma3 QA | 14.0 | 442.2 | 31.7 | 2.72 GB | PROXY (`finephrase-faq`) |
+| everything else (7 rows) | 119.0 | — | 63.6 | 5.46 GB | mixed |
+| **TOTAL** | **1,000.0** | **1,041.4** | **960.2** | **82.5 GB** | — |
+
+**Three things change, and one of them matters a great deal.**
+
+1. **The worst single bundle is `DCLM-baseline` at 325M documents / 27.92 GB — not `finephrase-table` at
+   225.6M / 19.37 GB.** DCLM is 41% of the corpus in one source, and `domain_column` is `None` for it, so
+   **it does not fan out into sub-bundles** — the whole 410B lands in one dedup set. That is **1.44× worse
+   than the figure this plan called the blocker**, and it is a bundle the 5.2 table does not contain at
+   all, because the reservoir drew only 29.8B of DCLM.
+2. **The corpus total falls to 0.96B documents, not 1.23B** — the mix is *longer*-documented than the
+   reservoir (1,041 tok/doc against 814.9), because DCLM and FineWeb-Edu displace short synthetic text.
+   So §5.3's 256-way partition is sized on a count that is **28% too high**, which is the safe direction.
+3. **The 2.28B figure in `orchestrator-findings.md` F4 is superseded and its own file says so** — it
+   applied the *synthetic* mean (438.5 tok/doc) corpus-wide. F4 carries the correction inline; the Bloom
+   sizing in that finding inherits the error (see §5.3).
+
+**Neither the blocker nor the fix changes.** A flat `np.uint64` at 8 B/key holds DCLM's 325M documents in
+**2.60 GB** and the global 960M in **7.68 GB**. The 256-way partition drops to **0.030 GB/worker**. What
+changes is *which bundle to smoke-test first* — and it is the one nobody had sized.
+
+⚠️ **Two caveats, stated because this table is the basis for a container size.** Four of the thirteen
+tok/doc values are PROXIES from a different source, marked above. And DCLM's 1,261.5 is measured on the
+`dclm_100BT` sample as drawn by the reservoir, not on the 3,764B parquet mirror this plan actually reads
+(§4.1) — a mirror whose row count is an *estimate*. **Measure DCLM's real tokens/document during the
+Phase 2 smoke test**, where the reader is already running.
 
 **Corroborated by a real incident, not just arithmetic.** At 251B this already bit: the dedup set was
 measured at **155 B/entry** before the int narrowing (its docstring had claimed 113 B, a 37%
@@ -386,20 +470,44 @@ the result is **exact global dedup with zero shared state** — no Bloom false p
 documents, no coordination. Sort, unique, resolve winners by an explicit source priority (§5.5), emit
 a keep-list. Pass 2 builds shards against it.
 
-| partitions | resident per worker @1.23B docs |
-|---|---|
-| 64 | 1.65 GB |
-| 128 | 0.82 GB |
-| **256** | **0.41 GB** |
+Sized at **1.23B documents** — the reservoir-scaled count, deliberately kept as the planning figure even
+though §5.2a measures the real mix at **0.96B**, because over-provisioning a partition count is free and
+the mix can still shift:
+
+| partitions | resident per worker @1.23B docs (planning) | @0.96B docs (§5.2a measured mix) |
+|---|---|---|
+| 64 | 1.65 GB | 1.28 GB |
+| 128 | 0.82 GB | 0.64 GB |
+| **256** | **0.41 GB** | **0.32 GB** |
+
+⚠️ **Those columns are 16 B/key** — a `(hash, ref)` pair held during the sort — not the 8 B/key of the
+accumulator in §5.2's table. Both numbers are correct for different structures, and confusing them is
+easy: the 8 B figure sizes *"can I hold every hash?"*, the 16 B figure sizes *"can one worker sort its
+partition?"*
 
 Triple volume is 1.23B × 26 B = **32 GB**, trivially sortable in S3. **The second pass is only
 affordable because of §3's staging** — without it, a second read costs another 2.7–5.4 h from
 HuggingFace instead of ~0.2 h from S3.
 
-**Why not a Bloom filter.** At fp=1e-4 it is only 2.94 GB and fits the existing container, which is
-genuinely attractive. But false positives **discard real documents** — 123K documents ≈ 0.10B tokens
-at that rate — and it cannot be made deterministic as a shared mutable structure. Keep it as the
+**Why not a Bloom filter.** At n=1.23B and fp=1e-4 it is only 2.94 GB and fits the existing container,
+which is genuinely attractive. But false positives **discard real documents** — 123K documents ≈ 0.10B
+tokens at that rate — and it cannot be made deterministic as a shared mutable structure. Keep it as the
 fallback if the pre-pass proves operationally awkward, and record the 0.01% loss explicitly if so.
+
+⚠️ **`orchestrator-findings.md` F4 reaches the opposite verdict — "the only affordable global option" —
+and it is superseded.** Two things separate that 8.20 GB from this 2.94 GB, and neither is a disagreement
+about Bloom filters:
+
+| | F4 | here |
+|---|---|---|
+| documents | 2.28B (the **synthetic** 438.5 tok/doc applied corpus-wide) | 1.23B planning / 0.96B measured (§5.2a) |
+| target false-positive rate | 1e-6 | 1e-4 |
+| size | 8.20 GB | 2.94 GB |
+
+F4's document count is corrected inside its own file. And F4 called Bloom *"the only affordable global
+option"* because it was comparing against a **global `set`** at 195.9 GB — it had not yet considered the
+flat-array pre-pass, which is 7.68 GB global at the measured count and **exact**. **A Bloom filter is the
+fallback, not the plan.** At n=0.96B and fp=1e-4 it would be 2.30 GB.
 
 **The 8-byte truncation is safe.** Birthday collision probability over 1.23B documents at 64 bits is
 **4.08%** — but that is the probability that *any* collision exists at all; the expected number of
@@ -481,22 +589,57 @@ question under ~14 words yields windows only in combination with template words 
 the previous demonstration's tail), so it can match only a document reproducing the template. Worse than
 the usual framing, which notes only that short *documents* yield zero windows.
 
-**The bound, from GPT-3 Table C.1:** 5th-percentile benchmark item lengths are **11 / 12 / 13 words**.
-So **at least 5% of ARC and HellaSwag items are shorter than a single 13-gram** — reachable only by the
-exact-hash half, which Consequence 1 shows is inert for exactly those suites. Both halves fail on the
-same items. That makes this **corpus-corrupting for ARC and HellaSwag specifically**, not merely a
-theoretical gap.
+**The bound, from GPT-3 Table C.1:** 5th-percentile benchmark item lengths are **11 / 12 / 13 words**
+across the three suites. So **at least 5% of the items in the two 11-word and 12-word suites are shorter
+than a single 13-gram** and yield **zero** windows — reachable only by the exact-hash half, which
+Consequence 1 shows is inert for exactly those suites. Both halves fail on the same items.
+
+⚠️ **Precisely:** an item of exactly **13 words is exactly one 13-gram**, not shorter than one — it yields
+a single window, which cannot reach `minimum_hits = 2` and so is **equally undetectable**, by a different
+mechanism. So the third suite is not evidence for "shorter than one 13-gram," but it lands in the same
+place: `minimum_hits = 2` needs **≥14 words** to be satisfiable at all. An earlier draft stated the bound as
+"≥5% of ARC/HellaSwag items are shorter than one 13-gram," which is right for the 11- and 12-word suites and
+imprecise for the 13-word one.
+
+That makes this **corpus-corrupting for the short-item suites specifically**, not merely a theoretical gap —
+and it strengthens the case rather than weakening it, because the `minimum_hits` floor extends the dead zone
+from "under 13 words" to "under 14."
 
 **FIX: rebuild the index from raw benchmark fields** — question alone, question + each choice, question
 + correct answer — **in addition to** the rendered form. One CPU job, no GPU, using the pinned
-`ai2-olmo` checkout. DERIVED cost: a bare ~30-word MMLU question yields ~18 windows × 62,102 items ≈
-**1.1M new n-grams, about +36% index size and +18 MB**. Cheap, and it restores the exact-hash half.
+`ai2-olmo` checkout.
+
+DERIVED cost: a bare ~30-word MMLU question yields ~18 windows × 62,102 items ≈ **1.1M new n-grams.**
+⚠️ **The two percentages that follow have different denominators and an earlier draft stated them as one
+figure:**
+
+| | against what | value |
+|---|---|---|
+| n-gram **count** | +1.1M on 3,097,372 existing | **+36%** |
+| **resident bytes** | +18 MB on the ~250 MB index | **+7%** |
+
+Both are correct; neither is "+36% and +18 MB" as a single claim. The bytes grow more slowly than the count
+because the exact-hash half does not grow at all. **Cheap either way, and it restores the exact-hash half.**
 
 ### 6.2a The n-gram size: keep 13, and do not relitigate it without a measurement
 
-The design doc specifies `allenai/decon` at **`ngram_size 5`**; the code shipped a reimplementation at
-**13-gram with `minimum_hits = 2`**. Two independent audits in this review reached **opposite verdicts**
-on that divergence, so here is the reconciliation.
+The design doc specifies `allenai/decon` at **`ngram_size 5, stride 10, threshold 0.8`**; the code shipped
+a reimplementation at **13-gram with `minimum_hits = 2`**. Two independent audits in this review reached
+**opposite verdicts** on that divergence, so here is the reconciliation.
+
+**What the two configurations are, since this section refers to them as "13/2" and "5/0.8" throughout:**
+
+| | shipped | specified |
+|---|---|---|
+| n-gram size | **13** | **5** |
+| trigger | **`minimum_hits = 2`** — two distinct n-gram hits, an absolute count | **`threshold 0.8`** — the fraction of a benchmark item's n-grams that must match |
+| stride | 1 (every window) | 10 |
+| match weighting | none | IDF, plus cluster expansion |
+
+So **`0.8` is a coverage fraction, not a second n-gram size** — it means *"flag the document when 80% of
+some benchmark item's 5-grams appear in it."* The two rules are not comparable by inspection: 13/2 fires on
+two long coincidences anywhere, 5/0.8 fires on broad shallow coverage of one item. That is *why* nobody can
+call the winner from reading the code.
 
 **Both agree DCLM's famous −11.8 MMLU is a deduplication result, not a decontamination one.** From v4
 Table 19: `min_ngram` 5 gives MMLU **32.5**, `min_ngram` 13 gives **44.3**, while Core moves only
@@ -758,16 +901,24 @@ missed. A model that needs a hand-waved remainder to match a measurement is not 
 worse than a 6-call model predicts. The wall-clock in §8.2 is scaled from the measured 507.5 ms/object
 directly, so **those numbers are unaffected**; only the per-call attribution changes.
 
-### 8.2 It does not fit any plausible timeout at either shard size
+### 8.2 It does not fit any plausible timeout
+
+**Shard size is settled: `SHARD_TOKENS = 25,001,984` (`corpus.py:89` = 3052 × 8192), giving ~40,001
+objects at 1.0T.** Everything below, and every figure in §8A and §9, is computed at that size. An earlier
+draft of `FINAL-DATASET-REPORT.md` §11 said 50,003,968 → ~20,000 objects; that value appeared in no code
+and is withdrawn. The 20,000 row is kept here **only** to show what halving the object count would buy,
+because that is the one real argument for revisiting the constant.
 
 | objects | round trips | serial | with 16 head workers |
 |---|---|---|---|
-| 10,049 (**measured**) | 60,294 | **85 min** | ~71 min |
-| 20,000 (report's shard size) | 160,000 | **2.82 h** | ~2.47 h |
-| 40,000 (**code's shard size**) | 320,000 | **5.63 h** | ~4.93 h |
+| 10,049 (**measured**) | 80,392 | **85 min** | ~71 min |
+| 20,000 (*hypothetical* 50M shard) | 160,000 | **2.82 h** | ~2.47 h |
+| **40,001 (the real size)** | **320,008** | **5.63 h** | ~4.93 h |
 
 Round trips are `objects × 8`; the wall-clock column is scaled from the **measured 507.5 ms/object**,
-so it is independent of the call count and unaffected by the §8.1 correction.
+so it is independent of the call count and unaffected by the §8.1 correction. The 10,049 row's 80,392 is
+not arithmetic — it is the **measured** count from the call-counting spy in commit `db437b6`, and
+80,392 ÷ 10,049 = exactly 8, which is what fixed the call count in §8.1.
 
 **`--head-workers` alone barely helps, and the reason is Amdahl's law:** it threads exactly one of
 **eight** calls, so even at infinite head workers the seven serial calls still cost **87.5%** of the
@@ -783,7 +934,7 @@ GPU/smoke** job definitions, not the dataset validator. **Get the live number be
 and 2 h fails; the honest requirement at default settings is **≥ 4 h**.
 
 **Promotion, by contrast, is already solved.** It is ~2 round trips per object but **is** threaded on
-both phases, so 20,000 objects at 16 workers is ~10–15 min.
+both phases, so 40,001 objects at 16 workers is ~20–30 min.
 
 ### 8.3 The fix, in order of leverage
 
@@ -801,9 +952,11 @@ both phases, so 20,000 objects at 16 workers is ~10–15 min.
    the 8-calls-per-object figure comes from.
 
 **Once this is fixed, shard size stops being forced by the validator** and can be chosen on mixture
-error and OLMo-core's read pattern — which is the correct basis. Note mixture error at the code's
-current 25,001,984-token shard is **0.007%–0.278%** across the stage-1 sources, an order of magnitude
-better than the 0.33% the report cites, so it does not constrain the choice either.
+error and OLMo-core's read pattern — which is the correct basis. Mixture error at 25,001,984 tokens is
+**0.007%–0.278%** across the stage-1 sources, so it does not constrain the choice either. (The report's
+former **0.33%** is the *same quantity computed at the withdrawn 50M shard size* — not an independent
+measurement that disagrees. Both are far below any level that would matter, which is precisely why the
+constant should be decided on Gate A cost.)
 
 ### 8.4 Publish as TWO datasets, not one
 
@@ -848,7 +1001,14 @@ incidental.
 
 Every figure below is anchored on the **reservoir's real 2026-08-05 run** (27 bundles, 10,049 shards,
 251.2B tokens, read from receipts), scaled by **3.981×** to reach 1.0T. That scaling lands on **40,001
-shards** and **1,227,185,570 documents**, which is where §5's document count comes from.
+shards** and **1,227,185,570 documents**, which is where §5's planning document count comes from.
+
+⚠️ **The 3.981× scaling assumes this corpus has the reservoir's composition, and it does not** — the
+reservoir is 23.82% synthetic against this corpus's 4.3%. §5.2a redoes the document count against the real
+mix and gets **960M, not 1.23B**. **Shard count is unaffected** (40,001 shards is tokens ÷ `SHARD_TOKENS`,
+independent of document length), and so is every duration below, because they are anchored on tokens and
+bytes rather than documents. The document count matters only to §5's memory sizing, where it is used in the
+conservative direction.
 
 ### 8A.1 ⚠️ Read this before trusting any number in this section
 
@@ -874,7 +1034,7 @@ exactly that error.*
 |---|---|---|---|
 | A1 | tokenize, `encode_batch` | **10.5 M tok/s across 32 vCPU** (0.328 M/vCPU) | `corpus_pack.py:230-250` |
 | A2 | deep re-hash, single stream | **87.8 MB/s**; **7.82× at 8 workers** | `verify-job.json`, `PUBLISH-SPEC.md:167` |
-| A3 | Gate A per object | **507.5 ms serial** = 6 round trips, 0.3% CPU | `pretrain_tokens_v1.py:205-210` |
+| A3 | Gate A per object | **507.5 ms serial** = **8** round trips, 0.3% CPU | `pretrain_tokens_v1.py:205-210` |
 | A4 | promote | ~2 round trips/object, **already threaded** | `validate.py:1943-1948` |
 | A5 | id/fetch pass, post-fix | **67 s** (was projected 16.9 h) | `INGEST-CALIBRATION.md` banner |
 
@@ -908,23 +1068,114 @@ it only prevents a long tail.
 **Both ❌ rows fail outright at 1.0T**, not merely run slowly: Gate A's 5.6 h and `verify --deep`'s
 13.0 h each exceed their job timeouts, so the corpus could not be promoted at all.
 
+**⚠️ Gate A appears three times in this plan at three values. All three are the same rate; only the
+denominator differs.** Naming them, because an earlier draft did not:
+
+| where | objects | serial | note |
+|---|---|---|---|
+| §8.2 | 40,001 — **both stages** | **5.63 h** | the arithmetic table |
+| §8A.4 above | 40,001 — both stages | **5.6 h** | same figure, rounded |
+| §9 Phase 4 | **36,000 — stage 1 only** | **5.08 h** | stage 2's 4,000 objects are a separate 0.56 h job |
+
+All three are `objects × 507.5 ms`. **Quote the one whose object count matches what you are validating** —
+the two-dataset topology of §8.4 means no single job ever validates all 40,001.
+
 ### 8A.5 The critical path is one bundle, and it is CPU
 
 Wall-clock per child is **read + tokenize serialized, not overlapped** — `corpus_read`,
 `corpus_build`, `corpus_pack`, `corpus_filter` and `s3.py` contain **zero** threading (grep-verified),
 so a child alternates between fetching and encoding in one generator chain.
 
-The largest bundle at 1.0T is `stackv2-edu` at 6,361 shards = **159B tokens**:
+The largest bundle at 1.0T is `stackv2-edu` at 6,361 shards = **159B tokens**. At A1's measured
+**0.328 M tok/s/vCPU**, its tokenize time depends entirely on how many vCPU that one child gets:
 
-| | read | tokenize | total |
+| vCPU for this child | tokenize | read (10 Gbit/s) | total | fits the 6.61 h floor? |
+|---|---|---|---|---|
+| **8** (the wave shape in §9 Phase 3) | **16.83 h** | 0.16 h | **16.99 h** | **NO — 2.6× over** |
+| 16 | 8.42 h | 0.16 h | 8.58 h | no |
+| 32 | 4.21 h | 0.16 h | 4.37 h | yes |
+| 32, at 2.5 Gbit/s instead of 10 | 4.21 h | 1.27 h | 5.48 h | yes |
+| **8, file-sharded 4 ways (32 vCPU total)** | **4.21 h** | 0.04 h | **4.25 h** | **yes** |
+| 8, file-sharded 8 ways (64 vCPU total) | 2.10 h | 0.02 h | **2.12 h** | yes |
+
+**⚠️ Corrected 2026-08-07, and this is a real defect in the earlier draft, not a presentational one.**
+The 4.21 h and 5.48 h figures were computed at **32 vCPU** while this same section specified **8 vCPU per
+child, 16 concurrent**. Those two statements are inconsistent: at 8 vCPU the bundle takes **16.83 h**,
+which does not merely miss the 6.61 h floor — **it is longer than the entire as-configured build**, and it
+would have been discovered only when the array's last child was still running eleven hours after the
+others finished.
+
+⚠️ **The read column varies with BANDWIDTH only — not with `_CHARS_PER_TOKEN`.** An earlier draft labelled
+these rows *"as-is (9.0 chars/token)"* versus *"fixed constants"*, which resurrects the constant §3.1
+**withdrew**. There is no constant to fix here: the 1.27 h → 0.16 h difference is 2.5 Gbit/s versus
+10 Gbit/s, and `_CHARS_PER_TOKEN` does not appear in it, because the budget is a ceiling `pack` never
+reaches. **Both numbers are bandwidth. Leave the constant at 9.0.**
+
+**The resolution, and it changes what task #25 means.** Two things are true at once and the earlier draft
+conflated them:
+
+- **Aggregate:** 1.0T ÷ (128 vCPU × 0.328 M/s) = **6.61 h**. That is the floor and it is real.
+- **Per child:** one bundle's duration is *its own* tokens ÷ *its own* vCPU. A 159B bundle is **15.9%** of
+  the corpus, so it needs ≥15.9% of the 128 vCPU — **at least 21 vCPU** — merely to finish when the
+  aggregate does.
+
+So the file-shard is **not** an optimization that buys 6.6 h → less. It is what makes **6.6 h reachable at
+all** under the stated wave shape. Either shard the big bundles or give them ≥32 vCPU each; the graph's
+`BUILD` = 6.6 h assumes one of the two, and §9 Phase 3 as written provides neither.
+
+**Tokenize is 96% of it once the read is fixed** (0.16 h against 4.21 h at 32 vCPU), which is why
+per-bundle vCPU allocation — not read bandwidth — is what to get right here. `_shard_slice` is already
+imported at `corpus_build.py:92` and already used at `:676`, so the mechanism exists; what is missing is
+its application *within* a bundle rather than across bundles (see §8A.5a).
+
+### 8A.5a ⚠️ `--shard/--of` slices bundles, not files — so the fix needs code
+
+**`_shard_slice(bundles_of(plan), shard, args.of)` at `corpus_build.py:676` strides the list of
+BUNDLES.** MEASURED-IN-CODE. So today an array of 16 children distributes ~100 bundles across them —
+**one bundle always lands entirely inside one child**, and a 159B bundle is therefore a 16.83 h child no
+matter how many children the array has.
+
+The units are worth stating plainly, because three different things are called sharding here:
+
+| unit | what it is | mechanism | status |
 |---|---|---|---|
-| as-is (9.0 chars/token, 2.5 Gbit/s) | 1.27 h | 4.21 h | **5.48 h** |
-| fixed constants, 10 Gbit/s | 0.16 h | 4.21 h | **4.37 h** |
-| **+ file-sharded 8 ways** | 0.02 h | 0.53 h | **0.55 h** |
+| **shard** | one ~25M-token `.u32le.bin` object | `SHARD_TOKENS` | exists |
+| **bundle** | one (source, domain, split) stream, N shards | `--shard/--of` strides these | **exists** |
+| **file-shard** | one bundle's *source files* split across children | — | **DOES NOT EXIST** |
 
-**Tokenize is 96% of it once the read is fixed**, which is why file-sharding the big bundles (task #25,
-using the already-imported `_shard_slice`) is the highest-value wall-clock change. At 8 vCPU per child
-the 128 vCPU cap allows **16 concurrent children**.
+`_shard_slice`'s own docstring is about the third case — it explains striding *"FinePhrase's files"* by
+name — but its two call sites both pass bundle lists. The primitive is right; nothing calls it on files.
+
+**What the change requires:** a bundle must be splittable into K children that each read a disjoint slice
+of its source files and write a disjoint ordinal range. Ordinals are the hard part, not the reading —
+`allocate_ordinals` walks the plan with one counter per split (`corpus.py:352-359`), so K children of one
+bundle must receive their ordinal ranges **from the plan**, at plan time, not negotiate them at runtime.
+**That makes it a plan-shape change, which puts it before `FREEZE`** — not the ~30-line reader tweak the
+earlier draft implied.
+
+**And `stackv2-edu` is not the binding case — DCLM is, by a wide margin.** §5.2a puts DCLM at **410B
+tokens in one bundle**, because its `domain_column` is `None` so it does not fan out. Even given an
+**entire `c7i.8xlarge` to itself — all 32 vCPU, the whole compute environment's instance type** — that one
+child takes **10.85 h**:
+
+| bundle | B tokens | at 8 vCPU | at 32 vCPU (a whole instance) | shards needed to reach 6.6 h |
+|---|---|---|---|---|
+| **DCLM-baseline** | **410.0** | **43.4 h** | **10.85 h** | **≥ 8 ways** |
+| FineWeb-Edu | 252.0 | 26.7 h | 6.67 h | ≥ 5 ways |
+| code (`stackv2`) | 108.0 | 11.4 h | 2.86 h | ≥ 2 ways |
+| FinePhrase, one partition | 36.0 | 3.8 h | 0.95 h | 1 (fits) |
+
+**So this is not an optimization at any wave shape.** The 128 vCPU cap is *on one instance type*, and a
+single Batch child cannot exceed one instance, so **no vCPU allocation makes a 410B single-child bundle fit
+the 6.6 h floor.** Splitting it is the only lever. That is why item 3b is on the critical path and item 3
+(val bundles) is not.
+
+⚠️ **One alternative worth considering before writing the code**, because it may be free: DCLM has a
+natural fan-out the plan currently discards. The parquet mirror is **27,938 files** (§4.1), and a
+`domain_column` — even a synthetic one derived from the file index — would make `allocate_ordinals` emit
+separate bundles with no new mechanism at all. That trades a schema decision (a `domain` label that is not
+semantically a domain, which pollutes `PATH_LABEL_KEYS`) against ~1–2 days of ordinal-range work.
+**Decide this before `FREEZE`; both options change the plan.**
 
 ### 8A.6 Why it is 36 h and not 10 h today: every worker default is 1
 
@@ -993,25 +1244,48 @@ human release.
 All of it is pure code or a read-only query, and **all of it must land before the plan is frozen**,
 because several items change the plan.
 
-| # | item | why it is here | effort |
-|---|---|---|---|
-| 1 | **Wire the FinePhrase id partition** into `_reader_for` | Changes the plan. Cannot be retrofitted after tokenization | ~5 lines + the budget correction below |
-| 2 | ~~Correct `_CHARS_PER_TOKEN`~~ | **WITHDRAWN — see §3.1.** The budget is a ceiling never reached, so this saves zero bytes and starves bundles if set too low | — |
-| 3 | **File-shard val bundles** via the existing `_shard_slice` | 43% of bytes moved serves 0.39% of tokens | ~30 lines |
-| 4 | **Replace the dedup set with a flat `np.uint64` pre-pass** | The current design OOMs at 1T | ~1 day |
-| 5 | **Pin `tokenizers`** in `pyproject.toml` | Production currently resolves whatever PyPI serves | 1 line |
-| 6 | **Thread the profile checks + raise `max_pool_connections`** | Gate A does not fit otherwise | ~20 lines |
-| 7 | **Record `FilterStats` in the receipt** | Without it no dedup claim is auditable | ~10 lines |
-| 8 | **Fix the boundary-marker prefix guard**, or comment why the table must stay at one entry | A future addition to it is silently a no-op today | ~5 lines |
-| 9 | **Drop `data_provenance_initiative`** | Ships GSM8K in CoT format; costs 0.51% of tokens | registry edit |
-| 10 | **Query the live validator timeout** | `edullm-validator:12`'s timeout is recorded nowhere | one read-only call |
+**Numbering.** The `#NN` column is the session task id, `graph` is the node in
+`BUILD-DEPENDENCY-GRAPH.md` §2. Three schemes were in use with no crosswalk; this table is the crosswalk,
+and it is authoritative. **Items marked CHANGES THE PLAN must land before `FREEZE`**, not merely before the
+first job.
+
+| # | item | task | graph | why it is here | effort |
+|---|---|---|---|---|---|
+| 1 | **Wire the FinePhrase id partition** into `_reader_for` | #21 | **C1** | **CHANGES THE PLAN.** Cannot be retrofitted after tokenization | ~5 lines + the budget correction below |
+| 2 | ~~Correct `_CHARS_PER_TOKEN`~~ | — | — | **WITHDRAWN — see §3.1.** The budget is a ceiling never reached, so this saves zero bytes and starves bundles if set too low | — |
+| 3 | **File-shard the VAL bundles** via `_shard_slice` | #25 | **C3** | 43% of bytes moved serves 0.39% of tokens. **DEFERRABLE** — pure read-volume saving | ~30 lines |
+| 3b | **File-shard the BIG bundles** (§8A.5a) | **#28** | **none — no node** | **NOT deferrable and NOT the same fix as 3.** Without it the 159B `stackv2-edu` child is **16.83 h** at 8 vCPU and `BUILD` cannot hit 6.6 h. Needs plan-time ordinal ranges, so it **CHANGES THE PLAN** | **~1–2 days** |
+| 4 | **Replace the dedup set with a flat `np.uint64` pre-pass** | #22 | **A2a + A2b** | The current design OOMs at 1T (§5.2a: DCLM needs 27.92 GB) | ~1 day |
+| 5 | **Pin `tokenizers`** in `pyproject.toml` | #23 | **B1** | Production currently resolves whatever PyPI serves | 1 line |
+| 6 | **Thread the profile checks + raise `max_pool_connections`** | #10 | **B3** | Gate A does not fit otherwise | **~100 lines** (see below) |
+| 7 | **Record `FilterStats` in the receipt** | — | none | Without it no dedup claim is auditable | ~10 lines |
+| 8 | **Fix the boundary-marker prefix guard**, or comment why the table must stay at one entry | — | **B2** | A future addition to it is silently a no-op today | ~5 lines |
+| 9 | **Drop `data_provenance_initiative`** | #16 | **B4** | Ships GSM8K in CoT format; costs 0.51% of tokens | registry edit |
+| 10 | **Query the live validator timeout** | #11 | none | `edullm-validator:12`'s timeout is recorded nowhere | one read-only call |
+| **11** | **Decide `SHARD_TOKENS`** | **#9** | **B6** | **CHANGES THE PLAN** (§8.2). The code says 25,001,984; confirm and stop carrying two values | ~1 h |
+| **12** | **Rebuild the decontamination index from raw fields** | **#24** | **B5** | Blocker 4 (§6.2). **Gates `FREEZE` with only ~0.9 h of slack** — start it early | ~4 h |
+
+**Two items the earlier draft omitted and the graph treats as gating:** #11/B6 and #12/B5. B5 in particular
+has the least slack of anything off the critical path.
+
+**⚠️ Item 6's effort was stated as ~20 lines here and ~100 lines in `pipeline-scale-audit.md`.** The audit
+is right and this table was wrong: threading the profile checks means adding a thread pool to
+`pretrain_tokens_v1.py`, which has **zero** threading today, *and* raising `max_pool_connections` in
+`s3.py`, *and* keeping the per-key size cache correct under concurrency. **Budget ~100 lines.**
 
 **⚠️ Item 1 has a trap worth naming:** applying the partition without dividing the reader's character
 budget by the keep fraction means every bundle finishes and *then* fails `verify` on unfilled shard
 refs. The two changes ship together or not at all.
 
-**Phase 0 wall-clock: ~2 days of engineering, zero AWS.** Items 2, 5, 8, 9 are one-liners; items 1, 3,
-6, 7 are half-day changes; item 4 is the one full day. Item 10 is a single read-only call.
+**⚠️ Do not confuse item 1's budget change with the withdrawn item 2.** They point in *opposite*
+directions. Item 2 would have made `_CHARS_PER_TOKEN` **smaller** (9.0 → ~4.3) and is withdrawn because the
+budget is a ceiling. Item 1 makes the budget **larger** — dividing by the keep fraction — because the
+partition discards ~72% of what it reads and the reader must still fill its shards. Applying item 2 while
+doing item 1 starves every FinePhrase bundle.
+
+**Phase 0 wall-clock: ~3–4 days of engineering, zero AWS.** Items 5, 8, 9 are one-liners; items 1, 7, 11
+are half-day changes; items 4, 6, 12 are ~1 day each; **item 3b is the new 1–2 days** and it is on the
+critical path. Item 10 is a single read-only call. Item 3 is deferrable.
 
 ### Phase 0b — three measurements that gate specific sources — **~2 h of compute, plus a human**
 
@@ -1086,10 +1360,25 @@ trustworthy.
 
 **Blocking a specific source:**
 
-- **Nemotron-CC-Math's text and id columns are UNVERIFIED** — the dataset is **gated**, so its schema
-  cannot be read without authentication. It is the only stage-1 source whose text column we cannot
-  name. Its 133B is CARD with no tokenizer named, and `3plus` **is not a loadable config** (it is the
-  union of `3` and `4plus`), so an ingest row naming it fails to resolve.
+- ✅ **RESOLVED 2026-08-07 — Nemotron-CC-Math's token count is now MEASURED**, by a teammate with gate
+  access. **134.0B under dolma2**: 472,213,218,716 uncompressed text bytes from exact parquet footers ×
+  0.283686 tok/byte sampled over 1,920 random-offset documents at seed 42. Per config: **`3` ≈ 83.6B,
+  `4plus` ≈ 50.4B.** The card's 133B was close. Artifact:
+  `_nemotron_cc_math_dolma2_measure.json`. The implied **3.53 bytes/token** is denser than English prose's
+  ~4.31 on this tokenizer, which is the expected direction for LaTeX-heavy text.
+
+  **Still open on this source, and none of it blocks the count:**
+  - **The `text` and id column NAMES are still unconfirmed in writing.** The count was produced by reading
+    the text column, so somebody knows it — **record the exact `text_column` and id column before the
+    registry row is written.** §4.2 is the cautionary case: FinePhrase has *two* plausible `text` columns
+    and the flat scan picks the wrong one silently.
+  - **`3plus` is still not a loadable config** — it is the union of `3` and `4plus`, so the registry needs
+    **two rows**, not one. The measurement's per-config split confirms this shape.
+  - ⚠️ **`4plus_MIND` is a third config and must NOT be added to the math pool.** It is a *rewrite* of
+    `4plus` (the card lists all three), so including both double-counts the same documents — the same trap
+    §4.2/§4.3 describes for FinePhrase, and the same reason §6 of the report treats math as one artifact.
+    134.0B is `3` + `4plus` only, which is correct. **If `4plus_MIND` is being uploaded, label it so it
+    cannot be swept into the pool by a prefix match.**
 - **Dolma 3's adult-content prevalence** is unmeasured and blocking.
 - **The dolma3 midtraining mix is `allenai/dolma3_dolmino_mix-100B-1125`** and ships **`.jsonl.zst`
   text**, not pre-tokenized shards — so re-tokenization is required, filtering is possible, and
