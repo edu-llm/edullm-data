@@ -18,6 +18,34 @@ Written incrementally, one section per question. Later sections may correct earl
 corrections are marked inline.
 
 ---
+
+## READ THIS FIRST — the five things that matter
+
+1. **`reservoir_ids.keeps_id` and `IdSet.contains` are fully implemented, tested, and have ZERO callers
+   in the build path.** The four FinePhrase sources are 91.0–92.9% the same documents rephrased four
+   ways, and FinePhrase 100% overlaps FineWeb-Edu at the document level. The fix is ~5 lines and the
+   verification artifact for it is green — because it audits a function production never calls. (F1)
+2. **The decontamination index is built over 5-shot-RENDERED prompts**, so its 149,777 exact hashes are
+   inert for MMLU/ARC/HellaSwag, and only ~20.9 distinct 13-grams survive per item. GSM8K is the one
+   naturally-shaped entry, which is why the one passing real-index test is the GSM8K one. (F2)
+3. **The index covers 9 OLMo-ladder families + MMLU + GSM8K-test and nothing else** — no MATH,
+   HumanEval, MBPP, DROP, GPQA, MMLU-Pro, BBH. It prints a healthy-looking size either way. (F3)
+4. **At 1T the per-bundle dedup set OOMs the 14 GiB container** (19.44 GB for
+   `synthetic-finephrase-table--train`). The fix is representation, not key width — narrowing the int
+   inside a Python `set` saves only 9.3%, because CPython boxes ints. (F5)
+5. **`FilterStats` never reaches the receipt**, so the duplicate and contamination rates of our own
+   corpus are unrecoverable from artifacts. This blocks most quantitative claims below. (F8)
+
+**Two of my own recommendations were retracted or resolved by the literature sweep** — F10 (URL-key
+dedup: downgraded to "measure first", because FineMath measured that removing exactly that overlap
+*hurts*) and F13 (13-gram vs 5-gram: resolved in the code's favour by DCLM Table 19's −11.8 MMLU). See
+"REVISIONS" before acting on anything in the findings list.
+
+**Scale note:** the registry and the built corpus are **252B, not 1T**. DCLM is 30B (11.9%) and
+FineWeb-Edu 20B (7.9%) — not the 378B/252B in the audit brief. All 1T figures are DERIVED by scaling the
+measured mix and are labelled as such.
+
+---
 ## Q1 — Is dedup GLOBAL or PER-BUNDLE?
 
 ### Answer: PER-BUNDLE, and narrower than that — it is per-`run_bundle()`-CALL.
@@ -1687,8 +1715,11 @@ like an answer and is not one.
    and says nothing about amplification. Add the measured **91.0–92.9% inter-format id overlap** and the
    **100% FineWeb-Edu document-level collision**. A consumer currently cannot know a leaked item may
    appear ~5× under 5 source labels.
-2. **Fix `corpus_filter.py:7-9` and `DATASET-DESIGN-reservoir.md:348-349`** — DCLM's Bloom-alone figure is
-   **+2.1 CORE, not +1.6** (L2). The qualitative claim survives and is *stronger* than written.
+2. **The `+1.6 CORE` figure is wrong in FIVE places** — DCLM's Bloom-alone number is **+2.1 CORE**
+   (L2); +1.6 is the MinHash+SuffixArray row. The qualitative claim ("equal to the full stack")
+   survives and is *stronger* than written. Grepped, all five sites:
+   `src/edullm_data/corpus_filter.py:8`, `HANDOFF.md:80`, `HANDOFF.md:1898`,
+   `DATASET-DESIGN-reservoir.md:348`, `DATASET-DESIGN-reservoir.md:739`.
 3. **Fix `corpus_filter.py:33-34`** — MMLU `dev` is in the index only as the embedded 5-shot preamble, not
    as items (`eval_bundle.py:150-155`). The "{dev, validation, test}" claim is wrong.
 4. **Record the 13-gram-vs-5-gram divergence** in `DATASET-DESIGN-reservoir.md:774` with L3 as the

@@ -301,3 +301,33 @@ and only `<|endoftext|>` causes it. **The single-entry table is correct.**
    down five live bundles at a ~1/2,500 rate. `neutralize_boundary_markers` DOES cover this (it is
    `<|endoftext|>`), so the existing code is adequate — **but it must actually run on this source**,
    and the same exposure applies to `dolma3-dolmino`, where Phi-4 is one of ten generators.
+
+## F18 — one audit claim REJECTED: arXiv 2604.13977 does resolve
+The dedup/decontam audit asked me to correct project memory on the grounds that
+"arXiv:2604.13977 does not exist." **I checked, and it does.**
+
+Fetching `arxiv.org/abs/2604.13977` returns a full record: "How Can We Synthesize High-Quality
+Pretraining Data? A Systematic Study of Prompt Design, Generator Model, and Source Data", 12 authors
+(Niklaus, Yamaguchi, Štefánik, Penedo, Kydlíček, Bakouch, Tunstall, Beeching, Frere, Raffel, von
+Werra, Wolf), cs.CL with cs.AI/cs.LG cross-lists, submitted 15 Apr 2026, revised 30 Jul 2026,
+accepted at COLM 2026. The abstract names FinePhrase and the 486B figure, and states the
+generator-scaling result.
+
+**Why the agent got it wrong, and why I nearly did too:** the tool that fetched the page flagged the
+April-2026 date as "a future date" and concluded the listing must be fabricated. Today is
+**2026-08-07**, so April 2026 is four months in the PAST. This is a knowledge-cutoff artifact, not
+evidence about the paper.
+
+**Lesson worth keeping:** "this arXiv id looks like it is from the future" is a claim about the
+checker's calendar, not about the paper. Verify the date against today before retracting a citation.
+The memory `finephrase-is-real-and-central` stands unchanged.
+
+The audit's four OTHER documentation corrections are accepted and worth making:
+1. `limitations[]` should carry the measured 91.0-92.9% inter-format id overlap and the 100%
+   FineWeb-Edu document-level collision — a consumer currently cannot know a leaked item may appear
+   ~5x under 5 source labels.
+2. `corpus_filter.py:7-9` understates DCLM's Bloom-alone figure: **+2.1 CORE, not +1.6**. The
+   qualitative claim survives and is stronger than written.
+3. `corpus_filter.py:33-34`'s "{dev, validation, test}" MMLU coverage claim is wrong — `dev` is in the
+   index only as the embedded 5-shot preamble.
+4. Record the 13-gram-vs-5-gram divergence with its justification rather than leaving it implicit.
