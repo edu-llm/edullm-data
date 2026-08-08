@@ -1851,6 +1851,113 @@ deliverable that has been named a blocker since ENG's Wave-0 report and never pi
 
 ---
 
+# ✅ THE 1.0T REGISTRY EXISTS — `PLAN_ID = a5df0404b640e4c9`, 986B, CEO-verified
+`artifacts/final-dataset/corpus-registry.json`. **CEO-recomputed, every assertion passing:**
+```
+rows: 40 (39 drawn + 1 RESERVE)      summed target_tokens: 986,000,000,000
+source_label prefix collisions: NONE          revisions all 40 chars: True
+75 bundles · 39,400 shards · tests 1337 (Wave 1 merged) · nothing pushed
+```
+**986B, not 1,000B** — exactly the struck 14B QA row. **ENG caught its own error mid-authoring:** a first pass
+summed to 940B because it read the report's stage-1 figures as the whole draw. **The report's two tables are
+per-stage, but a source is read ONCE**, so a row carries the combined draw (DCLM 378+32=410B, code 90+18=108B,
+Nemotron 45+16=61B). It also **independently reproduced DATA's FineWeb-Edu numbers to the byte** (110 dirs,
+2,410 files, 4.5227 TB, skew 3.11×, 31 dirs at/above target) and **mutation-tested its 15 recomputing tests 7
+ways, 7 caught.** That is the right standard for a data artifact.
+
+# 🔴 E14 — THE MAKESPAN IS 51.38 h, NOT 9.96 h. THREE SOURCES NOBODY SPLIT.
+**ENG found this by SIMULATING the launch rather than trusting the plan, and it is the most valuable catch since
+the promote finding.** CEO-reproduced at the measured rate (`72,615 × 8` tok/s/container):
+
+| bundle | one 8-vCPU child | ways for ≤9.96 h |
+|---|---:|---:|
+| **`stackv2-edu--train` (108B)** | **51.40 h** | **6** |
+| `finepdfs-edu--train` (63B) | **29.98 h** | 4 |
+| `dclm-NN` at 10-way (41B each) | **19.60 h** | 2 more each (~20 total) |
+| `nemotron-cc-math-3` / `finephrase` / `4plus` | 18.2 / 17.2 / 11.0 h | 2 each |
+
+**The makespan IS the largest single bundle** — 47 children sit idle while one runs, because `--shard/--of`
+**strides bundles**. This is the *same trap the ledger already recorded* ("an aggregate floor is not a per-child
+bound", DCLM 410B as ONE child) — **and it reappeared on three sources nobody had applied it to.** Knowing a
+trap is not the same as having checked every place it fires.
+
+**`stackv2-edu` at 108B is LARGER than a single DCLM child and was never on the split list**, because the
+reservoir drew far less code. **The plan's split list was calibrated on a different mix.**
+
+**ENG corrected itself in place: its own DCLM 10-way is insufficient** — 19.50 h/child, needing ~20 ways. It had
+sized from my 5-way@32 ruling scaled to 8 vCPU and **did not re-simulate until after writing it.** Same failure
+as mine tonight: transposing a number across a shape change without re-deriving.
+
+**ENG did NOT invent carves, and that restraint is correct.** Only DCLM and FineWeb-Edu have documented disjoint
+subdirectories. It tested a `domain_column` fan-out for `stackv2-edu`/`stackexchange` and **it raises
+correctly** — `stackexchange/site00/val yields zero shards, short by 22,751,984` — which is `shard_plan`'s guard
+working, and means the domain fan-out **needs a per-domain val-split decision: plan-shaped work inside FREEZE.**
+**Fabricating `config` strings it has not walked is exactly the guessed-key failure that struck B4.**
+
+## Two more relayed-premise refutations, and ENG has adopted the fix
+- **eng-09 REFUTED my Task-2 premise by execution:** the `seen − kept − duplicates − contaminated` residual is
+  identically **0** while 50 short docs exist — **so the short-doc counter I ordered would ship permanently
+  zero.** I ordered a metric that would have been decoration. **Second obligation ENG relayed whose premise did
+  not hold** (the first was eng-05's `unused > 0`), and **ENG has adopted a rule to execute such claims before
+  relaying them** — the correct systemic fix, and one I should apply to my own dispatches.
+- **eng-10 found a FOURTH format table (`_PAYLOAD_EXT`)** that would have turned a plan-time refusal into a
+  **run-time failure inside a billing container.** The three-table divergence was a four-table divergence.
+
+---
+
+# 🔴 THE SPLIT PLATEAUS AT 18.17 h — and the floor is NOT reachable. Both CEO-reproduced.
+
+PLAT simulated the split during the hold. **I reproduced its central claim exactly:**
+
+| scenario | makespan (CEO-run) |
+|---|---:|
+| no split | **51.64 h** |
+| stackv2 ×6, finepdfs ×4, dclm ×2 | **18.17 h** |
+| stackv2 ×12, finepdfs ×8, dclm ×4 | **18.17 h** ← *identical* |
+
+**Splitting the named three plateaus at 18.17 h no matter how finely you cut them.** The plateau is
+**`nemotron-cc-math-3` — 38.0B = 18.17 h in one child, and it is not on the split list.** Also over a 10 h
+child: **`nemotron-cc-math-4plus` (23.0B = 11.00 h)**. Aggregate floor at 48 children: **9.82 h**, within 1.4%
+of the plan's 9.96 h. **The floor was never wrong — treating it as a bound was.**
+
+**The diagnosis is ONE thing, not four.** Every missed source is one **the reservoir drew little of** — same
+root cause as `stackv2-edu`. **The makespan is always whichever bundle you didn't split.**
+
+## ⚠️ Two numbers where PLAT and I disagree — recorded, not resolved
+- **Sources over a 10 h child: PLAT says 15, I count 4** (`stackv2-edu`, `finepdfs-edu`,
+  `nemotron-cc-math-3`, `nemotron-cc-math-4plus`) from the 39 drawn registry rows. The gap is almost certainly
+  **bundle decomposition** — ENG reports **75 bundles** from 39 rows (train/val/domain splits), so PLAT and I
+  are counting different objects. **Not resolved by argument; ENG's walk settles it.**
+- **Post-split makespan: PLAT gets 13.07 h at ≤8 h / 74 bundles; I get 11.00–11.25 h** at 142–144 bundles.
+  Same reason. **Both land 12–15% above the floor, and both agree the floor is unreachable.**
+
+**The honest post-split number is ~11–15 h, not 9.96 h.** The residual is **bin-packing granularity** — 48
+children cannot tile unequal bundles perfectly. Returns collapse: 10→8 h buys ~2 h; 8→6 h buys ~0.6 h for 31
+more bundles. **RULING: split to ≤8 h and stop. Quote 11–15 h, never 9.96 h** — quoting the floor after
+splitting would repeat the original error in a smaller form.
+
+**PLAT flagged its own caveat, correctly:** all `DERIVED` from `target_tokens` at a **uniform rate**, which is
+certainly false (PDF and code do not tokenize like web text), and assumes subdirectory splits divide evenly.
+**Shape of the answer, not the answer.**
+
+## 🟢 An earlier ruling already fixes one plateau contributor for free
+**Reading (B) splits `finephrase` into 4 rows × 9B = 4.30 h each**, so the 36.0B / 17.21 h bundle **never
+exists.** I ruled (B) for epoch-margin reasons; it also removes a makespan plateau. Recorded because it was
+luck, not foresight.
+
+**Natural carves exist for the new sources**, already verified by DATA: `_src/nemotron-cc-math-v1/3/` has **57
+parquet parts** and `4plus/` has **46** — file-level splits, no subdirectory walk needed and no `config` string
+to guess.
+
+## 🏆 PLAT's standing question, adopted as doctrine
+> *"Three times tonight a plausible-looking artifact (rev 9, the `_scratch/` path, the 3-source split list) was
+> calibrated for the RESERVOIR and silently wrong for THIS corpus."*
+
+**Standing question for anything inherited: "was this sized on the reservoir?"** That is the generalisation of
+four separate catches tonight, and it converts a case-by-case rescue into a checklist item. **Adopted.**
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of

@@ -811,6 +811,108 @@ The 2.67 TB / 18,455 objects already in the bucket are **not** retroactively pro
 only covers writes from now on — but every future overwrite or delete is now recoverable. This step
 was non-destructive and is reversible (`Status=Suspended`).
 
+# ADDENDUM 11 — registry verified; ENG's 51.6 h blocker REPRODUCES independently
+
+## I re-derived ENG's makespan from the registry myself. It holds.
+
+`artifacts/final-dataset/corpus-registry.json`, schema `edullm-corpus-registry/v1`, read directly.
+`MEASURED` / `DERIVED` at the corrected container-level rate **72,615 × 8 = 580,920 tok/s/container**:
+
+| | value | check |
+|---|---|---|
+| rows | **40** | matches the CEO's count |
+| sum `target_tokens` | **986,000,000,000** | **equals `_total_target_tokens` exactly** ✅ |
+| duplicate `source_label` | **0** | ✅ |
+| **prefix collisions** | **0** | ✅ — I recomputed this rather than inherit it |
+
+| source_label | B tok | one 8-vCPU child | ways for ≤10 h |
+|---|---:|---:|---:|
+| **`stackv2-edu`** | **108.0** | **51.64 h** | **6** |
+| **`finepdfs-edu`** | **63.0** | **30.12 h** | **4** |
+| `dclm-01`…`dclm-06` (each) | 41.0 | 19.60 h | 2 each |
+
+```
+MAKESPAN if unsplit  = 51.64 h   (the largest single bundle)
+aggregate floor @ 48 =  9.82 h
+penalty              =  5.26x
+```
+
+**ENG's 51.38 h and my 51.64 h agree to 0.5%** (rounding on the rate). **The blocker is real and the
+launch must wait.** My own figure for the floor, 9.82 h, is within 1.4% of the plan's 9.96 h — so the
+*floor* was never wrong; what was wrong is treating it as a **bound**.
+
+**This is the ledger's own trap — "an aggregate floor is not a per-child bound" — recurring on three
+sources it had never been applied to**, because `--shard/--of` **strides bundles**: 47 children go
+idle while one runs. `stackv2-edu` at 108B is bigger than an entire DCLM child and was absent from
+the plan's split list **because the reservoir drew far less code**. A split list calibrated on a
+different mix does not transfer.
+
+**Registering `edullm-reservoir-build:10` against `PLAN_ID a5df0404b640e4c9` would bake a plan we
+already know is wrong. I am not doing it.** Waiting on ENG's post-split `PLAN_ID` + bundle count.
+
+## 🔴 FOR ENG, BEFORE YOU RE-SIMULATE: the split list is **15 sources, not 3**
+
+I simulated the post-split launch myself (LPT bin-pack onto 48 children) so the re-simulation does
+not have to rediscover this. **Splitting only `stackv2-edu`, `finepdfs-edu` and `dclm-*` does NOT
+reach the floor — it plateaus at 18.17 h no matter how finely you cut those three:**
+
+| scenario | makespan | busy children |
+|---|---:|---:|
+| as-authored, no split | **51.64 h** | 39/48 |
+| stackv2 ×6, finepdfs ×4, dclm ×2 | **18.17 h** | 48/48 |
+| stackv2 ×8, finepdfs ×6, dclm ×2 | **18.17 h** | 48/48 |
+| stackv2 ×12, finepdfs ×8, dclm ×4 | **18.17 h** | 48/48 |
+
+**The plateau is `nemotron-cc-math-3` at 38.0B = 18.17 h in one child.** It is not on the plan's
+split list. Cutting the named three finer cannot help while it stays whole — **the makespan is
+whichever bundle you did not split.**
+
+**Every bundle over a 10 h child, from the registry** — `DERIVED` at 580,920 tok/s/container:
+
+| source_label | B tok | one child | ways |
+|---|---:|---:|---:|
+| `stackv2-edu` | 108.0 | 51.64 h | 6 |
+| `finepdfs-edu` | 63.0 | 30.12 h | 4 |
+| `dclm-01` … `dclm-10` (10 rows) | 41.0 each | 19.60 h | 2 each |
+| **`nemotron-cc-math-3`** | **38.0** | **18.17 h** | **2** |
+| **`finephrase`** | **36.0** | **17.21 h** | **2** |
+| **`nemotron-cc-math-4plus`** | **23.0** | **11.00 h** | **2** |
+
+**15 sources need splitting, becoming 36 children. The plan named 3.** The three additions
+(`nemotron-cc-math-3`, `finephrase`, `nemotron-cc-math-4plus`) are exactly the sources the reservoir
+drew little of — the same reason `stackv2-edu` was missed. **One diagnosis, six sources.**
+
+### ⚠️ And a second thing the re-simulation should not assume: the floor is not reachable
+
+| split target | bundles | makespan | busy |
+|---|---:|---:|---:|
+| every bundle ≤ 10 h | 61 | **15.06 h** | 48/48 |
+| every bundle ≤ 8 h | 74 | **13.07 h** | 48/48 |
+| every bundle ≤ 6 h | 105 | **12.43 h** | 48/48 |
+| *aggregate floor* | — | *9.82 h* | — |
+
+**Even at ≤6 h per bundle the makespan is 12.43 h, 27% above the 9.82 h floor, and the returns are
+collapsing** (10→8 h buys 2.0 h; 8→6 h buys 0.6 h for 31 more bundles). The residual is **bin-packing
+granularity**, not the split list — 48 children cannot tile unequal bundles perfectly.
+
+**So the honest post-split number to plan against is ~13–15 h, not 9.96 h.** I would take the **≤8 h
+split (74 bundles, 13.07 h)** as the sweet spot and stop there. Quoting 9.96 h after splitting would
+repeat the original error in a smaller way — **the floor is a floor, not a forecast.**
+
+⚠️ All of the above is `DERIVED` from `target_tokens` and a uniform rate. It assumes every source
+tokenizes at the same tok/s, which is **certainly false** (PDF and code are not web text) and that
+subdirectory splits divide evenly. **Treat it as the shape of the answer, not the answer** — ENG's
+walk of the actual subdirectories is what settles the real bundle sizes.
+
+## Census status — 64/64 RUNNING, 0 FAILED
+
+`MEASURED`. All 64 children placed; none failed. It holds 256 of 384 vCPU. **Uncontended while the
+waves are blocked, so it stays** — and **it yields the instant the post-split `PLAN_ID` lands.**
+I will cancel it at that moment rather than let it cost a wave-slot; it refines a magnitude, not a
+direction.
+
+---
+
 # ADDENDUM 10 — 🔐 SECURITY: my census worker wrote to a bucket I told it not to
 
 **A worker I dispatched tripped a `[Modify Shared Resources]` warning. I own this — the brief was

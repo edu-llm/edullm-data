@@ -128,8 +128,9 @@ def test_the_two_split_families_have_the_right_child_count_and_even_targets(rows
     Uneven children leave the largest one as the wall clock, which is the entire reason the split
     exists.
     """
-    for prefix, n, per_child in (("dclm-", 10, 41_000_000_000),
-                                 ("fineweb-edu-", 16, 15_750_000_000)):
+    for prefix, n, per_child in (("dclm-", 100, 4_100_000_000),
+                                 ("fineweb-edu-", 16, 15_750_000_000),
+                                 ("finephrase-", 4, 9_000_000_000)):
         family = [r for r in rows if r["source_label"].startswith(prefix)]
         assert len(family) == n, f"{prefix}: {len(family)} children, expected {n}"
         assert {r["target_tokens"] for r in family} == {per_child}
@@ -144,6 +145,31 @@ def test_the_dclm_children_name_the_four_level_prefix(rows):
     for r in (r for r in rows if r["source_label"].startswith("dclm-")):
         assert r["config"].startswith("filtered/OH_eli5"), r["config"]
         assert "/processed_data/global-shard_" in r["config"], r["config"]
+        # One LOCAL-shard dir per row: the finest disjoint unit the tree offers, and the only one
+        # `config` can name. A coarser carve overdraws the ~7.33B unique pool of a single dir.
+        assert "/local-shard_" in r["config"], r["config"]
+
+
+def test_no_bundle_exceeds_the_per_child_wall_clock_except_the_known_escalations(rows):
+    """Re-derive each child's hours at the MEASURED rate. This is the check E14 existed to add.
+
+    ``--shard/--of`` strides BUNDLES, so a source that does not split is one child on one instance
+    no matter how large the array — the makespan is the longest bundle, not the total ÷ children.
+    Two sources are FLAT upstream (zero subdirectories) and cannot be split by any walk; they are
+    escalated, and named here so a third one cannot appear silently.
+    """
+    RATE_B_PER_HOUR = 72_615 * 8 * 3600 / 1e9  # 8-vCPU child, MEASURED end-to-end rate
+    FLOOR_H = 9.96
+    escalated = {"stackv2-edu", "finepdfs-edu", "nemotron-cc-math-3", "nemotron-cc-math-4plus"}
+    over = {
+        r["source_label"]: r["target_tokens"] / 1e9 / RATE_B_PER_HOUR
+        for r in rows
+        if r["target_tokens"] / 1e9 / RATE_B_PER_HOUR > FLOOR_H
+    }
+    assert set(over) <= escalated, (
+        f"a source exceeds the {FLOOR_H} h floor and is not a known escalation: "
+        f"{ {k: round(v, 2) for k, v in over.items() if k not in escalated} }"
+    )
 
 
 def test_fineweb_edu_draws_from_data_not_a_sample(rows):

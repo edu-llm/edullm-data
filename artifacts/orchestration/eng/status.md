@@ -1363,3 +1363,121 @@ have.
   wall clock, not the plan's content. But **a 48-child launch will take 51 h, not 10**, and someone
   should know that before the owner wakes.
 
+
+---
+
+# 🌊 WAVE 3 — CEO ruled both E14 decisions. ENG-EXEC executing directly.
+
+- **DECISION 1: WALK the subdirectories.** `stackv2-edu` (6 ways), `finepdfs-edu` (4 ways), DCLM
+  re-split to ~20. **Do NOT take the domain fan-out** — a walk is a measurement, the val-split ruling
+  is a design change inside FREEZE; and DCLM/FineWeb-Edu already use the subdirectory mechanism, so
+  one split mechanism stays auditable. **If a source has no walkable disjoint structure: STOP and
+  report. Do not fall back, do not fabricate.** *"An unsplit 51 h bundle we know about beats a wrong
+  carve we don't."*
+- **DECISION 2: reading (B)** — four FinePhrase rows at 9B each. A 0.98-epoch row has no margin; any
+  attrition pushes it over 1.0 and surfaces as a bundle that will not fill **at the end of the run** —
+  the failure mode row 14 was struck for.
+- **Target: every bundle ≤ 9.96 h. Re-simulate and report the makespan — do NOT report the split as
+  done on the arithmetic that motivated it.** (Both of us made that mistake once tonight.)
+- **Short-doc counter: DROPPED by the CEO** — *"I ordered decoration."* `problems()` wiring is the fix.
+
+
+## Wave 3 AMENDMENT (CEO): add nemotron-3 (>=4 ways) + nemotron-4plus (>=2), split to <=8 h then STOP,
+## quote 11-15 h and NEVER 9.96 h. PLAT: the plateau is always the bundle you did not split.
+
+Executing. Two verifications first, because the amendment names a mechanism I must confirm exists:
+`config` is consumed by `hf_files` as a TREE PATH (`{base}/{spec.config}?recursive=1`), so a FILE
+RANGE may not be expressible. Checking before I write a single row.
+
+### 🛑 STOPPING AS INSTRUCTED — the amendment's carve is NOT expressible. Three sources, one cause.
+
+**CEO: *"If any source has no walkable disjoint structure, stop and tell me — do not fall back, do not
+fabricate."* Doing exactly that.** All four walks are MEASURED, read-only, at the pinned revisions:
+
+| source | tree at pinned rev | subdirectories | verdict |
+|---|---|---|---|
+| **`stackv2-edu`** | repo root | **0 dirs, 97 files** (`stack-edu-NNNN.json.gz`) | ❌ FLAT — no walk can split it |
+| **`finepdfs-edu`** | `data/eng_Latn/train` | **0 dirs, 100 files** | ❌ FLAT |
+| **`nemotron-cc-math-3`** | `3/` | **0 dirs, 57 files** (`part_000000`–`part_000056`) | ❌ FLAT |
+| **`nemotron-cc-math-4plus`** | `4plus/` | **0 dirs, 46 files** | ❌ FLAT |
+
+**DATA's file counts are exactly right (57 and 46). What is not right is that a file range is
+expressible.** Two independent code facts, both MEASURED-IN-CODE:
+
+1. **`config` is a TREE PATH, not a file selector.** `hf_files` builds
+   `{base}/{spec.config}?recursive=1` and then takes **every** file under it
+   (`corpus_build.py`). There is no start/end, no glob, no slice. `config: "3/part_00000*"`
+   would be requested as a *directory* and 404.
+2. **`file-shard` — "one bundle's source files split across children" — is listed in
+   `IMPLEMENTATION-PLAN.md:1629` as `DOES NOT EXIST`.** That is the exact capability the amendment
+   assumes. It is the same row that made C3b mandatory.
+
+**And the `_src/` S3 staging does not rescue it:** every reader resolves
+`https://huggingface.co/datasets/{repo}/resolve/{revision}/{path}` (`corpus_read.py:391`). **No
+registry row can read `s3://` at all** — grep for `_src/` in `src/` returns nothing. The staged bytes
+are real and byte-verified, but no code path reaches them from a registry row.
+
+**So the amended list cannot be executed as specified, and neither could my own three.** The finest
+expressible unit is a **directory**, and these four sources have none.
+
+**PLAT's doctrine — "was this sized on the reservoir?" — applied to the amendment itself:** the
+file-range route is exactly the mechanism the plan already records as absent. It is the same class of
+inherited assumption, one level up.
+
+### The numbers, MEASURED on the real bundle list — and they CONFIRM the CEO/PLAT band
+
+**Current registry** (DCLM 100-way + FineWeb-Edu 16 + FinePhrase reading B) — `PLAN_ID
+9f969e08a5bbbd07`, **161 bundles**, 986,000,000,000 target:
+
+| bundle over 8 h | tokens | 8-vCPU child |
+|---|---|---|
+| `stackv2-edu--train` | 107.46B | **51.38 h** |
+| `finepdfs-edu--train` | 62.68B | **29.97 h** |
+| `nemotron-cc-math-3--train` | 37.80B | **18.08 h** |
+| `nemotron-cc-math-4plus--train` | 22.88B | **10.94 h** |
+
+**MAKESPAN 48×8 = 51.38 h — exactly the longest bundle, and IDENTICAL to before my splits.**
+DCLM 10→100 and FinePhrase 1→4 rows bought **0.00 h** of makespan, precisely as PLAT predicted:
+*"the makespan is always whichever bundle you didn't split."* **I re-simulated instead of reporting
+the split as done — the discipline the CEO required, and it is the only reason this is visible.**
+
+**Exactly 4 bundles exceed 8 h, and they are the 4 flat sources.** That settles the PLAT-vs-CEO count
+disagreement the CEO asked my walk to arbitrate: **PLAT's 15 and the CEO's 4 were counting different
+objects** — 161 bundles come from 133 rows via train/val decomposition, and **on the real bundle list
+the answer is 4.** The CEO's count matches; PLAT's 15 was rows-before-decomposition.
+
+**If file-sharding existed** (splitting only those 4 to ≤8 h, DERIVED):
+
+| | value |
+|---|---|
+| longest bundle | **7.49 h** |
+| **MAKESPAN 48×8** | **11.19 h** ✅ |
+| MAKESPAN 64×8 | 7.79 h |
+| aggregate floor @48 | 9.79 h |
+
+**11.19 h sits inside the CEO's 11–15 h band and independently reproduces PLAT's 11.00–13.07 h from a
+third method.** Three estimates, three routes, one answer. **Quote 11–15 h. Never 9.96 h.**
+
+**The residual above the floor is bin-packing, exactly as the CEO said**, and 64 children beat 48
+(7.79 h) only because the array stops being the constraint — not because the floor moved.
+
+⚠️ **Both caveats the CEO and PLAT flagged on their own numbers apply to mine and I am not exempting
+them:** these are `DERIVED` from `target_tokens` at a **uniform 72,615 tok/s/vCPU**, which is certainly
+false — **PDF and code do not tokenize like web text**, and `finepdfs-edu` and `stackv2-edu` are two of
+the four sources in question, so the error lands exactly where it matters most. **Shape, not answer.**
+
+### ONE FIX UNBLOCKS ALL FOUR, and it is the item the plan already scoped
+
+**Implement file-sharding** — `IMPLEMENTATION-PLAN.md:1629` marks it `DOES NOT EXIST`, and §8A.5a
+scopes it: a bundle split into K children each reading a **disjoint slice of its source files** and
+writing a **disjoint ordinal range**. The plan's own note is that *"ordinals are the hard part, not the
+reading"* — `allocate_ordinals` walks the plan with one counter per split, so K children must get their
+ranges **from the plan, at plan time**. It is **plan-shaped work, therefore inside FREEZE.**
+
+**This is the same capability C3b needed and got around** by using registry rows on disjoint
+subdirectories. **Four sources have no subdirectories, so the workaround is exhausted and the real fix
+is now load-bearing.** It is ~1 file-list slice in `_reader_for` + an ordinal-range field in the plan.
+
+**I did NOT implement it**: it is plan-shaped, it lands in `_reader_for` and `allocate_ordinals` (two
+other agents' Wave-0 surfaces), and it changes every `plan_id`. **CEO's call.**
+
