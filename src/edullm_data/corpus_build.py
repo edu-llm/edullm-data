@@ -74,6 +74,7 @@ from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 from .corpus import (
     GROUP,
+    MAX_FILE_SHARDS,
     MIN_DOC_TOKENS,
     SHARD_TOKENS,
     TOKENIZER_DATASET_ID,
@@ -84,6 +85,7 @@ from .corpus import (
     ShardRef,
     allocate_ordinals,
     carve,
+    partition_ordinals,
 )
 from .corpus_read import READABLE_FORMATS
 from .ingest_reservoir import (
@@ -103,6 +105,7 @@ __all__ = [
     "REGISTRY_PATH",
     "BuildDriverError",
     "Bundle",
+    "PLAN_SCHEMA",
     "bundle_is_done",
     "load_registry",
     "main",
@@ -111,6 +114,15 @@ __all__ = [
     "run_bundle",
     "split_source_rows",
 ]
+
+
+#: The plan document's schema tag. Bumped v1 -> v2 by the ``file_shard`` field, which is present on
+#: EVERY bundle entry (``{"index": 0, "of": 1}`` when unsharded) rather than only on sharded ones —
+#: an optional field would make every reader carry a default, and a reader whose default disagrees
+#: with the plan's intent reads the wrong files with no error. Adding the field changes ``plan_id``
+#: for every plan, which is expected: ``plan_id`` is the sha256 of this document, so any schema
+#: change is a new content address by construction.
+PLAN_SCHEMA = "edullm-build-plan/v2"
 
 
 class BuildDriverError(BuildError):
@@ -359,6 +371,7 @@ def plan_document(
     val_fraction: float = VAL_FRACTION,
     domain_map: Mapping[str, Mapping[str, str]] | None = None,
     registry_meta: Mapping[str, Any] | None = None,
+    file_shards: Mapping[str, int] | None = None,
 ) -> dict[str, Any]:
     """The plan artifact: every bundle, every shard ref, and the ordinals, decided once.
 
@@ -369,6 +382,37 @@ def plan_document(
 
     That purity is why there is no timestamp in the document. A `created_at` would change the
     `plan_id` on every regeneration and destroy exactly the property the id exists to provide.
+
+    FILE-SHARDING — ``file_shards``, §8A.5a
+    ---------------------------------------
+    ``{spec.key: K}``, or ``None`` to read ``registry_meta["_file_shards"]``. A source with ``K``
+    splits **each of its streams** into ``K`` bundles that read a disjoint slice of the SAME source
+    files and write a disjoint sub-range of the ordinal block the stream already owns.
+
+    **Why here and not in the reader.** ``--shard/--of`` strides BUNDLES
+    (``_shard_slice(bundles_of(plan), …)`` at the ``run`` call site), so one bundle is always one
+    child on one instance, and a Batch child cannot exceed one instance. MEASURED-IN-CODE on the
+    shipping registry: ``stackv2-edu--train`` is 4,298 shards / 107.46 B tokens in ONE bundle,
+    which at the measured end-to-end 72,615 tok/s/vCPU is ~51 h on an 8-vCPU child against a 9.96 h
+    aggregate floor. No vCPU allocation fixes that. Splitting it does.
+
+    **Why it is a plan change and not a reader flag — the ordinals.** A child must never allocate an
+    ordinal (the reuse failure is invisible: see :func:`~.corpus.allocate_ordinals`). So
+    :func:`~.corpus.allocate_ordinals` still runs ONCE, over one row per stream, exactly as before;
+    this function then calls :func:`~.corpus.partition_ordinals` to cut the block that stream
+    already owns into K contiguous, disjoint sub-blocks. **The set of shard paths the plan emits is
+    IDENTICAL with and without file-sharding** — only their grouping into bundles changes. That is
+    the property that makes this safe to add before ``FREEZE`` and testable without a build.
+
+    **What it does NOT change:** ``source_label``. Parts share the ``source`` path segment, so
+    nothing consumer-visible moves. That is the whole difference from :func:`split_source_rows`,
+    which publishes ``dclm-01 … dclm-NN`` permanently inside ``manifest_sha256``. Use
+    ``split_source_rows`` when the subdirectories are genuinely different inputs worth naming; use
+    ``file_shards`` when they are one source that is merely too big for one child.
+
+    Refused, all before any read: ``K < 1``, a non-int ``K``, ``K > MAX_FILE_SHARDS``, a key naming
+    no drawn row, and ``K`` greater than a stream's shard count (a part with no refs has no
+    destination — the same failure ``shard_plan`` refuses for a whole stream).
     """
     drawn = [s for s in specs if s.target_tokens > 0]
     if not drawn:
@@ -380,6 +424,8 @@ def plan_document(
     # caller that constructs specs in memory — including the one splitting a source into N rows,
     # which is the caller most likely to collide.
     _assert_unique_identities(drawn, where="the drawn plan")
+
+    ways = _resolve_file_shards(drawn, file_shards, registry_meta)
 
     targets: dict[tuple[str, str | None, str], int] = {}
     for spec in drawn:
@@ -429,8 +475,29 @@ def plan_document(
         bundles.setdefault((ref.source, ref.domain, ref.split), []).append(ref)
 
     spec_by_label = {s.source_label: s for s in drawn}
+
+    # ONE plan row per stream went into `allocate_ordinals`, so the global block allocation is
+    # untouched by file-sharding. The parts are cut out of the block a stream ALREADY owns, which is
+    # why no child and no part ever allocates an ordinal. `partition_ordinals` raises if a part
+    # would get none.
+    parts: list[tuple[tuple[str, str | None, str], int, int, list[ShardRef]]] = []
+    for (src, dom, split), shards in sorted(
+        bundles.items(), key=lambda kv: (kv[0][0], kv[0][1] or "", kv[0][2])
+    ):
+        k = ways.get(spec_by_label[src].key, 1)
+        if k > len(shards):
+            raise BuildDriverError(
+                f"{_bundle_id(src, dom, split)}: file_shards asks for {k} parts but the stream has "
+                f"only {len(shards)} shard(s) — {k - len(shards)} part(s) would get no ordinals at "
+                f"all, and a part with nowhere to write drops its documents in full. Note the VAL "
+                f"stream is {val_fraction:.1%} of the source and is usually the one that binds: "
+                f"lower the part count, or file-shard the train stream only."
+            )
+        for i, block in enumerate(partition_ordinals(shards, k)):
+            parts.append(((src, dom, split), i, k, block))
+
     doc = {
-        "schema": "edullm-build-plan/v1",
+        "schema": PLAN_SCHEMA,
         "group": GROUP,
         "shard_tokens": SHARD_TOKENS,
         "min_doc_tokens": MIN_DOC_TOKENS,
@@ -447,7 +514,7 @@ def plan_document(
         ),
         "bundles": [
             {
-                "bundle_id": _bundle_id(src, dom, split),
+                "bundle_id": _bundle_id(src, dom, split, index=i, of=k),
                 "source": src,
                 "domain": dom,
                 "split": split,
@@ -458,23 +525,134 @@ def plan_document(
                 "file_format": spec_by_label[src].file_format,
                 "text_column": spec_by_label[src].text_column,
                 "id_column": spec_by_label[src].id_column,
-                "tokens": sum(r.tokens for r in shards),
-                "shards": [r.path for r in shards],
+                #: ALWAYS present, `{"index": 0, "of": 1}` when unsharded. Never optional: a
+                #: reader that has to supply a default reads the wrong files when its default
+                #: disagrees with the plan, and nothing downstream can see that — the documents
+                #: are real, the tokens are real, and the counts still add up.
+                "file_shard": {"index": i, "of": k},
+                "tokens": sum(r.tokens for r in block),
+                "shards": [r.path for r in block],
             }
-            for (src, dom, split), shards in sorted(
-                bundles.items(), key=lambda kv: (kv[0][0], kv[0][1] or "", kv[0][2])
-            )
+            for (src, dom, split), i, k, block in parts
         ],
     }
+    _assert_plan_is_disjoint(doc)
     doc["plan_id"] = hashlib.sha256(
         json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()[:16]
     return doc
 
 
-def _bundle_id(source: str, domain: str | None, split: str) -> str:
-    """A filesystem- and key-safe id for one stream."""
-    return f"{source}--{domain}--{split}" if domain else f"{source}--{split}"
+def _assert_plan_is_disjoint(doc: Mapping[str, Any]) -> None:
+    """Two whole-plan invariants, recomputed from the emitted document. **Silent-loss guard.**
+
+    Not a formality and not a restatement of :func:`~.corpus.partition_ordinals`' contract: this
+    checks the ASSEMBLED artifact, after ids and paths were built by string formatting, which is
+    where the two failures actually enter. Both are invisible downstream.
+
+    **1. `bundle_id` uniqueness — a receipt-overwrite, i.e. K-1x data loss under resume.**
+    ``receipt_key`` is ``…/_receipts/{bundle_id}.json``, so two parts sharing an id write ONE
+    receipt: the second overwrites the first, and ``bundle_is_done`` then reports every part whose
+    id matches that receipt as DONE. K-1 children that never ran are skipped, the corpus is short
+    their shards, and nothing objects until a training run's instance count comes up wrong. This
+    check exists because the id is assembled from a format string — the mechanism that made
+    ``split_source_rows`` need a ``label_width`` guard for the same reason.
+
+    **2. Shard-path uniqueness — the ordinal-reuse class, restated in the currency that matters.**
+    ``allocate_ordinals``' docstring records that reuse is not rejected anywhere: ``parse_shard_name``
+    returns ``('train', 0)`` for two different sources' ``train-00000`` and nothing in
+    ``validate.py`` compares ordinals across sources. So two bundles claiming one key means one
+    ``PutObject`` overwrites the other and the corpus is silently short a shard.
+    ``verify_bundle_set`` has ``bundle-set-shard-path-collision`` for the same failure, but it only
+    fires AFTER a build has written both objects; this fires at plan time, for free.
+    """
+    ids: dict[str, int] = {}
+    for n, entry in enumerate(doc["bundles"]):
+        if entry["bundle_id"] in ids:
+            raise BuildDriverError(
+                f"two bundles share bundle_id {entry['bundle_id']!r} (entries "
+                f"{ids[entry['bundle_id']]} and {n}). receipt_key() is keyed on bundle_id, so "
+                f"their receipts overwrite each other in S3 and bundle_is_done() then declares "
+                f"every one of them DONE — the later children are skipped without ever running "
+                f"and the corpus is silently short their shards."
+            )
+        ids[entry["bundle_id"]] = n
+
+    owner: dict[str, str] = {}
+    for entry in doc["bundles"]:
+        for path in entry["shards"]:
+            if path in owner:
+                raise BuildDriverError(
+                    f"{path} is claimed by both {owner[path]!r} and {entry['bundle_id']!r}. One "
+                    f"bundle's PutObject overwrites the other's, and ordinal reuse is rejected "
+                    f"NOWHERE downstream — parse_shard_name accepts both and validate.py never "
+                    f"compares ordinals across sources."
+                )
+            owner[path] = entry["bundle_id"]
+
+
+def _bundle_id(
+    source: str, domain: str | None, split: str, *, index: int = 0, of: int = 1
+) -> str:
+    """A filesystem- and key-safe id for one unit of work.
+
+    ``of == 1`` returns exactly what this function has always returned, so every existing bundle id
+    and every receipt key under an unsharded stream is byte-identical. That is deliberate: the
+    schema bump should cost nothing on the ~157 streams nobody is splitting.
+
+    ``of > 1`` appends ``--p{index:02d}of{of:02d}``. Two digits each, and ``MAX_FILE_SHARDS`` is 99
+    for exactly that reason — a truncated index would collide two parts into one receipt key, and a
+    receipt that overwrites another makes ``verify_bundle_set``'s ``bundle-set-incomplete`` report a
+    missing part it would otherwise catch. The suffix stays inside ``SAFE_SEGMENT_RE`` (lowercase,
+    digits, ``-``) so it survives ``_assert_safe_key`` and the receipt key round trip.
+    """
+    base = f"{source}--{domain}--{split}" if domain else f"{source}--{split}"
+    return base if of <= 1 else f"{base}--p{index:02d}of{of:02d}"
+
+
+def _resolve_file_shards(
+    drawn: Sequence[CorpusSpec],
+    file_shards: Mapping[str, int] | None,
+    registry_meta: Mapping[str, Any] | None,
+) -> dict[str, int]:
+    """Validate the ``{spec.key: K}`` map, from the argument or from ``registry_meta``.
+
+    Kept out of :func:`plan_document`'s body because every one of these refusals is cheap and local,
+    and because the registry fallback is the part a caller most easily gets wrong: the map lives in
+    the registry's TOP-LEVEL metadata (``_file_shards``), not in a row, so ``CorpusSpec`` and the
+    row schema stay untouched and an old registry plans exactly as it did before.
+
+    An unknown key is refused rather than ignored, and that is the important one: a typo'd source
+    name in the map would silently leave the 51 h bundle unsplit while the operator believed it was
+    split seven ways — and the only symptom is a build that takes five times as long, discovered
+    hours in.
+    """
+    raw = file_shards if file_shards is not None else (registry_meta or {}).get("_file_shards")
+    if not raw:
+        return {}
+    known = {s.key for s in drawn}
+    out: dict[str, int] = {}
+    for key, k in sorted(raw.items()):
+        if key not in known:
+            raise BuildDriverError(
+                f"file_shards names {key!r}, which is not a drawn registry row "
+                f"(is it a reserve row, or a typo?). Ignoring it would leave that source unsplit "
+                f"while the operator believes it was split {k} ways — a build that silently takes "
+                f"K times as long, discovered hours in."
+            )
+        if isinstance(k, bool) or not isinstance(k, int) or k < 1:
+            raise BuildDriverError(
+                f"file_shards[{key!r}] is {k!r}; it must be an int >= 1 (1 means unsharded)."
+            )
+        if k > MAX_FILE_SHARDS:
+            raise BuildDriverError(
+                f"file_shards[{key!r}] is {k}, over MAX_FILE_SHARDS ({MAX_FILE_SHARDS}). The part "
+                f"index is two digits in the bundle id; truncating it collides two parts onto one "
+                f"receipt key."
+            )
+        if k > 1:
+            out[key] = k
+    return out
 
 
 @dataclasses.dataclass(frozen=True)
@@ -493,10 +671,40 @@ class Bundle:
     #: The plan's `val_fraction`, carried so `keep_rate` needs no second argument. Defaults to
     #: `VAL_FRACTION` for hand-built bundles in tests; the plan always supplies the real value.
     val_fraction: float = VAL_FRACTION
+    #: `(index, of)` — which slice of the SOURCE FILES this bundle reads. **Always a 2-tuple, never
+    #: `None`**, so a reader can write `idx, of = bundle.file_shard` unconditionally and pass it
+    #: straight to `_shard_slice`; `(0, 1)` is the identity there (`items[0::1] == items`), which is
+    #: exactly today's whole-source behaviour. An `Optional` here would put a default in every
+    #: reader, and a reader whose default disagrees with the plan reads the wrong files silently.
+    file_shard: tuple[int, int] = (0, 1)
+
+    def __post_init__(self) -> None:
+        index, of = self.file_shard
+        if of < 1 or not 0 <= index < of:
+            raise BuildDriverError(
+                f"{self.bundle_id}: file_shard {self.file_shard!r} is not a valid (index, of) — "
+                f"needs of >= 1 and 0 <= index < of. An out-of-range index makes "
+                f"`items[index::of]` return the WRONG files or none at all, and a shorter file "
+                f"list does not look like an error."
+            )
 
     @property
     def stream(self) -> tuple[str, str | None, str]:
         return (self.source, self.domain, self.split)
+
+    @property
+    def file_shard_index(self) -> int:
+        """Which file slice this bundle reads. ``0`` when the bundle is not file-sharded."""
+        return self.file_shard[0]
+
+    @property
+    def file_shard_count(self) -> int:
+        """How many ways the source files are split. ``1`` when the bundle is not file-sharded."""
+        return self.file_shard[1]
+
+    @property
+    def is_file_sharded(self) -> bool:
+        return self.file_shard[1] > 1
 
     @property
     def tokens(self) -> int:
@@ -537,6 +745,11 @@ class Bundle:
                     ordinal=parsed[1],
                 )
             )
+        # Absent means "not file-sharded", which is exactly right for a v1 plan (v1 could not
+        # express a part) and for the hand-built entries in tests. It is NOT right for a v2 plan
+        # that dropped the field — that would make a child read the whole source while holding 1/K
+        # of the ordinals — so `bundles_of` refuses that case, where the schema is knowable.
+        fs = entry.get("file_shard") or {}
         return cls(
             bundle_id=entry["bundle_id"],
             source=entry["source"],
@@ -545,6 +758,7 @@ class Bundle:
             spec_key=entry["spec_key"],
             shards=tuple(refs),
             val_fraction=val_fraction,
+            file_shard=(int(fs.get("index", 0)), int(fs.get("of", 1))),
         )
 
 
@@ -552,6 +766,21 @@ def bundles_of(plan: Mapping[str, Any]) -> list[Bundle]:
     # The plan's val_fraction reaches each Bundle here, because `_reader_for` sizes a val bundle's
     # read budget by its inverse and a wrong value there silently starves or over-reads.
     vf = float(plan.get("val_fraction", VAL_FRACTION))
+    # Strict where the schema is knowable. `from_plan_entry` has to tolerate a missing `file_shard`
+    # (v1 plans and hand-built test entries have none, and "not sharded" is the correct reading of
+    # both), but a v2 plan that omits it on a bundle that IS a part would hand that child the whole
+    # file list against 1/K of the ordinals — a silent over-read whose only symptom is surplus, and
+    # `partial_source=True` swallows surplus by design. So the check lives here, not there.
+    if plan.get("schema") == PLAN_SCHEMA:
+        missing = [e["bundle_id"] for e in plan["bundles"] if "file_shard" not in e]
+        if missing:
+            raise BuildDriverError(
+                f"plan declares {PLAN_SCHEMA} but {len(missing)} bundle(s) carry no `file_shard` "
+                f"(first: {missing[0]!r}). The field is mandatory in v2, `{{'index': 0, 'of': 1}}` "
+                f"when unsharded — defaulting it here would let a PART read the whole source while "
+                f"holding 1/K of the ordinals, and the only symptom is a surplus that "
+                f"partial_source=True is designed to ignore."
+            )
     return [Bundle.from_plan_entry(e, vf) for e in plan["bundles"]]
 
 
