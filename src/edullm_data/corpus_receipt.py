@@ -1,11 +1,19 @@
 """The build receipt: one bundle's claim that it is finished, and the checks that falsify it.
 
 A corpus build is ~420 Batch array children (``HANDOFF.md`` item 3). Each child owns a **bundle** —
-one ``(source, domain, split)`` stream's shards — and when it finishes it writes a receipt. The
-receipt exists because resumability needs a way to answer "is bundle *k* done?" without re-reading
-the documents that produced it, and because the alternative answer (a commit marker) is the failure
-mode the survey already recorded: *a worker that commits then dies leaves missing shards that every
-later run declares done*.
+one ``(source, domain, split)`` stream's shards, or, when the plan file-shards a large stream K ways,
+**one of K disjoint parts of one** — and when it finishes it writes a receipt. The receipt exists
+because resumability needs a way to answer "is bundle *k* done?" without re-reading the documents
+that produced it, and because the alternative answer (a commit marker) is the failure mode the survey
+already recorded: *a worker that commits then dies leaves missing shards that every later run
+declares done*.
+
+**A bundle is a part, not always a whole stream, and that is load-bearing here.** K siblings share
+one ``(source, domain, split)`` by construction, so every set-level check keyed on the stream alone
+mistook a correct file-sharded build for K duplicate retries — ``verify`` exits non-zero, so the build
+ran and then failed its own verification. :func:`_check_set_file_shard_families` is the fix, and it is
+a *narrowing* of the grouping key rather than its removal: see that function for why grouping on
+``bundle_id`` instead would have deleted the check it was meant to preserve.
 
 WHY THIS MODULE IS MOSTLY VERIFIER
 ----------------------------------
@@ -392,6 +400,53 @@ class ShardReceipt:
         )
 
 
+def _parse_file_shard(doc: Mapping[str, Any]) -> tuple[int, int]:
+    """``doc["file_shard"]`` -> ``(index, of)``, defaulting to ``(0, 1)`` when absent.
+
+    **Absent must mean the DEFAULT, never a zero that looks like data.** Wave 0's eng-06 found the
+    trap this avoids: :func:`verify_receipt` SHORT-CIRCUITS on an unrecognised ``schema_version``,
+    and ``corpus_build.bundle_is_done`` reads receipts to decide what to skip — so any change that
+    made existing receipts unreadable would make every completed bundle look unbuilt and silently
+    mandate a full rebuild. A receipt written yesterday has no ``file_shard`` key and *was* the whole
+    stream, so ``(0, 1)`` is not a lenient fallback, it is the true reading.
+
+    Accepts BOTH shapes on purpose, because the two upstream surfaces disagree as of 2026-08-08:
+    eng-11's published plan contract nests ``{"index": i, "of": k}`` while eng-12's shipped
+    ``Bundle.from_plan_entry`` reads flat ``file_shard`` / ``file_shards`` ints. A receipt is written
+    by one and read by another (possibly on a different wheel — that is what
+    ``bundle-set-mixed-wheel-versions`` exists for), and the cost of accepting both is four lines
+    against a resume that reads every sibling as unsharded and reports K duplicate streams at the end
+    of an 11 h run.
+
+    A present-but-unusable value RAISES. It is not defaulted, because "I could not read your
+    declaration" and "you declared the default" have opposite consequences here: the second makes a
+    file-sharded family look like a set of duplicate-stream retries, i.e. it converts a garbled field
+    into a confident wrong verdict on the corpus.
+    """
+    raw = doc.get("file_shard")
+    if raw is None:
+        return (0, int(doc.get("file_shards", 1) or 1)) if "file_shards" in doc else (0, 1)
+    if isinstance(raw, Mapping):
+        index, of = raw.get("index", 0), raw.get("of", 1)
+    else:
+        index, of = raw, doc.get("file_shards", 1)
+    try:
+        # Reject a float or a numeric string rather than coercing: `int(2.9)` is 2 and `int("3")` is
+        # 3, and both would silently accept a producer whose K is not the K the plan cut.
+        if isinstance(index, bool) or isinstance(of, bool):
+            raise TypeError("bool")
+        if not isinstance(index, int) or not isinstance(of, int):
+            raise TypeError(f"{type(index).__name__}/{type(of).__name__}")
+    except TypeError as exc:
+        raise BuildError(
+            f"receipt.file_shard must be two ints — either {{'index': i, 'of': k}} or the flat "
+            f"file_shard/file_shards pair; got {raw!r} ({exc}). Refusing rather than defaulting to "
+            f"(0, 1): a default here would make a K-way file-sharded family read as K unrelated "
+            f"receipts for one stream, which is the retry-that-did-not-replace defect."
+        ) from exc
+    return index, of
+
+
 @dataclass(frozen=True)
 class Receipt:
     """One bundle's completion claim.
@@ -455,12 +510,69 @@ class Receipt:
     #: from "this bundle wrote every shard it was asked for" — otherwise the two are the same
     #: shorter-than-expected shard list.
     unfilled: tuple[str, ...] = ()
+    #: Which of the plan's K file-slices of this stream this bundle built, and how many the plan cut.
+    #:
+    #: ``(0, 1)`` — the default — means **not file-sharded: this bundle is the whole stream**, which
+    #: is what every bundle was before ``corpus_build._bundle_files`` existed. ``file_shards == K >
+    #: 1`` means the plan split one ``(source, domain, split)`` stream across K children that each
+    #: read a disjoint stride of the source FILES and wrote a disjoint slice of the stream's ordinal
+    #: block (``corpus_build.Bundle.file_shard``, ``_assert_file_shard_family``).
+    #:
+    #: **Why the receipt has to carry this at all.** K siblings share one stream *by construction*,
+    #: so :func:`verify_bundle_set`'s ``bundle-set-duplicate-stream`` — which is right to refuse two
+    #: receipts for one stream — cannot tell a correct K-way build from the retry-that-did-not-
+    #: replace it exists to catch. Without these two ints the only way to keep the gate passing is to
+    #: stop grouping by stream, which deletes the check. With them the gate gets *stronger*: it now
+    #: also sees a missing sibling, which ``bundle-set-incomplete`` structurally cannot (the stream is
+    #: present — its K-1 surviving siblings are standing right there).
+    #:
+    #: They are a **claim, not a conclusion**: :func:`_check_set_file_shard_families` recomputes the
+    #: family from the receipts that exist and from their real shard paths, and reports the
+    #: declaration when the two disagree.
+    file_shard: int = 0
+    file_shards: int = 1
     schema_version: str = RECEIPT_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        # Structural only, and a LOAD failure rather than a Violation — the same line
+        # `ShardReceipt.__post_init__` and `from_dict`'s docstring draw. An out-of-range slice index
+        # is not a claim that can be compared against S3; there is nothing to report about it beyond
+        # "this document is unusable". Both consumers fail SAFE on the raise: `_cmd_verify` counts
+        # the receipt as MISSING (and exits non-zero), and `corpus_build.bundle_is_done` returns
+        # False, so the bundle is rebuilt rather than skipped.
+        if isinstance(self.file_shards, bool) or not isinstance(self.file_shards, int):
+            raise BuildError(
+                f"Receipt.file_shards for {self.bundle_id!r} must be an int; got "
+                f"{self.file_shards!r}"
+            )
+        if isinstance(self.file_shard, bool) or not isinstance(self.file_shard, int):
+            raise BuildError(
+                f"Receipt.file_shard for {self.bundle_id!r} must be an int; got {self.file_shard!r}"
+            )
+        if self.file_shards < 1:
+            raise BuildError(
+                f"Receipt.file_shards for {self.bundle_id!r} is {self.file_shards}; must be >= 1 "
+                f"(1 = the whole stream, the pre-file-sharding case). A K of 0 or less would make "
+                f"the expected index set empty, so every sibling would read as out of family."
+            )
+        if not 0 <= self.file_shard < self.file_shards:
+            raise BuildError(
+                f"Receipt.file_shard for {self.bundle_id!r} is {self.file_shard}, out of range for "
+                f"file_shards={self.file_shards}. This is not cosmetic: the index is what the "
+                f"sibling-coverage check compares against range({self.file_shards}), so an "
+                f"out-of-range one would make a complete family look incomplete and an incomplete "
+                f"one look explained."
+            )
 
     @property
     def stream(self) -> tuple[str, str | None, str]:
         """The ``(source, domain, split)`` triple, i.e. ``PackResult.stream``."""
         return (self.source, self.domain, self.split)
+
+    @property
+    def is_file_sharded(self) -> bool:
+        """True when the plan split this stream and this receipt is one of K siblings."""
+        return self.file_shards > 1
 
     @property
     def label(self) -> str:
@@ -497,6 +609,17 @@ class Receipt:
             doc["filter"] = self.filter.to_dict()
         if self.keep is not None:
             doc["keep"] = self.keep.to_dict()
+        # OMITTED for an unsharded bundle, for the digest reason above and not for tidiness.
+        # `receipt_sha256` is documented as an idempotency key a resumed driver may compare, and
+        # every receipt already in S3 was written without this key; emitting `{"index": 0, "of": 1}`
+        # unconditionally would change the canonical bytes of every one of them, so a resumed build
+        # would see a digest mismatch on work that is bit-for-bit identical. Absent therefore means
+        # exactly what it meant before this field existed — "the whole stream, not file-sharded" —
+        # which is a TRUE statement about every historical receipt, unlike the `filter` case where
+        # absent and zeroed say different things. Nested, matching this document's other multi-field
+        # blocks (`stream`, `pack`, `build`) and the plan entry's own `file_shard` shape.
+        if self.is_file_sharded:
+            doc["file_shard"] = {"index": self.file_shard, "of": self.file_shards}
         return doc
 
     def to_json_bytes(self) -> bytes:
@@ -529,6 +652,7 @@ class Receipt:
         raw_shards = doc.get("shards") or []
         if not isinstance(raw_shards, Sequence) or isinstance(raw_shards, (str, bytes)):
             raise BuildError("receipt.shards must be a list")
+        file_shard, file_shards = _parse_file_shard(doc)
         return cls(
             plan_id=str(doc.get("plan_id", "")),
             bundle_id=str(doc.get("bundle_id", "")),
@@ -559,6 +683,11 @@ class Receipt:
                 else None
             ),
             unfilled=tuple(str(p) for p in doc.get("unfilled", []) or []),
+            # Absent parses to the DEFAULT (0, 1) = "the whole stream", never to a zero that looks
+            # like data. This is eng-06's Wave-0 precedent and it is what keeps every v1 and every
+            # already-written v2 receipt verifiable — see `_parse_file_shard`.
+            file_shard=file_shard,
+            file_shards=file_shards,
             schema_version=str(doc.get("schema_version", "")),
         )
 
@@ -575,6 +704,8 @@ class Receipt:
         wheel_version: str = __version__,
         filter_stats: Any = None,
         keep_filter: Any = None,
+        file_shard: int = 0,
+        file_shards: int = 1,
     ) -> "Receipt":
         """Build a receipt from what the packer actually produced.
 
@@ -595,6 +726,15 @@ class Receipt:
         :meth:`KeepRecord.from_filter`. Both optional and defaulting to ``None`` because
         ``PackResult`` cannot supply either — the dedup pass runs upstream of the packer and the
         packer never sees it — so a caller without one records nothing rather than recording zeros.
+
+        ⚠️ **``file_shard``/``file_shards`` come from the caller's ``Bundle``, and ``PackResult``
+        cannot supply them either** — the packer is handed one stream's refs and has no idea whether
+        the plan cut that stream K ways. So the default here is ``(0, 1)`` = the whole stream, and
+        **a driver that file-shards MUST pass them**. If it does not, K siblings each write a receipt
+        declaring ``(0, 1)``, :func:`verify_bundle_set` sees K plain duplicate-stream retries, and
+        the run fails its own verification **after** the full billable spend — the exact end-of-run
+        failure shape file-sharding was introduced to remove. The wiring is one line at
+        ``corpus_build.run_bundle``'s call site (``corpus_build.py:895``).
         """
         shards: list[ShardReceipt] = []
         for ref in result.written:
@@ -613,7 +753,15 @@ class Receipt:
         stream = tuple(result.stream)
         return cls(
             plan_id=plan_id,
-            bundle_id=bundle_id or bundle_id_for(plan_id, stream),  # type: ignore[arg-type]
+            # The file-shard pair reaches `bundle_id_for` so a caller that omits `bundle_id` gets K
+            # distinct ids rather than K colliding ones. `receipt_key` keys on this id, and a
+            # collision there means one receipt object where K should be — after which
+            # `bundle_is_done` declares the K-1 never-run children DONE, because the surviving
+            # receipt's shards really are all present at the right size.
+            bundle_id=bundle_id
+            or bundle_id_for(  # type: ignore[arg-type]
+                plan_id, stream, file_shard=file_shard, file_shards=file_shards
+            ),
             prefix=prefix.strip("/"),
             source=stream[0],
             domain=stream[1],
@@ -630,10 +778,18 @@ class Receipt:
             filter=None if filter_stats is None else FilterRecord.from_stats(filter_stats),
             keep=None if keep_filter is None else KeepRecord.from_filter(keep_filter),
             unfilled=tuple(ref.path for ref in result.unfilled),
+            file_shard=file_shard,
+            file_shards=file_shards,
         )
 
 
-def bundle_id_for(plan_id: str, stream: tuple[str, str | None, str]) -> str:
+def bundle_id_for(
+    plan_id: str,
+    stream: tuple[str, str | None, str],
+    *,
+    file_shard: int = 0,
+    file_shards: int = 1,
+) -> str:
     """A deterministic id for one bundle of work.
 
     Derived rather than allocated, for the same reason ``corpus.is_held_out`` is a pure function of
@@ -642,9 +798,32 @@ def bundle_id_for(plan_id: str, stream: tuple[str, str | None, str]) -> str:
     from child 37, and the whole point of the receipt is that a later run can tell those apart.
 
     Uses the counter-mode-SHA-256 house pattern (``corpus.is_held_out``, ``read._shuffle_key``).
+
+    ⚠️ **``file_shard`` is in the material because otherwise K siblings collide.** The id is what
+    ``corpus_build.receipt_key`` keys on, so K parts of one stream sharing an id would overwrite each
+    other's receipt in S3 — one object where K should be, and ``bundle_is_done`` would then declare
+    the K-1 children that never ran DONE, because the surviving receipt's shards are all present at
+    the right size. The build would resume past most of the work and publish short. Measured
+    2026-08-08 (eng-11): all parts of a stream returned the same ``8d16efcd49721e9b``.
+
+    **Not live on today's build path** — ``corpus_build.run_bundle`` always passes ``bundle_id``
+    explicitly from ``Bundle.bundle_id``, so the defaulting branch in :meth:`Receipt.from_pack_result`
+    is never taken there. It is fixed anyway rather than documented, because "safe only because every
+    current caller happens to pass the argument" is the property that quietly stops holding, and the
+    failure it stops holding into is silent data loss rather than an exception.
+
+    **The unsharded id is UNCHANGED, deliberately.** ``file_shards == 1`` hashes byte-identical
+    material to before, so every one of the plan's unsharded bundle ids, every receipt key already in
+    S3, and every completed bundle's resume state survive this. A suffix added unconditionally would
+    have renamed every receipt in the bucket and made every finished bundle look unbuilt — the same
+    blast radius as an unguarded schema bump.
     """
     source, domain, split = stream
     material = f"bundle|{plan_id}|{source}|{domain or ''}|{split}"
+    if file_shards > 1:
+        # Both numbers, not just the index: part 1-of-3 and part 1-of-7 read DIFFERENT files and own
+        # different ordinal ranges, so they are different work and must not share an id.
+        material += f"|fs{file_shard}of{file_shards}"
     return hashlib.sha256(material.encode()).hexdigest()[:16]
 
 
@@ -1336,7 +1515,15 @@ def verify_bundle_set(
 
     * ``bundle-set-incomplete`` — an expected stream has no receipt.
     * ``bundle-set-unexpected-stream`` — a receipt for a stream nobody planned.
-    * ``bundle-set-duplicate-stream`` — two receipts claim one stream (a retry that did not replace).
+    * ``bundle-set-duplicate-stream`` — two receipts claim one ``(stream, file_shard)`` (a retry that
+      did not replace). **File-shard-aware:** K legitimate siblings of one stream do NOT trip this;
+      two receipts for the same *part* still do. See :func:`_check_set_file_shard_families`.
+    * ``bundle-set-incomplete-file-shard`` — a file-shard family is missing a part. This is a hole
+      ``bundle-set-incomplete`` structurally CANNOT see: the stream has receipts, so it is not absent.
+    * ``bundle-set-file-shard-count-conflict`` — the family's members disagree about K, or K
+      contradicts the number of parts the plan asked for.
+    * ``bundle-set-file-shard-overlap`` — two siblings claim the same shard path, so the plan did not
+      give them disjoint ordinal ranges.
     * ``bundle-set-plan-mismatch`` — receipts from two different ``plan_id``s merged into one corpus.
     * ``bundle-set-shard-path-collision`` — two bundles claim the same key; one overwrote the other.
     * ``bundle-set-duplicate-shard-digest`` — two bundles hold byte-identical shards. **This is the
@@ -1398,17 +1585,7 @@ def verify_bundle_set(
                 f"corpus.",
             )
         )
-    for stream, group in sorted(by_stream.items(), key=lambda kv: (kv[0][0], kv[0][1] or "", kv[0][2])):
-        if len(group) > 1:
-            v.append(
-                Violation(
-                    "bundle-set-duplicate-stream",
-                    f"{len(group)} receipts claim stream {stream!r} "
-                    f"(bundle ids {sorted(r.bundle_id for r in group)}). Nothing says which is "
-                    f"authoritative, and their shard lists may differ — a retry that wrote a new "
-                    f"receipt without removing the old one produces exactly this.",
-                )
-            )
+    v += _check_set_file_shard_families(by_stream, expected)
 
     v += _check_set_provenance(receipts)
     v += _check_set_shards(receipts)
@@ -1416,6 +1593,205 @@ def verify_bundle_set(
     if s3 is not None and bucket is not None:
         for r in receipts:
             v += verify_receipt(r, s3, bucket, deep=deep, hash_workers=hash_workers)
+    return v
+
+
+def _check_set_file_shard_families(
+    by_stream: Mapping[tuple[str, str | None, str], Sequence[Receipt]],
+    expected: Sequence[tuple[str, str | None, str]],
+) -> list[Violation]:
+    """Two receipts for one stream: legitimate K-way file-sharding, or the retry that did not replace?
+
+    **This is the check the whole file-sharding lever waits on.** ``verify`` exits non-zero, so until
+    this distinction exists a correct file-sharded build runs ~11 h and then fails its own
+    verification, and the 51.38 h -> ~11 h saving is unrealisable. Reproduced 2026-08-08 against a
+    synthesised receipt set for the real 185-bundle plan: **8** ``bundle-set-duplicate-stream``
+    violations, one per file-sharded stream (four sources x train+val), and — the diagnostic that
+    matters — **zero** ``bundle-set-shard-path-collision``. The ordinal ranges really were disjoint;
+    only the grouping was confused.
+
+    **Why not simply group by ``bundle_id``.** That is the easy fix and it is wrong: it makes the
+    grouping key unique by construction, so the check can never fire again and the genuine defect it
+    exists to catch — *a retry that wrote a new receipt without removing the old one*, two claims on
+    one piece of work with possibly different shard lists — is silently deleted. The refusal is the
+    feature; it has to survive.
+
+    **What this does instead.** It groups by ``(stream, file_shard)``, so K siblings occupy K distinct
+    keys and a duplicated *part* still collides. Then it audits the family as a SET, which is the only
+    level at which three of these four defects are visible at all:
+
+    * a duplicated part -> ``bundle-set-duplicate-stream`` (the original check, narrowed by one field
+      and otherwise unchanged — including for the ``file_shards == 1`` case, where
+      ``(stream, 0)`` is exactly ``stream`` and the behaviour is byte-for-byte what it was).
+    * **a MISSING part** -> ``bundle-set-incomplete-file-shard``. Today this is invisible: the stream
+      has receipts, so ``bundle-set-incomplete`` is satisfied, and the shortfall arrives at Gate A as
+      a slightly smaller corpus that is entirely self-consistent. This check is strictly NEW ground.
+    * members disagreeing about K -> ``bundle-set-file-shard-count-conflict``. K is what the coverage
+      set is compared against, so two values mean the family is neither covering nor disjoint and no
+      other statement about it can be trusted.
+    * siblings sharing a shard path -> ``bundle-set-file-shard-overlap``, reported here (rather than
+      leaving it to ``bundle-set-shard-path-collision``) because between siblings it has a specific,
+      actionable cause — the plan failed to partition the stream's ordinal block — and because the
+      generic message blames "two bundles" for what is one bundle's plan-time split.
+
+    **The family is RECOMPUTED from the receipts that exist, never read from a declared count.**
+    ``of`` is a producer assertion like every other field here: a family of two receipts both
+    declaring ``of=7`` is five children short, and the way you learn that is by counting the receipts
+    in front of you and comparing, not by reading ``of`` and believing it. The declared value is used
+    only as the *expectation to falsify*, and it is reported next to the recomputed reality so the
+    reader can see which one is lying. This is ``CONTRIBUTING.md``'s golden rule applied to a pure
+    check: a check that reads a field and asserts it is present is decoration.
+
+    ``expected`` is accepted and deliberately NOT used to source K. The expected set is
+    ``[b.stream for b in bundles_of(plan)]`` (``corpus_build._cmd_verify``), which after file-sharding
+    contains the same stream K times — so ``len`` of its occurrences is the plan's K, and trusting it
+    would make this check compare the plan against itself. ``corpus_build._assert_file_shard_family``
+    already validates the plan side from the plan's refs; this side must be independent of it, because
+    the failure being hunted is a receipt set that does not match a correct plan. It IS used for one
+    thing the receipts cannot know: whether the plan asked for a different K than the receipts
+    declare, which is a real conflict and otherwise unreportable.
+    """
+    v: list[Violation] = []
+
+    def _where(s: tuple[str, str | None, str]) -> str:
+        return "/".join(p for p in s if p)
+
+    # How many times each stream appears in the expected list. `_cmd_verify` builds it from
+    # `bundles_of(plan)`, one entry per BUNDLE, so a K-way split stream appears K times. Used only to
+    # cross-check the declared K — never to supply it.
+    planned_parts: dict[tuple[str, str | None, str], int] = {}
+    for stream in expected:
+        planned_parts[stream] = planned_parts.get(stream, 0) + 1
+
+    for stream, group in sorted(by_stream.items(), key=lambda kv: (kv[0][0], kv[0][1] or "", kv[0][2])):
+        by_part: dict[int, list[Receipt]] = {}
+        for r in group:
+            by_part.setdefault(r.file_shard, []).append(r)
+
+        # 1. Two receipts for the SAME part. The original defect, undiminished: for an unsharded
+        #    stream every receipt has `file_shard == 0`, so this is the pre-existing check verbatim.
+        for part, dupes in sorted(by_part.items()):
+            if len(dupes) <= 1:
+                continue
+            if dupes[0].is_file_sharded:
+                # Name the PART, and say the rest of the family is fine. Re-running the whole stream
+                # would rewrite the other siblings' disjoint ordinals for nothing.
+                sharded = f", file_shard {part} of {dupes[0].file_shards}"
+                remedy = (
+                    " This is ONE PART of a file-sharded stream: the other parts are unaffected, so "
+                    "delete the stale receipt and re-run this part, not the stream."
+                )
+            else:
+                sharded = ""
+                remedy = ""
+            v.append(
+                Violation(
+                    "bundle-set-duplicate-stream",
+                    f"{len(dupes)} receipts claim stream {stream!r}{sharded} "
+                    f"(bundle ids {sorted(r.bundle_id for r in dupes)}). Nothing says which is "
+                    f"authoritative, and their shard lists may differ — a retry that wrote a new "
+                    f"receipt without removing the old one produces exactly this.{remedy}",
+                )
+            )
+
+        declared = {r.file_shards for r in group}
+
+        # 2. The family disagrees about K. Checked before coverage, because K is what coverage is
+        #    compared against — reporting "missing part 5 of 7" when half the family thinks K is 3
+        #    would be a confident finding derived from a number that is already known to be wrong.
+        if len(declared) > 1:
+            detail = "; ".join(
+                f"of={k} -> {sorted(r.bundle_id for r in group if r.file_shards == k)}"
+                for k in sorted(declared)
+            )
+            v.append(
+                Violation(
+                    "bundle-set-file-shard-count-conflict",
+                    f"{_where(stream)}: receipts declare {len(declared)} different file-shard counts "
+                    f"({detail}). K is what the file stride divides by and what the ordinal block was "
+                    f"partitioned into, so two values mean the parts are neither disjoint nor "
+                    f"covering — and every other statement about this family, including which parts "
+                    f"are missing, is derived from a number that is already wrong.",
+                )
+            )
+            continue
+
+        k = declared.pop() if declared else 1
+
+        # 3. The plan and the receipts disagree about K. The receipts cannot see this on their own;
+        #    it is the one thing `expected` is good for here.
+        planned = planned_parts.get(stream)
+        if planned is not None and planned != k:
+            v.append(
+                Violation(
+                    "bundle-set-file-shard-count-conflict",
+                    f"{_where(stream)}: the receipts declare file_shards={k} but the plan holds "
+                    f"{planned} bundle(s) for this stream. Either the receipts were written by a run "
+                    f"against a different plan revision, or the driver file-sharded by a K the plan "
+                    f"did not choose — and since the ordinal block was partitioned at plan time, a "
+                    f"different K means different ranges: the parts that did run wrote keys no plan "
+                    f"row asked for.",
+                )
+            )
+
+        # 4. Coverage. RECOMPUTED: the parts present are counted, not read off `of`. A family of two
+        #    receipts both declaring of=7 is five children short, and no field in either receipt says
+        #    so — only the count of receipts in front of you does.
+        if k > 1:
+            missing = sorted(set(range(k)) - set(by_part))
+            if missing:
+                v.append(
+                    Violation(
+                        "bundle-set-incomplete-file-shard",
+                        f"{_where(stream)}: file_shards={k} but no receipt for part(s) {missing} "
+                        f"(present: {sorted(by_part)}). **`bundle-set-incomplete` cannot see this** — "
+                        f"the stream is not absent, its {len(by_part)} surviving sibling(s) are right "
+                        f"here — so without this check the corpus publishes short by that part's "
+                        f"share of the stream, internally consistent and passing Gate A, with the "
+                        f"mixture still naming the full source. Re-run only the named part(s); the "
+                        f"others hold disjoint ordinals and are unaffected.",
+                    )
+                )
+            stray = sorted(p for p in by_part if not 0 <= p < k)
+            if stray:
+                # Unreachable via `from_dict` (`__post_init__` refuses an out-of-range index) but
+                # reachable by a hand-built Receipt, and silence here would let a stray part satisfy
+                # the coverage count while filling none of the expected slots.
+                v.append(
+                    Violation(
+                        "bundle-set-file-shard-count-conflict",
+                        f"{_where(stream)}: file_shard {stray} is outside range({k}). Those parts "
+                        f"correspond to no slice the plan cut, so their shards were written against "
+                        f"ordinals nobody allocated.",
+                    )
+                )
+
+            # 5. Disjointness, recomputed from the real paths. `_check_set_shards` would also see the
+            #    collision, but only as a generic two-bundles-overwrote-each-other; between siblings
+            #    the cause is specific — the plan failed to partition the stream's ordinal block —
+            #    and that is the sentence the operator needs.
+            owner: dict[str, int] = {}
+            for r in sorted(group, key=lambda r: r.file_shard):
+                for shard in r.shards:
+                    prior = owner.get(shard.path)
+                    if prior is not None and prior != r.file_shard:
+                        v.append(
+                            Violation(
+                                "bundle-set-file-shard-overlap",
+                                f"{_where(stream)}: {shard.path} is claimed by file_shard {prior} "
+                                f"AND {r.file_shard} of {k}. Siblings must hold DISJOINT ordinal "
+                                f"ranges — `allocate_ordinals` partitions the stream's block at plan "
+                                f"time precisely so they do. Overlapping means the two children "
+                                f"raced for one key in S3 (last writer wins, silently), the plan's "
+                                f"token total double-counts the survivor, and the read budget that "
+                                f"was NOT divided by {k} was sized against an assumption that does "
+                                f"not hold.",
+                                path=shard.path,
+                            )
+                        )
+                    else:
+                        owner[shard.path] = r.file_shard
+
     return v
 
 
