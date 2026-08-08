@@ -11,32 +11,44 @@ has checked. `UNVERIFIED` means plausible and unchecked — flagged, never used 
 
 ---
 
-## 0. The executive summary, and the five things that would have gone wrong
+## 0. The executive summary, and the six things that would have gone wrong
 
 The pipeline that will build this corpus already exists and already ran: 27 bundles, 10,049 shards,
-**251.2B tokens** published on 2026-08-05. Scaling it to 1.0T is mostly arithmetic — but five defects
+**251.2B tokens** published on 2026-08-05. Scaling it to 1.0T is mostly arithmetic — but **six** defects
 surfaced in this review, and **not one of them fails loudly.** Each either discards work silently or
 produces a corpus that passes every gate while being wrong.
 
-| # | blocker | consequence if unfixed | fix |
-|---|---|---|---|
-| 1 | **Ordinals shift when a source is added** | adding one 4B source renames **98% of shards** and voids **882B tokens** | freeze the full plan first — **0 code** |
-| 2 | **The FinePhrase de-dup predicate is never called** | 59.8B declared synthetic is **~18.5B distinct**; the epoch guard reports green at ~4× true exposure | ~5 lines, at the reader |
-| 3 | **The dedup set OOMs at 1T** | **27.92 GB for the DCLM bundle** in a 15.03 GB container (§5.2a) | flat `np.uint64` → 2.60 GB |
-| 4 | **The decontamination index is built from 5-shot renders** | 149,777 exact hashes are **dead** for MMLU/ARC/HellaSwag | rebuild from raw fields, one CPU job |
-| 5 | **43% of all bytes moved is the val split**, serving 0.39% of the tokens | 2.02× over-read; intrinsic to a per-document hash carve, not a formula bug | file-shard val bundles, ~30 lines |
+| # | blocker | consequence if unfixed | fix | task |
+|---|---|---|---|---|
+| **0** | **⚠️ One bundle cannot be split, so `BUILD` is 16.8 h and not 6.6 h** | `--shard/--of` strides **bundles** (`corpus_build.py:676`), so DCLM's 410B is ONE child — **10.85 h even given an entire 32-vCPU instance.** A Batch child cannot exceed one instance, so no vCPU allocation fixes it. **Critical path 13.31 h → 21.31 h** | plan-time ordinal ranges, **or** a synthetic `domain_column` so DCLM fans out for free (§8A.5a) | **#28** |
+| 1 | **Ordinals shift when a source is added** | adding one 4B source renames **98% of shards** and voids **882B tokens** | freeze the full plan first — **0 code** | #20 |
+| 2 | **The FinePhrase de-dup predicate is never called** | the report already specifies the fix — **36B from ONE partition** — and the code cannot express it. Draw 36B from all four configs and exposure returns at ~2.4× on ~15B distinct documents (§0's detail below) | ~5 lines, at the reader | #21 |
+| 3 | **The dedup set OOMs at 1T** | **27.92 GB for the DCLM bundle** in a 15.03 GB container — 1.44× worse than the bundle an earlier draft named, and **absent from that draft's table** (§5.2a) | flat `np.uint64` → 2.60 GB | #22 |
+| 4 | **The decontamination index is built from 5-shot renders** | 149,777 exact hashes are **dead** for MMLU/ARC/HellaSwag; and `minimum_hits=2` needs **≥14 words**, which ≥5% of items in the 11- and 12-word suites do not have | rebuild from raw fields, one CPU job | #24 |
+| 5 | **43% of all bytes moved is the val split**, serving 0.39% of the tokens | 2.02× over-read; intrinsic to a per-document hash carve, not a formula bug | file-shard **val** bundles, ~30 lines. **Deferrable — and a different item from blocker 0** | #25 |
+
+**Blocker 0 was added 2026-08-07, after the owner cross-checked this document against
+`BUILD-DEPENDENCY-GRAPH.md` by arithmetic.** It is the only one of the six that was not merely
+undiscovered but **actively contradicted**: the graph asserted a 6.6 h `BUILD` while marking its
+prerequisite DEFERRABLE. Neither document was internally inconsistent; the pair was.
 
 Two more that are not blockers but would embarrass us: **`tokenizers` is not a declared dependency**,
 so production resolves whatever PyPI served that morning — and every Cosmopedia document begins with a
 leading space, which changes its first token under byte-level BPE.
 
-**And the wall-clock (§8A), which is the same build either way:**
+**And the wall-clock (§8A):**
 
-| | as the pipeline is configured today | with the fixes | floor |
+| | as configured today | with the fixes | floor |
 |---|---|---|---|
-| **end to end** | **~36 h**, and two stages fail their timeouts outright | **~10 h** | 6.6 h of tokenize at the 128 vCPU cap |
+| **job time, end to end** | **~36 h**, and two stages fail their timeouts outright | **~10 h** | 6.6 h of tokenize at the 128 vCPU cap |
+| **critical path** (incl. the code ahead of the jobs) | — | **21.31 h** | 8.81 h of jobs on the path |
 
-The 3.7× gap is **entirely flags and two constants** — no new architecture. Five threading facilities
+**Read those two rows as answering different questions.** ~10 h is the sum of job durations once the flags
+are passed. **21.31 h is the earliest the corpus can exist**, because 12.5 h of code and image build sit
+ahead of the first job — dominated by blocker 0's fix. Skipping that fix gives 23.54 h, so it pays for
+itself, but it does not make the ~10 h figure a delivery date.
+
+The 3.7× job-time gap is **entirely flags** — no new architecture. Five threading facilities
 exist in the package and work; **every default is 1**, and the registered job definitions do not pass
 the flags. `verify --deep` is the clean example: it ran 1.005 TB in **3.27 h on one stream of a 16 vCPU
 box**, when the same code at `--hash-workers 8` was **measured at 7.82×** — about 25 minutes.
@@ -1292,7 +1304,7 @@ critical path. Item 10 is a single read-only call. Item 3 is deferrable.
 | measurement | what it decides | wall-clock |
 |---|---|---|
 | **In-region S3 read bandwidth** | Whether tokenization is on the critical path; decides the gigatoken question and every read estimate in §8A | **~10 min** |
-| **Nemotron-CC-Math's real dolma2 token count** | Its 133B is CARD with no tokenizer named, and it is **gated** — a human must accept the license before its text column can even be named | ~5 min once ungated; **human-blocked** |
+| ✅ ~~**Nemotron-CC-Math's real dolma2 token count**~~ | **DONE 2026-08-07 — 134.0B**, measured by a teammate with gate access (§10). **What is still owed is the exact `text` and id column names**, which nobody has written down | done |
 | **Dolma 3 adult-content prevalence** | Blocking for that source. Sample at **random offsets** — a prior attempt could not separate the signal from HuggingFace preview ordering | **~1 h** |
 | mean doc length for 5 stage-2 sources | The dolma3 QA source (GPT-4o-mini-rewritten multiple choice) is the one plausibly near the 20-token EOS floor | **~1 h** |
 
@@ -1346,10 +1358,21 @@ promoting, cancel the validator job or disable the rule first. (On the reservoir
 **disabled**, so nothing auto-promoted and the validator was submitted by hand — confirm which state
 the rule is in before Phase 4.)
 
-### Total: ~10 h fixed, ~36 h as-configured
+### Total: ~10 h of job time fixed, ~36 h as-configured — but 21.31 h to a published corpus
 
-The 3.7× gap is entirely flags and two constants — no new architecture. Add **~2 days of Phase 0 code**
-and the calendar cost is dominated by approval latency, not compute.
+The 3.7× job-time gap is entirely flags — no new architecture. **The two figures are not
+interchangeable:**
+
+| | h | what it is |
+|---|---|---|
+| ~36 h | job time as the job definitions are registered today | two stages exceed their timeouts, so it is not even achievable |
+| **~10 h** | **job time once the flags are passed** | the sum of the stage rows in §8A.4 |
+| 8.81 h | the jobs actually **on** the critical path | the rest run in parallel or have slack |
+| **21.31 h** | **earliest a published corpus can exist** | 8.81 h of jobs **+ 12.5 h of code and image build ahead of them**, dominated by item 3b |
+
+Add **~3–4 days of Phase 0 code** (revised from ~2 days by item 3b) and the calendar cost is dominated by
+approval latency, not compute. **Quote 21.31 h to anyone asking when the corpus will exist; quote ~10 h only
+when discussing what the jobs cost.**
 
 ---
 

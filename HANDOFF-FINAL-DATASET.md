@@ -302,7 +302,7 @@ whether execution reaches it.
 > **`docs/BUILD-DEPENDENCY-GRAPH.md` §8 has the launch order as an orchestrator brief.** Read that
 > instead of reconstructing one from this list.
 
-**The five blockers, from `IMPLEMENTATION-PLAN.md` §0. None of them fails loudly** — each either
+**The six blockers, from `IMPLEMENTATION-PLAN.md` §0. None of them fails loudly** — each either
 silently discards work or produces a corpus that passes every gate while being wrong.
 
 | # | blocker | consequence | fix | task |
@@ -357,7 +357,7 @@ Regenerate any PDF after editing with the commands in `scripts/README-pdf.md`.
 
 All landed. Reports `01`–`17` in `artifacts/1t-research/`. **There is no `14`** — that brief hit the
 concurrency cap and was never launched; it would have attacked the remaining pipeline claims, including
-the untested Gate A extrapolation at ~20,000 objects and **whether an interleaved shard can still carry
+the untested Gate A extrapolation at ~40,000 objects and **whether an interleaved shard can still carry
 per-source `labels`** (which decides if the micro-batch fix is data-side or trainer-side). `12` is
 truncated at 202 lines by an API failure but its final table survived.
 
@@ -369,8 +369,9 @@ holds dolma2-exact counts and re-measuring wastes a wave.
 
 ## Still unverified — flagged, not used
 
-Gate A's cost at ~20,000 objects (my own extrapolation from a measured 85 min at 10,049, never tested);
-Nemotron-CC-Math's 133B (CARD); FinePDFs-Edu's ~70B (byte-derived, after the recorded 161.07B was found
+Gate A's cost at ~40,000 objects (my own extrapolation from a measured 85 min at 10,049, never tested);
+~~Nemotron-CC-Math's 133B (CARD)~~ — **now MEASURED at 134.0B**, though its `text` and id **column names**
+are still unrecorded; FinePDFs-Edu's ~70B (byte-derived, after the recorded 161.07B was found
 wrong by 2.3×); MegaMath-Web's post-filter pool size; and **the tension between an agent's "MMLU 26.9
 at 4T" figure and OLMo 2 Table 2's 1B/100B DCLM model scoring MMLU 34.8–35.2 (CF format)** — both
 cannot be casually true, and I did not resolve it.

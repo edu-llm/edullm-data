@@ -411,8 +411,10 @@ budget is a config field; a wrong schema is a version 2.
 Stated plainly. Several published figures in this space do not survive checking, so the distinction
 between what we measured and what we inherited is worth keeping visible.
 
-- **Nemotron-CC-Math's 133B** is a card claim with no tokenizer named. It needs a real count before it
-  enters mixture arithmetic.
+- ✅ ~~**Nemotron-CC-Math's 133B** is a card claim with no tokenizer named.~~ **RESOLVED 2026-08-07 —
+  MEASURED at 134.0B** under dolma2 (§4's grade key has the method). **What remains is not the count:** the
+  exact `text` and id **column names** are still not written down anywhere, and `4plus_MIND` is a *rewrite*
+  of `4plus`, so adding both would double-count. Record the columns before the registry row exists.
 - **FinePDFs-Edu's ~70B** is byte-derived rather than directly counted. A widely-circulated 161.07B
   figure for it is wrong by 2.3× — it implies a byte-per-token ratio that is not physically possible for
   English prose on this tokenizer.
@@ -431,7 +433,7 @@ between what we measured and what we inherited is worth keeping visible.
 
 > **This document decides WHAT to build. Two companions decide how and when, and you need both before
 > writing code or launching a job:**
-> - **`docs/IMPLEMENTATION-PLAN.md`** — build mechanics, and **five defects that would silently corrupt
+> - **`docs/IMPLEMENTATION-PLAN.md`** — build mechanics, and **six defects that would silently corrupt
 >   or discard the work.** None of them fails loudly.
 > - **`docs/BUILD-DEPENDENCY-GRAPH.md`** — the execution DAG, the **21.31 h** critical path, and what
 >   may run in parallel.
