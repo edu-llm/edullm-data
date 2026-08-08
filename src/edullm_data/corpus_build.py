@@ -104,6 +104,7 @@ __all__ = [
     "plan_document",
     "receipt_key",
     "run_bundle",
+    "split_source_rows",
 ]
 
 
@@ -133,6 +134,10 @@ def load_registry(path: str | None = None) -> tuple[list[CorpusSpec], dict[str, 
     Reserve rows (``target_tokens == 0``) are returned like any other: dropping them here would
     hide them from ``plan --show-reserve``, and the caller that builds the plan is the one that
     should decide what to skip.
+
+    Both ``key`` and ``source_label`` are checked for uniqueness — see
+    :func:`_assert_unique_identities`, which explains why a duplicate is silent token loss and why
+    ``CorpusSpec.__post_init__`` structurally cannot catch it.
     """
     p = path or str(_repo_root() / REGISTRY_PATH)
     try:
@@ -148,8 +153,154 @@ def load_registry(path: str | None = None) -> tuple[list[CorpusSpec], dict[str, 
     if not rows:
         raise BuildDriverError(f"{p} declares no corpora")
     specs = [CorpusSpec(**row) for row in rows]  # CorpusSpec.__post_init__ does the real checking
+    _assert_unique_identities(specs, where=p)
     meta = {k: v for k, v in doc.items() if k != "corpora"}
     return specs, meta
+
+
+def _assert_unique_identities(specs: Sequence[CorpusSpec], *, where: str = "the plan") -> None:
+    """Refuse two rows that share a ``source_label`` or a ``key``. **Silent-loss guard.**
+
+    ``CorpusSpec.__post_init__`` validates each row *in isolation* — it cannot see its siblings, so
+    uniqueness has nowhere else to live. And uniqueness is not hygiene here; both duplicates
+    destroy data with a green build and no log line.
+
+    **``source_label`` — measured, not argued.** :func:`plan_document` keys its target dict by
+    ``(spec.source_label, dom, split)`` (``:238``), so the second row of a colliding pair overwrites
+    the first and the first's tokens are simply gone. Executed on two rows worth 100 and 200 shards:
+    **33.3% of the declared tokens vanished and nothing raised.** The failure is worse than a hole,
+    because ``spec_by_label`` (``:251``) collapses the *same* way and is what supplies ``config`` to
+    every bundle — so N rows meant to read N disjoint subdirectories all inherit ONE ``config`` and
+    every child reads the same input. That is N× duplicate data in a corpus whose token counts all
+    still add up.
+
+    This is exactly the shape the bundle split needs (one row per disjoint subdirectory of a
+    too-large source), which is why the guard ships with it rather than after it.
+
+    **``key`` — the same class, a different consumer.** ``_cmd_run`` resolves specs with
+    ``{s.key: s for s in load_registry(...)[0]}`` (``:672``) and :func:`plan_document` looks up
+    ``tokens_per_source`` by ``spec.key`` (``:206``), so a duplicate key silently routes a build to
+    the wrong upstream repo — a plan that names one source and a run that reads another.
+    """
+    for field in ("source_label", "key"):
+        seen: dict[str, str] = {}
+        for spec in specs:
+            value = getattr(spec, field)
+            if value in seen:
+                raise BuildDriverError(
+                    f"{where}: two rows share {field}={value!r} ({seen[value]!r} and "
+                    f"{spec.key!r}). Every row needs its own {field}, and the reason is silent "
+                    f"data loss, not tidiness: plan_document keys its targets by "
+                    f"(source_label, domain, split), so the duplicate overwrites the first row and "
+                    f"ITS TOKENS DISAPPEAR with no error — and spec_by_label collapses the same "
+                    f"way, so all the colliding rows inherit ONE `config` and read the SAME input, "
+                    f"which is duplicate data the token counts cannot reveal. If you are splitting "
+                    f"one big source into N disjoint subdirectories, give each row a distinct "
+                    f"label (e.g. {value}-01 … {value}-NN) — but note the label lands in the shard "
+                    f"path and inside manifest_sha256, so it is permanent and consumer-visible."
+                )
+            seen[value] = spec.key
+
+
+def split_source_rows(
+    spec: CorpusSpec,
+    subdirs: Sequence[str],
+    *,
+    total_tokens: int | None = None,
+    label_width: int = 2,
+) -> list[CorpusSpec]:
+    """One row per DISJOINT subdirectory, so a too-large source becomes N buildable children.
+
+    **This exists because wall clock is set by the slowest array child, and `--shard/--of` strides
+    BUNDLES, not files** (`_shard_slice`, called at ``:676`` on a bundle list). A source that does
+    not fan out is therefore one bundle, one child, one instance — and a Batch child cannot exceed
+    one instance no matter how large the array. Measured at the end-to-end build rate of 72,615
+    tok/s/vCPU, a 410B single-child bundle is **49 h on a whole 32-vCPU instance** against a 9.96 h
+    aggregate floor. No vCPU allocation fixes that; only splitting does.
+
+    **Why registry rows rather than new machinery.** N rows with distinct ``source_label`` make
+    :func:`plan_document` emit N streams, which become N bundles, which ``_shard_slice`` already
+    spreads across children — and :func:`~.corpus.allocate_ordinals` gives each its own dense
+    ordinal block **at plan time**. Plan-time disjoint ordinal ranges are precisely the hard part
+    that the alternative route budgets days to build. This function only assembles rows; every
+    mechanism it relies on already ships.
+
+    ``subdirs`` MUST be pairwise disjoint and MUST each exist, because nothing downstream can tell
+    that two children read the same files: the token counts still add up, the ordinals are still
+    dense, and the duplicate documents are real text that hashes and decodes fine. Disjointness is
+    the caller's evidence to bring — walk the tree — not something this function can verify without
+    the network.
+
+    ⚠️ **``source_label`` is permanent and consumer-visible.** It becomes the ``source`` segment of
+    every shard path (:func:`~.corpus.shard_key`), ``labels_from_path`` reads it back, Gate A
+    recomputes it, and the path is inside ``manifest_sha256``. So a 5-way split publishes
+    ``dclm-01`` … ``dclm-05`` and a consumer selecting ``source=dclm`` sees five labels and matches
+    none of them exactly. **That is a schema decision, it cannot be backfilled, and it must be made
+    deliberately before the corpus is frozen** — not discovered by whoever writes the mixture.
+
+    ``total_tokens`` defaults to ``spec.target_tokens`` and is divided evenly. Even division is only
+    correct when the subdirectories are comparably sized: ``_shard_slice`` strides, it does not
+    balance, so N equal targets over skewed inputs give N unequal children and the largest one is
+    still the wall clock. MEASURED for the two sources this was written for:
+    ``dclm-baseline-1.0-parquet``'s ten ``global-shard_NN_of_10`` directories vary by **0.25%**
+    (equal division is exact), while ``fineweb-edu``'s 110 ``data/CC-MAIN-*`` directories vary by
+    **3.1×** (equal division is not, and the caller must group them by size first).
+
+    ``pool_tokens`` is divided the same way when present, because ``CorpusSpec.__post_init__``
+    checks pool ≥ target per row and an undivided pool would silently defeat that check on every
+    child. ``traps`` gains a line recording the split, since a row that no longer names its parent
+    source is hard to trace back.
+    """
+    if len(subdirs) < 2:
+        raise BuildDriverError(
+            f"{spec.key}: splitting into {len(subdirs)} part(s) is not a split. Pass at least two "
+            f"disjoint subdirectories, or leave the row alone."
+        )
+    if len(set(subdirs)) != len(subdirs):
+        dupes = sorted({d for d in subdirs if list(subdirs).count(d) > 1})
+        raise BuildDriverError(
+            f"{spec.key}: subdirs repeat {dupes}. Two rows on the same subdirectory read the SAME "
+            f"files, and nothing downstream can detect it — the tokens are real, the counts add "
+            f"up, and the corpus quietly contains that data twice."
+        )
+    n = len(subdirs)
+    if n > 10 ** label_width - 1:
+        raise BuildDriverError(
+            f"{spec.key}: {n} parts do not fit {label_width} label digits; raise label_width. "
+            f"Truncating would collide two labels, which is silent token loss "
+            f"(see _assert_unique_identities)."
+        )
+    want = spec.target_tokens if total_tokens is None else total_tokens
+    if want <= 0:
+        raise BuildDriverError(
+            f"{spec.key}: nothing to split (target_tokens {want}). A reserve row is not built, so "
+            f"splitting it produces N reserve rows and no children."
+        )
+    share = want // n
+    pool_share = spec.pool_tokens // n if spec.pool_tokens is not None else None
+    rows: list[CorpusSpec] = []
+    for i, sub in enumerate(subdirs, start=1):
+        rows.append(
+            dataclasses.replace(
+                spec,
+                key=f"{spec.key}-{i:0{label_width}d}",
+                source_label=f"{spec.source_label}-{i:0{label_width}d}",
+                config=sub,
+                target_tokens=share,
+                pool_tokens=pool_share,
+                traps=spec.traps + (
+                    f"Part {i} of {n}, split from {spec.key!r} over disjoint subdirectories so the "
+                    f"source builds as {n} array children instead of one. source_label "
+                    f"{spec.source_label!r} -> {spec.source_label}-{i:0{label_width}d} is "
+                    f"PERMANENT: it is the shard path's source segment and is inside "
+                    f"manifest_sha256.",
+                ),
+            )
+        )
+    # The guard is the point of the function, not a formality: a caller that passes a bad
+    # `label_width` or a spec whose label already ends in a digit could still collide.
+    _assert_unique_identities(rows, where=f"the {n}-way split of {spec.key!r}")
+    return rows
 
 
 def _repo_root():
@@ -200,6 +351,13 @@ def plan_document(
     drawn = [s for s in specs if s.target_tokens > 0]
     if not drawn:
         raise BuildDriverError("every registry row is reserve (target_tokens 0); nothing to build")
+
+    # Checked HERE and not only in `load_registry`, because this is where the loss happens and this
+    # function is reachable without a registry file at all (`_cmd_plan` passes a list; tests and any
+    # future generator do too). A guard placed only at the file reader would be bypassed by every
+    # caller that constructs specs in memory — including the one splitting a source into N rows,
+    # which is the caller most likely to collide.
+    _assert_unique_identities(drawn, where="the drawn plan")
 
     targets: dict[tuple[str, str | None, str], int] = {}
     for spec in drawn:

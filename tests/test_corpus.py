@@ -58,6 +58,47 @@ def test_shard_bytes_is_a_single_part_copy():
     assert SHARD_TOKENS * DTYPE_SIZE < 5 * 1024**3
 
 
+#: MEASURED Gate A cost per object: 10,049 objects in ~85 min, 8 round trips each, recorded at
+#: ``profiles/pretrain_tokens_v1.py:205-210``. Latency-bound (0.3% CPU), so it scales with objects.
+_GATE_A_SECONDS_PER_OBJECT = 85 * 60 / 10_049
+
+#: ``edullm-validator`` rev 14, MEASURED 2026-08-08 via ``batch describe-job-definitions``.
+_VALIDATOR_TIMEOUT_S = 14_400
+
+
+def test_gate_a_at_1T_does_NOT_fit_the_validator_timeout_at_this_shard_size():
+    """The shard-size docstring's second constraint, RECOMPUTED — and it fails.
+
+    This is deliberately a test that pins a *known shortfall* rather than a passing property. The
+    constant's comment used to justify itself with "~10,400 objects fits the 7200 s timeout", and
+    both premises silently moved: the live timeout is 14,400 s and 1.0T gives ~40,000 objects, not
+    10,400. The arithmetic below is what makes that visible in CI instead of in a doc nobody
+    re-derives.
+
+    The value stays because task #10 (thread the profile checks) is the right lever, not a smaller
+    shard. **If #10 lands, this test should start failing and be replaced by the threaded bound.**
+    """
+    objects_1t = round(1.0e12 / SHARD_TOKENS)
+    assert 39_000 <= objects_1t <= 41_000, f"1.0T gives {objects_1t:,} objects, not ~40,000"
+
+    serial_s = objects_1t * _GATE_A_SECONDS_PER_OBJECT
+    assert serial_s > _VALIDATOR_TIMEOUT_S, (
+        "if this now passes, Gate A got cheaper or the timeout rose — re-derive the constant's "
+        "docstring rather than deleting the test"
+    )
+    # `--head-workers 16` threads exactly 1 of the 8 calls, so Amdahl caps the gain at 7/8.
+    assert serial_s * (7 / 8 + (1 / 8) / 16) > _VALIDATOR_TIMEOUT_S, (
+        "head_workers alone must not be mistaken for a fix: it threads 1 of 8 calls"
+    )
+
+    # The largest corpus that DOES fit at this shard size, so the shortfall has a number.
+    break_even_objects = int(_VALIDATOR_TIMEOUT_S / _GATE_A_SECONDS_PER_OBJECT)
+    assert 700e9 < break_even_objects * SHARD_TOKENS < 720e9
+
+    # And the reservoir, which is what the original justification was actually measured on, fits.
+    assert round(252.6e9 / SHARD_TOKENS) * _GATE_A_SECONDS_PER_OBJECT < _VALIDATOR_TIMEOUT_S
+
+
 # --------------------------------------------------------------------------------------
 # The path IS the label
 # --------------------------------------------------------------------------------------
