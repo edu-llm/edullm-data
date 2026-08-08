@@ -696,6 +696,265 @@ def test_bundle_tokens_is_derived_from_its_refs_not_stored():
 
 
 # --------------------------------------------------------------------------------------
+# The FinePhrase id partition — the one thing here that cannot be retrofitted
+# --------------------------------------------------------------------------------------
+#
+# The four FinePhrase configs are ONE corpus rephrased four ways over the same ~339M FineWeb-Edu
+# documents (MEASURED 91.0-92.9% pairwise id overlap; 26.83% distinct over a 287,000-id read).
+# Nothing downstream can catch it: four rephrasings are four different strings, so exact dedup,
+# MinHash and every token count all pass. After tokenization there is no document -> id mapping
+# left, so `_reader_for` is the last place it can be fixed.
+#
+# `reservoir_ids.keeps_id` was tested and verified balanced to 0.27pp for weeks while having exactly
+# one caller, a JSON reporting function. So these tests deliberately assert on the DOCUMENTS THAT
+# COME OUT of the real `_reader_for`, recomputed against `partition_of` — never that `keeps_id` was
+# called.
+
+FINEPHRASE_REPO = "HuggingFaceFW/finephrase"
+
+
+def _fp_spec(config: str = "faq", **over) -> CorpusSpec:
+    """A registry-shaped FinePhrase row: the real repo, the real nested leaf, one config."""
+    base = dict(
+        key=f"finephrase-{config}", category="synthetic",
+        source_label=f"synthetic-finephrase-{config}", repo=FINEPHRASE_REPO,
+        file_format="parquet", text_column="rollout_results.list.element.text", id_column="id",
+        config=config, target_tokens=SHARD_TOKENS, revision="b" * 40,
+    )
+    base.update(over)
+    return CorpusSpec(**base)
+
+
+def _run_reader(spec, bundle, docs_per_file, n_files=400):
+    """Drive the REAL `_reader_for` over a fake HF tree, returning (docs_out, files_read).
+
+    `docs_per_file(path)` yields the documents one "file" holds. Patches `hf_files` and the parquet
+    reader, i.e. exactly the two things that need a network — everything between them is the
+    production code path.
+    """
+    import edullm_data.corpus_build as mod
+    from edullm_data import corpus_read
+
+    files_read = []
+
+    def reader(repo, entry, sp):
+        files_read.append(entry["path"])
+        yield from docs_per_file(entry["path"])
+
+    tree = [{"path": f"data/{i:05d}.parquet", "size": 1000} for i in range(n_files)]
+    real_hf_files, real_reader = mod.hf_files, corpus_read.read_parquet_documents
+    mod.hf_files = lambda sp, headers=None: tree
+    corpus_read.read_parquet_documents = reader
+    try:
+        out = list(mod._reader_for(spec, bundle))
+    finally:
+        mod.hf_files = real_hf_files
+        corpus_read.read_parquet_documents = real_reader
+    return out, files_read
+
+
+def test_the_reader_keeps_exactly_the_ids_this_finephrase_config_owns():
+    """THE blocker. Feed one known id set through the reader four times, once per config, and
+    assert the survivors are EXACTLY the ids `partition_of` assigns to that config.
+
+    Recomputed from `partition_of` on the spot, not compared against a stored expectation and not
+    asserted via a spy on `keeps_id`. A mock that records the call would pass even if the reader
+    threw the result away, which is precisely the failure this test exists to rule out: the
+    partition code has been green and uncalled since it was written.
+    """
+    from edullm_data.reservoir_ids import FINEPHRASE_FORMATS, partition_of
+
+    ids = [f"<urn:uuid:0000-{i:06d}>" for i in range(4_000)]
+    text = "lorem ipsum dolor " * 40
+
+    def files(_path):
+        for doc_id in ids:
+            yield Document(id=doc_id, text=text, source="synthetic-finephrase")
+
+    seen_by_format = {}
+    for fmt in FINEPHRASE_FORMATS:
+        spec = _fp_spec(fmt)
+        bundle = _small(B.bundles_of(B.plan_document([spec]))[0])
+        out, _ = _run_reader(spec, bundle, files, n_files=1)
+        got = {d.id for d in out}
+        want = {i for i in ids if FINEPHRASE_FORMATS[partition_of(i)] == fmt}
+        assert got == want, f"{fmt}: kept {len(got)} ids, partition assigns {len(want)}"
+        assert got, f"{fmt} kept nothing — a partition that drops everything reports success"
+        seen_by_format[fmt] = got
+
+    # DISJOINT AND COMPLETE. This is the property the whole blocker is about: drawing all four
+    # configs must yield each parent document ONCE, not four times.
+    union = set().union(*seen_by_format.values())
+    assert sum(len(v) for v in seen_by_format.values()) == len(union) == len(ids)
+    for a in FINEPHRASE_FORMATS:
+        for b in FINEPHRASE_FORMATS:
+            if a != b:
+                assert not (seen_by_format[a] & seen_by_format[b]), f"{a} and {b} overlap"
+
+
+def test_the_realised_partition_shares_are_balanced_on_a_sample():
+    """The design's arithmetic needs each partition to hold >= 17.3% of its config (`table`, the
+    worst case) against an ideal 25.0%. An unbalanced split is not a cosmetic problem — a starved
+    partition leaves the bundle's last shard unfilled, which `verify` refuses.
+
+    Recomputed here from what the READER actually emitted, so it measures the wired-in path rather
+    than re-testing `audit_partition` (which `test_reservoir_ids.py` already covers). The reference
+    measurement on real ids is 24.86-25.26% over 287,000 ids
+    (`artifacts/reservoir/id-partition-verification.json`, worst deviation 0.27pp).
+    """
+    from edullm_data.reservoir_ids import FINEPHRASE_FORMATS
+
+    ids = [f"<urn:uuid:aa17-{i:07d}>" for i in range(12_000)]
+    text = "balanced sample text " * 30
+
+    def files(_path):
+        for doc_id in ids:
+            yield Document(id=doc_id, text=text, source="synthetic-finephrase")
+
+    shares = {}
+    for fmt in FINEPHRASE_FORMATS:
+        spec = _fp_spec(fmt)
+        bundle = _small(B.bundles_of(B.plan_document([spec]))[0])
+        out, _ = _run_reader(spec, bundle, files, n_files=1)
+        shares[fmt] = 100.0 * len(out) / len(ids)
+
+    assert abs(sum(shares.values()) - 100.0) < 1e-9, shares
+    # 17.3% is the design floor (`table`); 2pp of the 25.0% ideal is a far tighter bar and still
+    # ~8x looser than the 0.27pp measured on real ids, so this fails on a broken partition and not
+    # on sampling noise.
+    for fmt, pct in shares.items():
+        assert 17.3 < pct, f"{fmt} at {pct:.3f}% is under the design floor: {shares}"
+        assert abs(pct - 25.0) < 2.0, f"{fmt} at {pct:.3f}% deviates too far: {shares}"
+
+
+def test_a_finephrase_bundle_reads_four_times_the_text_to_deliver_its_tokens():
+    """The budget correction, which ships with the partition or not at all.
+
+    A partition keeping ~1 document in 4 quarters the effective keep rate. Without dividing the
+    budget the reader stops after ~1/4 of the text the plan allocated, the bundle runs to
+    completion, and it fails `verify` on unfilled refs AFTER its full billable work.
+
+    Asserted through the DELIVERED characters — what reaches `pack` — rather than through the
+    budget expression, so it still holds if the constants move. Both bundles plan the same tokens,
+    so both must deliver comparable text despite one of them discarding 3 documents in 4.
+    """
+    per_file = 100
+    text = "x" * 500
+
+    def files(path):
+        start = int(path.split("/")[1].split(".")[0]) * per_file
+        for i in range(start, start + per_file):
+            yield Document(id=f"<urn:uuid:bud1-{i:07d}>", text=text, source="s")
+
+    fp = _fp_spec("math")
+    plain = _spec(key="plain", source_label="plain", target_tokens=SHARD_TOKENS)
+
+    delivered, read = {}, {}
+    for spec in (fp, plain):
+        bundle = _small(B.bundles_of(B.plan_document([spec]))[0])
+        out, files_read = _run_reader(spec, bundle, files, n_files=200)
+        assert len(files_read) < 200, f"{spec.key} exhausted the tree; the budget never bound"
+        delivered[spec.key] = sum(len(d.text) for d in out)
+        read[spec.key] = len(files_read)
+
+    ratio = delivered["finephrase-math"] / delivered["plain"]
+    assert 0.75 < ratio < 1.35, (
+        f"FinePhrase delivered {delivered['finephrase-math']:,} chars vs "
+        f"{delivered['plain']:,} for the same planned tokens (ratio {ratio:.3f}) — the budget was "
+        f"not divided by the keep fraction"
+    )
+    # And it got there by READING ~4x as much, which is the cost the correction knowingly accepts.
+    read_ratio = read["finephrase-math"] / read["plain"]
+    assert 3.0 < read_ratio < 5.0, f"read {read} — expected ~4x the files, got {read_ratio:.2f}x"
+
+
+def test_a_non_finephrase_source_is_not_partitioned():
+    """The partition must be scoped to FinePhrase and nothing else. Applying it to a source whose
+    documents have no synthetic siblings would silently discard 75% of a legitimate pool — the same
+    magnitude of error as not applying it, in the other direction.
+    """
+    ids = [f"doc-{i}" for i in range(1_500)]
+    text = "unrelated corpus text " * 25
+
+    def files(_path):
+        for doc_id in ids:
+            yield Document(id=doc_id, text=text, source="tiny")
+
+    spec = _spec()  # repo="acme/tiny"
+    bundle = _small(B.bundles_of(B.plan_document([spec]))[0])
+    out, files_read = _run_reader(spec, bundle, files, n_files=1)
+    assert [d.id for d in out] == ids, "a non-FinePhrase source must be passed through untouched"
+    assert files_read == ["data/00000.parquet"]
+
+
+def test_a_finephrase_row_with_an_unnameable_config_is_refused_not_skipped():
+    """`keeps_id` raises on an unknown format rather than returning False, deliberately: a typo'd
+    config name would otherwise drop 100% of its rows and report a successful ingest of an empty
+    source. That behaviour is PRESERVED here, and moved earlier — the refusal happens before the
+    first HTTP request, so a bad row fails locally instead of 6,800 files into a billable job.
+
+    The mirror-image failure is just as bad and is also covered: silently treating an unrecognised
+    config as "not FinePhrase" would skip the partition entirely and restore the 4x over-exposure.
+    """
+    import edullm_data.corpus_build as mod
+
+    def boom(*a, **k):
+        raise AssertionError("hf_files must not be reached — the refusal precedes any listing")
+
+    bundle = _small(B.bundles_of(B.plan_document([_fp_spec("faq")]))[0])
+    real_hf_files = mod.hf_files
+    try:
+        mod.hf_files = boom
+        for bad in ("tables", "FAQ", None, ""):
+            # key/source_label pinned to a valid pair, so `config` is the only thing wrong.
+            spec = _fp_spec(key="fp-bad", source_label="synthetic-fp-bad", config=bad)
+            with pytest.raises(B.BuildDriverError, match="not one of"):
+                mod._finephrase_format(spec)
+            with pytest.raises(B.BuildDriverError, match="not one of"):
+                list(mod._reader_for(spec, bundle))
+    finally:
+        mod.hf_files = real_hf_files
+
+
+def test_the_partition_is_keyed_on_the_upstream_repo_not_the_label():
+    """`source_label` is a NAMING decision (§1.1 fuses realness into it), so keying the partition on
+    it means a later mix edit that renames the label silently turns the partition off — and a 4x
+    over-exposure is invisible to every check downstream. `repo` is upstream identity.
+    """
+    import edullm_data.corpus_build as mod
+
+    assert mod._finephrase_format(_fp_spec("table", source_label="anything-else")) == "table"
+    assert mod._finephrase_format(_fp_spec("table", key="renamed-key")) == "table"
+    assert mod._finephrase_format(_spec()) is None
+
+
+def test_the_shipped_registry_carries_the_nested_rewrite_leaf_and_a_nameable_config():
+    """§4.2's column trap, recomputed against the COMMITTED registry rather than a fixture.
+
+    FinePhrase's top-level `text` holds the ORIGINAL FineWeb-Edu document — its `dataset` field
+    literally reads `HuggingFaceFW/fineweb-edu` — so a row pointing at `text` would build a corpus
+    of unrephrased web text labelled synthetic, and no hash, size or decode check catches it. The
+    reader's own tests pin what it does GIVEN a spec; this pins what the shipped rows say.
+
+    Also asserts every FinePhrase row is one `_finephrase_format` can name, which is what makes the
+    partition apply to all of them rather than raising mid-build.
+    """
+    import edullm_data.corpus_build as mod
+    from edullm_data.reservoir_ids import FINEPHRASE_FORMATS
+
+    specs, _ = B.load_registry()
+    fp = [s for s in specs if s.repo == FINEPHRASE_REPO]
+    assert len(fp) == len(FINEPHRASE_FORMATS), f"expected 4 FinePhrase rows, got {len(fp)}"
+    assert sorted(s.config for s in fp) == sorted(FINEPHRASE_FORMATS)
+    for s in fp:
+        assert s.text_column == "rollout_results.list.element.text", (
+            f"{s.key}: text_column is {s.text_column!r}. Top-level `text` is the ORIGINAL "
+            f"FineWeb-Edu document; only the exact path_in_schema selects the rewrite."
+        )
+        assert mod._finephrase_format(s) == s.config
+
+
+# --------------------------------------------------------------------------------------
 # The double encode
 # --------------------------------------------------------------------------------------
 

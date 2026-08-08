@@ -85,12 +85,14 @@ from .corpus import (
     carve,
 )
 from .ingest_reservoir import (
+    FINEPHRASE_REPO,
     IngestError,
     _assert_lifecycle_covers,
     _assert_safe_key,
     _require_batch,
     _shard_slice,
 )
+from .reservoir_ids import FINEPHRASE_FORMATS, N_PARTITIONS, keeps_id
 
 __all__ = [
     "DEFAULT_BUCKET",
@@ -1039,6 +1041,35 @@ _CHARS_PER_TOKEN = 6.0
 _FILTER_HEADROOM = 1.5
 
 
+def _finephrase_format(spec: CorpusSpec) -> str | None:
+    """The FinePhrase config `spec` draws, or `None` if it is not a FinePhrase row.
+
+    Keyed on ``repo`` rather than on ``source_label`` or ``key``, because the label is a *naming*
+    decision (today `synthetic-finephrase-faq`, and §1.1 fuses realness into it, so it is exactly
+    the field a later mix edit is most likely to rewrite) while the repo is upstream identity. A
+    partition that stops applying because someone renamed a label is a silent 4x over-exposure, and
+    nothing downstream can see it — which is the whole reason this function exists.
+
+    Raises rather than returning `None` for a FinePhrase row whose `config` is not one of the four
+    formats. That mirrors :func:`reservoir_ids.keeps_id`'s own refusal and exists for the same
+    reason: the two failure modes of a typo'd config name are "drop 100% of rows and report a
+    successful ingest of an empty source" and "drop 0% of rows and silently skip the partition".
+    Both look green. Checked here, before the first HTTP request, so a bad row fails at plan-read
+    time rather than 6,800 files into a billable job.
+    """
+    if spec.repo != FINEPHRASE_REPO:
+        return None
+    if spec.config not in FINEPHRASE_FORMATS:
+        raise BuildDriverError(
+            f"{spec.key}: repo is {FINEPHRASE_REPO} but config is {spec.config!r}, which is not "
+            f"one of {FINEPHRASE_FORMATS}. The four configs are ~91-93% THE SAME DOCUMENTS and the "
+            f"sha256(id) % 4 partition is what makes them disjoint; a config this function cannot "
+            f"name would either drop every row or skip the partition entirely, and both report "
+            f"success. Fix the registry row — do not relax this check."
+        )
+    return spec.config
+
+
 def _reader_for(spec: CorpusSpec, bundle: Bundle) -> Iterable[Document]:
     """Documents for one bundle, dispatched on the registry's `file_format`.
 
@@ -1055,6 +1086,16 @@ def _reader_for(spec: CorpusSpec, bundle: Bundle) -> Iterable[Document]:
     last file is always read to its end. Truncating mid-file would make the document set depend on
     where the budget happened to run out, and a re-run with a different `min_doc_tokens` would then
     select a different corpus under the same `plan_id`. Whole files keep the read deterministic.
+
+    **Applies the FinePhrase `sha256(id) % 4` partition, and this is the one thing here that
+    cannot be retrofitted.** The four FinePhrase configs are not four corpora — they are ONE corpus
+    rephrased four ways over the same ~339 M FineWeb-Edu documents, MEASURED at 91.0-92.9% pairwise
+    id overlap, and 26.83% distinct over a 287,000-id complete-column read. Nothing downstream can
+    see it: a content digest sees four different strings so exact dedup passes, MinHash sees four
+    differently-worded texts so fuzzy dedup passes, and every token count still adds up. After
+    tokenization a document is a byte range inside a shard and there is no document -> id mapping
+    left, so this must happen HERE, on the way in, or not at all. `reservoir_ids.keeps_id` is the
+    predicate; before this it had exactly one caller and that caller only wrote a JSON report.
 
     ⚠️ UNVERIFIED against live HF from inside a Batch container — every offline test injects
     `documents=` instead, so this dispatch is exercised only by its own unit test. Settle it with a
@@ -1073,17 +1114,40 @@ def _reader_for(spec: CorpusSpec, bundle: Bundle) -> Iterable[Document]:
             f"plan time by _assert_readable"
         )
 
+    # Resolved BEFORE the first HTTP request, so a registry row this cannot partition fails on a
+    # cheap local check rather than after a bundle's worth of billable reading.
+    fp_format = _finephrase_format(spec)
+
     # A val bundle keeps only `val_fraction` of what it reads, so its budget is scaled by the
     # inverse. Without this a val bundle stops after ~0.5% of the text it needs and every one of
     # its shards comes up empty. The carve is a pure function of the document id (corpus.is_held_out)
     # and cannot be predicted per file, so there is no cheaper way to reach a val document than
     # reading the train ones alongside it and discarding them.
+    #
+    # ⚠️ THE PARTITION DIVIDES THE SAME BUDGET, AND SHIPPING ONE WITHOUT THE OTHER IS WORSE THAN
+    # SHIPPING NEITHER. A FinePhrase bundle now discards ~3 of every 4 documents it reads, so its
+    # budget has to buy 4x the text to deliver the tokens the plan allocated. Without this factor
+    # every FinePhrase bundle reads to ~1/4 of what it needs, runs to completion, and THEN fails
+    # `verify` on unfilled refs — after its full billable work, which is the same end-of-run
+    # failure shape that `partial_source=True` was added to fix (run_bundle:503).
+    #
+    # `N_PARTITIONS` rather than the measured 24.86-25.26%: this is a budget, i.e. a CEILING that
+    # `pack` stops short of as soon as the planned shards are full (corpus_pack.py:727-741), so the
+    # exact-quarter idealisation errs by at most 0.6% and errs into `_FILTER_HEADROOM`'s slack.
     keep_rate = bundle.keep_rate
+    if fp_format is not None:
+        keep_rate /= N_PARTITIONS
     budget = int(bundle.tokens * _CHARS_PER_TOKEN * _FILTER_HEADROOM / keep_rate)
     seen_chars = 0
     for entry in hf_files(spec):
         for doc in reader(spec.repo, entry, spec):
+            # Charged against the budget BEFORE the partition drops it. The budget is denominated
+            # in characters READ, not characters kept, and the `/ N_PARTITIONS` above is what turns
+            # one into the other — counting only survivors here would apply the correction twice
+            # and read 16x.
             seen_chars += len(doc.text)
+            if fp_format is not None and not keeps_id(fp_format, doc.id):
+                continue
             yield doc
         if seen_chars >= budget:
             return
