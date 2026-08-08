@@ -426,6 +426,61 @@ def bundle_is_done(
     return True
 
 
+def _keep_filter_for(bundle: Bundle, keep_list: Any):
+    """``None`` (per-bundle dedup, today's behaviour) or a fresh ``KeepFilter`` for this bundle.
+
+    Three things happen here rather than at the call site, because each one is a way the wiring
+    fails SILENTLY and produces a corpus that looks deduplicated.
+
+    1. **A keep-list belonging to another bundle is refused.** The pre-pass emits one `.keep64` per
+       bundle and awards each hash to exactly one winner, so feeding `dclm--train`'s list to
+       `finewiki--train` would reject nearly every document as "won by another bundle" — a bundle
+       that writes almost nothing, with no error, resembling a genuinely duplicate-heavy source.
+
+       ⚠️ **Scope of this check, stated precisely because it is weaker than it looks.**
+       `read_keep_list(raw, bundle_id)` takes the id from its CALLER and defaults it to the
+       placeholder `"keep-list"` — the `.keep64` payload itself carries no bundle id. So this
+       catches a caller that reads the right bytes and labels them wrong, or forgets to label them
+       at all; it does NOT catch a caller that reads the wrong OBJECT and labels it confidently.
+       Only the per-bundle `sha256` in `keeplists.json` binds a `bundle_id` to bytes, and checking
+       that belongs to whatever loads the artifact. **Cheap and worth having, not a proof of
+       provenance.**
+    2. **A fresh filter per call, never a reused one.** `KeepFilter` holds a used-bitmap; reusing an
+       instance across bundles would make the second bundle observe the first's progress and
+       reintroduce exactly the order-dependence the pre-pass design exists to avoid.
+    3. **A `KeepFilter` passed in directly is refused.** It is a plausible mistake — the parameter
+       is named `keep_list` and the two types are duck-compatible — and it is the one that gets past
+       every other check, because a caller-owned filter is a shared mutable object whose bitmap
+       state depends on how many bundles ran before. Accepting it would silently give back
+       order-dependent output.
+    """
+    if keep_list is None:
+        return None
+
+    from .corpus_filter import KeepFilter, KeepList
+
+    if isinstance(keep_list, KeepFilter):
+        raise BuildDriverError(
+            f"{bundle.bundle_id}: keep_list was given a KeepFilter, not a KeepList. A KeepFilter "
+            f"carries a mutable used-bitmap, so sharing one across bundles makes each bundle's "
+            f"output depend on which bundles ran first — the order-dependence the immutable "
+            f"keep-list exists to prevent. Pass the KeepList; this function builds the filter."
+        )
+    if not isinstance(keep_list, KeepList):
+        raise BuildDriverError(
+            f"{bundle.bundle_id}: keep_list must be a corpus_filter.KeepList, got "
+            f"{type(keep_list).__name__}."
+        )
+    if keep_list.bundle_id != bundle.bundle_id:
+        raise BuildDriverError(
+            f"{bundle.bundle_id}: was handed the keep-list for {keep_list.bundle_id!r}. Pass 1 "
+            f"awards each hash to exactly ONE bundle, so this bundle would reject nearly every "
+            f"document as won-by-another and write an almost-empty stream — with no error, looking "
+            f"exactly like a source that was genuinely all duplicates."
+        )
+    return KeepFilter(keep_list)
+
+
 def run_bundle(
     bundle: Bundle,
     plan: Mapping[str, Any],
@@ -440,6 +495,7 @@ def run_bundle(
     vocab_size: int | None = None,
     wheel_version: str = "0.0.0",
     index: Any = None,
+    keep_list: Any = None,
 ) -> dict[str, Any]:
     """Read → carve → filter → tokenize → pack → upload → receipt, for one bundle.
 
@@ -449,6 +505,30 @@ def run_bundle(
     The upload happens inside `pack`'s sink, so a shard's bytes are written to S3 and dropped from
     memory before the next one is cut — `corpus_pack` holds at most one 100 MB shard at a time and
     routing it through a buffer here would undo that.
+
+    ``keep_list`` — THE GLOBAL DEDUP PRE-PASS'S VERDICT (§5.2a/§5.3, task #22)
+    -------------------------------------------------------------------------
+    A `corpus_filter.KeepList` from pass 1, or ``None``. Injected for the same reason ``index`` is:
+    this function decides nothing about dedup, it applies a decision made elsewhere.
+
+    **What it replaces, and it is not what the section headings suggest.** Without it,
+    `dedup_and_decontaminate` default-constructs a `SeenHashes` **per bundle**, so there is no
+    cross-bundle dedup at all today — every copy of a cross-source duplicate survives, and the same
+    text under two doc ids lands in BOTH `train` and `val` because `carve` routes on a hash of the
+    *id*, not the text. So this does not re-order an existing behaviour; it introduces global dedup
+    for the first time, and removes that train/val leakage as a side effect.
+
+    **Why passing a keep-list keeps reruns byte-identical, which is the whole point.** A shared
+    mutable filter would make each bundle's output depend on which bundles ran before it, destroying
+    the property this repo has verified (9 bundles / 4,137 shards re-run byte-identical on a new
+    wheel). `KeepFilter` splits the two things that look like one: the **keep-list is immutable and
+    shared**, and the used-bitmap that suppresses intra-bundle repeats is **per-instance and
+    unobservable** by any other bundle. Determinism needs no *shared* state, not no state — so this
+    function constructs a fresh `KeepFilter` per call and never lets one outlive a bundle.
+
+    ⚠️ **What splitting bundles does NOT fix, so the win is not double-counted.** §8A.3: splitting a
+    bundle relieves the OOM; the flat pre-pass is what actually fixes dedup. Splitting only stops it
+    crashing. This parameter is the dedup half.
     """
     from .corpus_filter import FilterStats, dedup_and_decontaminate
     from .corpus_pack import pack, tokenize_documents
@@ -459,9 +539,26 @@ def run_bundle(
     digests: dict[str, tuple[str, int]] = {}
 
     def sink(ref: ShardRef, payload: bytes) -> None:
+        # The digest is computed BEFORE the upload and declared to S3, which is the whole change
+        # here (§8.3a step 1). It used to be computed one line later, for the receipt only, so a
+        # shard was written with `put` and a bare 200 was taken as proof the bytes arrived — and
+        # `verify --deep`'s full second read of the corpus was the only thing standing behind them.
+        # Declaring it makes S3 recompute server-side and reject a corrupted body with `BadDigest`
+        # before an object exists at all, which is strictly stronger *and* strictly earlier than
+        # detecting the same corruption after the whole corpus is written.
+        #
+        # One digest, two uses: the value handed to S3 and the value recorded in the receipt come
+        # from the same `hashlib.sha256(payload)` call, so the receipt cannot claim a digest S3 did
+        # not verify. Splitting them into two calls over the same bytes would be equivalent today
+        # and is exactly the kind of thing an edit later makes untrue.
+        #
+        # ⚠️ This does NOT license retiring `verify --deep` on its own — see §8.3a: at `GA1`'s
+        # unthreaded cost the critical path is unchanged either way, so the deletion only pays
+        # once Gate A is threaded (B3). And retiring `--deep` retires ONE TIER; the cheap tier
+        # holds `bundle-set-mixed-wheel-versions`, a live publish blocker.
         key = _assert_safe_key(f"{root}/{ref.path}")
-        s3.put(bucket, key, payload)
-        digests[ref.path] = (hashlib.sha256(payload).hexdigest(), len(payload))
+        digest = s3.put_bytes_verified(bucket, key, payload)
+        digests[ref.path] = (digest, len(payload))
 
     # Carve routes documents by a pure function of (source, doc_id), so BOTH splits are decided
     # from one read of the source. This bundle keeps only its own side.
@@ -478,8 +575,18 @@ def run_bundle(
     #
     # Ahead of the length filter as well, because both are cheaper than tokenizing and there is no
     # point measuring the token length of a document that is about to be dropped.
+    #
+    # `seen=None` is byte-for-byte today's behaviour: `dedup_and_decontaminate` builds a fresh
+    # per-bundle `SeenHashes`. `seen=KeepFilter(...)` is the global pre-pass's verdict. The seam is
+    # a `seen=` argument and nothing else because `KeepFilter` is duck-type compatible with
+    # `SeenHashes` (both are `add_if_new(hex) -> bool`), which is what keeps the blast radius of
+    # introducing global dedup down to one keyword.
     filter_stats = FilterStats()
-    surviving = dedup_and_decontaminate(_selected(), index=index, stats=filter_stats)
+    keep_filter = _keep_filter_for(bundle, keep_list)
+    keep_list_size = 0 if keep_filter is None else len(keep_filter.keep)
+    surviving = dedup_and_decontaminate(
+        _selected(), index=index, seen=keep_filter, stats=filter_stats
+    )
 
     # The length filter runs INSIDE tokenize_documents, from the ids encode_batch already produced.
     # It used to be a separate `corpus_read.filter_documents` pass calling `tokenizer.encode` once
@@ -512,6 +619,35 @@ def run_bundle(
         raise BuildDriverError(f"{bundle.bundle_id}: pack returned no result")
     result = results[0]
 
+    # The determinism property, checked rather than asserted in prose. A keep-list that CHANGED
+    # while this bundle ran would mean the filter is a shared mutable structure after all, and the
+    # byte-identical-rerun property (9 bundles / 4,137 shards, verified) would be gone with nothing
+    # reporting it — a later run would just produce different bytes.
+    #
+    # ⚠️ Necessary, not sufficient, and saying so is the point: this compares the key COUNT, so it
+    # catches an append or a truncation and not a swap of two entries. A full re-hash of the keys
+    # would be sufficient and is deliberately not done — it is O(keys) per bundle for a property
+    # `KeepList`'s frozen dataclass already enforces at the type level. This guards the case that
+    # type cannot: an object that duck-types as a KeepList and mutates.
+    if keep_filter is not None and len(keep_filter.keep) != keep_list_size:
+        raise BuildDriverError(
+            f"{bundle.bundle_id}: the keep-list changed during the build — {keep_list_size:,} keys "
+            f"at the start, {len(keep_filter.keep):,} at the end. An immutable keep-list is what "
+            f"makes a rerun byte-identical; a mutating one makes this bundle's output depend on "
+            f"what else was running, and nothing downstream would report it."
+        )
+
+    # §5.6. Both filter blocks go INTO the artifact, not just into stdout. Before this they were
+    # returned, printed by `_cmd_run`, and lost — the duplicate and contamination rates of our own
+    # corpus survived only in CloudWatch logs from the 2026-08-05 run, so no quantitative dedup
+    # claim about a built corpus was auditable from its own artifacts.
+    #
+    # THREE denominators exist here and TWO are recorded, deliberately. `filter.seen` counts
+    # documents entering dedup; `keep.*` counts probes against the keep-list's key space, which is
+    # a property of pass 1; `length.seen` counts documents SURVIVING dedup. The first two are
+    # otherwise unrecoverable, which is the whole §5.6 argument. `length` is not — it is returned
+    # below and printable — so it stays out rather than putting a third denominator in the same
+    # block, which is exactly the `category_attrition` mistake.
     receipt = Receipt.from_pack_result(
         result,
         plan_id=plan_id,
@@ -524,6 +660,8 @@ def run_bundle(
                 key=spec.key, repo=spec.repo, revision=spec.revision or "", config=spec.config
             ),
         ),
+        filter_stats=filter_stats,
+        keep_filter=keep_filter,
     )
     # Verify BEFORE writing the receipt. A receipt is a claim that work is done; writing one for
     # shards that failed their own checks is how a later run skips broken work.
@@ -547,6 +685,11 @@ def run_bundle(
         "tokens_out": result.tokens_out,
         "unfilled": len(result.unfilled),
         "filter": filter_stats.as_dict(),
+        # A THIRD denominator, and the third separate block. These count probes against the
+        # keep-list's key space — a property of pass 1, not of this bundle's read. `None` when the
+        # bundle ran under per-bundle dedup, which is a different build regime and must not read as
+        # a keep-list run that matched nothing.
+        "keep": None if keep_filter is None else keep_filter.as_dict(),
         # Reported separately from `filter` because it is a different denominator: `filter.seen`
         # counts documents entering dedup, `length.seen` counts those that survived it. Merging
         # them would recreate the `category_attrition` mistake — a numerator whose denominator a

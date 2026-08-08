@@ -267,14 +267,23 @@ def test_a_missing_receipt_is_not_done():
 def test_the_receipt_is_written_only_after_its_shards_verify():
     """Order matters: a receipt over broken shards is how a later run skips broken work.
 
-    Simulated with a sink-level failure — an S3 whose put silently drops one object, which is the
+    Simulated with a sink-level failure — an S3 whose write silently drops one object, which is the
     shape of a partial upload.
+
+    Intercepts `put_bytes_verified`, which is what the sink calls since the shard upload started
+    declaring its `ChecksumSHA256` (§8.3a step 1). It used to intercept `put`, and that override
+    kept "passing" against the new sink while dropping NOTHING — a fixture that no longer reaches
+    the code it was written to break, reported as a green test.
     """
     class DroppingS3(FakeS3):
-        def put(self, bucket, key, body, *, content_type=None):
+        def put_bytes_verified(self, bucket, key, body, *, content_type=None):
             if key.endswith("train-00001.u32le.bin"):
-                return  # silently dropped, exactly like an interrupted PUT
-            super().put(bucket, key, body, content_type=content_type)
+                # Silently dropped, exactly like an interrupted PUT: the caller still gets the
+                # digest it would have got, so nothing at the call site can tell.
+                import hashlib
+
+                return hashlib.sha256(body).hexdigest()
+            return super().put_bytes_verified(bucket, key, body, content_type=content_type)
 
     s3 = DroppingS3()
     plan = B.plan_document([_spec()])
@@ -707,3 +716,414 @@ def test_the_threaded_verify_raises_the_botocore_connection_pool_ceiling():
 
     # The default path is unchanged: no Config is passed, so it keeps botocore's own default.
     assert B._s3()._c.meta.config.max_pool_connections == 10
+
+
+# --------------------------------------------------------------------------------------
+# B7 — the shard upload declares its ChecksumSHA256 (§8.3a step 1)
+# --------------------------------------------------------------------------------------
+
+
+def test_every_shard_upload_declares_a_checksum_recomputed_from_its_own_payload():
+    """The digest S3 is asked to verify must be a digest of the bytes S3 received.
+
+    Recomputed, never trusted: this reads the payload back out of the store and re-derives the
+    sha256 from those bytes, then compares it to the base64 `ChecksumSHA256` the write DECLARED.
+    Asserting merely that a checksum was declared would pass against a constant.
+
+    Why it matters: before this, the sink called plain `s3.put` and computed the sha256 one line
+    afterwards for the receipt only (§8.3a). A 200 from an unverified PUT was the only evidence the
+    bytes arrived intact, so `verify --deep`'s full second read of the corpus was the sole thing
+    standing behind them.
+    """
+    import base64
+    import hashlib
+
+    s3 = FakeS3()
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    _run(bundle, plan, _spec(), s3)
+
+    shard_keys = sorted(k for (b, k) in s3._store if b == BUCKET and k.endswith(".u32le.bin"))
+    assert shard_keys, "fixture wrote no shards"
+    for key in shard_keys:
+        declared = s3.declared_checksum(BUCKET, key)
+        assert declared is not None, (
+            f"{key} was uploaded with no ChecksumSHA256 declared — S3 verified nothing and a "
+            f"corrupted body would have become an object"
+        )
+        payload = s3.get(BUCKET, key)
+        recomputed = base64.b64encode(hashlib.sha256(payload).digest()).decode("ascii")
+        assert declared == recomputed, (
+            f"{key} declared {declared} but its stored bytes hash to {recomputed}"
+        )
+
+
+def test_the_receipt_digest_is_the_same_digest_that_was_declared_to_s3():
+    """One hash, two uses. A receipt claiming a digest S3 never verified would be a provenance
+    hole exactly where the deep tier is being retired from.
+
+    Recomputed from the payload on both sides rather than compared field-to-field, so the test
+    fails if either the receipt or the declaration drifts off the real bytes.
+    """
+    import base64
+    import hashlib
+    import json
+
+    s3 = FakeS3()
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    info = _run(bundle, plan, _spec(), s3)
+
+    receipt = json.loads(s3.get(BUCKET, info["receipt_key"]))
+    assert receipt["shards"], "fixture wrote no shards"
+    for shard in receipt["shards"]:
+        key = f"{receipt['prefix']}/{shard['path']}"
+        payload = s3.get(BUCKET, key)
+        assert shard["sha256"] == hashlib.sha256(payload).hexdigest()
+        assert shard["bytes"] == len(payload)
+        assert s3.declared_checksum(BUCKET, key) == base64.b64encode(
+            hashlib.sha256(payload).digest()
+        ).decode("ascii")
+
+
+def test_a_corrupted_body_is_rejected_by_the_server_and_never_becomes_an_object():
+    """The mechanism the checksum buys, asserted rather than assumed.
+
+    Models the behaviour VERIFIED LIVE against S3 on 2026-08-01 for the file-shaped path
+    (`s3.put_file_verified`): a declared digest that does not match the body returns `BadDigest`
+    and **no object is created**. Driven here through `FakeS3._accept_verified_put`, the fake's
+    server side, because that is the only seam at which a wrong digest can be declared at all —
+    `put_bytes_verified` derives the digest from the body and so cannot produce a mismatch.
+
+    ⚠️ This is a model of the server, not a live measurement of the bytes-shaped call. The
+    bytes-shaped path issues the same `put_object` with the same header, but a deliberate
+    corruption must still be asserted against real S3 in the Phase 2 smoke test.
+    """
+    import base64
+    import hashlib
+
+    from edullm_data.s3 import S3Error
+
+    s3 = FakeS3()
+    body = b"\x01\x02\x03\x04" * 64
+    wrong = base64.b64encode(hashlib.sha256(b"different bytes").digest()).decode("ascii")
+
+    with pytest.raises(S3Error, match="BadDigest"):
+        s3._accept_verified_put(BUCKET, "corrupt.u32le.bin", body, wrong)
+
+    assert (BUCKET, "corrupt.u32le.bin") not in s3._store, "no object may exist after a BadDigest"
+    assert s3.declared_checksum(BUCKET, "corrupt.u32le.bin") is None
+
+
+def test_a_plain_put_declares_nothing_so_the_test_above_cannot_pass_vacuously():
+    """The control. If `declared_checksum` returned something for every write, the checksum
+    assertions would hold whether or not the sink was ever changed."""
+    s3 = FakeS3()
+    s3.put(BUCKET, "unverified.bin", b"payload")
+    assert s3.declared_checksum(BUCKET, "unverified.bin") is None
+
+
+# --------------------------------------------------------------------------------------
+# A2b / #22 — run_bundle consumes the global dedup keep-list
+# --------------------------------------------------------------------------------------
+
+
+def _keep_list_for(bundle_id, texts):
+    """A real keep-list awarding `texts` to `bundle_id`, built through the producer's own API.
+
+    Constructed via `HashScan` + `resolve_keep_lists` rather than hand-assembled, so these tests
+    exercise the contract eng-05 froze rather than my reading of it.
+    """
+    from edullm_data.corpus_filter import HashScan, resolve_keep_lists
+
+    scan = HashScan()
+    for t in texts:
+        scan.add_text(t)
+    return resolve_keep_lists({bundle_id: scan})[bundle_id]
+
+
+def test_no_keep_list_is_byte_for_byte_todays_behaviour():
+    """`keep_list=None` must change nothing. It is what lets global dedup land without touching
+    any bundle that is not built against a pre-pass.
+
+    Compared on the RECEIPT DIGEST — a content address over every shard path, digest, byte count
+    and conservation number — not on a summary field, so a difference anywhere in the artifact
+    fails this.
+    """
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    docs = _docs(n=400)
+
+    a, b = FakeS3(), FakeS3()
+    ref = B.run_bundle(bundle, plan, _spec(), s3=a, bucket=BUCKET, prefix=PREFIX,
+                       documents=lambda sp, bu: docs, tokenizer=WordTok(), eos_id=100257,
+                       vocab_size=100278, wheel_version="0.6.3")
+    explicit = B.run_bundle(bundle, plan, _spec(), s3=b, bucket=BUCKET, prefix=PREFIX,
+                            documents=lambda sp, bu: docs, tokenizer=WordTok(), eos_id=100257,
+                            vocab_size=100278, wheel_version="0.6.3", keep_list=None)
+
+    assert ref["receipt_sha256"] == explicit["receipt_sha256"]
+    assert ref["filter"] == explicit["filter"]
+    assert ref["keep"] is None, "no keep-list means no keep block, not a zeroed one"
+    assert a.dump(BUCKET) == b.dump(BUCKET), "every uploaded byte must be identical"
+
+
+def test_a_keep_list_drops_exactly_the_documents_it_does_not_award():
+    """The consumer half of #22, recomputed against an independently-derived expected set.
+
+    The keep-list is built over HALF the documents, so the expected survivor set is known without
+    consulting any counter the code under test maintains — `filter.kept` is then compared to a
+    number this test derived itself.
+    """
+    docs = _docs(n=400)
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+
+    # Which documents actually reach the filter is decided by `carve`, upstream of dedup, so the
+    # expected count has to be taken from the same routing rather than from len(docs).
+    from edullm_data.corpus import carve
+
+    reaching = [d for split, d in carve(docs, fraction=plan["val_fraction"]) if split == "train"]
+    awarded = reaching[: len(reaching) // 2]
+
+    keep = _keep_list_for(bundle.bundle_id, [d.text for d in awarded])
+    s3 = FakeS3()
+    info = B.run_bundle(bundle, plan, _spec(), s3=s3, bucket=BUCKET, prefix=PREFIX,
+                        documents=lambda sp, bu: docs, tokenizer=WordTok(), eos_id=100257,
+                        vocab_size=100278, wheel_version="0.6.3", keep_list=keep)
+
+    f, k = info["filter"], info["keep"]
+    assert f["seen"] == len(reaching)
+    assert f["kept"] == len(awarded), (
+        f"exactly the awarded documents must survive: expected {len(awarded)}, got {f['kept']}"
+    )
+    assert f["duplicates"] == len(reaching) - len(awarded)
+    assert f["seen"] == f["kept"] + f["duplicates"] + f["contaminated"]
+    # The keep block's own numbers, against the same independently-derived counts.
+    assert k["keys"] == len(awarded)
+    assert k["hits"] == len(awarded)
+    assert k["misses"] == len(reaching) - len(awarded)
+    assert k["repeats"] == 0
+    # `unused` is RE-DERIVED, not asserted to be zero. `pack` stops as soon as its planned shards
+    # are full and does not drain the document iterator (MEASURED 2026-08-08: 50,264 of 200,015
+    # documents pulled), so a healthy bundle routinely leaves awarded keys unpresented. An earlier
+    # draft asserted zero here and the matching verifier check failed a legitimate two-bundle run.
+    assert k["unused"] == k["keys"] - k["hits"]
+
+
+def test_the_output_does_not_depend_on_which_bundle_ran_first():
+    """THE determinism property, and the reason a shared mutable filter was rejected (§5.3).
+
+    Two bundles are run in both orders against fresh stores and every uploaded byte is compared.
+    A filter carrying state between them would make the second bundle's output depend on the
+    first's and the two stores would differ.
+
+    **The fixture is built so both bundles actually write.** The obvious construction — the same
+    texts offered to both bundles — is degenerate: global dedup awards every hash to one winner, so
+    the loser writes nothing and there is nothing left for an ordering to change. (MEASURED on this
+    fixture: `resolve_keep_lists` gave `tiny--train` 150 keys and `two--train` 0.) So each bundle
+    gets its own texts PLUS a shared overlap that only one of them can win — which is the case an
+    order-dependent filter would actually get wrong.
+    """
+    from edullm_data.corpus_filter import HashScan, resolve_keep_lists
+
+    specs = [_spec(), _spec(key="two", source_label="two")]
+    plan = B.plan_document(specs)
+    by_key = {s.key: s for s in specs}
+    bundles = [_small(b) for b in B.bundles_of(plan)]
+    assert len(bundles) == 2
+
+    overlap = _docs(n=60, seed=9)
+    own = {bundles[0].bundle_id: _docs(n=200, seed=31),
+           bundles[1].bundle_id: _docs(n=200, seed=32)}
+
+    def docs_for(bundle):
+        return [
+            Document(id=f"{bundle.source}-{i}", text=d.text, source=bundle.source)
+            for i, d in enumerate(own[bundle.bundle_id] + overlap)
+        ]
+
+    scans = {}
+    for bu in bundles:
+        scan = HashScan()
+        for d in docs_for(bu):
+            scan.add_text(d.text)
+        scans[bu.bundle_id] = scan
+    keeps = resolve_keep_lists(scans)
+
+    # The fixture must be non-degenerate in BOTH directions or this test proves nothing: each
+    # bundle must win keys, and the overlap must be genuinely contested.
+    assert all(len(v) > 0 for v in keeps.values()), f"degenerate fixture: {keeps}"
+    total_distinct = len({d.text for bu in bundles for d in docs_for(bu)})
+    assert sum(len(v) for v in keeps.values()) == total_distinct
+    assert sum(len(v) for v in keeps.values()) < sum(len(docs_for(bu)) for bu in bundles), (
+        "the overlap must actually be deduplicated away, or ordering has nothing to affect"
+    )
+
+    def run_in(order):
+        s3 = FakeS3()
+        infos = {}
+        for bu in order:
+            infos[bu.bundle_id] = B.run_bundle(
+                bu, plan, by_key[bu.spec_key], s3=s3, bucket=BUCKET, prefix=PREFIX,
+                documents=lambda sp, b, _b=bu: docs_for(_b), tokenizer=WordTok(),
+                eos_id=100257, vocab_size=100278, wheel_version="0.6.3",
+                keep_list=keeps[bu.bundle_id],
+            )
+        return s3.dump(BUCKET), infos
+
+    forward, info_f = run_in(bundles)
+    backward, info_b = run_in(list(reversed(bundles)))
+
+    assert forward == backward, (
+        "bundle execution order changed the bytes written — the keep-list is not immutable and "
+        "the byte-identical-rerun property is gone"
+    )
+    for bid in own:
+        assert info_f[bid]["receipt_sha256"] == info_b[bid]["receipt_sha256"]
+        assert info_f[bid]["filter"] == info_b[bid]["filter"]
+        assert info_f[bid]["keep"] == info_b[bid]["keep"]
+
+
+def test_the_same_text_in_two_bundles_survives_exactly_once_globally():
+    """What the pre-pass BUYS, asserted rather than cited.
+
+    Today there is no cross-bundle dedup at all — `dedup_and_decontaminate` default-constructs a
+    `SeenHashes` per bundle, so every copy of a cross-source duplicate survives. This runs the same
+    corpus both ways and shows the difference, so the test fails if the keep-list is ever wired up
+    as a no-op.
+    """
+    from edullm_data.corpus_filter import HashScan, resolve_keep_lists
+
+    specs = [_spec(), _spec(key="two", source_label="two")]
+    plan = B.plan_document(specs)
+    by_key = {s.key: s for s in specs}
+    bundles = [_small(b) for b in B.bundles_of(plan)]
+    shared = _docs(n=150, seed=9)
+
+    def docs_for(bundle):
+        return [Document(id=f"{bundle.source}-{i}", text=d.text, source=bundle.source)
+                for i, d in enumerate(shared)]
+
+    # Without a keep-list: BOTH bundles keep the same texts. That is the leak.
+    without = {}
+    s3 = FakeS3()
+    for bu in bundles:
+        try:
+            without[bu.bundle_id] = B.run_bundle(
+                bu, plan, by_key[bu.spec_key], s3=s3, bucket=BUCKET, prefix=PREFIX,
+                documents=lambda sp, b, _b=bu: docs_for(_b), tokenizer=WordTok(),
+                eos_id=100257, vocab_size=100278, wheel_version="0.6.3",
+            )["filter"]["kept"]
+        except BuildError:
+            pytest.fail("the no-keep-list arm must succeed; it is today's shipping behaviour")
+    assert all(v > 0 for v in without.values())
+    assert sum(without.values()) > max(without.values()), (
+        "per-bundle dedup must let the SAME text survive in both bundles — that is the defect"
+    )
+
+    # With a keep-list: the total kept across both bundles is the DISTINCT text count.
+    scans = {}
+    for bu in bundles:
+        scan = HashScan()
+        for d in docs_for(bu):
+            scan.add_text(d.text)
+        scans[bu.bundle_id] = scan
+    keeps = resolve_keep_lists(scans)
+    distinct = len({d.text for d in shared})
+    assert sum(len(v) for v in keeps.values()) == distinct, (
+        "global dedup must award each distinct text exactly once across all bundles"
+    )
+    assert sum(without.values()) > distinct, "the fixture must actually exhibit the leak"
+
+
+def test_another_bundles_keep_list_is_refused_rather_than_silently_starving_the_stream():
+    """The mis-wiring that produces an almost-empty bundle with no error.
+
+    Pass 1 awards each hash to exactly ONE bundle, so the wrong list rejects nearly everything as
+    won-by-another — indistinguishable from a source that was genuinely all duplicates.
+    """
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    wrong = _keep_list_for("some-other-bundle", [d.text for d in _docs(n=10)])
+
+    with pytest.raises(BuildError, match="keep-list for 'some-other-bundle'"):
+        B.run_bundle(bundle, plan, _spec(), s3=FakeS3(), bucket=BUCKET, prefix=PREFIX,
+                     documents=lambda sp, bu: _docs(), tokenizer=WordTok(), eos_id=100257,
+                     vocab_size=100278, wheel_version="0.6.3", keep_list=wrong)
+
+
+def test_a_shared_keepfilter_is_refused_because_its_bitmap_is_mutable():
+    """The plausible mistake that defeats the whole design.
+
+    `KeepFilter` duck-types as a `SeenHashes` and the parameter is named `keep_list`, so passing one
+    directly looks right. It is the one error every other check misses: a caller-owned filter is
+    shared mutable state whose bitmap depends on how many bundles ran before, which is precisely
+    the order-dependence the immutable keep-list exists to prevent.
+    """
+    from edullm_data.corpus_filter import KeepFilter
+
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    kl = _keep_list_for(bundle.bundle_id, [d.text for d in _docs(n=10)])
+
+    with pytest.raises(BuildError, match="KeepFilter, not a KeepList"):
+        B.run_bundle(bundle, plan, _spec(), s3=FakeS3(), bucket=BUCKET, prefix=PREFIX,
+                     documents=lambda sp, bu: _docs(), tokenizer=WordTok(), eos_id=100257,
+                     vocab_size=100278, wheel_version="0.6.3", keep_list=KeepFilter(kl))
+
+
+def test_a_keep_list_that_mutates_mid_build_is_caught():
+    """The immutability guard, driven by a keep-list that actually grows while the build runs.
+
+    An earlier draft of this test built a mutating object and then asserted nothing about it —
+    it passed without ever invoking the guard. Recording that here because a test that constructs
+    an elaborate fixture and forgets to use it is indistinguishable from a passing test.
+
+    Necessary, not sufficient: the guard compares the key COUNT, so it catches an append or a
+    truncation, not a swap of two entries. `run_bundle`'s own comment says so.
+    """
+    import array as _array
+
+    from edullm_data.corpus_filter import KeepList
+
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    docs = _docs(n=400)
+    real = _keep_list_for(bundle.bundle_id, [d.text for d in docs])
+
+    class GrowingKeepList(KeepList):
+        """Passes `_keep_filter_for`'s isinstance check, then grows behind the filter's back —
+        which is exactly the shared-mutable-structure case the pre-pass design forbids."""
+
+        def __len__(self):
+            # `object.__setattr__` because `KeepList` is a frozen dataclass — which is the point:
+            # frozen stops an honest mistake, not a determined one, so the count guard still earns
+            # its place.
+            object.__setattr__(
+                self, "keys", _array.array("Q", list(self.keys) + [max(self.keys) + 1])
+            )
+            return len(self.keys)
+
+    grown = GrowingKeepList(real.bundle_id, _array.array("Q", real.keys))
+
+    with pytest.raises(BuildError, match="keep-list changed during the build"):
+        B.run_bundle(bundle, plan, _spec(), s3=FakeS3(), bucket=BUCKET, prefix=PREFIX,
+                     documents=lambda sp, bu: docs, tokenizer=WordTok(), eos_id=100257,
+                     vocab_size=100278, wheel_version="0.6.3", keep_list=grown)
+
+
+def test_the_keep_block_is_absent_not_zeroed_when_no_keep_list_is_used():
+    """A zeroed keep block is a positive claim ("the keep-list matched nothing"); an absent one
+    says "this bundle ran under per-bundle dedup". Different build regimes, and a reader must be
+    able to tell them apart."""
+    import json
+
+    s3 = FakeS3()
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    info = _run(bundle, plan, _spec(), s3)
+
+    doc = json.loads(s3.get(BUCKET, info["receipt_key"]))
+    assert "keep" not in doc, "no keep-list means no keep key at all"
+    assert "filter" in doc, "the filter block is written regardless"

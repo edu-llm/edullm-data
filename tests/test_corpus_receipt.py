@@ -1425,3 +1425,247 @@ def test_a_missing_shard_mid_list_does_not_disturb_the_order_of_the_rest():
     assert "receipt-shard-missing" in _codes(baseline)
     deep_paths = [v.path for v in baseline if v.code == "receipt-payload-digest-mismatch"]
     assert deep_paths == [paths[1], paths[4]]        # attached to the right shards, in order
+
+
+# --------------------------------------------------------------------------------------
+# §5.6 — the filter and keep blocks reach the artifact
+# --------------------------------------------------------------------------------------
+
+
+def _seeded_for(receipt) -> FakeS3:
+    """An S3 holding bodies that make `receipt`'s SHARD facts true, so the only thing a test in this
+    section can trip is the filter/keep accounting it is actually about."""
+    s3 = FakeS3()
+    for shard in receipt.shards:
+        s3.seed(BUCKET, f"{receipt.prefix}/{shard.path}" if receipt.prefix else shard.path,
+                _shard_body(shard.tokens // SEQ_LEN, seed=f"{receipt.source}/{receipt.split}/"
+                            f"{shard.path}"))
+    return s3
+
+
+
+def _filter(seen=1_000, kept=900, duplicates=80, contaminated=20, normalization="week1-nfc-rstrip-v1"):
+    from edullm_data.corpus_receipt import FilterRecord
+
+    return FilterRecord(seen=seen, kept=kept, duplicates=duplicates,
+                        contaminated=contaminated, normalization=normalization)
+
+
+def _keep(keys=1_000, hits=920, repeats=30, misses=50, unused=80, hash_bits=64):
+    from edullm_data.corpus_receipt import KeepRecord
+
+    return KeepRecord(keys=keys, hits=hits, repeats=repeats, misses=misses,
+                      unused=unused, hash_bits=hash_bits)
+
+
+def test_the_filter_identity_survives_a_round_trip_through_to_dict_and_from_dict():
+    """`seen == kept + duplicates + contaminated`, RECOMPUTED on the far side of serialization.
+
+    The identity holds by construction inside `dedup_and_decontaminate` and that construction dies
+    with the process. What the receipt has to preserve is the numbers, and a round trip is where a
+    field silently drops — `to_dict` omitting a key and `from_dict` defaulting it to 0 would leave
+    an identity that still "closes" at the wrong values.
+    """
+    record = _filter()
+    receipt = _receipt(filter=record)
+
+    revived = Receipt.from_dict(json.loads(receipt.to_json_bytes().decode("utf-8")))
+
+    assert revived.filter is not None
+    assert revived.filter == record, "every field must survive, not just the ones the identity uses"
+    r = revived.filter
+    assert r.seen == r.kept + r.duplicates + r.contaminated
+    assert r.accounted == 1_000
+    assert r.normalization == "week1-nfc-rstrip-v1"
+    # The digest is over the canonical JSON, so an identical receipt re-serializes identically.
+    assert revived.receipt_sha256() == receipt.receipt_sha256()
+
+
+def test_a_broken_filter_identity_is_reported_rather_than_stored_silently():
+    """The negative. Without this the round-trip test above would pass against a `from_dict` that
+    zeroed every field, because 0 == 0 + 0 + 0."""
+    receipt = _receipt(filter=_filter(seen=1_000, kept=900, duplicates=80, contaminated=19))
+    s3 = _seeded_for(receipt)
+
+    codes = {v.code for v in verify_receipt(receipt, s3, BUCKET)}
+    assert "receipt-filter-accounting-broken" in codes
+
+
+def test_an_unrecorded_normalization_rule_is_reported():
+    """Every dedup decision is a function of the normalization rule, so a record without it cannot
+    be compared to any other corpus's."""
+    receipt = _receipt(filter=_filter(normalization=""))
+    s3 = _seeded_for(receipt)
+
+    codes = {v.code for v in verify_receipt(receipt, s3, BUCKET)}
+    assert "receipt-filter-normalization-unrecorded" in codes
+
+
+def test_a_filter_block_from_a_different_bundle_is_caught_by_the_document_bound():
+    """`documents` is what reached the packer and everything between the two stages only REMOVES,
+    so the packer cannot see more than the filter passed."""
+    receipt = _receipt(filter=_filter(seen=100, kept=50, duplicates=50, contaminated=0),
+                       documents=1_000)
+    s3 = _seeded_for(receipt)
+
+    codes = {v.code for v in verify_receipt(receipt, s3, BUCKET)}
+    assert "receipt-filter-documents-exceed-kept" in codes
+
+
+def test_the_keep_block_round_trips_and_its_cross_check_against_the_filter_holds():
+    """The three relations between two INDEPENDENTLY maintained counter sets.
+
+    `dedup_and_decontaminate` calls `add_if_new` exactly once per document it counts, so
+    hits+repeats+misses == filter.seen, repeats+misses == filter.duplicates, and
+    hits == filter.kept + filter.contaminated. Each block's own identity would survive a single
+    wrong `+= 1`; these relations would not.
+    """
+    filt = _filter(seen=1_000, kept=900, duplicates=80, contaminated=20)
+    keep = _keep(keys=1_000, hits=920, repeats=30, misses=50, unused=80)
+    receipt = _receipt(filter=filt, keep=keep, documents=900)
+
+    revived = Receipt.from_dict(json.loads(receipt.to_json_bytes().decode("utf-8")))
+    assert revived.keep == keep
+    assert revived.filter == filt
+
+    k, f = revived.keep, revived.filter
+    assert k.probes == f.seen
+    assert k.repeats + k.misses == f.duplicates
+    assert k.hits == f.kept + f.contaminated
+    assert k.unused == k.keys - k.hits
+
+    s3 = _seeded_for(receipt)
+    assert verify_receipt(receipt, s3, BUCKET) == [], "a consistent pair must produce no violations"
+
+
+@pytest.mark.parametrize(
+    "keep_kwargs, expected",
+    [
+        # One extra hit: the probe total no longer matches `filter.seen`, AND hits no longer match
+        # kept+contaminated. Two relations catch one lie, which is what independent counters buy.
+        (dict(keys=1_000, hits=921, repeats=30, misses=50, unused=79),
+         {"receipt-keep-probe-mismatch", "receipt-keep-hit-mismatch"}),
+        # One extra repeat: probes disagree, and so does the duplicate total.
+        (dict(keys=1_000, hits=920, repeats=31, misses=50, unused=80),
+         {"receipt-keep-probe-mismatch", "receipt-keep-duplicate-mismatch"}),
+        # `unused` alone corrupted — the alarm field itself, which must re-derive.
+        (dict(keys=1_000, hits=920, repeats=30, misses=50, unused=17),
+         {"receipt-keep-unused-inconsistent"}),
+        # More hits than the keep-list holds keys. The one direction an early stop cannot produce.
+        (dict(keys=100, hits=920, repeats=30, misses=50, unused=100),
+         {"receipt-keep-hits-exceed-keys", "receipt-keep-unused-inconsistent"}),
+    ],
+)
+def test_each_keep_cross_check_fires_on_its_own_inconsistency(keep_kwargs, expected):
+    """One case per relation, asserted as an EXACT code set.
+
+    Exact rather than `in`, because membership would let one over-broad check stand in for all
+    four — every case would "pass" against a verifier that reported every code every time.
+    """
+    filt = _filter(seen=1_000, kept=900, duplicates=80, contaminated=20)
+    receipt = _receipt(filter=filt, keep=_keep(**keep_kwargs), documents=900)
+    s3 = _seeded_for(receipt)
+
+    assert {v.code for v in verify_receipt(receipt, s3, BUCKET)} == expected
+
+
+def test_unused_keys_alone_are_NOT_a_violation():
+    """MEASURED 2026-08-08: `corpus_pack.pack` stops when its planned shards are full and does not
+    drain the document iterator (50,264 of 200,015 documents pulled), and `run_bundle` passes
+    `partial_source=True` precisely because `_reader_for` over-delivers on purpose.
+
+    So a healthy bundle routinely leaves awarded keys unpresented. An earlier draft of this verifier
+    treated `unused > 0` as a divergence signal — following `KeepFilter`'s own docstring — and it
+    failed a legitimate two-bundle run at end-of-run, AFTER its full billable work. Same shape as
+    the `_drain_surplus` bug that killed 25 of 27 bundles in the first array.
+    """
+    filt = _filter(seen=200, kept=180, duplicates=15, contaminated=5)
+    keep = _keep(keys=10_000, hits=185, repeats=10, misses=5, unused=9_815)
+    receipt = _receipt(filter=filt, keep=keep, documents=180)
+    s3 = _seeded_for(receipt)
+
+    codes = {v.code for v in verify_receipt(receipt, s3, BUCKET)}
+    assert codes == set(), f"a large `unused` must not fail a healthy bundle: {codes}"
+
+
+def test_a_keep_block_without_a_filter_block_is_reported():
+    """`run_bundle` writes both or neither, so one alone means the receipt was assembled elsewhere
+    and the three cross-checks cannot run."""
+    receipt = _receipt(keep=_keep())
+    s3 = _seeded_for(receipt)
+
+    codes = {v.code for v in verify_receipt(receipt, s3, BUCKET)}
+    assert "receipt-keep-without-filter" in codes
+
+
+# --------------------------------------------------------------------------------------
+# The schema bump
+# --------------------------------------------------------------------------------------
+
+
+def test_a_v1_receipt_written_before_the_filter_block_existed_still_verifies():
+    """The bump must not orphan the receipts already in S3.
+
+    `verify_receipt` SHORT-CIRCUITS on an unrecognised `schema_version`, and `bundle_is_done` reads
+    receipts to decide what to skip — so dropping v1 would make every completed bundle look unbuilt
+    and silently mandate a full rebuild.
+    """
+    receipt = _receipt(schema_version="edullm-corpus-receipt/v1")
+    s3 = _seeded_for(receipt)
+
+    assert receipt.filter is None
+    assert verify_receipt(receipt, s3, BUCKET) == []
+
+
+def test_an_absent_filter_block_parses_as_None_and_not_as_zeros():
+    """A zeroed record is a positive claim ("the filter saw no documents"); absent means "nothing
+    was recorded". Collapsing them would make every legacy receipt assert something false."""
+    doc = _receipt().to_dict()
+    assert "filter" not in doc and "keep" not in doc
+
+    revived = Receipt.from_dict(doc)
+    assert revived.filter is None and revived.keep is None
+
+
+def test_an_all_zero_filter_block_is_preserved_as_a_record_not_collapsed_to_absent():
+    """The other direction, and the reason `from_dict` tests for a Mapping rather than using
+    `.get() or {}` — which would turn a legitimately-empty bundle's record into "unrecorded"."""
+    receipt = _receipt(filter=_filter(seen=0, kept=0, duplicates=0, contaminated=0))
+    doc = receipt.to_dict()
+    assert doc["filter"] == {"seen": 0, "kept": 0, "duplicates": 0, "contaminated": 0,
+                             "normalization": "week1-nfc-rstrip-v1"}
+
+    revived = Receipt.from_dict(doc)
+    assert revived.filter is not None, "an all-zero record must not read back as absent"
+    assert revived.filter.accounted == 0
+
+
+def test_the_current_schema_version_is_v2_and_v1_is_still_readable():
+    from edullm_data.corpus_receipt import READABLE_RECEIPT_SCHEMAS
+
+    assert RECEIPT_SCHEMA_VERSION == "edullm-corpus-receipt/v2"
+    assert "edullm-corpus-receipt/v1" in READABLE_RECEIPT_SCHEMAS
+    assert RECEIPT_SCHEMA_VERSION in READABLE_RECEIPT_SCHEMAS
+
+
+def test_the_length_filters_stats_object_is_refused_at_the_boundary():
+    """`corpus_read.FilterStats` measures the LENGTH filter — a different pass with a different
+    denominator (`filter.seen` counts documents entering dedup, `length.seen` counts survivors).
+
+    Merging them recreates the `category_attrition` mistake, so `from_stats` reads the five fields
+    by name and raises rather than producing a record whose identity happens to close at zeros.
+    """
+    from edullm_data.corpus_read import FilterStats as LengthStats
+    from edullm_data.corpus_receipt import FilterRecord
+
+    with pytest.raises(AttributeError):
+        FilterRecord.from_stats(LengthStats(min_tokens=64))
+
+
+def test_a_negative_count_is_refused():
+    from edullm_data.corpus_receipt import FilterRecord, KeepRecord
+
+    with pytest.raises(BuildError, match="non-negative"):
+        FilterRecord(seen=-1)
+    with pytest.raises(BuildError, match="non-negative"):
+        KeepRecord(hits=-1)

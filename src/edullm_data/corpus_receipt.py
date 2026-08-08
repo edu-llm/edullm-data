@@ -88,6 +88,8 @@ __all__ = [
     "SEQ_LEN_STRIDE",
     "SourcePin",
     "ShardReceipt",
+    "FilterRecord",
+    "KeepRecord",
     "Receipt",
     "bundle_id_for",
     "verify_receipt",
@@ -99,8 +101,20 @@ __all__ = [
 #: Versioned because the checks below are an interpretation of these fields, not of a shape. A
 #: verifier that applied v1 rules to a v2 document would report confidently on fields it does not
 #: understand, which is worse than refusing.
-RECEIPT_SCHEMA_VERSION = "edullm-corpus-receipt/v1"
-READABLE_RECEIPT_SCHEMAS = frozenset({RECEIPT_SCHEMA_VERSION})
+RECEIPT_SCHEMA_VERSION = "edullm-corpus-receipt/v2"
+
+#: v1 stays readable, and that is not politeness — :func:`verify_receipt` SHORT-CIRCUITS on an
+#: unrecognised ``schema_version`` (returning only ``receipt-schema-unknown``), and
+#: ``corpus_build.bundle_is_done`` reads receipts to decide what to skip. Dropping v1 would make
+#: every receipt already in S3 unverifiable and every completed bundle look unbuilt, i.e. the bump
+#: would silently mandate a full rebuild.
+#:
+#: **Why v2 exists at all**, given that a v1 reader simply ignores an unknown key: the version is
+#: documented above as an interpretation of these *fields*, not of a shape, and v2 changes an
+#: interpretation. Under v1 an absent ``filter`` block means *the schema had no slot for it*; under
+#: v2 it means *the producer chose not to record what it removed*. Only the second is a finding, and
+#: a reader cannot tell them apart without the version. See :attr:`Receipt.filter`.
+READABLE_RECEIPT_SCHEMAS = frozenset({"edullm-corpus-receipt/v1", RECEIPT_SCHEMA_VERSION})
 
 #: ``4 * 8192`` = 32,768. The exact stride ``pretrain_tokens_v1.check_seq_len_alignment``
 #: (``profiles/pretrain_tokens_v1.py:445``) recomputes ``size % stride`` against at Gate A. Checking
@@ -161,6 +175,164 @@ class SourcePin:
             repo=str(doc.get("repo", "")),
             revision=doc.get("revision"),
             config=doc.get("config"),
+        )
+
+
+@dataclass(frozen=True)
+class FilterRecord:
+    """What the DOCUMENT-level filter removed, and why. The receipt's copy of
+    ``corpus_filter.FilterStats``.
+
+    **Why this is in the artifact at all.** Before it, ``run_bundle`` computed these numbers,
+    returned them, and ``_cmd_run`` printed them to stdout — so the duplicate and contamination
+    rates of our own corpus survived only in CloudWatch logs from the 2026-08-05 run
+    (``IMPLEMENTATION-PLAN.md`` §5.6). No quantitative dedup claim about a built corpus was
+    auditable from its own artifacts, which is why several figures in
+    ``artifacts/impl-plan/dedup-decontam-audit.md`` are DERIVED-from-mix rather than MEASURED.
+
+    ``normalization`` is not decoration either: it is the compatibility surface every dedup
+    decision is a function of (``corpus_filter.py:44-47``). A corpus that cannot state which rule it
+    was deduped under cannot be compared to one deduped under another.
+
+    **Counts, never a ratio** — the same rule ``FilterStats`` states, for the same reason. A ratio
+    invites the ``leakage-summary.json`` ``category_attrition`` mistake, where a numerator whose
+    denominator a reader had to guess overstated a loss by four orders of magnitude.
+
+    ⚠️ **This is the DEDUP pass's accounting and nothing else's.** ``corpus_read.FilterStats`` —
+    ``dropped_short`` / ``dropped_tokens`` / ``mean_kept_tokens`` — measures the LENGTH filter,
+    which runs afterwards over the survivors, so its ``seen`` is this record's ``kept``. The two
+    have **different denominators** and merging them into one block would recreate the mistake
+    above. ``run_bundle`` reports them as two blocks; the receipt keeps them apart the same way and
+    carries only this one, because it is the one that is otherwise unrecoverable.
+    """
+
+    seen: int = 0
+    kept: int = 0
+    duplicates: int = 0
+    contaminated: int = 0
+    normalization: str = ""
+
+    def __post_init__(self) -> None:
+        for name in ("seen", "kept", "duplicates", "contaminated"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise BuildError(f"FilterRecord.{name} must be a non-negative int; got {value!r}")
+
+    @property
+    def accounted(self) -> int:
+        """``kept + duplicates + contaminated`` — what :attr:`seen` must equal."""
+        return self.kept + self.duplicates + self.contaminated
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "seen": self.seen,
+            "kept": self.kept,
+            "duplicates": self.duplicates,
+            "contaminated": self.contaminated,
+            "normalization": self.normalization,
+        }
+
+    @classmethod
+    def from_dict(cls, doc: Mapping[str, Any]) -> "FilterRecord":
+        return cls(
+            seen=int(doc.get("seen", 0)),
+            kept=int(doc.get("kept", 0)),
+            duplicates=int(doc.get("duplicates", 0)),
+            contaminated=int(doc.get("contaminated", 0)),
+            normalization=str(doc.get("normalization", "")),
+        )
+
+    @classmethod
+    def from_stats(cls, stats: Any) -> "FilterRecord":
+        """Adapt a ``corpus_filter.FilterStats``. Duck-typed so this module keeps importing without
+        ``corpus_filter``, exactly as ``from_pack_result`` duck-types ``PackResult``.
+
+        ⚠️ **Reads the five fields by name rather than calling ``as_dict()``**, so handing it a
+        ``corpus_read.FilterStats`` — the LENGTH filter's, which has no ``duplicates`` and a
+        different ``seen`` denominator — raises ``AttributeError`` at the boundary instead of
+        silently producing a record whose identity happens to close at zeros.
+        """
+        return cls(
+            seen=int(stats.seen),
+            kept=int(stats.kept),
+            duplicates=int(stats.duplicates),
+            contaminated=int(stats.contaminated),
+            normalization=str(stats.normalization),
+        )
+
+
+@dataclass(frozen=True)
+class KeepRecord:
+    """How this bundle's documents fared against the global dedup keep-list.
+
+    The receipt's copy of ``corpus_filter.KeepFilter.as_dict()``. Present only when the bundle was
+    built against a keep-list; ``None`` means it ran under per-bundle dedup, which is a different
+    build regime and must be readable as such rather than as a keep-list run that matched nothing.
+
+    ⚠️ **A third denominator, kept in a third block on purpose.** ``FilterRecord.seen`` counts
+    documents entering dedup; ``corpus_read.FilterStats.seen`` counts those surviving it; these
+    fields count probes against the keep-list's **key space**, whose size is a property of pass 1,
+    not of this bundle's read. Three quantities, three denominators.
+
+    ⚠️ **``unused`` is NOT a clean divergence signal, despite what ``KeepFilter``'s docstring says.**
+    See :func:`_check_keep_accounting` — ``corpus_pack.pack`` stops early rather than draining, so a
+    healthy bundle routinely leaves keys unpresented.
+    """
+
+    keys: int = 0
+    hits: int = 0
+    repeats: int = 0
+    misses: int = 0
+    unused: int = 0
+    hash_bits: int = 0
+
+    def __post_init__(self) -> None:
+        for name in ("keys", "hits", "repeats", "misses", "unused", "hash_bits"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise BuildError(f"KeepRecord.{name} must be a non-negative int; got {value!r}")
+
+    @property
+    def probes(self) -> int:
+        """``hits + repeats + misses`` — every ``add_if_new`` call this bundle made."""
+        return self.hits + self.repeats + self.misses
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "keys": self.keys,
+            "hits": self.hits,
+            "repeats": self.repeats,
+            "misses": self.misses,
+            "unused": self.unused,
+            "hash_bits": self.hash_bits,
+        }
+
+    @classmethod
+    def from_dict(cls, doc: Mapping[str, Any]) -> "KeepRecord":
+        return cls(
+            keys=int(doc.get("keys", 0)),
+            hits=int(doc.get("hits", 0)),
+            repeats=int(doc.get("repeats", 0)),
+            misses=int(doc.get("misses", 0)),
+            unused=int(doc.get("unused", 0)),
+            hash_bits=int(doc.get("hash_bits", 0)),
+        )
+
+    @classmethod
+    def from_filter(cls, keep: Any) -> "KeepRecord":
+        """Adapt a ``corpus_filter.KeepFilter``. Duck-typed, like :meth:`FilterRecord.from_stats`.
+
+        Reads ``unused`` through the producer's own property rather than recomputing ``keys - hits``
+        here: a second copy of the arithmetic is a second thing to drift.
+        :func:`verify_receipt` re-derives it on the artifact, which is where a recompute belongs.
+        """
+        return cls(
+            keys=int(len(keep.keep)),
+            hits=int(keep.hits),
+            repeats=int(keep.repeats),
+            misses=int(keep.misses),
+            unused=int(keep.unused),
+            hash_bits=int(keep.as_dict()["hash_bits"]),
         )
 
 
@@ -267,6 +439,17 @@ class Receipt:
     max_eos_fraction: float
     wheel_version: str
     sources: tuple[SourcePin, ...] = ()
+    #: What the document-level dedup + decontamination pass removed. See :class:`FilterRecord`.
+    #:
+    #: ``None`` is meaningful and is NOT the same as a zeroed record: it means this bundle recorded
+    #: nothing, either because it was written under schema v1 (which had no slot) or because the
+    #: producer did not pass its stats. An all-zero :class:`FilterRecord` is a positive claim that
+    #: the filter saw no documents. A default-constructed record here would erase that distinction
+    #: and make every legacy receipt assert something false.
+    filter: FilterRecord | None = None
+    #: How this bundle fared against the global dedup keep-list. See :class:`KeepRecord`.
+    #: ``None`` means it ran under per-bundle dedup — a different build regime, not a null result.
+    keep: KeepRecord | None = None
     #: Planned refs the stream had no data for. Data, not an error (``corpus_pack.pack``: ordinal
     #: gaps are legal). Recorded so a reader of the receipt can tell "this bundle underran its plan"
     #: from "this bundle wrote every shard it was asked for" — otherwise the two are the same
@@ -285,7 +468,7 @@ class Receipt:
         return "/".join(part for part in self.stream if part)
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        doc: dict[str, Any] = {
             "schema_version": self.schema_version,
             "plan_id": self.plan_id,
             "bundle_id": self.bundle_id,
@@ -306,6 +489,15 @@ class Receipt:
                 "sources": [p.to_dict() for p in self.sources],
             },
         }
+        # OMITTED when absent, never emitted as null or as a zeroed block. `to_json_bytes` feeds
+        # `canonical_json`, so a key present-but-null would change the receipt's own sha256 for
+        # every v1-shaped receipt re-serialized under v2 — and a zeroed block would be a false
+        # positive claim ("the filter saw no documents") where the truth is "nothing was recorded".
+        if self.filter is not None:
+            doc["filter"] = self.filter.to_dict()
+        if self.keep is not None:
+            doc["keep"] = self.keep.to_dict()
+        return doc
 
     def to_json_bytes(self) -> bytes:
         """The canonical serialization, via ``contracts.canonical_json``.
@@ -353,6 +545,19 @@ class Receipt:
             max_eos_fraction=float(pack.get("max_eos_fraction", 0.0)),
             wheel_version=str(build.get("wheel_version", "")),
             sources=tuple(SourcePin.from_dict(p) for p in build.get("sources", []) or []),
+            # A receipt written before these blocks existed (schema v1) parses to None, not to a
+            # zeroed record — see the fields' own comments. `.get() or {}` would collapse a
+            # legitimately-all-zero block to absent, so the test is explicitly for a Mapping.
+            filter=(
+                FilterRecord.from_dict(raw_filter)
+                if isinstance(raw_filter := doc.get("filter"), Mapping)
+                else None
+            ),
+            keep=(
+                KeepRecord.from_dict(raw_keep)
+                if isinstance(raw_keep := doc.get("keep"), Mapping)
+                else None
+            ),
             unfilled=tuple(str(p) for p in doc.get("unfilled", []) or []),
             schema_version=str(doc.get("schema_version", "")),
         )
@@ -368,6 +573,8 @@ class Receipt:
         sources: Sequence[SourcePin] = (),
         bundle_id: str | None = None,
         wheel_version: str = __version__,
+        filter_stats: Any = None,
+        keep_filter: Any = None,
     ) -> "Receipt":
         """Build a receipt from what the packer actually produced.
 
@@ -382,6 +589,12 @@ class Receipt:
         to :func:`verify_receipt`, deliberately — the constructor only sees producer numbers, and
         two producer numbers agreeing proves nothing. The verifier is the single place that compares
         them to S3.
+
+        ``filter_stats`` is the driver's ``corpus_filter.FilterStats`` and ``keep_filter`` its
+        ``corpus_filter.KeepFilter``, adapted by :meth:`FilterRecord.from_stats` and
+        :meth:`KeepRecord.from_filter`. Both optional and defaulting to ``None`` because
+        ``PackResult`` cannot supply either — the dedup pass runs upstream of the packer and the
+        packer never sees it — so a caller without one records nothing rather than recording zeros.
         """
         shards: list[ShardReceipt] = []
         for ref in result.written:
@@ -414,6 +627,8 @@ class Receipt:
             max_eos_fraction=float(result.max_eos_fraction),
             wheel_version=wheel_version,
             sources=tuple(sources),
+            filter=None if filter_stats is None else FilterRecord.from_stats(filter_stats),
+            keep=None if keep_filter is None else KeepRecord.from_filter(keep_filter),
             unfilled=tuple(ref.path for ref in result.unfilled),
         )
 
@@ -703,6 +918,185 @@ def _check_recorded_conservation(receipt: Receipt) -> list[Violation]:
                 f"{receipt.label}: tail_dropped is {receipt.tail_dropped:,}, at or over SEQ_LEN "
                 f"({SEQ_LEN}). The tail rule truncates to the nearest whole sequence, so its "
                 f"remainder cannot reach one — a whole sequence was dropped instead.",
+            )
+        )
+    v += _check_filter_accounting(receipt)
+    return v
+
+
+def _check_filter_accounting(receipt: Receipt) -> list[Violation]:
+    """Re-assert ``corpus_filter.FilterStats``'s identity on the artifact, for the same reason
+    :func:`_check_recorded_conservation` re-asserts ``PackResult``'s.
+
+    ``seen == kept + duplicates + contaminated`` holds by construction inside
+    ``dedup_and_decontaminate`` — every document takes exactly one of three branches
+    (``corpus_filter.py:310-314``) — and that construction dies with the process. A receipt loaded
+    from JSON has never been through it. Recomputing here is what makes the recorded attrition a
+    checkable number rather than a field that is merely present.
+
+    Absent (v1, or a producer that recorded nothing) is NOT a violation: this is a new block and
+    every receipt already in S3 predates it. Whether missing attrition should eventually *block* a
+    publish is a policy question for the plan, not something to smuggle in as a verifier default.
+
+    ``documents`` — the count ``corpus_pack`` reports reaching the packer — cannot exceed
+    ``filter.kept``, because everything between the two stages only removes more. It can be far
+    smaller (the val carve, the length floor), so this is a bound, not an equality. It is the only
+    thing that can catch a filter block grafted onto the wrong bundle's receipt.
+    """
+    record = receipt.filter
+    if record is None:
+        # No filter block, but a `keep` block may still be present and its `unused` re-derivation
+        # needs no filter. Checking only the relations that are reachable is the point: a check
+        # skipped because its counterpart is missing is a check that silently stops running.
+        return _check_keep_accounting(receipt, None)
+    v: list[Violation] = []
+    if record.seen != record.accounted:
+        v.append(
+            Violation(
+                "receipt-filter-accounting-broken",
+                f"{receipt.label}: the filter saw {record.seen:,} documents but accounts for "
+                f"{record.kept:,} kept + {record.duplicates:,} duplicate + "
+                f"{record.contaminated:,} contaminated = {record.accounted:,} "
+                f"({record.seen - record.accounted:+,} unaccounted). Every document entering dedup "
+                f"is kept, dropped as a duplicate, or dropped as contaminated; there is no fourth "
+                f"channel, so an unbalanced record cannot be read as an attrition rate.",
+            )
+        )
+    if record.normalization == "":
+        v.append(
+            Violation(
+                "receipt-filter-normalization-unrecorded",
+                f"{receipt.label}: the filter block records no normalization rule. Every dedup "
+                f"decision in this bundle is a function of that rule (`corpus_filter.py:44-47`), "
+                f"so a record without it cannot be compared to any other corpus's.",
+            )
+        )
+    if receipt.documents > record.kept:
+        v.append(
+            Violation(
+                "receipt-filter-documents-exceed-kept",
+                f"{receipt.label}: the packer reports {receipt.documents:,} documents but the "
+                f"filter kept only {record.kept:,}. Everything between the two stages removes "
+                f"documents (the val carve, the length floor), so the packer cannot see more than "
+                f"the filter passed — this filter block describes a different bundle.",
+            )
+        )
+    v += _check_keep_accounting(receipt, record)
+    return v
+
+
+def _check_keep_accounting(receipt: Receipt, record: FilterRecord | None) -> list[Violation]:
+    """Cross-check the keep-list's counters against the filter's, and re-derive ``unused``.
+
+    **The cross-check is the strong one, and it is what makes both blocks worth trusting.**
+    ``dedup_and_decontaminate`` calls ``seen.add_if_new`` exactly once per document it counts in
+    ``stats.seen`` (``corpus_filter.py:305-314``), and every call increments exactly one
+    ``KeepFilter`` counter while its return value routes the document into exactly one
+    ``FilterStats`` counter. So:
+
+    * ``hits + repeats + misses == filter.seen`` — the two counter sets saw the same documents;
+    * ``repeats + misses == filter.duplicates`` — a keep-list rejection IS a duplicate, by either
+      route (an intra-bundle repeat, or a hash another bundle won);
+    * ``hits == filter.kept + filter.contaminated`` — a hit is emitted by the keep-list and then
+      either survives decontamination or does not.
+
+    Each block's own internal identity would be satisfied by a single wrong ``+= 1`` in that block.
+    These relations hold across **two independently maintained counter sets**, so a miscount in
+    either shows up. That is a genuine recompute of the artifact rather than a restatement of it.
+
+    ``unused`` is re-derived rather than read: a stored value that does not equal ``keys - hits``
+    is a corrupted alarm, the failure that hides a failure. That inconsistency IS a violation.
+
+    ⚠️ **``unused > 0`` is NOT a violation, and an earlier version of this function made it one.**
+    ``KeepFilter``'s docstring calls it *"the only signal that the staged read changed between"* the
+    two passes, and that reading is what I implemented first. **MEASURED here on 2026-08-08 and it
+    is wrong in this pipeline**: ``corpus_pack.pack`` stops as soon as the bundle's planned shards
+    are full and does **not** drain the document iterator — offered 200,015 documents it pulled
+    50,264 and returned. ``run_bundle`` passes ``partial_source=True`` for exactly this reason, and
+    ``_reader_for`` over-delivers *on purpose* (``_CHARS_PER_TOKEN`` 6.0 against a measured ~4.4,
+    times ``_FILTER_HEADROOM`` 1.5). So a healthy bundle routinely leaves keys unpresented, and
+    gating on it would fail most bundles at end-of-run **after their full billable work** — the same
+    shape as the ``_drain_surplus`` bug that killed 25 of 27 bundles in the first array run.
+
+    **What ``unused`` actually conflates:** (a) pass 1 and pass 2 read different inputs — the real
+    alarm; (b) pass 2 stopped early having filled its shards — the normal case. The receipt cannot
+    separate them, because doing so needs pass 1's ``scanned`` for this bundle, which lives in
+    ``keeplists.json`` and not here. The comparison that WOULD be diagnostic is ``keep.probes``
+    against that ``scanned``: equal probes with unused keys means an early stop, fewer probes than
+    scanned means divergence. Wiring ``keeplists.json`` into the verifier is the fix, and it is not
+    in this change.
+    """
+    keep = receipt.keep
+    if keep is None:
+        return []
+    v: list[Violation] = []
+
+    if record is None:
+        # The three cross-block relations need a filter block. Its absence alongside a `keep` block
+        # is itself worth reporting: `run_bundle` writes both or neither, so one without the other
+        # means the receipt was assembled by something else.
+        v.append(
+            Violation(
+                "receipt-keep-without-filter",
+                f"{receipt.label}: records a keep-list block but no filter block. `run_bundle` "
+                f"writes both or neither, so the three cross-checks between them cannot run and "
+                f"the keep counters stand unverified against anything.",
+            )
+        )
+    else:
+        if keep.probes != record.seen:
+            v.append(
+                Violation(
+                    "receipt-keep-probe-mismatch",
+                    f"{receipt.label}: the keep-list was probed {keep.probes:,} times "
+                    f"({keep.hits:,} hit + {keep.repeats:,} repeat + {keep.misses:,} miss) but the "
+                    f"filter counted {record.seen:,} documents. The filter calls the keep-list "
+                    f"exactly once per document it counts, so these cannot differ — one of the two "
+                    f"blocks was written by a different run.",
+                )
+            )
+        if keep.repeats + keep.misses != record.duplicates:
+            v.append(
+                Violation(
+                    "receipt-keep-duplicate-mismatch",
+                    f"{receipt.label}: the keep-list rejected {keep.repeats + keep.misses:,} "
+                    f"documents ({keep.repeats:,} intra-bundle repeats + {keep.misses:,} won by "
+                    f"another bundle) but the filter recorded {record.duplicates:,} duplicates. "
+                    f"Every keep-list rejection is counted as a duplicate; there is no other path "
+                    f"to that counter.",
+                )
+            )
+        if keep.hits != record.kept + record.contaminated:
+            v.append(
+                Violation(
+                    "receipt-keep-hit-mismatch",
+                    f"{receipt.label}: the keep-list emitted {keep.hits:,} documents but the filter "
+                    f"kept {record.kept:,} and dropped {record.contaminated:,} as contaminated "
+                    f"({record.kept + record.contaminated:,} total). A document the keep-list emits "
+                    f"either survives decontamination or does not; there is no third outcome.",
+                )
+            )
+
+    derived_unused = keep.keys - keep.hits
+    if keep.unused != derived_unused:
+        v.append(
+            Violation(
+                "receipt-keep-unused-inconsistent",
+                f"{receipt.label}: records unused={keep.unused:,} but keys - hits = "
+                f"{keep.keys:,} - {keep.hits:,} = {derived_unused:,}. A value that does not "
+                f"re-derive is a corrupted alarm — a failure hiding a failure.",
+            )
+        )
+    if keep.hits > keep.keys:
+        # The one direction that is unambiguously impossible: a bundle cannot emit more documents
+        # than the keep-list awarded it, because every hit consumes a distinct key and the
+        # used-bitmap prevents a second. Unlike `unused > 0` this cannot come from an early stop.
+        v.append(
+            Violation(
+                "receipt-keep-hits-exceed-keys",
+                f"{receipt.label}: recorded {keep.hits:,} hits against a keep-list of only "
+                f"{keep.keys:,} keys. Each hit consumes a distinct key, so this cannot happen — "
+                f"the two numbers come from different runs.",
             )
         )
     return v
