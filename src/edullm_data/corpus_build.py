@@ -671,21 +671,48 @@ class Bundle:
     #: The plan's `val_fraction`, carried so `keep_rate` needs no second argument. Defaults to
     #: `VAL_FRACTION` for hand-built bundles in tests; the plan always supplies the real value.
     val_fraction: float = VAL_FRACTION
-    #: `(index, of)` — which slice of the SOURCE FILES this bundle reads. **Always a 2-tuple, never
-    #: `None`**, so a reader can write `idx, of = bundle.file_shard` unconditionally and pass it
-    #: straight to `_shard_slice`; `(0, 1)` is the identity there (`items[0::1] == items`), which is
-    #: exactly today's whole-source behaviour. An `Optional` here would put a default in every
-    #: reader, and a reader whose default disagrees with the plan reads the wrong files silently.
+    #: `(index, of)` — which slice of the SOURCE FILES this bundle reads, and how many slices the
+    #: plan cut. **Always a 2-tuple, never `None`**, so a reader can write
+    #: `idx, of = bundle.file_shard` unconditionally and pass it straight to `_shard_slice`;
+    #: `(0, 1)` is the identity there (`items[0::1] == items`), which is exactly today's
+    #: whole-source behaviour. An `Optional` here would put a default in every reader, and a reader
+    #: whose default disagrees with the plan reads the wrong files silently.
+    #:
+    #: `of == K > 1` means the plan split one logical stream into K bundles that each read
+    #: ``hf_files(spec)[index::K]`` — a DISJOINT slice, striding rather than a contiguous block.
+    #: Striding is not a style choice: file sizes vary (MEASURED CV 0.034–0.211 across the four
+    #: split sources) and the big ones cluster, so a contiguous cut leaves one child heavier —
+    #: 14.1% imbalance against striding's 2.6% on `stackv2-edu`.
+    #:
+    #: **This comes from the PLAN, never from `--shard/--of`.** `--shard/--of` strides the bundle
+    #: LIST across array children (`_cmd_run`); this strides one bundle's FILES. Conflating them is
+    #: the whole confusion §8A.5a untangles: an array of 48 children over 100 bundles still puts
+    #: each bundle entirely inside one child, so a 107B bundle is a 51 h child however large the
+    #: array. K is a plan-time decision because the ordinal ranges are (`allocate_ordinals` runs
+    #: once, at plan time), and because a runtime K would make `plan_id` a lie.
+    #:
+    #: ⚠️ Kept as ONE atomic field rather than two ints so index and count cannot drift apart. Two
+    #: concurrent agents implemented both shapes; the tuple is canonical because the pair is
+    #: meaningless split, and `plan["schema"]` is `edullm-build-plan/v2` to mark the wire format.
     file_shard: tuple[int, int] = (0, 1)
 
     def __post_init__(self) -> None:
+        # Checked HERE rather than at the `_shard_slice` call, so a malformed plan fails when the
+        # plan is read — before the tokenizer download, the decon index load, and the first
+        # billable HTTP request. `_shard_slice` raises on the same condition, but it raises
+        # `IngestError` from the middle of a generator several minutes into a job.
         index, of = self.file_shard
-        if of < 1 or not 0 <= index < of:
+        if of < 1:
             raise BuildDriverError(
-                f"{self.bundle_id}: file_shard {self.file_shard!r} is not a valid (index, of) — "
-                f"needs of >= 1 and 0 <= index < of. An out-of-range index makes "
-                f"`items[index::of]` return the WRONG files or none at all, and a shorter file "
-                f"list does not look like an error."
+                f"{self.bundle_id}: file_shard of={of} — must be >= 1 (1 = the whole source, the "
+                f"pre-file-sharding behaviour)"
+            )
+        if not 0 <= index < of:
+            raise BuildDriverError(
+                f"{self.bundle_id}: file_shard index={index} is out of range for of={of}. "
+                f"Out-of-range is not a no-op: `items[{index}::{of}]` returns [] for an index past "
+                f"the end, and a child that reads NO files still writes a receipt, so the bundle "
+                f"would be silently EMPTY rather than failed."
             )
 
     @property
@@ -758,8 +785,68 @@ class Bundle:
             spec_key=entry["spec_key"],
             shards=tuple(refs),
             val_fraction=val_fraction,
+            # `.get` with the whole-source default, so EVERY plan written before file-sharding
+            # existed still reads as one bundle over one whole source — which is what it was.
+            # A `KeyError` here would make the schema change retroactive and unread old plans.
             file_shard=(int(fs.get("index", 0)), int(fs.get("of", 1))),
         )
+
+
+def _assert_file_shard_family(bundles: Sequence[Bundle]) -> None:
+    """Every file-sharded bundle has K siblings covering 0..K-1, with DISJOINT shard refs.
+
+    **This is what makes `_reader_for`'s decision not to divide the budget by K safe.** That
+    decision rests entirely on `bundle.tokens` being this child's own 1/K share, which is true only
+    because the plan allocated each sibling its own refs. If a plan instead gave all K children the
+    full stream's shard list, every child would read K× what it needs AND write the same ordinals K
+    times — and NOTHING downstream would catch it: the token counts add up, the ordinals are dense,
+    the shards decode, and the last writer of each key wins in S3. The corpus would be K-1 children
+    of wasted spend and a silently duplicated stream.
+
+    Recomputed from the refs, not asserted from a declared field, per the golden rule. Checked over
+    the whole plan rather than per bundle because disjointness is a property of the SET — a single
+    bundle cannot see its siblings, and `_cmd_run` hands each child only its own slice of the list.
+
+    A missing sibling is refused for the same reason `_bundle_files` refuses K > file count: files
+    striding to a shard nobody runs are simply never read, and the shortfall arrives at `verify` as
+    an unfilled-ref count indistinguishable from filter attrition.
+    """
+    fams: dict[tuple[str, str | None, str, str], list[Bundle]] = {}
+    for b in bundles:
+        if b.file_shard_count > 1:
+            fams.setdefault((b.source, b.domain, b.split, b.spec_key), []).append(b)
+    for (src, dom, split, _key), sibs in sorted(
+        fams.items(), key=lambda kv: (kv[0][0], kv[0][1] or "", kv[0][2])
+    ):
+        where = f"{src}/{dom or '-'}/{split}"
+        ks = {b.file_shard_count for b in sibs}
+        if len(ks) != 1:
+            raise BuildDriverError(
+                f"{where}: siblings disagree on file_shards ({sorted(ks)}). K is what the stride "
+                f"divides by, so two values mean the slices are neither disjoint nor covering."
+            )
+        k = ks.pop()
+        got = sorted(b.file_shard_index for b in sibs)
+        if got != list(range(k)):
+            raise BuildDriverError(
+                f"{where}: file_shards={k} but the plan holds file_shard {got}, not "
+                f"{list(range(k))}. Every index must appear exactly once — a missing one means "
+                f"those files are never read by anyone and the stream is silently short, and a "
+                f"repeated one means two children read the same files and write the same ordinals."
+            )
+        seen: dict[str, int] = {}
+        for b in sibs:
+            for ref in b.shards:
+                if ref.path in seen:
+                    raise BuildDriverError(
+                        f"{where}: shard {ref.path} is claimed by BOTH file_shard "
+                        f"{seen[ref.path]} and {b.file_shard}. Siblings must hold DISJOINT ordinal "
+                        f"ranges — overlapping refs make the two children overwrite each other in "
+                        f"S3, and the plan's token total then double-counts the survivor. This is "
+                        f"also the assumption `_reader_for` relies on when it does NOT divide the "
+                        f"read budget by {k}."
+                    )
+                seen[ref.path] = b.file_shard
 
 
 def bundles_of(plan: Mapping[str, Any]) -> list[Bundle]:
@@ -781,7 +868,16 @@ def bundles_of(plan: Mapping[str, Any]) -> list[Bundle]:
                 f"holding 1/K of the ordinals, and the only symptom is a surplus that "
                 f"partial_source=True is designed to ignore."
             )
-    return [Bundle.from_plan_entry(e, vf) for e in plan["bundles"]]
+    bundles = [Bundle.from_plan_entry(e, vf) for e in plan["bundles"]]
+    # Here, not in `_cmd_run`: `bundles_of` is the one funnel every consumer of a plan goes through
+    # (run, verify, the receipt checks), so a plan that would silently duplicate a stream is
+    # refused by all of them rather than only by the path someone remembered to guard.
+    #
+    # BOTH guards are kept, from two independent agents, because they catch different things: the
+    # schema check above catches a v2 plan that OMITS the field; this one catches a family whose
+    # members are individually well-formed but collectively wrong (a missing or duplicated index).
+    _assert_file_shard_family(bundles)
+    return bundles
 
 
 def plan_key(prefix: str, plan_id: str) -> str:
@@ -1594,6 +1690,40 @@ def _finephrase_format(spec: CorpusSpec) -> str | None:
     return spec.config
 
 
+def _bundle_files(spec: CorpusSpec, bundle: Bundle) -> list[dict]:
+    """The source files THIS bundle reads: the whole list, or its stride of it.
+
+    One function so there is exactly one place that decides which files a child touches, and so the
+    union property is testable without driving the tokenizer: `_bundle_files` over all K shards of
+    a bundle must reproduce `hf_files(spec)` exactly, no file twice and none dropped.
+
+    `_shard_slice` is `ingest_reservoir`'s, imported not reimplemented — it is already
+    `items[shard::of]` over a generic list and its docstring is *about striding files by name*,
+    which is this case. Both of its existing call sites pass bundle lists; this is the first caller
+    that passes what the docstring describes. Reimplementing the one-liner locally would fork the
+    invariant its tests protect.
+
+    ⚠️ Refuses a K larger than the file count instead of returning an empty slice. `items[7::95]`
+    is fine, but `items[7::5]` on a 5-file source is `[]` — and a child that reads zero files does
+    not fail: it yields nothing, packs nothing, and leaves its refs unfilled, which surfaces at
+    `verify` at the END of the run as an ambiguous shortfall. A source with fewer files than the
+    plan's K is a planning error and is cheap to catch here, before the first byte.
+    """
+    files = hf_files(spec)
+    if bundle.file_shard_count == 1:
+        return files
+    if bundle.file_shard_count > len(files):
+        raise BuildDriverError(
+            f"{bundle.bundle_id}: the plan splits this source {bundle.file_shard_count} ways but "
+            f"{spec.repo}@{(spec.revision or '')[:10]}"
+            f"{'/' + spec.config if spec.config else ''} has only {len(files)} payload files. "
+            f"At least one child would read NO files, yield no documents, and leave its shards "
+            f"unfilled — which looks like filter attrition at `verify`, not like a bad plan. "
+            f"Lower the plan's file_shard `of` to at most {len(files)}."
+        )
+    return _shard_slice(files, bundle.file_shard_index, bundle.file_shard_count)
+
+
 def _reader_for(spec: CorpusSpec, bundle: Bundle) -> Iterable[Document]:
     """Documents for one bundle, dispatched on the registry's `file_format`.
 
@@ -1620,6 +1750,48 @@ def _reader_for(spec: CorpusSpec, bundle: Bundle) -> Iterable[Document]:
     tokenization a document is a byte range inside a shard and there is no document -> id mapping
     left, so this must happen HERE, on the way in, or not at all. `reservoir_ids.keeps_id` is the
     predicate; before this it had exactly one caller and that caller only wrote a JSON report.
+
+    **Reads only this bundle's SLICE of the source files when the plan split it K ways** —
+    `hf_files(spec)[file_shard::file_shards]`. This is the fix §8A.5a scopes, and it is the
+    difference between a 51.38 h child and a ~7.6 h one on `stackv2-edu--train`. Three things about
+    it are load-bearing:
+
+    * **Striding, not contiguous blocks**, via the same `_shard_slice` the FinePhrase ingest uses.
+      Its docstring says contiguous is wrong because file sizes vary and "the big ones cluster";
+      MEASURED on our four flat sources (ENG-EXEC, 2026-08-08, HF tree API at the pinned revisions)
+      that is true — `stackv2-edu`'s 95 files have CV 0.211 and 2.09x max/min, and contiguous
+      blocks give 1.132x worst-child imbalance against striding's **1.026x** (8.35 h vs 7.57 h).
+      A contiguous split is not a stylistic alternative here; it costs 0.8 h on this one bundle.
+    * **`hf_files` returns a path-sorted list**, so the slice a child reads is a pure function of
+      `(spec, file_shard, file_shards)` — not of which child started first, nor of listing order.
+      That is what keeps the build byte-identical across re-runs, the property 9 bundles / 4,137
+      shards previously demonstrated.
+    * **The budget is NOT divided by K, and that is a decision, not an omission** — see below.
+
+    **THE BUDGET UNDER FILE-SHARDING.** `budget` converts *tokens this bundle must deliver* into
+    *characters to read*; it is not a fraction of a pool. So the question "divide by K?" reduces to
+    "does `bundle.tokens` describe the whole stream or this child's share?", and the answer comes
+    from the plan: **`allocate_ordinals` runs once, at plan time, and gives each of the K children
+    its OWN disjoint refs** (§8A.5a — plan-time ordinal ranges are the reason this is a plan-shape
+    change and not a reader tweak). `bundle.tokens` sums *this* bundle's refs, so it is already
+    1/K of the stream and the existing formula is already right. Dividing again would read 1/K of
+    what the child needs and fail `verify` on unfilled refs after the full billable run — the exact
+    end-of-run failure shape `partial_source=True` and the FinePhrase `/ N_PARTITIONS` factor were
+    each added to fix.
+
+    **Feasibility survives the split exactly, and only because the stride is even.** The child gets
+    1/K of the pool and owes 1/K of the tokens, so its target/pool ratio is UNCHANGED from the
+    unsharded bundle — a bundle that could be filled before the split can be filled after it. That
+    argument depends on the slice holding ~1/K of the BYTES, which the stride delivers to within
+    the measured 2.6%, and `_FILTER_HEADROOM`'s 1.5x absorbs that comfortably. It would NOT hold
+    for a contiguous split of a size-sorted source, which is a second, independent reason the
+    stride is not optional.
+
+    ⚠️ **The no-division decision is only safe while the plan really does give each child its own
+    refs, so that is CHECKED rather than trusted** — `_assert_file_shard_family` recomputes it in
+    :func:`bundles_of` across the whole sibling set. If a plan instead handed all K children the
+    full shard list, every child would over-read K× *and* write the same ordinals K times, and
+    nothing downstream could see it: the token counts add up and the shards decode fine.
 
     ⚠️ UNVERIFIED against live HF from inside a Batch container — every offline test injects
     `documents=` instead, so this dispatch is exercised only by its own unit test. Settle it with a
@@ -1671,9 +1843,12 @@ def _reader_for(spec: CorpusSpec, bundle: Bundle) -> Iterable[Document]:
     keep_rate = bundle.keep_rate
     if fp_format is not None:
         keep_rate /= N_PARTITIONS
+    # NOT divided by the file_shard count — the docstring's "THE BUDGET UNDER FILE-SHARDING"
+    # paragraph is the justification, and it turns on `bundle.tokens` already being this child's
+    # own 1/K share because the plan allocated its refs separately.
     budget = int(bundle.tokens * _CHARS_PER_TOKEN * _FILTER_HEADROOM / keep_rate)
     seen_chars = 0
-    for entry in hf_files(spec):
+    for entry in _bundle_files(spec, bundle):
         for doc in read_documents(spec.repo, entry, spec):
             # Charged against the budget BEFORE the partition drops it. The budget is denominated
             # in characters READ, not characters kept, and the `/ N_PARTITIONS` above is what turns
