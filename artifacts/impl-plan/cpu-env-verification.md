@@ -1,6 +1,6 @@
 # CPU / H100 compute-environment verification — sbsandbox, us-east-1
 
-Verified 2026-08-08. Account `056956104102` (`sbsandbox`), region `us-east-1`.
+Verified 2026-08-08. Account `<ACCOUNT_ID>` (`sbsandbox`), region `us-east-1`.
 Identity: `eric.wu@alphaaiengineering.com`, employeeType `INTERN`, via `mcp__sb-aws__whoami`.
 
 All AWS calls are read-only describe/get/list through the `mcp__sb-aws__aws` MCP broker.
