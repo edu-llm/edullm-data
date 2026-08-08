@@ -24,7 +24,7 @@ produces a corpus that passes every gate while being wrong.
 | 2 | **The FinePhrase de-dup predicate is never called** | 59.8B declared synthetic is **~18.5B distinct**; the epoch guard reports green at ~4× true exposure | ~5 lines, at the reader |
 | 3 | **The dedup set OOMs at 1T** | 19.37 GB for one bundle in a 15.03 GB container | flat `np.uint64` → 1.80 GB |
 | 4 | **The decontamination index is built from 5-shot renders** | 149,777 exact hashes are **dead** for MMLU/ARC/HellaSwag | rebuild from raw fields, one CPU job |
-| 5 | **The reader budgets 18 TB to fetch 4.21 TB** | 4.28× over-read, half of it from the val split alone | one constant + ~30 lines |
+| 5 | **43% of all bytes moved is the val split**, serving 0.39% of the tokens | 2.02× over-read; intrinsic to a per-document hash carve, not a formula bug | file-shard val bundles, ~30 lines |
 
 Two more that are not blockers but would embarrass us: **`tokenizers` is not a declared dependency**,
 so production resolves whatever PyPI served that morning — and every Cosmopedia document begins with a
@@ -140,30 +140,43 @@ inside a Batch container — every offline test injects `documents=` instead."* 
 `s3://edullm-landing/_src/<source>/`. No parsing, no filtering, no tokenizing. Every later pass reads
 in-region.
 
-### 3.1 ⚠️ First, the number that dominates everything: the pipeline reads 18 TB, not 4.2 TB
+### 3.1 The read volume — and a claim of mine that a later audit correctly demolished
 
-This is the largest cost in the build and it is an artifact of two constants, not of the data.
+**⚠️ RETRACTED: my earlier finding that the pipeline "reads 18 TB to fetch 4.21 TB" was wrong**, and so
+was the fix I proposed for it. Recorded here rather than deleted, because the reasoning error is
+instructive and because task #25 was created on the strength of it.
 
-`_reader_for` sets `budget = int(bundle.tokens * _CHARS_PER_TOKEN * _FILTER_HEADROOM / keep_rate)`
-with `_CHARS_PER_TOKEN = 6.0` and `_FILTER_HEADROOM = 1.5` (`corpus_build.py:865,881`).
+**What I claimed.** `_reader_for` sets `budget = int(bundle.tokens * _CHARS_PER_TOKEN *
+_FILTER_HEADROOM / keep_rate)` with `_CHARS_PER_TOKEN = 6.0` and `_FILTER_HEADROOM = 1.5`
+(`corpus_build.py:865,881`) — i.e. 9.0 chars/token against a measured 4.31 B/token — and that a val
+bundle's `keep_rate = 0.005` divisor made the val split budget another 9 TB, for 18 TB total.
 
-| | figure |
-|---|---|
-| real text needed for 1.0T tokens, at a mix-weighted **0.2374 tok/byte** (19 measured values) | **4.21 TB** |
-| char budget per token | 6.0 × 1.5 = **9.0**, against a measured mean of **4.31 B/token** → **2.09× over-read** |
-| train split budgeted read | 9.00 TB |
-| **val split budgeted read** (`keep_rate = VAL_FRACTION = 0.005`, so the budget is divided by 0.005) | **9.00 TB** |
-| **total budgeted read** | **18.00 TB — a 4.28× amplification** |
+**Why it is wrong, verified two ways.**
 
-**The val split alone roughly doubles the download**, and it is not a bug: `is_held_out` is a hash of
-the document id, so a val document cannot be located without reading the train documents beside it.
-But budgeting `tokens × 9 / 0.005` for a 5B-token val split is the wrong instrument. **Two fixes, both
-cheap:**
+1. **`val_fraction` cancels out of the read, algebraically.** A val bundle's tokens are
+   `want × VF` and its divisor is `VF`; a train bundle's are `want × (1−VF)` over `(1−VF)`.
+   **Both budgets equal `want × 9.0` exactly, for any `val_fraction`.** So the "200× divisor" is not
+   an amplifier at all — I read a formula and failed to cancel it. Both source documents state the
+   formula; neither cancels it.
+2. **The budget is a CEILING that is never reached.** The reader is a lazy generator feeding
+   `pack`, which iterates `stream_refs` and stops as soon as the planned shards are full
+   (`corpus_pack.py:727-741`, `exhausted` flag). **Confirmed on the real run: 26 of 27 bundles filled
+   every shard**, with unfilled refs only in `finewiki--train` (33 refs, 90.5% of plan) — so `pack`
+   stopped before the reader exhausted its budget in every other case.
 
-1. **Correct `_CHARS_PER_TOKEN`** from 6.0 to ~4.6 (measured 4.31 plus real headroom). 18 TB → ~9.2 TB
-   for a one-line change.
-2. **Give val bundles file-sharding instead of a 200× budget divisor.** `_shard_slice` already exists
-   and is already imported — roughly 30 lines, and the highest-value change in the whole audit.
+**Consequence: correcting `_CHARS_PER_TOKEN` would save exactly zero bytes** and carries pure downside
+— set it too low and a bundle starves, producing the unfilled refs that `verify` then rejects. **Do
+not make that change.**
+
+**What the real number is.** The measured over-read is **2.02×**, and the genuinely surprising part
+survives: **43% of all bytes moved is the val split, serving 0.39% of the tokens.** That is not the
+budget formula's fault — it is intrinsic. `is_held_out` is a hash of the document id, so a val document
+cannot be reached without reading the train documents interleaved with it. The fix is file-sharding, not
+a constant.
+
+**The lesson, which is the same one §8A.1 draws about the calibration file:** I derived a headline
+number from a formula without checking whether the code ever reaches it. A budget is not a
+measurement.
 
 ### 3.2 Then stage the sources once
 
@@ -172,16 +185,21 @@ cheap:**
 | stage once | **4.21 TB** of real source text (already compressed as parquet / jsonl.gz) | DERIVED from 19 measured tok/byte values |
 | S3 Standard storage | **~$97/month**, so ~**$194** for a two-month build window | DERIVED at $0.023/GB-month |
 | HF → AWS transfer | **free** (AWS does not charge ingress) | — |
-| re-read 18 TB, **staged in-region** | **0.20–4.0 h** (0.5 h at 8 × 10 Gbit/s) | DERIVED |
-| re-read 18 TB, **live from HF** | **8–40 h** at 5–1 Gbit/s, and rate-limit exposed | DERIVED |
+| re-read ~8.5 TB (4.21 TB × 2.02), **staged in-region** | **0.09–1.9 h** (0.24 h at 8 × 10 Gbit/s) | DERIVED |
+| re-read ~8.5 TB, **live from HF** | **3.8–19 h** at 5–1 Gbit/s, and rate-limit exposed | DERIVED |
 
-**Staging is what makes the amplification affordable rather than fatal:** the same 18 TB costs
-in-region bandwidth instead of internet bandwidth. Fix the constants *and* stage, and the read stops
-being the binding constraint at all.
+⚠️ **And the HF figure may be an order of magnitude optimistic.** Both rows above assume bandwidth
+borrowed from an *S3* measurement. Reconciling the reservoir's measured 8 h build instead implies **HF
+CDN throughput near 8.4 MB/s**, which would make a live re-read of 8.5 TB take **~11 days**. That
+single unmeasured number is the strongest argument for staging, and Phase 0b measures it first.
+
+**Staging is what makes the 2.02× over-read affordable rather than fatal:** the same bytes cost
+in-region bandwidth instead of internet bandwidth, and the multiplier stops mattering.
 
 **Four benefits beyond speed**, the first of which makes §5's dedup design possible:
 
-1. **Extra passes become cheap** — a second read costs ~0.5 h instead of 8–40 h.
+1. **Extra passes become cheap** — a second read costs ~0.25 h instead of 3.8–19 h (or days, if the
+   CDN figure above is the real one).
 2. **Resume never re-hits HuggingFace.** No rate limits, no 429s, no revision drift mid-build.
 3. **Reproducibility.** An HF revision can move under us; staged bytes cannot.
 4. **It retires the untested path.** The live-HF read stops being a production dependency.
@@ -192,10 +210,15 @@ being the binding constraint at all.
 
 At the measured 10.5 M tok/s across 32 vCPU and `c7i` on-demand pricing (~$0.04462/vCPU-hour,
 UNVERIFIED against a live price API), 1.0T tokens is **~$38** — and it is $38 at 32, 64, or 96 vCPU,
-because the work is fixed and the rate scales. Roughly $79 with the 2.09× over-read included.
+because the work is fixed and the rate scales. Roughly **$77** with the 2.02× over-read included.
 
 **So tokenization is neither the wall-clock bottleneck nor a cost item.** That is the context for §7's
 gigatoken recommendation.
+
+⚠️ **One caveat on that claim, and it is unmeasured.** The 13-gram decontamination scan is roughly
+**193 billion Python-level `blake2b` calls** and its CPU cost **has never been measured**. §8A attributes
+essentially all build CPU to tokenization; if the scan is comparable, that attribution is wrong and the
+build is not as CPU-cheap as this section implies. Worth measuring in the same smoke job.
 
 **And there is no Batch timeout to design around.** `INGEST-CALIBRATION.md:19-22` corrects this
 in-repo: the 7200 s figure was *our own setting*, not a platform ceiling. The real constraint is the
@@ -316,8 +339,25 @@ The largest bundle *by document count* at 1T is not the largest by tokens: it is
 | **flat `np.uint64`, 8 B/key** | **1.80 GB** | **9.8 GB** | **yes** |
 
 Dedup is only one resident structure: add ~0.45 GB for the decontamination index, 0.4 GB tokenizer,
-0.5 GB pyarrow row group, plus the interpreter. **Three of the four FinePhrase bundles and
-`stackv2-edu` all exceed the container on the dedup set alone — with no global dedup attempted.**
+0.5 GB pyarrow row group, plus the interpreter — so the usable budget is closer to **13.6 GB**.
+
+**Which bundles fail, precisely** (this corrects an earlier draft that named `stackv2-edu`):
+
+| bundle @1.0T | documents | `set[int]` @85.9 B | verdict |
+|---|---|---|---|
+| **`synthetic-finephrase-table`** | **225.6 M** | **19.37 GB** | **OOM** |
+| `synthetic-finephrase-math` | 191.9 M | 16.48 GB | **OOM** |
+| `synthetic-finephrase-tutorial` | 137.3 M | 11.79 GB | over the usable budget |
+| `synthetic-finephrase-faq` | 134.6 M | 11.56 GB | over the usable budget |
+| `stackv2-edu` | 168.1 M | 14.44 GB | fits the container, not the budget |
+
+The FinePhrase bundles dominate because their mean document is **263 tokens** against `pubmed`'s 7,918
+— a 30× spread — so they hold the most *documents* despite not holding the most tokens.
+
+**Corroborated by a real incident, not just arithmetic.** At 251B this already bit: the dedup set was
+measured at **155 B/entry** before the int narrowing (its docstring had claimed 113 B, a 37%
+understatement), and that *"is what pinned all four hosts at 97% memory with 25% of their CPU idle."*
+The narrowing to 85.9 B bought headroom at 251B; at 1.0T it is not enough.
 
 **VERIFIED MYSELF, and it corrects a natural intuition:** narrowing the key *inside* a Python `set`
 does not help. `sys.getsizeof` gives 44 B for a 128-bit int and 36 B for a 64-bit one, so against the
@@ -707,9 +747,15 @@ The 85-minute figure everyone quotes is **MEASURED live** and recorded at
 `pretrain_tokens_v1.py:205-210`: *"Gate A ran ~85 min at 0.3% CPU and ~15.8 round trips/s — purely
 latency-bound, which is what pushed the first promotion attempt past its 2 h timeout."*
 
-That reconciles with the model: 10,049 objects × 6 calls = 60,294 round trips over 85 minutes = 11.8
-rt/s, against a recorded 15.8 (the gap is the per-group LIST plus manifest GETs). **Gate A is
-`objects × 6 × latency`, and the CPU is idle.**
+**⚠️ The table above undercounts by two, and the measurement says so.** At 6 calls/object, 10,049
+objects over 85 minutes is 11.8 rt/s — but the recorded rate is **15.8**. I originally attributed that
+gap to per-group LISTs and manifest GETs. It isn't: **8 calls/object gives 15.76 rt/s**, which
+reproduces the measurement almost exactly, so the "gap" I explained away *was* the two calls I had
+missed. A model that needs a hand-waved remainder to match a measurement is not yet a model.
+
+**So Gate A is `objects × 8 × latency`, and the CPU is idle** — which makes every figure below ~33%
+worse than a 6-call model predicts. The wall-clock in §8.2 is scaled from the measured 507.5 ms/object
+directly, so **those numbers are unaffected**; only the per-call attribution changes.
 
 ### 8.2 It does not fit any plausible timeout at either shard size
 
@@ -903,14 +949,25 @@ is reachable."*
 | projection | what would double it |
 |---|---|
 | tokenize 6.61 h | **linear vCPU scaling is an ASSUMPTION.** A1 was measured at 32 vCPU only; 128 vCPU on one host may contend on memory bandwidth. Never measured at the cap |
-| read 0.26–4.0 h | in-region S3 bandwidth is **UNMEASURED** — our only datapoint is 0.8 MiB/s *out of region*. This is the same shape as the calibration file's error: a rate we assumed rather than measured |
+| **read 0.26–4.0 h** | **the most likely 2×, and possibly 10×.** Every read figure borrows ~85 MB/s from a *single-stream S3* measurement. Reconciling the measured 8 h reservoir build instead implies **HF CDN throughput near 8.4 MB/s** — an order of magnitude lower. Our only other datapoint is 0.8 MiB/s *out of region* |
+| the 13-gram decon scan | **~193 billion Python-level `blake2b` calls, NEVER measured.** I attributed all CPU in the build to tokenization; this is a second CPU consumer of unknown size and plausibly explains unaccounted hours |
+| **publish** | **no in-region `publish()` duration has EVER been measured**, and it is the one stage pulling ~4 TB through a client. The only datapoints are 0.8 MiB/s from a laptop off-region and a 125 GB Batch publish that **timed out at 3600 s** single-threaded with 31 of 32 vCPU idle |
 | Gate A 0.36 h | threading gains are capped by `max_pool_connections` (default **10**); at 16 workers it self-throttles unless the pool is raised too |
-| `verify --deep` 1.66 h | 7.82× was measured at 1.005 TB; at 4.0 TB the S3 read may saturate the NIC before 8 streams |
+| `verify --deep` 1.66 h | 7.82× was measured at 1.005 TB; at 4.0 TB the read may saturate the NIC before 8 streams. **Where that 7.82× was measured is not recorded** |
 | all of it | **the 128 vCPU cap is a queue property, not a physical one.** If the queue is shared, effective concurrency drops and everything scales inversely |
 
 **Never measured at the target scale:** Gate A beyond 10,049 objects, `verify --deep` beyond 1.005 TB,
-tokenize beyond 32 vCPU, and `_reader_for` against live HuggingFace from inside a Batch container at
-all. The last one is why §9 Phase 2 is a mandatory smoke test.
+tokenize beyond 32 vCPU, `publish()` in-region at all, the decontamination scan's CPU cost at all, and
+`_reader_for` against live HuggingFace from inside a Batch container at all.
+
+**One job settles four of those bands at once** — the mandatory single-bundle smoke test (§9 Phase 2)
+combined with Phase 0b's bandwidth measurement. **Run it before trusting any figure in this section.**
+
+**A counter to my own confidence here.** An earlier session's per-bundle ETAs during the real run were
+**all retracted** by their own author: *"every per-bundle ETA I gave was wrong, in both directions."*
+Two of my own numbers in this document were also wrong until a later audit caught them (§3.1's read
+volume, and the Gate A call count in §8.1). **Treat the "fixed" column as a target to verify, not a
+promise** — the *ordering* of the fixes is far better evidenced than their absolute durations.
 
 ---
 
@@ -927,8 +984,8 @@ because several items change the plan.
 | # | item | why it is here | effort |
 |---|---|---|---|
 | 1 | **Wire the FinePhrase id partition** into `_reader_for` | Changes the plan. Cannot be retrofitted after tokenization | ~5 lines + the budget correction below |
-| 2 | **Correct `_CHARS_PER_TOKEN`** 6.0 → ~4.6 | Halves the read | 1 line |
-| 3 | **File-shard val bundles** via the existing `_shard_slice` | Removes the other half of the read amplification | ~30 lines |
+| 2 | ~~Correct `_CHARS_PER_TOKEN`~~ | **WITHDRAWN — see §3.1.** The budget is a ceiling never reached, so this saves zero bytes and starves bundles if set too low | — |
+| 3 | **File-shard val bundles** via the existing `_shard_slice` | 43% of bytes moved serves 0.39% of tokens | ~30 lines |
 | 4 | **Replace the dedup set with a flat `np.uint64` pre-pass** | The current design OOMs at 1T | ~1 day |
 | 5 | **Pin `tokenizers`** in `pyproject.toml` | Production currently resolves whatever PyPI serves | 1 line |
 | 6 | **Thread the profile checks + raise `max_pool_connections`** | Gate A does not fit otherwise | ~20 lines |

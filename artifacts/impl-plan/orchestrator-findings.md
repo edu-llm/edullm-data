@@ -427,3 +427,70 @@ RENDERED prompts, which is a defect at *any* n-gram size (task #24). Fix that be
 benchmark item lengths are **11/12/13 words**, so **≥5% of ARC and HellaSwag items are shorter than a
 single 13-gram** and are reachable only by the exact-hash half, which F2 shows is inert for those
 suites. That makes the short-item hole concrete rather than theoretical.
+
+## F21 — the wall-clock audit demolished my own read-amplification finding. It was right.
+
+**RETRACTED: F5/§3.1's "the pipeline reads 18 TB to fetch 4.21 TB."** I verified the refutation two
+independent ways and it holds on both.
+
+1. **`val_fraction` cancels out of the read, algebraically.** A val bundle's tokens are `want × VF`
+   and its budget divisor is `VF`; a train bundle's are `want × (1−VF)` over `(1−VF)`. **Both equal
+   `want × 9.0` for any `val_fraction`.** The "200× divisor" amplifies nothing — I read the formula
+   and failed to cancel it. Both source documents state the formula and neither cancels it either.
+2. **The budget is a CEILING never reached.** The reader is a lazy generator feeding `pack`, which
+   iterates `stream_refs` and sets `exhausted` only when documents run out
+   (`corpus_pack.py:727-741`). **Verified on the real run: 26 of 27 bundles filled every shard**;
+   unfilled refs appear only in `finewiki--train` (33). So `pack` stopped before the reader drained
+   its budget in every other bundle.
+
+**So correcting `_CHARS_PER_TOKEN` saves exactly zero bytes and is pure downside** — too low and a
+bundle starves, producing the unfilled refs `verify` rejects. **Task #25's first item is withdrawn.**
+The real over-read is **2.02×**, and the intrinsic finding survives: **43% of bytes moved is the val
+split serving 0.39% of tokens**, which file-sharding fixes and a constant does not.
+
+**The lesson is the one §8A.1 already draws about the calibration file, now applied to me:** I derived
+a headline number from a formula without checking whether the code reaches it. **A budget is not a
+measurement.**
+
+## F22 — my Gate A model undercounted by two calls, and I had explained the gap away
+At 6 calls/object, 10,049 objects over 85 min is 11.8 rt/s; the MEASURED rate is **15.8**. I attributed
+the gap to per-group LISTs and manifest GETs. **It was the two calls I had missed:** 8 calls/object
+gives **15.76 rt/s**, reproducing the measurement almost exactly. Independently corroborated by a
+call-counting spy in commit `db437b6`: **80,392 round trips before the HEAD-cache fix, 70,343 after**
+— 80,392 / 10,049 = exactly 8.
+
+**A model that needs a hand-waved remainder to match a measurement is not a model yet.** The §8.2
+wall-clock is scaled from the measured 507.5 ms/object directly, so those figures are unaffected; only
+the per-call attribution changes.
+
+## F23 — the OOM conclusion is double-sourced, but the audit's example used a stale constant
+The audit reported `stackv2-edu` at **~26 GB** using **155 B/entry** (`HANDOFF.md:1469`, MEASURED —
+and the cause of all four hosts pinning at 97% memory with 25% of CPU idle). That figure predates the
+int narrowing: the current code stores `int(digest[:32], 16)`, measured at **85.9 B/entry**.
+
+Re-derived at the current representation:
+
+| bundle @1T | docs | `set[int]` 85.9 B | verdict |
+|---|---|---|---|
+| `stackv2-edu` | 168.1 M | 14.44 GB | **fits** 15.03 GB (barely, and before the decon index) |
+| **`synthetic-finephrase-table`** | **225.6 M** | **19.37 GB** | **OOM** |
+
+**So the conclusion stands but the example must change:** the OOM is driven by
+`synthetic-finephrase-table` (263 tok/doc mean → most documents), not `stackv2-edu`. Task #22 is
+unaffected — a flat `np.uint64` array is 1.80 GB either way.
+
+## F24 — three new defects worth having, and one measurement that would settle everything
+From the same audit, not yet verified by me:
+- **The 13-gram decontamination scan is ~193 billion Python-level `blake2b` calls** and has never been
+  measured. Plausibly the unexplained hours in the build. **This is a real risk to the §8A projection**
+  because it is CPU work I attributed entirely to tokenization.
+- **Documents are NFC-normalized three times.**
+- **`bytes_fetched` — the exact counter that would have settled the over-read question — is reported by
+  the ingest module and discarded by the build module.**
+
+**And the largest evidence gap in the whole wall-clock section:** no in-region `publish()` duration has
+**ever** been measured, and it is the one stage that pulls ~4 TB through a client. Related and
+alarming: the audit's reconciliation of the measured 8 h build implies **HF CDN throughput may be
+~8.4 MB/s, not the ~85 MB/s that every read projection borrows from an S3 measurement.** If true, the
+staged-copy recommendation in §3.2 becomes much more valuable, and Phase 0b's bandwidth measurement is
+the single highest-value job in the plan.
