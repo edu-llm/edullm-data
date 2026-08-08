@@ -139,4 +139,14 @@ testpaths = ["tests"]
 # src-layout: keeps `python -m pytest` working without an editable install, which is
 # the documented fallback for network-less / externally-managed environments.
 pythonpath = ["src"]
-addopts = "-ra"
+# `-m "not network"`: the default run stays offline and deterministic. Network tests are OPT-IN via
+# `-m network`, because a suite that silently depends on the internet fails for the wrong reason in
+# CI and passes for the wrong reason on a laptop with a warm DNS cache.
+addopts = "-ra -m 'not network'"
+markers = [
+  # Hits a live upstream (the HuggingFace tree API). Read-only, no bulk data, no S3, no credentials.
+  # Exists because a registry `config` that 404s is INVISIBLE to every offline test: the row parses,
+  # the plan builds, `plan_id` is stable, and the failure arrives inside a billing Batch container
+  # on the first read. One row of 133 shipped that way (`cosmopedia`, E17).
+  "network: requires outbound HTTPS to an upstream dataset host (opt in with `-m network`)",
+]

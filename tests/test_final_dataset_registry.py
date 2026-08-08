@@ -239,3 +239,54 @@ def test_every_row_carries_its_traps(rows):
     for r in rows:
         if r["target_tokens"] > 0 and not r["source_label"].startswith(("dclm-", "fineweb-edu-")):
             assert r["traps"], f"{r['key']} records no traps"
+
+
+@pytest.mark.network
+def test_every_spec_config_resolves_to_a_listable_path_with_payload_files():
+    """The check whose absence let a 404 reach a billing container. Opt-in: `-m network`.
+
+    **Why no offline test can cover this.** A registry `config` that does not exist upstream is
+    invisible to every check that does not make the request: the row parses, `CorpusSpec` validates,
+    `plan_document` builds, `plan_id` is stable and reproducible, and the shard paths are correct.
+    The failure surfaces on the first `hf_files` call — inside a Batch child, after the image build,
+    the role assumption, the tokenizer download and the decon-index load. One row of 133 shipped
+    exactly that way (`cosmopedia`, `config: "web_samples_v2"` → HTTP 404; the configs live under
+    `data/`).
+
+    **Recomputes rather than asserts.** It calls the real `hf_files` — the same function the build
+    calls, at the same pinned revision — and requires a NON-EMPTY file list. Non-empty is the load-
+    bearing half: `hf_files` filters by payload extension, so a path that lists but holds no
+    `.parquet`/`.json.gz` returns `[]`, and a child that reads zero files does not fail. It yields
+    nothing, packs nothing, and leaves its refs unfilled, which looks like filter attrition at
+    `verify` rather than like a bad row.
+
+    Read-only, no bulk data, no S3, no credentials. 133 rows over a thread pool, ~10 s.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from edullm_data.corpus_build import hf_files
+
+    specs, _ = __import__("edullm_data.corpus_build", fromlist=["load_registry"]).load_registry(
+        str(REGISTRY)
+    )
+    drawn = [s for s in specs if s.target_tokens > 0]
+
+    def probe(spec):
+        try:
+            return spec.key, len(hf_files(spec)), None
+        except Exception as exc:  # noqa: BLE001 — the point is to report, not to raise here
+            return spec.key, 0, f"{type(exc).__name__}: {exc}"
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = list(ex.map(probe, drawn))
+
+    broken = [(k, err) for k, n, err in results if err is not None]
+    empty = [k for k, n, err in results if err is None and n == 0]
+    assert not broken, (
+        f"{len(broken)} of {len(drawn)} registry rows do not resolve at their pinned revision: "
+        f"{broken[:3]}. Each one is a build that dies on its first read inside a container."
+    )
+    assert not empty, (
+        f"{len(empty)} row(s) resolve but list NO payload files: {empty[:3]}. A child that reads "
+        f"zero files still writes a receipt, so the bundle is silently empty rather than failed."
+    )

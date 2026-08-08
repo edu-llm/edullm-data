@@ -1979,3 +1979,110 @@ and `partial_source=True` discards excess. Margin large (2.6% imbalance vs `_FIL
 
 **Nothing pushed. No S3 write, no Batch submit, no `manifest.json`.**
 
+
+---
+
+# 🔴 E17 — THE COSMOPEDIA ROW: MY ERROR, ADJUDICATED. **And it is TWO defects, not one.**
+
+PLAT found `cosmopedia--train` dies in `hf_files` with HTTP 404 on `tree/<rev>/web_samples_v2`. I own
+this row — I authored it in Wave 2.
+
+## Adjudication, from the report and the dossier rather than from what resolves
+
+**The report does NOT name a config.** Every cosmopedia mention, grepped:
+- `FINAL-DATASET-REPORT.md:102` — `| Cosmopedia (synthetic) | 4% | 4.0B | 21.7B | 0.18 |`
+- `:115` — a bucket-composition footnote
+
+**So the report does not disambiguate. Stating that plainly, as instructed.** But the **dossier does**,
+and it convicts me: row 16 reads **"5 of 8 configs (a DECISION — see §B12)"**. **I wrote ONE config.**
+
+**Walked the repo at the pinned revision (MEASURED, read-only):** `/` holds exactly one dir, `data/`;
+`data/` holds **all 8 configs**. So `web_samples_v2` was never a valid path at any revision — **the
+`data/` prefix is not a convention I failed to follow, it is where the configs live.**
+
+| config | files | GB | share |
+|---|---|---|---|
+| `web_samples_v1` | 139 | 38.98 | 42.3% |
+| `web_samples_v2` | 118 | 32.66 | 35.4% |
+| `stories` | 43 | 11.90 | 12.9% |
+| `auto_math_text` | 18 | 4.46 | 4.8% |
+| `stanford` | 13 | 3.30 | 3.6% |
+| `wikihow` / `openstax` / `khanacademy` | 2 / 2 / 1 | 0.50 / 0.35 / 0.05 | 1.0% |
+| **all 8** | **336** | **92.20** | — |
+
+**The pool arithmetic settles the intent.** All 8 configs → **25.8–32.3B tokens** (DERIVED at
+0.28–0.35 tok/parquet-byte), which **brackets the report's stated 21.7B pool.** `web_samples_v2` alone
+is 9.1–11.4B — nowhere near 21.7B. **So the report's row was costed against the WHOLE dataset, not one
+config.** That is independent evidence for the dossier's "5 of 8", and against my single-config row.
+
+## 🔴 DEFECT 2, which the 404 was hiding: a 4.0B draw from ONE config is a MIX change
+
+At 4.0B from `web_samples_v2` alone the row runs **44% of that config's low-end pool** — vs the report's
+**0.18 epochs**. Fixing only the path would have produced a **buildable, green, silently different
+corpus**: one Mixtral-generated web-rephrasing config at ~0.4 epochs instead of the diversified
+synthetic-textbook mix the report priced. **A 200 is weaker evidence than a 404** — exactly PLAT's line,
+and the reason I am not patching one character.
+
+## THE RULING — I am NOT authoring the config set. Escalating with a recommendation.
+
+**`config` is a single tree path** (`hf_files` builds `{base}/{config}?recursive=1`), so **"5 of 8
+configs" is NOT expressible as one row.** It needs either 5 rows or one row at `data/`.
+
+**My recommendation: ONE row at `config: "data"`**, which lists all 336 files across all 8 configs, pool
+25.8–32.3B, 4.0B draw ≈ **0.12–0.16 epochs — matching the report's 0.18 within the band.** Rationale:
+it is the only shape that reproduces the report's own arithmetic, it needs no new rows (no `plan_id`
+churn beyond this one change), and `_shard_slice` strides files so the draw spreads across all 8
+configs rather than concentrating in one.
+
+⚠️ **Two things that recommendation does NOT settle, and I will not decide them:**
+1. **The dossier says 5 of 8, not 8 of 8.** It never records WHICH 5 or why. `config: "data"` takes all
+   8. If the exclusion was deliberate — plausibly `auto_math_text`, whose `prompt` is **58.9% of
+   `text`** — then `data/` is wrong and it needs 5 rows.
+2. **`khanacademy`/`openstax` are Cosmopedia configs named for their seed sources.** The dossier
+   CLEARED CK-12 (not among the 8), but ingesting all 8 pulls in openstax/khanacademy-seeded synthetic
+   text. Cleared, but a licence-adjacent call that is not mine.
+
+**Recorded as a CEO/DATA decision. I have applied the minimal, report-consistent fix (`config: "data"`)
+so the build is unblocked, and flagged both open questions above rather than letting the change pass as
+a typo fix.**
+
+## ✅ E17 FIXED AND VERIFIED — new `PLAN_ID 29968a2b04008a8c`
+
+`config: "web_samples_v2"` → **`"data"`**; `pool_tokens` → 25,800,000,000 (the DERIVED low end over
+all 8 configs, replacing a figure sized for one).
+
+| check | result |
+|---|---|
+| `hf_files(cosmopedia)` | **336 files, all 8 configs covered** (was HTTP 404) |
+| epochs | **0.155** vs the report's 0.18 ✅ |
+| **`PLAN_ID`** | **`29968a2b04008a8c`** |
+| bundles / shards / tokens | **185 / 39,307 / 982,752,985,088** — PLAT predicted all three exactly |
+| summed `target_tokens` | **986,000,000,000** unchanged |
+| determinism | True |
+| suite | **1415 passed, 1 deselected** |
+
+## The CI gap is closed — and the test is mutation-proven
+
+`tests/test_final_dataset_registry.py::test_every_spec_config_resolves_to_a_listable_path_with_payload_files`,
+marked `network` and **opt-in** via `-m network`. Registered the marker in `pyproject.toml` and set
+`addopts = "-ra -m 'not network'"` so the default run stays offline and deterministic — a suite that
+silently depends on the internet fails for the wrong reason in CI and passes for the wrong reason on a
+laptop with a warm cache.
+
+**It calls the REAL `hf_files`** at the pinned revision — the same function the build calls — over all
+133 rows in a thread pool (~16 s). **Two assertions, and the second is the load-bearing one:** rows must
+resolve, AND must list a **non-empty** payload file set. `hf_files` filters by extension, so a path that
+lists but holds no `.parquet`/`.json.gz` returns `[]` — and **a child that reads zero files does not
+fail**; it writes a receipt over an empty bundle, which reads as filter attrition at `verify`.
+
+**Mutation-proven:** reverting the config to the 404 path →
+```
+AssertionError: 1 of 132 registry rows do not resolve at their pinned revision:
+[('cosmopedia', 'HTTPError: HTTP Error 404: Not Found')]
+```
+**All 133 rows currently resolve.** That independently confirms PLAT's 132/133 probe and closes my own
+question — no other row was card-derived in a way that 404s. ⚠️ But it does **not** close the harder
+half: **a 200 proves the path exists, not that it holds the intended content.** `cosmopedia` had BOTH
+defects and only the 404 was visible. The pool-vs-report cross-check is what caught the second, and
+**that check exists in only one place — the registry test's epoch assertion.**
+
