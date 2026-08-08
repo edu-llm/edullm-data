@@ -1958,6 +1958,116 @@ four separate catches tonight, and it converts a case-by-case rescue into a chec
 
 ---
 
+# 🛑 MY AMENDED CARVE WAS NOT EXPRESSIBLE — CEO ERROR #6. ENG walked it and refused.
+
+**I told ENG the Nemotron sources split "on file ranges — no walk, no `config` string to guess, strictly safer."
+That was wrong, and it assumed a capability the plan itself records as ABSENT.** ENG walked all four sources
+read-only at pinned revisions and CEO-verified every claim:
+
+| source | subdirectories | files |
+|---|---|---|
+| `stackv2-edu` | **0** | 97 |
+| `finepdfs-edu` | **0** | 100 |
+| `nemotron-cc-math-3` | **0** | 57 |
+| `nemotron-cc-math-4plus` | **0** | 46 |
+
+**All four are FLAT.** DATA's 57/46 counts were exactly right — what was wrong was my inference that a **file
+range is expressible**:
+1. **`config` is a tree path, not a file selector.** `hf_files` requests `{base}/{config}?recursive=1` and takes
+   **every** file under it. `3/part_00000*` would be requested as a directory and **404**.
+2. **`file-shard` is recorded as `DOES NOT EXIST`** — CEO-verified verbatim at `IMPLEMENTATION-PLAN.md:1629`,
+   in a table whose other two units are marked "exists". **The exact capability my amendment assumed.**
+3. **`_src/` does not rescue it.** Every reader resolves
+   `https://huggingface.co/datasets/{repo}/resolve/{revision}/{path}` (`corpus_read.py:391`), and
+   **`grep -c "s3://" corpus_read.py` → 0. No registry row can read `s3://` at all.**
+
+**ENG applied PLAT's own doctrine to my amendment — "was this sized on the reservoir?" one level up — and it
+failed the test.** So the Nemotron route was **not** safer than the walk; it needed a mechanism that does not
+exist. **Sixth CEO error, and the second where I asserted a capability without checking it was executable.**
+
+## The disagreement is arbitrated: my count of 4 was right
+**Exactly 4 bundles exceed 8 h, and they are the 4 flat sources.** PLAT's 15 counted **rows before train/val
+decomposition**; mine counted the real bundle list. Settled by ENG's walk, as I said it would be — not by argument.
+
+## Two splits bought exactly 0.00 h, as PLAT predicted
+Registry now **133 rows · 986,000,000,000 · `PLAN_ID 9f969e08a5bbbd07` · 161 bundles · 39,307 shards · tests
+1338.** Reading (B) applied (4 FinePhrase rows × 9B, ~0.25 epochs). **Makespan UNCHANGED at 51.38 h.**
+**Only re-simulating made that visible** — the discipline I ordered is what caught it.
+
+**DCLM is 100 rows, not the 20 I ruled — the pool guard refused 20.** One `local-shard` dir holds ~7.33B
+*unique* tokens, and a 20-way row draws 20.5B. **The binding constraint is the 733B unique pool, not wall
+clock.** 100 local-shard dirs is the finest disjoint unit the tree has. **My "~20 ways" was a wall-clock answer
+to a pool-size question** — ENG's guard caught it, which is the guard working as designed.
+
+## 🔑 THE DECISIVE FINDING — `_shard_slice` ALREADY EXISTS
+CEO-verified: `_shard_slice` is defined at `ingest_reservoir.py:764`, and **`corpus_build.py:230`'s own docstring
+says it strides "BUNDLES, not files"** while *"`_shard_slice`'s own docstring is about the third case — it
+explains striding FinePhrase's **files** by name — but its two call sites both pass bundle lists.
+**The primitive is right; nothing calls it on files.**"*
+
+**So file-sharding is not a new subsystem. It is an existing primitive called on the wrong list**, plus the hard
+part: **ordinals must be allocated at PLAN time** (`allocate_ordinals`, `corpus.py:351` — *"Assign globally-unique
+ordinals across the whole group, up front… the failure is invisible: verified by execution, `parse_shard_name`
+returns `('train', 0)` for both"*).
+
+## ❌ No third path exists — I checked
+Only **2 of 133 rows** carry a `domain_column` (`stackexchange` → `metadata.site`, `stackv2-edu` →
+`metadata.gha_language`). **`finepdfs-edu`, `nemotron-cc-math-3` and `nemotron-cc-math-4plus` have NONE**, so the
+domain fan-out cannot reach three of the four. **File-sharding is the only mechanism. The workaround is
+exhausted, exactly as ENG said.**
+
+---
+
+# ⚖️ RULING — **IMPLEMENT FILE-SHARDING.** Not shipping at 51.38 h.
+
+The choice: **ship at 51.38 h with no code change**, or **implement file-sharding for ~11–15 h.** ENG correctly
+declined to decide (it is plan-shaped, inside FREEZE, touches two Wave-0 surfaces, and changes every `plan_id`)
+and correctly declined to implement it unilaterally. **CEO decision, not an owner escalation** — reasoning below.
+
+## Why implement
+1. **The owner's stated goal is speed.** *"I want to have a data set as soon as possible."* **40 hours is the
+   single largest lever left tonight** — larger than every other optimisation this session combined. Shipping
+   51.38 h to avoid a scoped code change inverts the owner's priority.
+2. **It is not a new subsystem.** `_shard_slice` **already exists** (`ingest_reservoir.py:764`) and **its own
+   docstring is about striding files by name.** The primitive is right; **it is called on the wrong list.**
+   That is a far smaller change than "implement file-sharding" sounds.
+3. **The workaround is provably exhausted.** All four sources are flat (0 subdirectories), and **3 of the 4 have
+   no `domain_column`** (only 2 of 133 rows do). There is no third path — I checked rather than assumed.
+4. **51.38 h is not merely slow, it is fragile.** One bundle running 51 h with `attempts: 1` while 47 children
+   idle is the **blast-radius** argument CLAUDE.md already makes against long single-attempt jobs. A capacity
+   blip at hour 40 loses everything. **~11–15 h across many children is both faster AND safer.**
+5. **`--shard/--of` striding bundles is exactly why 47 children would idle.** Fixing the granularity fixes the
+   idling, not just the clock.
+
+## Why this is mine and not the owner's
+Compute is pre-approved; the owner granted **"diagnose, fix, retry autonomously"** and **auto-promote**; and this
+is a **reversible pre-FREEZE code change with a test suite behind it** — not an irreversible act. Waking them to
+choose "faster" when they said "as soon as possible" would be theatre. **If it cannot be done safely, the
+fallback is 51.38 h, which remains available at every moment.**
+
+## Conditions — non-negotiable, because ordinals are the failure mode
+- **`allocate_ordinals` (`corpus.py:351`) allocates at PLAN time, globally, up front.** Its docstring records the
+  failure as **invisible**: *"verified by execution, `parse_shard_name` returns `('train', 0)` for both."* **A
+  child must NEVER allocate an ordinal.** Every K children of a bundle get a **disjoint, plan-assigned ordinal
+  range**.
+- **A test that recomputes, not one that asserts a field exists:** simulate K children over one bundle and assert
+  the union of written ordinals is **exactly** the expected set — **no gaps, no overlaps, no reuse.** Ordinal
+  REUSE is the one real contradiction the spec verdict already identified.
+- **Determinism must survive.** 9 bundles / 4,137 shards previously re-ran byte-identical; **file-sharding must
+  preserve that** — same inputs, same digests. Predict the verdict free with `verify_bundle_set`, no `s3=`.
+- **Two Wave-0 surfaces are touched** (`_reader_for`, `allocate_ordinals`). **One agent owns one FUNCTION**, and
+  each must be told the other exists. Merge order: `allocate_ordinals` → `_reader_for`.
+- **Baseline 1338 must not regress**, and the new capability needs its own tests.
+- **Re-simulate after implementing, then report the makespan** — do not report the split as done on the strength
+  of the arithmetic that motivated it. That error has now been made twice tonight, once by me.
+
+**Quote 11–15 h, never 9.96 h.** Three independent methods (ENG 11.19 h, PLAT 11.00–13.07 h, mine 11.00–11.25 h)
+land in that band, all `DERIVED` at a **uniform rate that is certainly false** — and **PDF and code are two of
+the four sources**, so the error lands where it matters most. **Shape, not answer.** ENG flagged this against its
+own number without being asked.
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of

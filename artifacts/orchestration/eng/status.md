@@ -1481,3 +1481,447 @@ is now load-bearing.** It is ~1 file-list slice in `_reader_for` + an ordinal-ra
 **I did NOT implement it**: it is plan-shaped, it lands in `_reader_for` and `allocate_ordinals` (two
 other agents' Wave-0 surfaces), and it changes every `plan_id`. **CEO's call.**
 
+
+---
+
+# 🌊 WAVE 4 — CEO RULED: IMPLEMENT FILE-SHARDING. 40 h is the largest lever left.
+
+Fallback stays live at every moment: **if it cannot be done safely, ship 51.38 h.**
+
+**Conditions (non-negotiable, all from the CEO):** ordinals are allocated at PLAN time, globally, up
+front — **a child must NEVER allocate one**; each of K children gets a **disjoint plan-assigned range**.
+The test must **recompute the union of written ordinals: no gaps, no overlaps, no reuse.**
+Determinism (9 bundles / 4,137 shards byte-identical) must survive. Two Wave-0 surfaces,
+**merge order `allocate_ordinals` → `_reader_for`**. Baseline **1338**. **Re-simulate, then report.**
+
+## Verifying the CEO's `_shard_slice` claim BEFORE dispatch (my own rule, adopted after E11/E12)
+### ✅ CEO's `_shard_slice` claim VERIFIED before dispatch (my own post-E11/E12 rule)
+
+`grep -rn "def _shard_slice" src/` → **exactly one definition**, `ingest_reservoir.py:764`, **generic
+over `items: list`**, returns `items[shard::of]`. Its docstring is explicitly about striding
+**FinePhrase's FILES by name** and warns that striding beats contiguous blocks because *"sizes vary by
+an order of magnitude and the big ones cluster."* **Both call sites pass BUNDLE lists**
+(`ingest_reservoir.py:875` a tree, `corpus_build.py:1073` `bundles_of(plan)`). **The CEO is right: the
+primitive is correct and is called on the wrong list.** MEASURED-IN-CODE.
+
+**A second structural fact I verified, which shrinks the risk:** `allocate_ordinals`
+(`corpus.py:351-359`) already walks the plan with one counter per split and gives each bundle a
+**CONTIGUOUS BLOCK** of ordinals. So a bundle already *owns* a range — K children must **partition a
+block that already exists**, not negotiate new numbers. That is a far smaller change than an allocator,
+and it is why the CEO's "a child must NEVER allocate an ordinal" condition is naturally satisfiable.
+Passed to eng-11 as design input.
+
+## Wave 4 dispatched — 2 workers, merge order `allocate_ordinals` → `_reader_for`
+
+| stream | owns | branch |
+|---|---|---|
+| 11 | `allocate_ordinals`, `ShardRef`, `plan_document`, `shard_plan` — **plan-time ordinal ranges** | `agent/eng-11/plan-file-shards` |
+| 12 | `_reader_for`, `_shard_slice` — **the file slice** | `agent/eng-12/reader-file-slice` |
+
+eng-11 merges first and **publishes the plan-schema contract early**; eng-12 reads it and codes against
+a marked assumption if absent. Same producer/consumer discipline that made Wave 0's eng-05/eng-06 pair
+merge cleanly. eng-12 was additionally warned that `_reader_for` carries **three Wave-0 behaviours**
+(the FinePhrase id partition keyed on `spec.repo`, the keep-fraction budget division, and the WITHDRAWN
+`_CHARS_PER_TOKEN`) and that the budget-vs-K question is the one that silently breaks every child.
+
+### ✅ FILE-SIZE UNIFORMITY MEASURED — the CEO's open question. **Striding works; the carve stands.**
+
+Read the HF tree API read-only at the pinned revisions (no bulk data). **MEASURED:**
+
+| source | files | min | max | mean | CV | max/min |
+|---|---|---|---|---|---|---|
+| `stackv2-edu` | **95** (not 97 — 97 includes `.gitattributes` + `README.md`) | 0.47 GB | 0.99 GB | 0.87 | **0.211** | 2.09× |
+| `finepdfs-edu` | 100 | 2.77 | 3.21 | 2.99 | **0.034** | 1.16× |
+| `nemotron-cc-math-3` | 57 | 0.53 | 1.92 | 1.88 | 0.096 | **3.61×** |
+| `nemotron-cc-math-4plus` | 46 | 0.49 | 1.53 | 1.35 | 0.114 | 3.10× |
+
+**Two are materially non-uniform by max/min** (Nemotron 3.61× and 3.10×) — but that is one small
+trailing part file against a tight body (CV 0.096/0.114). **`stackv2-edu` has the highest CV at 0.211.**
+
+**The decisive result: STRIDING absorbs all of it.** Per-child load with `items[k::K]`:
+
+| source | K | files/child | worst child | imbalance |
+|---|---|---|---|---|
+| `stackv2-edu` | 7 | 13–14 | **7.57 h** | **1.026×** |
+| `finepdfs-edu` | 4 | 25 | 7.54 h | 1.001× |
+| `nemotron-cc-math-3` | 3 | 19 | 6.10 h | 1.013× |
+| `nemotron-cc-math-4plus` | 2 | 23 | 5.53 h | 1.010× |
+
+**Worst imbalance 2.6%.** And this **empirically vindicates `_shard_slice`'s docstring**: contiguous
+blocks give `stackv2-edu` **8.35 h at 1.132× imbalance** versus striding's 7.57 h at 1.026×. The
+docstring's reasoning — *"the big ones cluster"* — is measurably right on our real data. **eng-12 must
+keep the stride.** So: **non-uniform enough to matter for the METHOD, not enough to change the CARVE.**
+
+### 🟢 MAKESPAN RE-SIMULATED ON REAL FILE SIZES — **11.07 h at 48 × 8-vCPU**
+
+173 children · **longest child 7.53 h** · 48×8 = **11.07 h** · 64×8 = 7.79 h · aggregate floor 9.79 h.
+
+**Fourth independent method, same band:** mine-uniform 11.19 h · **mine-real-sizes 11.07 h** ·
+PLAT 11.00–13.07 h · CEO 11.00–11.25 h. **Quote 11–15 h. Never 9.96 h.**
+**51.38 h → ~11.07 h = 40.3 h saved**, which is the lever the CEO ruled for.
+
+⚠️ **This is a PREDICTION from `target_tokens` scaled by BYTES at a uniform 72,615 tok/s/vCPU.** The
+caveat stands unexempted and now has a name: **PDF and code are two of the four sources**, and neither
+tokenizes like web text, so the residual error lands precisely on the two biggest children. **The
+CARVE is robust to it** (7.53 h against a 9.96 h floor is 2.4 h of headroom), **the 11.07 h is not** —
+it is a shape, not a promise. **Re-measure at the smoke test.**
+
+
+---
+
+# ✅ STREAM 12 COMPLETE (reader file slice) — VERIFIED BY ENG-EXEC
+
+Commit `6f3f23e`. **Tests 1338 → 1355 (+17), I ran it.** Scope: `corpus_build.py` + its tests **only**.
+`ingest_reservoir.py` **untouched** (empty diff) — `_shard_slice` needed no generalising, it was already
+generic, so eng-12 imports it and **its own union tests keep guarding it.** Stayed out of
+`plan_document`/`allocate_ordinals`/`shard_plan` (grep-verified empty). `_CHARS_PER_TOKEN` still 6.0.
+No S3/Batch/manifest. Not pushed.
+
+**The reader change is ONE LINE**; everything else is guard rails: `Bundle.file_shard`/`.file_shards`
+default `(0,1)` = whole source, so **pre-file-sharding plans still read**; `_bundle_files()` as the
+single place deciding which files a child reads; and `_assert_file_shard_family()` in `bundles_of`
+recomputing that siblings cover `0..K-1` once with **disjoint** refs.
+
+## Budget: NOT divided by K — and the reasoning is right
+
+`bundle.tokens` sums **this** bundle's refs, and the plan gives each sibling its own, so it is
+**already 1/K**. Dividing again reads 1/K of what the child needs → unfilled refs → `verify` fails
+**after full billable spend**. Child gets 1/K of the pool and owes 1/K of the tokens, so the
+**target/pool ratio is unchanged**. ⚠️ **That holds only because the stride is EVEN** — a second
+independent reason to keep striding, and eng-12 guarded it rather than trusting it. It does **not**
+depend on per-child token counts being exact (the budget is a ceiling `pack` stops short of), **so the
+PDF/code tok/byte caveat moves wall clock, not correctness.** That is the right scoping of my own caveat.
+
+## Mutation results — the second one is itself a finding
+
+| mutation | result |
+|---|---|
+| `items[shard::of]` → `items[shard:of]` | **14 fail** (10 eng-12's). K=1 params correctly do not — `_bundle_files` short-circuits |
+| budget `/ file_shards` | **EXACTLY 1 fails — the test written for it** |
+
+**A wrong budget is invisible to the other 1,354 tests and surfaces only at end-of-run `verify`.** That
+is the strongest possible argument for having demanded the mutation result: the passing suite would
+have told us nothing.
+
+eng-12 also **reproduced my file-size measurements exactly** (95/0.211/2.09×, 100/0.034/1.16×,
+57/0.096/3.61×, 46/0.114/3.10×) and independently got worst stride imbalance 2.6% vs contiguous 14.1%
+on `stackv2-edu`. Two agents, two runs, same numbers. It recorded two of its own tests failing first
+and fixing them, including a skew fixture it had to resize so an assertion could be a clean equality
+**instead of an unjustifiable tolerance** — exactly the right instinct.
+
+# 🔴🔴 E15 — `verify_bundle_set` REJECTS A CORRECT FILE-SHARDED BUILD. **The whole 40 h win is unrealisable until this is fixed.**
+
+**Found by eng-12, outside its own scope, and I REPRODUCED IT MYSELF** (free, no `s3=`): three correct
+siblings with **disjoint** shards on one stream →
+
+```
+bundle-set-duplicate-stream: 3 receipts claim stream ('stackv2-edu', None, 'train')
+  (bundle ids [...fs0of3, ...fs1of3, ...fs2of3]). Nothing says which is authoritative...
+```
+
+`corpus_receipt.py:1401-1411` groups receipts by `(source, domain, split)` and raises when more than one
+claims a stream — but **K file-shard siblings share one stream BY CONSTRUCTION.** `verify` is a **gate
+that exits non-zero**, so the build would run 11 h and then fail its own verification.
+
+**Ownership: NOBODY.** `corpus_receipt.py` is neither eng-11's nor eng-12's surface, and eng-12
+correctly did not reach into it. **I am assigning it rather than leaving it in a report.**
+
+⚠️ **Do NOT "fix" it by grouping on `bundle_id`** — eng-12 flagged this and it is right: that **weakens
+the genuine retry-that-did-not-replace case**, which is the real defect the check exists to catch. The
+fix must be **file-shard-aware**, which needs `file_shard`/`file_shards` on `Receipt` — a **schema
+change** (Wave 0 already took it to v2), so it is eng-11's plan-contract question as much as a receipt
+question.
+
+**Adjacent, and it lands on eng-11:** `receipt_key()` keys on `bundle_id`, so **siblings MUST get
+distinct `bundle_id`s or receipts overwrite in S3 and `bundle_is_done` declares K-1 never-run children
+DONE** — a silent K-1× data loss under resume. eng-12 used `...--fs0of3` style ids; eng-11 must make
+that the contract.
+
+## Contract status — ASSUMED, and eng-11's file was still a stub
+eng-12 checked twice, found `stream-11-plan-file-shards.md` unfilled, and **defended against it
+properly**: absent keys → whole source → today's behaviour, so **eng-11 merging first cannot break it**,
+and renaming the fields is a 2-call-site change. That is the correct way to handle a contract that has
+not landed. **I will reconcile the field names at merge.**
+
+## E15 ASSIGNED — stream 13 dispatched (`agent/eng-13/receipt-file-shard`)
+
+I did not leave the blocker in a report. eng-13 owns `corpus_receipt.py` exclusively; nobody else is in
+that file. Told explicitly: **do not group on `bundle_id`** (weakens the retry case eng-12 identified);
+make the check **file-shard-aware** and **recompute the family from the receipts** rather than trusting
+a declared count; and handle the schema with eng-06's Wave-0 precedent — `verify_receipt`
+**short-circuits on an unknown `schema_version`**, so absent fields must parse as a **default `(0,1)`**,
+never as zeros that look like data.
+
+I also passed it a trap I hit myself while reproducing E15: **give each test shard a distinct sha256**,
+or `bundle-set-duplicate-shard-digest` fires — a *different* and legitimate check that would mask the
+result. 5 of the 6 violations in my own reproduction were that artefact; only
+`bundle-set-duplicate-stream` was the real defect.
+
+Wave 4 now: **eng-11 (running) → eng-12 (done, `6f3f23e`) → eng-13 (running)**. Merge order
+`allocate_ordinals` → `_reader_for` → `corpus_receipt`, i.e. plan → reader → verifier, which is also
+data-flow order.
+
+
+---
+
+# ✅ STREAM 11 COMPLETE — and 🔴 E16: A CONTRACT MISMATCH THAT CRASHES THE BUILD, FOUND AT MERGE
+
+Commit `b0eff92`, **1338 → 1363** in its own tree. `allocate_ordinals` **UNCHANGED** — new
+`corpus.partition_ordinals(refs, K)` **cuts a block that already exists** into K contiguous sub-blocks,
+a pure function of `(n, K)`. **No child and no part allocates an ordinal** — the CEO's condition met by
+construction rather than by discipline. **MEASURED-IN-CODE: 39,307 shard paths, IDENTICAL SET with and
+without file-sharding** — file-sharding is corpus-content-neutral. Biggest unit of work 4,298 → 627
+shards.
+
+## 🔴 E16 — eng-11 and eng-12 DISAGREE ON THE WIRE FORMAT. I proved it crashes.
+
+eng-11 asked me to re-check whether eng-12 hard-coded the id string. It did not — **but I found a worse
+mismatch while looking:**
+
+| | eng-11 (plan producer) | eng-12 (plan consumer) |
+|---|---|---|
+| plan entry | `"file_shard": {"index": i, "of": k}` — **a dict** | reads `int(entry.get("file_shard", 0))` |
+| `Bundle` field | `file_shard: tuple[int,int] = (0,1)` | `file_shard: int = 0` + `file_shards: int = 1` |
+
+```
+>>> int({'index': 1, 'of': 7})
+TypeError: int() argument must be ... not 'dict'
+```
+
+**A hard `TypeError` on EVERY bundle of an eng-11 plan.** Both branches are internally correct and both
+pass their own suites — **1363 and 1355 green in isolation.** The defect exists only in the union, which
+is exactly the failure the published-contract discipline was supposed to prevent, and it slipped because
+**eng-11's contract file was still a stub when eng-12 finished** (eng-12 checked twice, said so, and
+defended with `.get` defaults — its diligence is why this is a 2-call-site fix and not a rewrite).
+
+**Not a crisis, and loud rather than silent** — a `TypeError` at plan-load is the best failure mode
+available. But it would have hit at the top of an 11 h array job. **I am resolving it at merge**, and
+adopting eng-11's dict shape as canonical: it keeps index and count in **one atomic field** so they
+cannot drift apart, it is self-describing in the JSON, and `plan["schema"]` is already bumped to
+`edullm-build-plan/v2` to mark it.
+
+⚠️ **The lesson is mine, not theirs.** I let a consumer start against a producer's unpublished contract.
+Wave 0's eng-05/eng-06 pair worked *because* eng-05 froze and published §1 before writing bulk code. I
+did not enforce the same ordering here. **If a producer/consumer pair is dispatched concurrently again,
+the producer publishes the wire format BEFORE the consumer writes a line — that is now a dispatch
+precondition, not a request.**
+
+## eng-11's mutation results — mutation 2 is the one that justifies the union test
+
+| mutation | result |
+|---|---|
+| overlapping ranges | 20 failed, names the doubly-claimed key |
+| **floor-only cut** (drops `n%K` shards — no overlap, no dup id, no path collision) | **7 failed:** `missing=[9] extra=[] reused=[]` |
+| K parts sharing one `bundle_id` | 20 failed, names the receipt overwrite |
+
+**Mutation 2 yields an internally perfectly consistent plan** — every guard in the plan is blind to it.
+It is visible **only** by comparing what children actually wrote to `s3._store` against the unsharded
+set. That is precisely the "union of written ordinals, no gaps/overlaps/reuse" test the CEO demanded,
+and it earned its place empirically.
+
+## PLAN_ID — three values, and the authoritative one is a decision
+
+| plan | id | bundles |
+|---|---|---|
+| before (v1) | `9f969e08a5bbbd07` | 161 |
+| v2, unsharded | `2dee727972725556` | 161 |
+| **v2, K=7/4/3/2** | **`68ebedaaddc7eb06`** | **185** |
+
+**The id moves even with nothing sharded**, because `file_shard` is on every entry. Expected pre-FREEZE.
+Byte-identical on re-run: verified. Nothing uploaded.
+
+## E15 independently reproduced — and it is 8 violations, not 4
+eng-11 synthesised a perfect receipt set for the whole 185-bundle plan: **8 × `bundle-set-duplicate-stream`**
+— one per file-sharded **stream**, and each of the four sources has **train AND val**. My own repro used
+one stream and saw 1. **`bundle-set-shard-path-collision` does NOT fire**, which independently proves the
+ordinal ranges are disjoint and **only the stream grouping is confused.** Relaying to eng-13.
+
+✅ **And `Receipt` can carry the fields at ZERO schema cost** — it already has three defaulted-optional
+siblings (`unfilled`, `filter`, `keep`), `from_dict` reads every field with `.get(…, default)`, and the
+version is already `/v2` with `{v1,v2}` readable. **Pure additive field, no bump.** eng-11 recommends
+grouping by `(source, domain, split, file_shard)` plus a new `bundle-set-incomplete-file-shard` — which
+is **stronger than today's gate**, because right now **a missing part is invisible** (the stream has a
+receipt). Relaying.
+
+**Latent second defect:** `bundle_id_for` (`corpus_receipt.py:636-648`) derives from `(plan_id, stream)`
+only, so K parts get the same default (`8d16efcd49721e9b`). **Not live** — `run_bundle` always passes
+`bundle_id` explicitly — but any future caller that omits it collides. eng-13's file.
+
+## Residual risk eng-11 flagged and did not fix (correctly — not its surface)
+**A part's range is a range, not a quota.** Underfill is free; **overfill with `partial_source=True` —
+which `run_bundle` passes unconditionally — silently DISCARDS the excess.** Not new, but file-sharding
+multiplies those boundaries by K. At the measured 2.6% imbalance against `_FILTER_HEADROOM` 1.5 the
+margin is large, and the 25-of-27 end-of-run-failure history says the current default is right. **Open
+item, not a blocker.**
+
+## Contract deltas, reconciled
+- **id spelling** `--p00of03` (eng-11) vs `--fs0of3` (eng-12): eng-12 **never constructs the string**
+  (grep-verified empty in `src/`), so **eng-11's two-digit form wins with zero call sites to change.**
+  Two digits matter: a one-digit index collides parts 1 and 11 at K=12.
+- **K bound:** eng-11 enforces `K <= shard count`, eng-12 `K <= file count`. **KEEP BOTH** — they are
+  different constraints and `plan_document` is pure and cannot see file counts. ⚠️ **What actually binds
+  K: `stackv2-edu` has 4,298 train shards but only 21 VAL shards.**
+
+
+## ✅ E16 RESOLVED AT MERGE — 1380 passing, both suites green together
+
+Merged eng-11 (`1363`) then eng-12, resolving 4 conflicts by hand. **`1380 passed`** — 1363 + 1355
+reconciled with **no test dropped**.
+
+**Canonical wire format: eng-11's tuple.** `"file_shard": {"index": i, "of": k}` in the plan,
+`Bundle.file_shard: tuple[int,int] = (0,1)`. Rationale: index and count are **meaningless apart**, so
+one atomic field cannot drift. **Kept eng-12's error messages** — they name the *consequence* (a
+silently EMPTY bundle) rather than just the invalidity. Migrated eng-12's call sites (`_bundle_files`,
+`_assert_file_shard_family`) to `file_shard_index`/`file_shard_count`, and its fixtures to the dict form.
+
+**Kept BOTH agents' guards — they catch different things**, which is why this was a merge and not a
+choice: eng-11's schema check rejects **a v2 plan that OMITS the field**; eng-12's
+`_assert_file_shard_family` rejects **a family whose members are individually well-formed but
+collectively wrong** (missing or duplicated index). Neither subsumes the other.
+
+**VERIFIED ON THE MERGED TREE, not on either branch:**
+
+| | value |
+|---|---|
+| schema | `edullm-build-plan/v2` |
+| PLAN_ID unsharded | `2dee727972725556` / 161 bundles |
+| **PLAN_ID sharded (K=7/4/3/2)** | **`68ebedaaddc7eb06`** / **185 bundles**, 32 file-sharded parts |
+| **shard paths** | **39,307 — IDENTICAL SET with and without file-sharding** |
+| determinism | `plan_id` byte-identical on re-run ✅ |
+
+The identical-path-set result is the important one: **file-sharding changes who reads what, and changes
+nothing about what the corpus contains.**
+
+## E15 remains the gate — eng-13 running
+Merge order `allocate_ordinals` → `_reader_for` → `corpus_receipt` holds. **Until eng-13 lands,
+`verify_bundle_set` still rejects a correct file-sharded build (8 violations on the 185-bundle plan),
+so the ~11 h win is real in the plan and unrealisable in a run.** I relayed eng-11's stronger fix
+(group by `(source,domain,split,file_shard)` **plus** a new `bundle-set-incomplete-file-shard`, since a
+missing part is invisible today) and its finding that `Receipt` can carry the fields at **zero schema
+cost**.
+
+## Open items for the CEO
+1. **Which `plan_id` is authoritative.** I recommend eng-11's proposal: put K in the registry as
+   `_file_shards` so the artifact is **self-describing** and **`68ebedaaddc7eb06`** is the single number
+   to quote. I have NOT added it — it is plan-content and I want the ruling first.
+2. **Overfill:** a part's range is a range, not a quota, and `partial_source=True` (passed
+   unconditionally) **silently discards excess**. Margin is large (2.6% imbalance vs `_FILTER_HEADROOM`
+   1.5) and history says the default is right. Open item, not a blocker.
+3. **What binds K is VAL, not train:** `stackv2-edu` has 4,298 train shards but only **21 val shards**.
+
+
+---
+
+# ✅ WAVE 4 COMPLETE — E15 FIXED END-TO-END. **1338 → 1415 (+77). The 40 h lever is REALISABLE.**
+
+| # | stream | branch | tests after |
+|---|---|---|---|
+| 1 | 11 — plan-time ordinal ranges | `agent/eng-11/plan-file-shards` | 1363 |
+| 2 | 12 — reader file slice (**E16 resolved by hand**) | `agent/eng-12/reader-file-slice` | **1380** |
+| 3 | 13 — file-shard-aware verify | `agent/eng-13/receipt-file-shard` | **1414** |
+| 4 | **ENG-EXEC: the missing wiring line + its test** | — | **1415** |
+
+## The line eng-13 could not write, and why it mattered
+
+eng-13 fixed the grouping but flagged that **`run_bundle` never passed the part to
+`Receipt.from_pack_result`**. It correctly refused to work around it by parsing the index out of
+`bundle_id` — eng-11 and eng-12 disagreed on that string, so parsing it would have baked in the very
+mismatch I was resolving. **It was nobody's surface: eng-13 owns `corpus_receipt.py`, eng-12 owns
+`_reader_for`, eng-11 owns `plan_document`. The line lives in `run_bundle`. I wrote it.**
+
+**Verified live, not by inspection.** Before: `call site passes file_shard -> False`. Mutant with the
+line removed:
+```
+AssertionError: stackv2-edu--train--p00of03: receipt declares (0, 1) but the bundle is
+part (0, 3) — verify would group these siblings as retries
+```
+
+## 🟢 END-TO-END PROOF on the real plan — the number this wave existed to produce
+
+`PLAN_ID 68ebedaaddc7eb06`, 185 bundles, 32 file-sharded parts, synthesised receipts, **no S3, no
+network**:
+
+| scenario | violations |
+|---|---|
+| **correct file-sharded set** | **0** ✅ |
+| one part dropped | **1** — `bundle-set-incomplete-file-shard` |
+
+**Both halves matter:** zero on correct means the build can now pass its own gate; one on a dropped
+part means the gate is **stronger than before file-sharding existed**, where a missing part was
+invisible.
+
+⚠️ **A harness trap I hit and am recording so the next person does not:** `verify_bundle_set`'s
+`expected` is a **per-BUNDLE sequence, not a deduplicated set of streams** — `planned_parts` counts
+occurrences to learn K. My first harness passed a `set` and got **8 `bundle-set-file-shard-count-conflict`
+violations on a perfectly correct set**. I nearly recorded that as a regression in eng-13's work. **The
+error message diagnosed it correctly** — *"the receipts declare file_shards=4 but the plan holds 1
+bundle(s) for this stream"* — which is a good check reporting a bad harness, and is exactly why the
+message names both numbers.
+
+## eng-13's schema call — no v3, and the reasoning is stronger than my brief's
+
+I offered v3 as an option. eng-13 **declined it and was right**: `verify_receipt` short-circuits on an
+unrecognised version and `bundle_is_done` reads receipts, so a v3 that any deployed reader did not know
+would make **every receipt in S3 unverifiable and every completed bundle look unbuilt.** And unlike
+`filter` — which genuinely needed v2 because absent-vs-zeroed differ in meaning — **absent `file_shard`
+means the same thing under every version: "the whole stream."** Two guards: absent parses as `(0,1)`,
+and `to_dict` **omits** the key when `of == 1`, so `receipt_sha256` stays byte-stable for every receipt
+already written. That last detail is the one I would have missed.
+
+**5 mutations, 5 caught** — including accept-any-duplicate failing the **pre-existing**
+`test_two_receipts_for_one_stream_are_reported`, which is the proof the retry check was not weakened.
+And a finding matching eng-12's: **the naive "drop part 1 of 3" test does NOT catch the trust-declared-`of`
+mutation** — only the two-receipts-both-declaring-`of=7` test does. Wrong behaviour visible to 1 test of
+1,372, twice in one wave.
+
+**`bundle_id_for` fixed, not documented** — K parts shared one id; the suffix is guarded by
+`if file_shards > 1` so unsharded ids hash byte-identical material and every receipt key in S3 survives.
+
+**Merge note from eng-13, adopted:** its `_check_set_file_shard_families` (receipt side) and eng-12's
+`_assert_file_shard_family` (plan side) are **deliberately independent — do not de-duplicate them.** The
+failure being hunted is a receipt set that does not match a *correct* plan.
+
+## 🟢 MAKESPAN RE-SIMULATED AGAINST THE REAL IMPLEMENTATION (not my model)
+
+Driven through the merged `plan_document` + `bundles_of`, per-part loads weighted by each part's
+**actual** `_shard_slice` file stride:
+
+| | value |
+|---|---|
+| **`PLAN_ID`** | **`68ebedaaddc7eb06`** |
+| **summed `target_tokens`** | **986,000,000,000** |
+| **bundles** | **185** (32 file-sharded parts) |
+| shards | 39,307 |
+| **longest child** | **7.53 h** |
+| **MAKESPAN 48 × 8-vCPU** | **11.07 h** |
+| MAKESPAN 64 × 8-vCPU | 7.79 h |
+| aggregate floor @48 | 9.79 h |
+
+**Identical to my pre-implementation prediction (11.07 h), now produced by the shipped code path
+rather than a model of it.** 51.38 h → 11.07 h = **40.3 h saved**.
+
+⚠️ **Still DERIVED and the caveat is unchanged:** byte-scaled at a uniform 72,615 tok/s/vCPU, and
+**PDF and code are two of the four split sources**, so the residual error lands on the two biggest
+children. **The CARVE is robust** — 7.53 h against a 9.96 h floor is 2.4 h of headroom, and eng-12
+established that the budget is a ceiling `pack` stops short of, so a wrong rate moves **wall clock, not
+correctness**. **The 11.07 h is a shape, not a promise. Re-measure at the smoke test.**
+
+**Quote 11–15 h. Never 9.96 h.** Five independent methods now agree: mine-uniform 11.19 ·
+mine-real-sizes 11.07 · **implementation-driven 11.07** · PLAT 11.00–13.07 · CEO 11.00–11.25.
+
+## READY FOR PLAT — the three numbers for `edullm-reservoir-build:10`
+**`PLAN_ID 68ebedaaddc7eb06` · 986,000,000,000 target tokens · 185 bundles** (48 × 8-vCPU children).
+⚠️ **The registry does NOT yet carry `_file_shards`**, so `plan_document` produces `2dee727972725556`
+(161 bundles) unless K is passed. **CEO decision 1 below is required before PLAT registers anything.**
+
+## Open items for the CEO
+1. 🔴 **Add `_file_shards: {stackv2-edu: 7, finepdfs-edu: 4, nemotron-cc-math-3: 3,
+   nemotron-cc-math-4plus: 2}` to the registry** so the artifact is self-describing and
+   `68ebedaaddc7eb06` is the single authoritative number. **I have NOT done it — plan-content, and the
+   whole wave's discipline is that I do not author mix content on my own initiative.** One-line change,
+   and I will make it on your word.
+2. **Overfill:** a part's range is a range, not a quota; `partial_source=True` silently discards excess.
+   Margin large (2.6% imbalance vs `_FILTER_HEADROOM` 1.5). Open item, not a blocker.
+3. **What binds K is VAL, not train:** `stackv2-edu` has 4,298 train shards but only **21 val**.
+4. **Nothing pushed. No S3 write, no Batch submit, no `manifest.json`.** All 27 commits local.
+
