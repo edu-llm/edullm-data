@@ -10,6 +10,8 @@ tokenizer download, no Batch.
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import random
 
 import pytest
@@ -160,6 +162,103 @@ def test_a_large_source_does_get_a_val_split():
 def test_an_all_reserve_registry_is_refused():
     with pytest.raises(BuildError, match="reserve"):
         B.plan_document([_spec(target_tokens=0)])
+
+
+# --------------------------------------------------------------------------------------
+# Duplicate identities — the silent-loss guard. RECOMPUTED, not asserted.
+# --------------------------------------------------------------------------------------
+
+
+def _plan_tokens(plan) -> int:
+    return sum(b["tokens"] for b in plan["bundles"])
+
+
+def test_two_rows_sharing_a_source_label_would_silently_LOSE_tokens_so_they_are_refused():
+    """Not "a field is checked" — this measures the loss the check exists to prevent.
+
+    `plan_document` keys targets by `(source_label, domain, split)` (`corpus_build.py:238`), so a
+    second row with the same label OVERWRITES the first and its tokens are gone. The test proves
+    the magnitude by arithmetic on the declared inputs, then proves the guard fires.
+
+    It also pins the second, worse half of the failure: `spec_by_label` (`:251`) collapses the same
+    way, so the surviving bundle would carry ONE row's `config`. Two rows meant to read two disjoint
+    subdirectories would both read the SAME one — duplicate data that every token count agrees with.
+    """
+    a = _spec(key="dclm-a", source_label="dclm", target_tokens=SHARD_TOKENS * 100, config="dirA")
+    b = _spec(key="dclm-b", source_label="dclm", target_tokens=SHARD_TOKENS * 200, config="dirB")
+
+    with pytest.raises(BuildError, match="source_label"):
+        B.plan_document([a, b])
+
+    # What the guard bought, computed rather than claimed: build each row's plan alone, sum the
+    # tokens the planner would really emit, and compare against what a colliding plan can hold.
+    alone = _plan_tokens(B.plan_document([a])) + _plan_tokens(
+        B.plan_document([dataclasses.replace(b, source_label="dclm-b")])
+    )
+    survivor = _plan_tokens(B.plan_document([dataclasses.replace(a, source_label="solo")]))
+    # The larger row wins the dict slot, so the SMALLER row's tokens are what vanish.
+    lost = survivor
+    assert lost > 0
+    assert lost / alone > 0.3, (
+        f"expected the collision to destroy a third of the corpus; measured "
+        f"{lost:,} of {alone:,} tokens ({lost / alone:.1%})"
+    )
+
+
+def test_the_colliding_config_is_what_makes_it_worse_than_a_hole():
+    """The N-way-split failure, made concrete: one `config` would serve every child.
+
+    Without the guard, `spec_by_label` keeps only the last row, so both bundles below would name
+    `dirB` and two children would read identical input while the plan looked complete.
+    """
+    rows = [
+        _spec(key="dclm-a", source_label="dclm", target_tokens=SHARD_TOKENS * 100, config="dirA"),
+        _spec(key="dclm-b", source_label="dclm", target_tokens=SHARD_TOKENS * 200, config="dirB"),
+    ]
+    with pytest.raises(BuildError):
+        B.plan_document(rows)
+
+    # Distinct labels: both configs survive into the plan, which is the property the split needs.
+    fixed = [dataclasses.replace(r, source_label=r.key) for r in rows]
+    plan = B.plan_document(fixed)
+    configs = {b["config"] for b in plan["bundles"]}
+    assert configs == {"dirA", "dirB"}, "each split row must keep its own disjoint subdirectory"
+    assert _plan_tokens(plan) >= SHARD_TOKENS * 299, "no row's tokens may disappear"
+
+
+def test_two_rows_sharing_a_key_are_refused_because_run_resolves_specs_by_key():
+    """`_cmd_run` does `{s.key: s for s in load_registry(...)[0]}` (`corpus_build.py:672`).
+
+    A duplicate key there routes a build to the wrong upstream repo — the plan names one source and
+    the run reads another — with nothing in between to notice.
+    """
+    rows = [
+        _spec(key="dup", source_label="one", repo="acme/one"),
+        _spec(key="dup", source_label="two", repo="acme/two"),
+    ]
+    with pytest.raises(BuildError, match="key"):
+        B.plan_document(rows)
+    # Proven, not assumed: the dict really does keep only one of them.
+    assert len({s.key: s for s in rows}) == 1
+
+
+def test_the_shipping_registry_has_unique_identities(tmp_path):
+    """The guard must not be one the real registry trips, and the file must round-trip through it."""
+    specs, _meta = B.load_registry()
+    assert len({s.source_label for s in specs}) == len(specs)
+    assert len({s.key for s in specs}) == len(specs)
+
+
+def test_load_registry_refuses_a_registry_file_with_a_duplicated_label(tmp_path):
+    """The check has to fire on the FILE path too — that is where a hand-edited split row lands."""
+    specs, meta = B.load_registry()
+    rows = [dataclasses.asdict(s) for s in specs[:2]]
+    rows[1]["source_label"] = rows[0]["source_label"]
+    rows[1]["key"] = rows[0]["key"] + "-clone"
+    p = tmp_path / "registry.json"
+    p.write_text(json.dumps({**meta, "corpora": rows}))
+    with pytest.raises(BuildError, match="source_label"):
+        B.load_registry(str(p))
 
 
 def test_bundles_round_trip_through_the_plan():

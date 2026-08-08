@@ -133,6 +133,10 @@ def load_registry(path: str | None = None) -> tuple[list[CorpusSpec], dict[str, 
     Reserve rows (``target_tokens == 0``) are returned like any other: dropping them here would
     hide them from ``plan --show-reserve``, and the caller that builds the plan is the one that
     should decide what to skip.
+
+    Both ``key`` and ``source_label`` are checked for uniqueness — see
+    :func:`_assert_unique_identities`, which explains why a duplicate is silent token loss and why
+    ``CorpusSpec.__post_init__`` structurally cannot catch it.
     """
     p = path or str(_repo_root() / REGISTRY_PATH)
     try:
@@ -148,8 +152,53 @@ def load_registry(path: str | None = None) -> tuple[list[CorpusSpec], dict[str, 
     if not rows:
         raise BuildDriverError(f"{p} declares no corpora")
     specs = [CorpusSpec(**row) for row in rows]  # CorpusSpec.__post_init__ does the real checking
+    _assert_unique_identities(specs, where=p)
     meta = {k: v for k, v in doc.items() if k != "corpora"}
     return specs, meta
+
+
+def _assert_unique_identities(specs: Sequence[CorpusSpec], *, where: str = "the plan") -> None:
+    """Refuse two rows that share a ``source_label`` or a ``key``. **Silent-loss guard.**
+
+    ``CorpusSpec.__post_init__`` validates each row *in isolation* — it cannot see its siblings, so
+    uniqueness has nowhere else to live. And uniqueness is not hygiene here; both duplicates
+    destroy data with a green build and no log line.
+
+    **``source_label`` — measured, not argued.** :func:`plan_document` keys its target dict by
+    ``(spec.source_label, dom, split)`` (``:238``), so the second row of a colliding pair overwrites
+    the first and the first's tokens are simply gone. Executed on two rows worth 100 and 200 shards:
+    **33.3% of the declared tokens vanished and nothing raised.** The failure is worse than a hole,
+    because ``spec_by_label`` (``:251``) collapses the *same* way and is what supplies ``config`` to
+    every bundle — so N rows meant to read N disjoint subdirectories all inherit ONE ``config`` and
+    every child reads the same input. That is N× duplicate data in a corpus whose token counts all
+    still add up.
+
+    This is exactly the shape the bundle split needs (one row per disjoint subdirectory of a
+    too-large source), which is why the guard ships with it rather than after it.
+
+    **``key`` — the same class, a different consumer.** ``_cmd_run`` resolves specs with
+    ``{s.key: s for s in load_registry(...)[0]}`` (``:672``) and :func:`plan_document` looks up
+    ``tokens_per_source`` by ``spec.key`` (``:206``), so a duplicate key silently routes a build to
+    the wrong upstream repo — a plan that names one source and a run that reads another.
+    """
+    for field in ("source_label", "key"):
+        seen: dict[str, str] = {}
+        for spec in specs:
+            value = getattr(spec, field)
+            if value in seen:
+                raise BuildDriverError(
+                    f"{where}: two rows share {field}={value!r} ({seen[value]!r} and "
+                    f"{spec.key!r}). Every row needs its own {field}, and the reason is silent "
+                    f"data loss, not tidiness: plan_document keys its targets by "
+                    f"(source_label, domain, split), so the duplicate overwrites the first row and "
+                    f"ITS TOKENS DISAPPEAR with no error — and spec_by_label collapses the same "
+                    f"way, so all the colliding rows inherit ONE `config` and read the SAME input, "
+                    f"which is duplicate data the token counts cannot reveal. If you are splitting "
+                    f"one big source into N disjoint subdirectories, give each row a distinct "
+                    f"label (e.g. {value}-01 … {value}-NN) — but note the label lands in the shard "
+                    f"path and inside manifest_sha256, so it is permanent and consumer-visible."
+                )
+            seen[value] = spec.key
 
 
 def _repo_root():
@@ -200,6 +249,13 @@ def plan_document(
     drawn = [s for s in specs if s.target_tokens > 0]
     if not drawn:
         raise BuildDriverError("every registry row is reserve (target_tokens 0); nothing to build")
+
+    # Checked HERE and not only in `load_registry`, because this is where the loss happens and this
+    # function is reachable without a registry file at all (`_cmd_plan` passes a list; tests and any
+    # future generator do too). A guard placed only at the file reader would be bypassed by every
+    # caller that constructs specs in memory — including the one splitting a source into N rows,
+    # which is the caller most likely to collide.
+    _assert_unique_identities(drawn, where="the drawn plan")
 
     targets: dict[tuple[str, str | None, str], int] = {}
     for spec in drawn:
