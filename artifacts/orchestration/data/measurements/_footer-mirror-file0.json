@@ -1,0 +1,75 @@
+{
+ "repo": "mlfoundations/dclm-baseline-1.0-parquet",
+ "revision": "817d6752765f6a41261085171dd546b104f60626",
+ "file": "filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_01_of_10/local-shard_0_of_10/shard_00000000_processed.parquet",
+ "file_bytes": 144473349,
+ "num_rows": 61000,
+ "num_row_groups": 1,
+ "created_by": "parquet-rs version 52.0.0",
+ "arrow_schema": [
+  {
+   "name": "text",
+   "type": "string"
+  },
+  {
+   "name": "url",
+   "type": "string"
+  },
+  {
+   "name": "id",
+   "type": "string"
+  },
+  {
+   "name": "language",
+   "type": "string"
+  },
+  {
+   "name": "language_score",
+   "type": "float"
+  },
+  {
+   "name": "fasttext_score",
+   "type": "float"
+  }
+ ],
+ "leaves": [
+  {
+   "path_in_schema": "text",
+   "physical_type": "BYTE_ARRAY",
+   "rg0_uncompressed": 323504637,
+   "rg0_values": 61000
+  },
+  {
+   "path_in_schema": "url",
+   "physical_type": "BYTE_ARRAY",
+   "rg0_uncompressed": 5079159,
+   "rg0_values": 61000
+  },
+  {
+   "path_in_schema": "id",
+   "physical_type": "BYTE_ARRAY",
+   "rg0_uncompressed": 3151761,
+   "rg0_values": 61000
+  },
+  {
+   "path_in_schema": "language",
+   "physical_type": "BYTE_ARRAY",
+   "rg0_uncompressed": 55,
+   "rg0_values": 61000
+  },
+  {
+   "path_in_schema": "language_score",
+   "physical_type": "FLOAT",
+   "rg0_uncompressed": 362126,
+   "rg0_values": 61000
+  },
+  {
+   "path_in_schema": "fasttext_score",
+   "physical_type": "FLOAT",
+   "rg0_uncompressed": 360042,
+   "rg0_values": 61000
+  }
+ ],
+ "footer_bytes_fetched": 65536,
+ "footer_requests": 1
+}

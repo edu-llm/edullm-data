@@ -1,0 +1,85 @@
+{
+ "repo": "HuggingFaceFW/dclm_100BT",
+ "revision": "01022d378d944de6deeb1c79d08fecb4d27b2c6f",
+ "file": "data/000_00000.parquet",
+ "file_bytes": 3170280492,
+ "num_rows": 895229,
+ "num_row_groups": 896,
+ "created_by": "parquet-cpp-arrow version 23.0.0",
+ "arrow_schema": [
+  {
+   "name": "text",
+   "type": "string"
+  },
+  {
+   "name": "id",
+   "type": "string"
+  },
+  {
+   "name": "url",
+   "type": "string"
+  },
+  {
+   "name": "language",
+   "type": "string"
+  },
+  {
+   "name": "language_score",
+   "type": "double"
+  },
+  {
+   "name": "fasttext_score",
+   "type": "double"
+  },
+  {
+   "name": "dataset",
+   "type": "string"
+  }
+ ],
+ "leaves": [
+  {
+   "path_in_schema": "text",
+   "physical_type": "BYTE_ARRAY",
+   "rg0_uncompressed": 5366837,
+   "rg0_values": 1000
+  },
+  {
+   "path_in_schema": "id",
+   "physical_type": "BYTE_ARRAY",
+   "rg0_uncompressed": 52299,
+   "rg0_values": 1000
+  },
+  {
+   "path_in_schema": "url",
+   "physical_type": "BYTE_ARRAY",
+   "rg0_uncompressed": 85857,
+   "rg0_values": 1000
+  },
+  {
+   "path_in_schema": "language",
+   "physical_type": "BYTE_ARRAY",
+   "rg0_uncompressed": 49,
+   "rg0_values": 1000
+  },
+  {
+   "path_in_schema": "language_score",
+   "physical_type": "DOUBLE",
+   "rg0_uncompressed": 9297,
+   "rg0_values": 1000
+  },
+  {
+   "path_in_schema": "fasttext_score",
+   "physical_type": "DOUBLE",
+   "rg0_uncompressed": 9297,
+   "rg0_values": 1000
+  },
+  {
+   "path_in_schema": "dataset",
+   "physical_type": "BYTE_ARRAY",
+   "rg0_uncompressed": 86,
+   "rg0_values": 1000
+  }
+ ],
+ "footer_bytes_fetched": 3138769,
+ "footer_requests": 2
+}

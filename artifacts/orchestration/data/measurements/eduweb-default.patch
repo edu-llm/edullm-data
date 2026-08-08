@@ -1,0 +1,49 @@
+Task 2 patch — fix the fail-open `EDUWEB_DEFAULT` in the overlap script.
+
+Authored by DATA-EXEC 2026-08-08. NOT COMMITTED — handed to the CEO per the read-only lane.
+Target: scripts/measure_finephrase_overlap.py, lines 141-145.
+
+WHY THIS IS A FAIL-OPEN DEFAULT, NOT A TYPO
+The current default is `sample/350BT`, and the docstring defending it cites FinePhrase's own
+dataset card (`source_datasets: [HuggingFaceFW/fineweb-edu/sample-350BT]`). The card is wrong
+about where the documents actually are. Run as-is the script reports ~0% collision and would be
+believed, because the justification looks authoritative. MEASURED 2026-08-08: the same FinePhrase
+file scores 0 hits across 3 `sample/350BT` files and 2,085 hits in ONE `data/CC-MAIN-2013-20` file.
+
+--- a/scripts/measure_finephrase_overlap.py
++++ b/scripts/measure_finephrase_overlap.py
+@@ -141,5 +141,32 @@
+-#: FinePhrase's declared parent, from the dataset card at the pinned revision:
+-#: `source_datasets: [HuggingFaceFW/fineweb-edu/sample-350BT]`, and in prose "config
+-#: `sample-350BT`, split `train`". The repo path for that config is `sample/350BT`.
+-#: This is the id space in which the edu-web collision lives.
+-EDUWEB_DEFAULT = "sample/350BT"
++#: The id space in which the edu-web collision actually lives.
++#:
++#: ⚠️ THIS IS `data` (the FULL config) AND NOT `sample/350BT`, WHICH IS WHAT THE CARD SAYS.
++#: FinePhrase's card at the pinned revision declares
++#: `source_datasets: [HuggingFaceFW/fineweb-edu/sample-350BT]`, and this constant used to hold
++#: `sample/350BT` on the strength of it. **MEASURED 2026-08-08: that is false**, and the failure
++#: mode is silent — the script completes, reports ~0% collision, and the card-based docstring
++#: makes the wrong answer look justified.
++#:
++#: The evidence, from complete column reads on both sides at the pinned revisions
++#: (FinePhrase `78cf4a5ed0099214979c094c963e699c19163838`,
++#:  FineWeb-Edu `87f09149ef4734204d70ed1d046ddc9ca3f2b8f9`):
++#:
++#:   FinePhrase faq/000_00000_0.parquet, dump==CC-MAIN-2013-20 slice (19,700 ids) joined against
++#:     data/CC-MAIN-2013-20/train-00000-of-00014.parquet   ->  2,085 id hits / 2,087 url hits
++#:     data/CC-MAIN-2013-20/train-00001-of-00014.parquet   ->  4,170 cum.  / 4,176 cum.
++#:   The second file replicates the first at exactly 2.0000x on twice the data, and the
++#:   content-intrinsic `url` control agrees to 99.86% -- a uniform overlap, not an artifact.
++#:
++#:   The SAME FinePhrase file against three `sample/350BT` files:  0 hits on id AND on url,
++#:   against a DERIVED expectation of ~2,145 for one dump-matched pair.
++#:
++#: Leading explanation: `sample/350BT` as published at the FineWeb-Edu pin (2025-07-11) is not the
++#: snapshot FinePhrase (2026-03-31) was built from. Same config name, different row set.
++#:
++#: DO NOT "restore" this to `sample/350BT` on the strength of the card. If you change it, re-run
++#: the join above first -- a wrong value here does not fail, it under-reports the collision to ~0.
++#: Overridable with `--eduweb-configs` for exactly that re-measurement.
++EDUWEB_DEFAULT = "data"

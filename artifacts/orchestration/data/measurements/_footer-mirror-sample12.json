@@ -1,0 +1,86 @@
+[
+ {
+  "path": "filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_08_of_10/local-shard_4_of_10/shard_00000268_processed.parquet",
+  "fb": 380528003,
+  "rows": 137383,
+  "rg": 1,
+  "text_rg0": 854345302
+ },
+ {
+  "path": "filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_02_of_10/local-shard_3_of_10/shard_00000021_processed.parquet",
+  "fb": 227697952,
+  "rows": 96747,
+  "rg": 1,
+  "text_rg0": 514026958
+ },
+ {
+  "path": "filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_01_of_10/local-shard_2_of_10/shard_00000261_processed.parquet",
+  "fb": 229619951,
+  "rows": 99107,
+  "rg": 1,
+  "text_rg0": 517177614
+ },
+ {
+  "path": "filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_09_of_10/local-shard_6_of_10/shard_00000264_processed.parquet",
+  "fb": 404561207,
+  "rows": 147400,
+  "rg": 1,
+  "text_rg0": 912270139
+ },
+ {
+  "path": "filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_04_of_10/local-shard_2_of_10/shard_00000083_processed.parquet",
+  "fb": 281790505,
+  "rows": 111216,
+  "rg": 1,
+  "text_rg0": 632107499
+ },
+ {
+  "path": "filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_03_of_10/local-shard_8_of_10/shard_00000212_processed.parquet",
+  "fb": 365662540,
+  "rows": 134099,
+  "rg": 1,
+  "text_rg0": 822320226
+ },
+ {
+  "path": "filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_03_of_10/local-shard_6_of_10/shard_00000060_processed.parquet",
+  "fb": 202027099,
+  "rows": 83098,
+  "rg": 1,
+  "text_rg0": 458017016
+ },
+ {
+  "path": "filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_02_of_10/local-shard_6_of_10/shard_00000108_processed.parquet",
+  "fb": 231893195,
+  "rows": 97838,
+  "rg": 1,
+  "text_rg0": 521221727
+ },
+ {
+  "path": "filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_09_of_10/local-shard_6_of_10/shard_00000097_processed.parquet",
+  "fb": 233609630,
+  "rows": 94558,
+  "rg": 1,
+  "text_rg0": 529132750
+ },
+ {
+  "path": "filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_02_of_10/local-shard_2_of_10/shard_00000010_processed.parquet",
+  "fb": 218327381,
+  "rows": 89639,
+  "rg": 1,
+  "text_rg0": 489661166
+ },
+ {
+  "path": "filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_08_of_10/local-shard_9_of_10/shard_00000090_processed.parquet",
+  "fb": 227430464,
+  "rows": 94590,
+  "rg": 1,
+  "text_rg0": 517537891
+ },
+ {
+  "path": "filtered/OH_eli5_vs_rw_v2_bigram_200k_train/fasttext_openhermes_reddit_eli5_vs_rw_v2_bigram_200k_train/processed_data/global-shard_09_of_10/local-shard_6_of_10/shard_00000235_processed.parquet",
+  "fb": 279693348,
+  "rows": 115728,
+  "rg": 1,
+  "text_rg0": 643232319
+ }
+]
