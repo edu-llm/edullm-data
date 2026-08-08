@@ -22,9 +22,11 @@ corrections are marked inline.
 ## READ THIS FIRST — the five things that matter
 
 1. **`reservoir_ids.keeps_id` and `IdSet.contains` are fully implemented, tested, and have ZERO callers
-   in the build path.** The four FinePhrase sources are 91.0–92.9% the same documents rephrased four
-   ways, and FinePhrase 100% overlaps FineWeb-Edu at the document level. The fix is ~5 lines and the
-   verification artifact for it is green — because it audits a function production never calls. (F1)
+   in the build path.** The four FinePhrase sources hold only **0.2683 distinct documents** per declared
+   document (measured on a complete-column read of 287,000 ids), so 59.6B of declared synthetic rests on
+   **~17B of real documents** — and FinePhrase 100% overlaps FineWeb-Edu at the document level. The fix
+   is ~5 lines and the verification artifact for it is green, because it audits a function production
+   never calls. (F1)
 2. **The decontamination index is built over 5-shot-RENDERED prompts**, so its 149,777 exact hashes are
    inert for MMLU/ARC/HellaSwag, and only ~20.9 distinct 13-grams survive per item. GSM8K is the one
    naturally-shaped entry, which is why the one passing real-index test is the GSM8K one. (F2)
@@ -35,6 +37,12 @@ corrections are marked inline.
    inside a Python `set` saves only 9.3%, because CPython boxes ints. (F5)
 5. **`FilterStats` never reaches the receipt**, so the duplicate and contamination rates of our own
    corpus are unrecoverable from artifacts. This blocks most quantitative claims below. (F8)
+
+**F1 is a CONFIRMATION, not a discovery.** A prior session in this worktree found it independently,
+measured it better (**0.2683 distinct on a complete-column read of 287,000 ids**, not my DERIVED 18.6B),
+and already lists it as blocker #1 — verified on the deployed branch. See "PRIOR WORK" at the end, and
+read `artifacts/1t-research/11-decontamination-audit.md` (294 KB, which I did not read) before acting on
+the plan. Genuinely new here: **F2, F3, F4, F5, F6-reason-3, F8, F12, L2.**
 
 **Two of my own recommendations were retracted or resolved by the literature sweep** — F10 (URL-key
 dedup: downgraded to "measure first", because FineMath measured that removing exactly that overlap
@@ -1562,6 +1570,9 @@ and **nothing else** — no MATH, HumanEval, MBPP, DROP, GPQA, MMLU-Pro, BBH. A 
 **Deliverable:** an explicit list of benchmarks the 1T program will report. **Owner decision, not
 engineering.**
 
+⚠️ **Prerequisite:** read `artifacts/1t-research/11-decontamination-audit.md` (293,645 bytes) first — I
+did not, and it may already answer this. It certainly constrains it. See "PRIOR WORK" below.
+
 ### Step 1 — Rebuild the decontamination index. (F2 + F3 + F4 + F12; ~1 day eng, <$5 compute)
 
 The highest value per dollar in the audit, and it fixes four findings at once.
@@ -1742,3 +1753,160 @@ like an answer and is not one.
   across all sources) and publishes **no count, byte, or percentage** (L5).
 - **Whether removing cross-source duplicates helps or hurts *our* mix.** Step 9. Four producers say
   neutral-or-harmful; none of them ran our mixture.
+
+---
+
+# PRIOR WORK — F1 was already found, with a BETTER number, and it is already blocker #1
+
+Found late in this audit and it matters for how the findings should be used: a prior session in this
+same worktree reached F1 independently, measured it more precisely than the design doc did, and has
+already recorded it as the top blocker. **My F1 is a confirmation, not a discovery.** Two other prior
+artifacts bear directly on this audit.
+
+### The FinePhrase overlap has been RE-MEASURED, and 91–92.9% is the weaker figure
+
+`HANDOFF-FINAL-DATASET.md:131` — the `scripts/measure_finephrase_overlap.py` census is "**Now
+confirmatory only — the overlap was measured directly (0.2683 distinct on a complete-column read of
+287,000 ids)**."
+
+**MEASURED, and stronger than what I cited.** The design doc's 91.0–92.9% pairwise figures
+(`reservoir_ids.py:9-14`, `DATASET-DESIGN-reservoir.md:1607-1611`) came from a **1,000-id sample at one
+shard position**. The newer number is a **complete-column read of 287,000 ids** and expresses the same
+fact as a distinct-document fraction: **0.2683 distinct**, i.e. the four formats together hold only
+26.83% as many distinct documents as their row counts claim.
+
+**REVISION to F1's arithmetic.** I estimated ~18.6B distinct of 59.8B synthetic tokens by DERIVING from
+the pairwise overlaps. Using the direct measurement instead: **59.8B × 0.2683 = 16.0B distinct**, and
+`HANDOFF-FINAL-DATASET.md:208-210` states it as "today's 59.6B of declared synthetic rests on **~17B of
+real documents**", with `docs/FINAL-DATASET-REPORT.md:362` phrasing it as "about **28%** as many distinct
+documents." **Use ~17B / 0.2683, not my 18.6B.** The conclusion is unchanged and slightly worse than I
+wrote.
+
+### The prior session verified the zero-callers finding on the DEPLOYED branch
+
+`HANDOFF-FINAL-DATASET.md:208-211`, blocker #1: "**Wire `keeps_id` into the build path** (task #4). It
+exists, is tested on 287,000 ids, and is called from nothing that writes data… **Verified on the deployed
+branch: `corpus_read/build/filter/pack.py` reference it zero times.**"
+
+So the finding holds on the deployed branch as well as in this worktree — two independent greps, one of
+them against deployed code. F1's severity classification stands, and `docs/FINAL-DATASET-REPORT.md:360`
+lists the fix as next-step #2 of 7.
+
+### ⚠️ The prior session ALSO caught the L3 mis-citation, and had it right before I did
+
+`HANDOFF-FINAL-DATASET.md:159`, in a table headed "What Didn't Work — my own errors":
+
+> | "min_ngram 13→5 costs −11.8 MMLU" | That is a **deduplication** result (DCLM Table 19), not
+> decontamination |
+
+**That is exactly L3's correction, recorded by a prior session as a self-retraction.** It means the
+−11.8 figure has already been mis-applied to decontamination once in this project's history and
+explicitly walked back. My L3 adds the precise mechanism (BFF `min_ngram` 5 vs 13, MMLU 32.5 vs 44.3,
+same method and corpus) and the reproduction at 7B-1x — but the "this is dedup, not decontam" call was
+already made. **F13's revision should cite this prior retraction, not present the distinction as new.**
+
+### There is a 293,645-byte decontamination audit I did not read
+
+`artifacts/1t-research/11-decontamination-audit.md` — **293,645 bytes / ~4,030 lines**, on the main
+checkout, listed in `HANDOFF-FINAL-DATASET.md:136` as required reading "before touching the mix."
+
+**I did not read it, and this audit should be reconciled against it before anyone acts on the plan.** I
+found it only after writing the findings, and reading 294 KB would have displaced the code reading that
+was this audit's actual assignment. What I can see of its conclusions from the handoff summary is
+consistent with and in places stronger than mine:
+
+- `HANDOFF-FINAL-DATASET.md:192` — "**Nobody earns a decontamination TRUST verdict** across 17 audited
+  corpora." Matches project memory `decontamination-nobody-earns-trust`.
+- `:225` — Marin's 13-gram scan on Nemotron-CC-Math "found **11,868 contaminated docs against a
+  <902-doc removal budget**, including verbatim GSM8K *test* items at Jaccard 1.0", and their published
+  run **predates their own recall fix** (PR-7051). Listed as a blocking re-measurement.
+- `:112` — "**HellaSwag is negative in four independent papers** — QA data costs us there, and it is also
+  where **contamination persists longest while measuring 0.00% n-gram-dirty**." **This is direct
+  published support for F2 and F4**: an n-gram scan reporting zero on HellaSwag is a known false
+  negative, and our index holds HellaSwag only as 5-shot-rendered validation items (F2, G4.2).
+- `:96-102` — MMLU is near-random below ~400B tokens, so score **CF or BPB, not MCF**. This is the
+  caveat I attached to Step 9; it is prior art, not mine.
+
+**Practical consequence for the plan:** Step 0 (write down the eval suite) and Step 9 (measure before
+enabling removal) should both be checked against report `11` first — it may already answer them, and it
+certainly constrains them. Add that to Step 0 as a prerequisite.
+
+### What this prior work does NOT cover, i.e. what is genuinely new in this audit
+
+To be clear about marginal value, these findings I did not find anywhere in the prior artifacts:
+
+- **F2** — the index is built over 5-shot-**rendered** prompts, killing the exact-hash half for 4 of 5
+  benchmarks (traced to `eval_bundle.py:141-170`, with the 20.9-n-grams-per-item arithmetic).
+- **F3** — the index covers only the 9 OLMo-ladder families + MMLU + GSM8K-test; MATH/HumanEval/etc. are
+  absent (traced to `eval_bundle.py:25-34` and the manifest's 127 source keys).
+- **F4** — `minimum_hits=2` makes the true floor **14** words, not 13, and short items are caught by
+  nothing once F2 is accounted for.
+- **F5** — the per-bundle dedup set **OOMs the 14 GiB container at 1T** (19.44 GB), and the int-boxing
+  correction that narrowing the key saves only 9.3%.
+- **F6 reason 3** — a shared `SeenHashes` would **destroy build determinism** under resume. I found this
+  stated nowhere.
+- **F8** — `FilterStats` never reaches the receipt.
+- **F12** — the index is unrebuildable from this repo.
+- **L2** — the `+1.6 CORE` figure is wrong in five files (`+2.1` is Bloom-alone).
+
+---
+
+# VERIFICATION STATUS — which citations I checked myself, and which I relayed
+
+Being explicit, because the audit brief asked for it and because this project has been burned by
+relayed citations before (`HANDOFF-FINAL-DATASET.md:159-160` lists two of its own).
+
+### Independently verified in this audit (MEASURED-PUBLISHED, primary source read)
+
+Everything in L1–L7. Specifically: FineWeb's 31B-kept/171B-removed/460B experiment and the switch to
+per-snapshot MinHash (arXiv:2406.17557 §3.4); DCLM Table 17's Bloom-alone **+2.1** and Table 19's
+`min_ngram` 5-vs-13 **MMLU 32.5 vs 44.3** and Table 23's 85% residual duplicates (arXiv:2406.11794);
+Lee et al. Tables 2/13 (arXiv:2107.06499); RefinedWeb Fig 2 / Table 1 / Table 5 (arXiv:2306.01116);
+Dolma §5.4's 53.2% / 14.9% / 18.7% (arXiv:2402.00159); C4 §2.2 (arXiv:1910.10683); Common Pile §4.1's
+global 90%-of-20-grams rule (arXiv:2506.05209); Zyda-2 Table I's **13.0%** DCLM↔FineWeb-Edu overlap
+(arXiv:2411.06068); and the upstream dedup status of all 14 registry sources from their cards.
+
+### RELAYED from `DATASET-DESIGN-reservoir.md` and NOT independently verified in this audit
+
+These appear in my Q5/Q6 reasoning and in the "NOT in the plan" table. They are the design doc's
+citations, and I did not open the primary source. **Treat as UNVERIFIED until someone does:**
+
+- **arXiv:2311.04850** ("paraphrasing, translation can easily bypass these decontamination measures";
+  **8–18% of HumanEval** overlapping RedPajama-1T / StarCoder-Data invisibly to n-gram checks;
+  contamination found in GPT-3.5/4-generated synthetic data). Cited at
+  `DATASET-DESIGN-reservoir.md:768-772` and `corpus_filter.py:15`. This is the load-bearing citation for
+  Q6's entire premise, so it is the most important one to confirm. ⚠️ Also confirm the arXiv id and
+  title are right — this project has already shipped one fabricated id (`2604.13977`, L5).
+- **`allenai/decon` defaults** (`ngram_size 5`, `stride 10`, threshold 0.8, whole-doc removal) and the
+  **OLMo 3** findings of GSM8K "complete leakage" via Flan/Nemotron-Synth-QA and **>60,000 DROP examples
+  removed**. Cited at `DATASET-DESIGN-reservoir.md:774` and `corpus_filter.py:16-17`. F13 depends on the
+  first half of this.
+- **`lm-sys/llm-decontaminator`** and its ~$200-for-60B cost estimate
+  (`DATASET-DESIGN-reservoir.md:776`). My ~$800-at-1T figure is DERIVED by scaling an unverified estimate.
+- **DCLM Table 4**: semantic/embedding dedup "scored *below* the no-filter baseline… second-worst of 19
+  samplers in the Ask-LLM benchmark" (`DATASET-DESIGN-reservoir.md:361-362`). I verified Tables 17/19/23
+  of that paper but not Table 4.
+- **DCLM: removing MMLU overlap RAISED scores 51.8 → 52.7** (`DATASET-DESIGN-reservoir.md:766`). This is
+  the single most consequential unverified claim for whether decontamination matters at all, and it
+  should be checked before it is used to justify anything.
+- **Hernandez et al. arXiv:2205.10487**'s damage threshold of **100 exposures**
+  (`DATASET-DESIGN-reservoir.md:719`). F7's whole argument is scaled against this number.
+- **Muennighoff et al. arXiv:2305.16264**'s `R_D* ≈ 15.39` (`corpus.py:422-427`). Not load-bearing for
+  dedup/decontam; noted for completeness. Project memory
+  `moe-repetition-risk-is-total-params-not-sparsity` already records that Muennighoff has **zero MoE
+  runs**, which matters for the 1T MoE program.
+- **Pythia**: dedup gave "no clear benefit" at 70M–12B equi-token (`DATASET-DESIGN-reservoir.md:726`).
+- **Min-K% Prob (arXiv:2310.16789)**. My claim that it requires a trained model and is therefore a
+  post-hoc detector rather than a pre-training filter is **DERIVED from what membership-inference methods
+  are**, not from reading the paper. High confidence, but not verified here.
+
+### Measurements I explicitly declined to fabricate
+
+- **The fraction of MMLU / ARC-Easy / ARC-Challenge / HellaSwag items under 14 words** (F4). I gave a
+  clearly-labelled DERIVED estimate (ARC plausibly 10–25%, MMLU plausibly <10%) and stated it is not a
+  measurement. One CPU-minute over the HF datasets settles it. **Do not quote my estimate as a number.**
+- **The false-positive RATE of `minimum_hits=2`** (Q5). The code's evidence is a 2-item sample
+  (`tests/test_corpus_filter.py:265-284`), which is not a rate. I bounded the mechanism (template
+  n-grams from the 5-shot render are the real false-positive source) and left the magnitude UNVERIFIED.
+- **The duplicate and contamination rate of our own corpus** (F8). Unrecoverable from artifacts by
+  construction; it is why Step 2 of the plan comes before any re-run.

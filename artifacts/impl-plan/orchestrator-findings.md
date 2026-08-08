@@ -331,3 +331,47 @@ The audit's four OTHER documentation corrections are accepted and worth making:
 3. `corpus_filter.py:33-34`'s "{dev, validation, test}" MMLU coverage claim is wrong — `dev` is in the
    index only as the embedded 5-shot preamble.
 4. Record the 13-gram-vs-5-gram divergence with its justification rather than leaving it implicit.
+
+## F19 — the self-inflicted-slowness pattern: every worker default is 1, and job defs do not pass the flags
+
+**The shape, and it is systematic rather than scattered:** five threading facilities exist in the
+package and work. **Every default is 1.** And the build CLI exposes only ONE of them
+(`--hash-workers`, `corpus_build.py:968`); `validate.py`'s `head_workers` and `publish.py`'s
+`hash_workers`/`copy_workers` have no CLI flag on the build path at all.
+
+**The clearest case, MEASURED.** `verify --deep` on 2026-08-05: **1.005 TB in 3.27 h at 87.8 MB/s
+sustained, single stream, on a 16 vCPU box**, finishing with only 0.73 h (22%) of margin against a
+4 h timeout. `verify-job.json`'s comment blames "single-threaded" code.
+
+**⚠️ CORRECTION to my first reading of that.** The code is not the problem, and the fix already
+shipped: `PUBLISH-SPEC.md:167` records that **`0.7.5` threads the deep re-hash and it was MEASURED at
+7.82x on 8 workers** — so the same run is ~25 min. We are on **0.9.1**, so the code is present today.
+
+**The blocker is the JOB DEFINITION.** `PUBLISH-SPEC.md:168` states it outright: *"`edullm-reservoir-verify:1`
+does **not** pass the flag — a new revision is needed before the speedup is reachable, and the job
+def must also move to a `0.7.5` image."*
+
+**At 1.0T this stops being cosmetic:**
+
+| | 1.005 TB (measured) | 4.00 TB (at 1.0T) |
+|---|---|---|
+| single-threaded | 3.27 h | **13.02 h — times out** |
+| 8 workers (measured 7.82x) | ~0.42 h | **1.66 h — fits** |
+
+**And the whole build path has ZERO threading**: `corpus_read.py`, `corpus_build.py`,
+`corpus_pack.py`, `corpus_filter.py` and `s3.py` have no `ThreadPoolExecutor` or `max_workers` at
+all. Per child, read and tokenize are serialized in one generator chain; all parallelism came from
+Batch array children plus the tokenizer's internal rayon.
+
+**THE LESSON FOR THE WALL-CLOCK SECTION: the time a 1T build actually takes depends on job-definition
+revisions, not on the package version.** A stage can be fixed in code, shipped, and still run at the
+old speed because the registered job def never passes the flag. **Every wall-clock figure in the plan
+must therefore name the job def and the flags it passes**, not just the stage.
+
+**Related, and it is why this file distrusts the calibration doc:** `INGEST-CALIBRATION.md` measured a
+correct number (0.44 files/s at 16 workers) and drew two confidently wrong conclusions from it, both
+later retracted in a banner — "the binding constraint is requests per IP" was actually **our own 70x
+quota amplification** (resolving a signed CDN URL per range read instead of once), and "the 7200 s
+timeout" was **our own setting**, not an AWS limit. It also contains a self-flagged **16x unit error**
+(wall-seconds vs worker-seconds per file) that propagated into `RUN-THE-INGEST.md:35`. After the CDN
+fix the same pass took **67 s**. Do not size anything from that file's tables.

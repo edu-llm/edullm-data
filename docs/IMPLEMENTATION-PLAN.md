@@ -30,7 +30,18 @@ Two more that are not blockers but would embarrass us: **`tokenizers` is not a d
 so production resolves whatever PyPI served that morning — and every Cosmopedia document begins with a
 leading space, which changes its first token under byte-level BPE.
 
-The two most instructive are below; the rest are in their own sections.
+**And the wall-clock (§8A), which is the same build either way:**
+
+| | as the pipeline is configured today | with the fixes | floor |
+|---|---|---|---|
+| **end to end** | **~36 h**, and two stages fail their timeouts outright | **~10 h** | 6.6 h of tokenize at the 128 vCPU cap |
+
+The 3.7× gap is **entirely flags and two constants** — no new architecture. Five threading facilities
+exist in the package and work; **every default is 1**, and the registered job definitions do not pass
+the flags. `verify --deep` is the clean example: it ran 1.005 TB in **3.27 h on one stream of a 16 vCPU
+box**, when the same code at `--hash-workers 8` was **measured at 7.82×** — about 25 minutes.
+
+The two most instructive blockers are below; the rest are in their own sections.
 
 **The first is an ordering trap.** The plan of record says to "ingest source by source, each as a
 separately-approved platform job." Executed literally, that discards nearly everything each time. A
@@ -665,7 +676,7 @@ rt/s, against a recorded 15.8 (the gap is the per-group LIST plus manifest GETs)
 
 ### 8.2 It does not fit any plausible timeout at either shard size
 
-| objects | round trips | serial | with `head_workers=16` |
+| objects | round trips | serial | with 16 head workers |
 |---|---|---|---|
 | 10,049 (**measured**) | 60,294 | **85 min** | ~71 min |
 | 20,000 (report's shard size) | 120,000 | **2.82 h** | ~2.35 h |
@@ -744,6 +755,128 @@ incidental.
 
 ---
 
+## 8A. Wall-clock — and why the same build takes 10 hours or 36
+
+Every figure below is anchored on the **reservoir's real 2026-08-05 run** (27 bundles, 10,049 shards,
+251.2B tokens, read from receipts), scaled by **3.981×** to reach 1.0T. That scaling lands on **40,001
+shards** and **1,227,185,570 documents**, which is where §5's document count comes from.
+
+### 8A.1 ⚠️ Read this before trusting any number in this section
+
+The repo's most authoritative-looking timing document, `artifacts/reservoir/INGEST-CALIBRATION.md`, is
+**a case study in getting this exact task wrong.** It measured a correct number — 0.44 files/s at 16
+workers — and drew two confident conclusions from it, both since retracted in its own banner:
+
+- *"The binding constraint is requests per IP."* **False.** It was **our own 70× quota amplification**:
+  `_RangeFile` sent every one of pyarrow's ~70 per-file range reads to the *metered* resolver instead
+  of resolving the signed **CDN** URL once and reusing it. After the fix, the same pass took **67
+  seconds** against a **16.9 h** projection.
+- *"The 7200 s job-definition timeout"* as a wall to design around. **It was our own setting.** AWS
+  publishes no maximum Batch timeout.
+
+It also carries a self-flagged **16× unit error** (wall-seconds confused with worker-seconds per file)
+that propagated into `RUN-THE-INGEST.md:35`. **Do not size anything from that file's tables.** Its own
+closing lesson is the right one: *a throughput measurement that does not record what limited it invites
+exactly that error.*
+
+### 8A.2 The measured anchors
+
+| # | anchor | value | source |
+|---|---|---|---|
+| A1 | tokenize, `encode_batch` | **10.5 M tok/s across 32 vCPU** (0.328 M/vCPU) | `corpus_pack.py:230-250` |
+| A2 | deep re-hash, single stream | **87.8 MB/s**; **7.82× at 8 workers** | `verify-job.json`, `PUBLISH-SPEC.md:167` |
+| A3 | Gate A per object | **507.5 ms serial** = 6 round trips, 0.3% CPU | `pretrain_tokens_v1.py:205-210` |
+| A4 | promote | ~2 round trips/object, **already threaded** | `validate.py:1943-1948` |
+| A5 | id/fetch pass, post-fix | **67 s** (was projected 16.9 h) | `INGEST-CALIBRATION.md` banner |
+
+### 8A.3 The one hard floor: 128 vCPU
+
+The compute environment caps at **128 vCPU on one `c7i.8xlarge` type**, and that cap is real (unlike
+the timeout). Tokenization is CPU-bound, so at A1's measured per-vCPU rate:
+
+| vCPU | rate | 1.0T tokenize |
+|---|---|---|
+| 32 | 10.5 M tok/s | 26.46 h |
+| 64 | 21.0 M tok/s | 13.23 h |
+| **128 (the cap)** | **42.0 M tok/s** | **6.61 h** |
+
+**6.61 h is the tokenize floor for 1.0T** no matter how bundles are sliced. Slicing does not lower it —
+it only prevents a long tail.
+
+### 8A.4 Per-stage wall-clock, as-configured versus fixed
+
+| stage | as-configured | fixed | what changes it |
+|---|---|---|---|
+| Pass 0 — stage 4.21 TB to S3 | 3.0 h | **0.5 h** | parallel copy children |
+| Pass 1 — dedup pre-pass (hash only) | 1.0 h | **0.3 h** | reads staged text in-region |
+| Pass 2 — build (read+filter+tokenize+pack) | 11.2 h | **6.6 h** | file-shard the big bundles; **6.6 h is the floor** |
+| Publish both stages (40,001 objects) | 2.0 h | **0.3 h** | `copy_workers` / `hash_workers` > 1 |
+| **Gate A validate** | **5.6 h** ❌ | **0.36 h** | thread the profile checks + raise the pool |
+| **`verify --deep`** | **13.0 h** ❌ | **1.66 h** | `--hash-workers 8` (**measured 7.82×**) |
+| promote | 0.2 h | 0.02 h | already threaded |
+| **TOTAL** | **~36 h** | **~10 h** | |
+
+**Both ❌ rows fail outright at 1.0T**, not merely run slowly: Gate A's 5.6 h and `verify --deep`'s
+13.0 h each exceed their job timeouts, so the corpus could not be promoted at all.
+
+### 8A.5 The critical path is one bundle, and it is CPU
+
+Wall-clock per child is **read + tokenize serialized, not overlapped** — `corpus_read`,
+`corpus_build`, `corpus_pack`, `corpus_filter` and `s3.py` contain **zero** threading (grep-verified),
+so a child alternates between fetching and encoding in one generator chain.
+
+The largest bundle at 1.0T is `stackv2-edu` at 6,361 shards = **159B tokens**:
+
+| | read | tokenize | total |
+|---|---|---|---|
+| as-is (9.0 chars/token, 2.5 Gbit/s) | 1.27 h | 4.21 h | **5.48 h** |
+| fixed constants, 10 Gbit/s | 0.16 h | 4.21 h | **4.37 h** |
+| **+ file-sharded 8 ways** | 0.02 h | 0.53 h | **0.55 h** |
+
+**Tokenize is 96% of it once the read is fixed**, which is why file-sharding the big bundles (task #25,
+using the already-imported `_shard_slice`) is the highest-value wall-clock change. At 8 vCPU per child
+the 128 vCPU cap allows **16 concurrent children**.
+
+### 8A.6 Why it is 36 h and not 10 h today: every worker default is 1
+
+This is the systematic version of the owner's observation, and it is not scattered — it is one pattern.
+
+Five threading facilities exist in the package and all of them work. **Every default is 1.** The build
+CLI exposes exactly one as a flag (`--hash-workers`, `corpus_build.py:968`); `validate.py`'s
+`head_workers` and `publish.py`'s `hash_workers`/`copy_workers` have **no CLI flag on this path at
+all**.
+
+**The cleanest example.** `verify --deep` ran **1.005 TB in 3.27 h at 87.8 MB/s — one stream, on a 16
+vCPU box** — finishing with 22% margin against a 4 h timeout. `verify-job.json` blames
+"single-threaded" code. That is not the cause: `_run_deep_rehashes` (`corpus_receipt.py:865`) supports
+a pool, **the fix shipped in `0.7.5` and was MEASURED at 7.82×**, and we are on `0.9.1`. The same run
+is ~25 min.
+
+**So the blocker is the job definition, not the code.** `PUBLISH-SPEC.md:168` says it outright:
+*"`edullm-reservoir-verify:1` does **not** pass the flag — a new revision is needed before the speedup
+is reachable."*
+
+> **Therefore every wall-clock figure in this plan must name the job definition and the flags it
+> passes, not just the stage.** A stage can be fixed, shipped, and still run at the old speed because
+> the registered job def never passes the flag. That is how a 25-minute job stays a 3.27-hour job
+> across a version bump.
+
+### 8A.7 Error bars — what makes each of these 2× worse
+
+| projection | what would double it |
+|---|---|
+| tokenize 6.61 h | **linear vCPU scaling is an ASSUMPTION.** A1 was measured at 32 vCPU only; 128 vCPU on one host may contend on memory bandwidth. Never measured at the cap |
+| read 0.26–4.0 h | in-region S3 bandwidth is **UNMEASURED** — our only datapoint is 0.8 MiB/s *out of region*. This is the same shape as the calibration file's error: a rate we assumed rather than measured |
+| Gate A 0.36 h | threading gains are capped by `max_pool_connections` (default **10**); at 16 workers it self-throttles unless the pool is raised too |
+| `verify --deep` 1.66 h | 7.82× was measured at 1.005 TB; at 4.0 TB the S3 read may saturate the NIC before 8 streams |
+| all of it | **the 128 vCPU cap is a queue property, not a physical one.** If the queue is shared, effective concurrency drops and everything scales inversely |
+
+**Never measured at the target scale:** Gate A beyond 10,049 objects, `verify --deep` beyond 1.005 TB,
+tokenize beyond 32 vCPU, and `_reader_for` against live HuggingFace from inside a Batch container at
+all. The last one is why §9 Phase 2 is a mandatory smoke test.
+
+---
+
 ## 9. The job plan
 
 Nothing here auto-publishes. Every AWS job goes through the platform submission form and needs a
@@ -771,46 +904,72 @@ because several items change the plan.
 budget by the keep fraction means every bundle finishes and *then* fails `verify` on unfilled shard
 refs. The two changes ship together or not at all.
 
-### Phase 0b — three measurements that gate specific sources
+**Phase 0 wall-clock: ~2 days of engineering, zero AWS.** Items 2, 5, 8, 9 are one-liners; items 1, 3,
+6, 7 are half-day changes; item 4 is the one full day. Item 10 is a single read-only call.
 
-| measurement | what it decides | cost |
+### Phase 0b — three measurements that gate specific sources — **~2 h of compute, plus a human**
+
+| measurement | what it decides | wall-clock |
 |---|---|---|
-| **In-region S3 read bandwidth** | Whether tokenization is on the critical path at all; decides the gigatoken question | one cheap job |
-| **Nemotron-CC-Math's real dolma2 token count** | Its 133B is CARD with no tokenizer named. Also **gated — a human must accept the license** before its text column can even be named | one authenticated footer read (~700 KB) |
-| **Dolma 3 adult-content prevalence** | Blocking for that source. Sample at **random offsets** — a prior attempt could not separate the signal from HuggingFace preview ordering | ~1 h |
+| **In-region S3 read bandwidth** | Whether tokenization is on the critical path; decides the gigatoken question and every read estimate in §8A | **~10 min** |
+| **Nemotron-CC-Math's real dolma2 token count** | Its 133B is CARD with no tokenizer named, and it is **gated** — a human must accept the license before its text column can even be named | ~5 min once ungated; **human-blocked** |
+| **Dolma 3 adult-content prevalence** | Blocking for that source. Sample at **random offsets** — a prior attempt could not separate the signal from HuggingFace preview ordering | **~1 h** |
+| mean doc length for 5 stage-2 sources | The dolma3 QA source (GPT-4o-mini-rewritten multiple choice) is the one plausibly near the 20-token EOS floor | **~1 h** |
 
-Also worth the hour: **5 of 9 stage-2 sources have no measured mean document length**, and the AI2
-dolma3 QA source (GPT-4o-mini-rewritten multiple choice) is the one plausibly near the 20-token EOS
-floor. A random-offset sample settles it.
+**Run the bandwidth measurement first.** It is ten minutes and it calibrates every other number in
+§8A — and per §8A.1, an assumed bandwidth is exactly the mistake the calibration file made.
 
-### Phase 1 — freeze the plan, then stage
+### Phase 1 — freeze the plan, then stage — **0.5–3.0 h**
 
-1. **Freeze the mix.** Every source, both stages, final shares. This is the real gate.
-2. **Generate the complete plan** for all sources of both stages. Record its `plan_id`.
-3. **Stage sources to `s3://edullm-landing/_src/`** — ~4.21 TB, ~$194 for two months.
+1. **Freeze the mix.** Every source, both stages, final shares. **This is the real gate, and its
+   duration is a decision, not a computation.**
+2. **Generate the complete plan.** Pure function, no network — **seconds.** Record the `plan_id`.
+3. **Stage ~4.21 TB to `s3://edullm-landing/_src/`** — **0.5 h** with parallel copy children, up to
+   3.0 h serially. ~$194 for a two-month window; inbound transfer is free.
 
-### Phase 2 — ⚠️ a mandatory single-bundle smoke test
+### Phase 2 — ⚠️ a mandatory single-bundle smoke test — **~20 min**
 
-**`_reader_for` has never run against live HuggingFace from inside a Batch container, and the code
-says so** (`corpus_build.py:901-904`). Run one bundle against the smallest source before committing an
-array job. This is the single cheapest risk reduction available.
+**`_reader_for` has never run against live HuggingFace from inside a Batch container, and the code says
+so** (`corpus_build.py:901-904`). Run one bundle against the smallest source — `ubuntu-irc` at 1.75B
+tokens / 71 shards, the smallest real bundle in the reservoir — before committing an array job.
 
-### Phase 3 — the build, in waves
+**Twenty minutes to de-risk a 6.6-hour array.** The cheapest item in this plan.
 
-~100 bundles across 4–6 array waves. Per-bundle resume already works: `bundle_is_done` re-HEADs and
-compares sizes, and re-running a lost bundle is byte-identical (verified — nine bundles reproduced
-identical digests).
+### Phase 3 — the build, in waves — **6.6–11.2 h**
 
-| stage | tokens | shards @25.0M | Gate A serial | Gate A threaded |
-|---|---|---|---|---|
-| stage 1 | ~900B | ~36,000 | 5.07 h ❌ | ~19 min |
-| stage 2 | ~100B | ~4,000 | 0.56 h ✅ | ~2 min |
+~100 bundles across 4–6 array waves at **8 vCPU each = 16 concurrent** under the 128 vCPU cap. Per-bundle
+resume already works: `bundle_is_done` re-HEADs and compares sizes, and re-running a lost bundle is
+byte-identical (verified — nine bundles reproduced identical digests).
 
-### Phase 4 — publish two datasets
+**6.6 h is the CPU floor** (§8A.3). The 11.2 h upper figure is what an unsliced run costs, because the
+159B-token `stackv2-edu` bundle alone is a 4.37–5.48 h single child.
 
-`pretrain/final-stage1-900b` and `pretrain/final-stage2-100b`. Per stage: `verify --deep`, publish,
-Gate A, promote. **Remember writing a `manifest.json` fires EventBridge and promotes automatically** —
-to stage without promoting, cancel the validator job or disable the rule first.
+**Job def must pass:** enough vCPU per child to matter, and the wave shape. Nothing else here is
+flag-dependent.
+
+### Phase 4 — publish two datasets — **0.3–2.0 h publish, then validate**
+
+`pretrain/final-stage1-900b` and `pretrain/final-stage2-100b`. Per stage: publish, Gate A, `verify
+--deep`, promote.
+
+| step | stage 1 (~36,000 obj) | stage 2 (~4,000 obj) | job def must pass |
+|---|---|---|---|
+| publish (hash + copy) | 0.3 h threaded / ~2 h at 1 | 0.03 h / 0.2 h | `--hash-workers`, `--copy-workers` |
+| **Gate A validate** | **0.32 h** threaded / **5.08 h ❌ serial** | 0.04 h / 0.56 h | needs the §8.3 code fix first |
+| **`verify --deep`** | **1.49 h** at 8 workers / **11.7 h ❌** | 0.17 h / 1.3 h | **`--hash-workers 8`** |
+| promote | ~1 min | ~7 s | already threaded |
+
+**Both ❌ figures exceed their job timeouts**, so they are failures rather than slow runs.
+
+⚠️ **Writing a `manifest.json` fires EventBridge and promotes automatically.** To stage without
+promoting, cancel the validator job or disable the rule first. (On the reservoir the rule was left
+**disabled**, so nothing auto-promoted and the validator was submitted by hand — confirm which state
+the rule is in before Phase 4.)
+
+### Total: ~10 h fixed, ~36 h as-configured
+
+The 3.7× gap is entirely flags and two constants — no new architecture. Add **~2 days of Phase 0 code**
+and the calendar cost is dominated by approval latency, not compute.
 
 ---
 
