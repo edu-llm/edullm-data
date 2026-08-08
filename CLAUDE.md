@@ -4,7 +4,23 @@ You are working on **`edullm-data`**: the publisher, validator, and reader for t
 standard. Public repo: `github.com/edu-llm/edullm-data`. This file auto-loads on every launch; it
 orients you, it is not the spec.
 
-## Read these first, in order
+## ⚠️ ON THIS BRANCH (`final-dataset`), READ THESE TWO FIRST
+
+This worktree is the **corpus build for the 96-expert flagship / 32-expert baseline MoEs**, which is
+newer than anything in `HANDOFF.md`:
+
+1. **`HANDOFF-FINAL-DATASET.md`** — the living state of THIS work. Read it alone and you can continue.
+2. **`docs/FINAL-DATASET-REPORT.md`** (+ PDF) — the plan of record: mix, sources, measurement, and how
+   to draw the baseline subset from the same corpus.
+
+Two things to know before touching any number: **Maple is a separate experiment and its configs must
+not be read or cited** (owner instruction), and the model shape in the report is **derived**, not
+given — confirm d_model and layer count with the owner before relying on token or cost figures.
+
+`HANDOFF.md` below remains accurate about the **reservoir** corpus and the pipeline; it predates this
+work and does not describe it.
+
+## Then the standing orientation, in order
 
 1. **`HANDOFF.md`** — the living state of the project. Read it alone and you can continue with no
    other context: what is built, deployed, live, and what's next.

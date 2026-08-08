@@ -1,4 +1,4 @@
-# HANDOFF — `pretrain/final-dataset` for M20
+# HANDOFF — `pretrain/final-dataset`
 
 **Last updated 2026-08-07.** Read this file alone and you can continue with no other context.
 Branch `final-dataset`, worktree
@@ -20,25 +20,34 @@ Branch `final-dataset`, worktree
 >
 > ### The three facts everything else depends on
 >
-> 1. **THE MODEL IS `M20`: 20,002,742,272 total / 1,279,369,216 active = 15.63:1.**
->    Pinned in `OLMo-core/src/olmo_core/nn/transformer/config.py:1125` (`MAPLE_RUNGS["M20"]`,
->    commented *"THE MISSION DELIVERABLE"*) and `:1166`. 256 experts, **top-8, ZERO shared**,
->    d_model 2048, L=24, GQA 16/4. `maple/HANDOFF.md:60-63`: *"Active is 1.279B, not 1.49B…
->    **Plan against 1.279B.**"*
->    ⚠️ The owner has described this verbally as "20B total / 2B active at 10:1" and earlier as
->    "40B/4B". **The code is authoritative** — 2B active is wrong by 56%. On the non-embedding
->    convention most model cards use it is 0.868B active = 22.56:1.
-> 2. **BUDGET 1.0T.** Not 650B (the midpoint of two numbers is not an argument), not 1.3T (sized for
->    4B active). Rests on **Ling-mini-beta being nearly the same model** — 0.855B/17.5B against our
->    0.868B/19.59B on the same convention, **active matching to 1.6%, d_model identical** — which
->    reached *measured* parity with a dense 6.11B at exactly 1T tokens. Also the minimum disclosed
->    budget in the 14–22B-total class.
-> 3. **⚠️ H100 IS NOT PROVISIONED.** `maple/HANDOFF.md` D-072: live `compute_profile` values are
->    T4 / L4 / L40S / A10G / `gpu-8xa100` only; both H100 shapes went unprovisioned after 6,815
->    capacity failures. **Every 400 TFLOP/s figure in reports 01–17 is 3.2–4.3× optimistic.** At the
->    real active count, 1T costs **$69.9k / 88.8 days on 8×A100** today versus $36.7k / 27.8 days on
->    H100. The owner is unblocking it — **that unblock is worth more than the entire 400B→1T
->    increment.**
+> 1. **THE MODELS ARE A 96-EXPERT FLAGSHIP AND A 32-EXPERT BASELINE**, both with **2 shared + top-4
+>    routed** experts:
+>
+>    | | flagship | baseline |
+>    |---|---|---|
+>    | total | **20.00B** | **7.11B** |
+>    | experts | 96 (2 shared + top-4) | 32 (2 shared + top-4) |
+>    | **active** | **1.876B** | **1.873B** |
+>    | sparsity | 10.66:1 | 3.80:1 |
+>
+>    **Active params are 0.17% apart** — both activate 6 experts of identical width, so **per-token
+>    compute is the same** and the baseline is cheaper only in MEMORY. The pair is an **expert-count
+>    ablation at fixed active compute** (Clark 2202.01169's axis).
+>    ⚠️ **Shape is DERIVED, not given:** d_model 2048 / 24 layers / expert intermediate 1366, solved so
+>    96 experts land on 20.0B. **If the real shape differs, active params move and every token and cost
+>    figure moves with them.** Ask the owner and re-derive before relying on any of it.
+>    ⚠️ **Maple is a SEPARATE experiment — owner instruction, 2026-08-07. Do not read its configs or
+>    cite its numbers.** Any `M20` / `1.279B-active` / `15.63:1` figure in an older note came from
+>    there and is void.
+> 2. **CORPUS ~1.0T unique; TRAINING 1.25–2.0T.** These are deliberately different numbers. ~1.0T is
+>    what is sourceable at acceptable quality; the training floor comes from public precedent — every
+>    disclosed model at ~1.9B active trained **1.25T–20T** (JetMoE 1.25T is the class floor;
+>    Ling-mini-2.0 at 11.4:1, the closest ratio match to our 10.66:1, trained **20T**). 1.25–2.0T over
+>    a 1.0T corpus is 1.25–2.0 epochs at ~98.4% average token value.
+> 3. **⚠️ H100 IS NOT PROVISIONED.** Live `compute_profile` values are T4 / L4 / L40S / A10G /
+>    `gpu-8xa100` only. **Every 400 TFLOP/s figure in reports 01–17 is 3.2–4.3× optimistic.** At the
+>    real active count: **1.0T = $70k / 89 days on 8×A100**, 2.0T = $140k / 178 days. On H100 it would
+>    be $37k / 28 days. **Unblocking H100 is worth more than any budget decision available to us.**
 >
 > ### The corpus is TWO STAGES, not a flat mix — the biggest correction of the session
 >
@@ -106,7 +115,8 @@ Branch `final-dataset`, worktree
 
 ## Goal
 
-Build the pretraining corpus for **M20**, an education-focused MoE steered on MMLU, GSM8K, ARC and
+Build the pretraining corpus for the **96-expert flagship and 32-expert baseline** (§START HERE),
+education-focused MoEs steered on MMLU, GSM8K, ARC and
 HellaSwag, and publish it through this repo's airlock so it arrives validated, sliceable and labelled.
 ~1.0T tokens in two stages, tokenized with **dolma2**.
 
@@ -116,8 +126,8 @@ HellaSwag, and publish it through this repo's airlock so it arrives validated, s
 
 | file | state |
 |---|---|
-| `docs/FINAL-DATASET-REPORT.md` + `.pdf` | ⚠️ **STALE** — written for 40B/4B at 1.3T with a flat 54% web share. §1–§5 and §7 need rewriting for M20; **§6 (contamination) and §8 (what we got wrong) survive intact** |
-| `docs/FINAL-DATASET-MIX.md` | ⚠️ same staleness (rev 2) |
+| `docs/FINAL-DATASET-REPORT.md` + `.pdf` | ✅ **CURRENT — this is the plan of record.** 13 sections, self-contained, written for a first-time reader. 8-page PDF beside it. Its §9 is the baseline-subset recipe |
+| `docs/FINAL-DATASET-MIX.md` | superseded stub pointing at the report; kept because older commits link to the filename |
 | `scripts/measure_finephrase_overlap.py` + `.sbatch` + README | FarmShare census of FinePhrase id overlap. **Selftest passes locally.** Now confirmatory only — the overlap was measured directly (0.2683 distinct on a complete-column read of 287,000 ids) |
 | `scripts/md2html.py` + `README-pdf.md` | Markdown→PDF via headless Chrome, since no converter is installed. Two commands in that README |
 
@@ -130,7 +140,7 @@ worktree.** Before touching the mix, read `16` (regime), `17` (the reversal red-
 - **Demanding incremental disk writes in every subagent brief.** Four agents died mid-run on a
   Bedrock budget cap and **6,415 lines survived** because of it. Put this in every brief.
 - **Reading code and primary sources rather than summaries.** Every significant correction came from
-  opening the actual file: the M20 config, the conditional `seq_len` check, `build_mixture`'s fill
+  opening the actual file: the conditional `seq_len` check, `build_mixture`'s fill
   loop, OLMo 2 §2.3, the SuperBPE tokenizer's empty `added_tokens`.
 - **Agents that correct themselves.** The reversal red-team retracted its own replacement number
   mid-report and left the retraction visible; the MoE agent demoted its own #1 recommendation to #4.
@@ -148,7 +158,7 @@ worktree.** Before touching the mix, read `16` (regime), `17` (the reversal red-
 | "77.5% Common Crawl is a problem" | Normal — Llama 1 was 82%, dolma3 76%. Retracted |
 | "min_ngram 13→5 costs −11.8 MMLU" | That is a **deduplication** result (DCLM Table 19), not decontamination |
 | "Nemotron Nano 2 has zero occurrences of 'decontamin'" | False. I stated it as verified |
-| "Aryabumi brackets our scale" | Its code sweep ran **only at 470M**. Does not bracket 1.279B |
+| "Aryabumi brackets our scale" | Its code sweep ran **only at 470M**. Does not bracket ~1.9B active |
 | "AutoScale shows optima shift with scale" | **AutoScale has no model-size axis at all**; its "6.8%→0.07%" figures are not in the paper |
 
 **Three of the four claims that drove the web-led reversal do not hold** (`17-redteam-the-reversal.md`):
@@ -174,7 +184,7 @@ magnitudes.**
 - **Code ~15% of stage 1, 20–25% of the cooldown.** Aryabumi measured world knowledge at **−3.4% by
   25% code** — caveat, at 470M only.
 - **Gate on MMLU and GSM8K directly, and use BPB not accuracy.** AI2 abandoned accuracy at 1B/100B as
-  *"too difficult to show improvement"*; an accuracy harness at 1.279B active returns chance on every
+  *"too difficult to show improvement"*; an accuracy harness at ~1.9B active returns chance on every
   arm. Knowledge collapse is the most reproducible harm in this literature and **no loss-based gate
   sees it.**
 - **Nobody earns a decontamination TRUST verdict** across 17 audited corpora. Tier 1 = exclude 9 items
@@ -189,7 +199,8 @@ magnitudes.**
    documents. Verified on the deployed branch: `corpus_read/build/filter/pack.py` reference it **zero
    times**.
 2. **Fix `MoELoadBalancingLossGranularity`** (task #19) — defaults to `local_batch` in four places. At
-   M20's 15.63:1 with **zero shared experts**, Sigma-MoE-Tiny documents this as routing **collapse**.
+   10.66:1 with only **2 shared experts of 6 active**, Sigma-MoE-Tiny documents this as routing
+   **collapse** rather than merely suppressed specialization.
    Cannot be annealed in: switching at 10% of training recovers only ~55%.
 3. **Fix the missing EOS in `gigatoken-superbpe`** (task #12) — `added_tokens: []` makes Gate A's EOS
    check **skip silently** in two already-published corpora.
@@ -203,7 +214,8 @@ HuggingFace preview ordering** — sample at random offsets, not the preview end
 and found **11,868 contaminated docs against a <902-doc removal budget**, including verbatim GSM8K
 *test* items at Jaccard 1.0); and a real dolma2 footer count for Nemotron-CC-Math, currently CARD-grade.
 
-**Then rewrite the mix and the report** for M20 / 1.0T / two stages, and regenerate the PDF.
+**The mix and report are WRITTEN** (`docs/FINAL-DATASET-REPORT.md` + PDF, plan of record). Regenerate
+the PDF after any edit with the two commands in `scripts/README-pdf.md`.
 
 **Then ingest**, source by source, each as a separately-approved platform job.
 
@@ -230,5 +242,6 @@ at 4T" figure and OLMo 2 Table 2's 1B/100B DCLM model scoring MMLU 34.8–35.2 (
 cannot be casually true, and I did not resolve it.
 
 **The largest residual risk in the whole plan: every mixture study cited across all 17 reports is
-DENSE. No mixture ablation on a sparse MoE exists at any scale.** Transfer to M20 is UNVERIFIED, and
+DENSE. No mixture ablation on a sparse MoE exists at any scale.** Transfer to our architecture is
+UNVERIFIED, and
 that unknown is larger than any error the red team found.
