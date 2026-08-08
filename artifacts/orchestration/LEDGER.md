@@ -346,7 +346,7 @@ ships with zero write-path integrity check while the path has already booked the
 ## 🟡 F5 — the sha256 gap is wider than CLAUDE.md states
 `promote()` inherits Gate A's vacuity: `_destination_matches`, promotion's only `s3.hash_object` caller, is
 gated on `payload.vendored` = `profile.startswith("vendored/")` (`validate.py:493`, CEO-verified). **This
-corpus is `pretrain_tokens/v1`, so every integrity re-check in `promote()` is skipped.** Net: **from
+corpus is `pretrain-tokens/v1`, so every integrity re-check in `promote()` is skipped.** Net: **from
 `encode_batch`'s output to the sealed object, no process ever re-reads a payload byte and compares it to an
 independently computed digest.** CRC64NVME on `CopyObject` + the seal's `crc64nvme` map genuinely covers the
 *copy hop*; F4 leaves the *write* hop bare. §8.3a would remove the last re-read. **Ruling: B7 is now a
@@ -3342,6 +3342,69 @@ driver**, since a local path would destroy the safety net *as a side effect of a
 exercising publish for the first time on the real corpus is bounded to a landing-prefix write we can redo.
 **The promote-rate calibration is unaffected** — Gate A + promote is the measurement either way, and it is
 reported before anything follows.
+
+---
+
+# 🔴 CEO ERROR #16 — my GO's profile string was WRONG, and it would have cost a full 3.93 TB publish
+
+**CEO-verified:**
+```
+pretrain_tokens_v1.py:29   NAME = "pretrain-tokens/v1"      ← HYPHEN + slash
+get_profile('pretrain-tokens/v1') → OK
+get_profile('pretrain_tokens/v1') → ProfileError
+publish.py:498  if profile_for(g).startswith("pretrain-tokens/")   ← STRING MATCH, no validation
+```
+**The MODULE is `pretrain_tokens_v1.py`; the registered NAME is `pretrain-tokens/v1`.** The registry keys on
+`NAME`, and I wrote the **module spelling** into a field that takes the **NAME**.
+
+**It would not have failed cleanly — that is the whole finding.** `publish()` never validates the profile; it
+only string-matches at `:498` and copies the value verbatim into the manifest. So the underscore form
+**publishes 3.93 TB successfully**, **silently skips the `pretrain-tokens/` tokenizer-dependency block**, and is
+**then rejected by Gate A as `unknown-profile`** — costing a full publish plus a **`v2` reservation** to redo.
+**Two controls would still have held** (profile is inside `manifest_sha256`; Gate A recomputes), so it wastes a
+publish rather than shipping a wrong corpus. **The gates work; my string didn't.**
+
+**And the underscore form was in MY OWN LEDGER** — one occurrence at `:349`, **now corrected in place**.
+PLAT-2 found it had inherited the same spelling into its addenda and fixed it there. **Sixteenth error, and the
+first where a defect propagated from this ledger's prose into a deployed field.** *A module filename is not a
+registered name* — the same class as *a docstring is not behaviour* and *a tag is not contents.*
+
+# ✅ `edullm-dataset-publish:2` REGISTERED — with two declared changes I did not name
+```
+ACTIVE · image sha256:4df94c4c…babcae · role …/edullm-dataset-publish (UNCHANGED)
+16 vCPU / 32,768 MiB · 28,800 s · attempts 1 · PUBLISH_MODE=--dry-run · logs publish-edu-mix-983b
+profile pretrain-tokens/v1 ✅
+```
+**No capability added** — same role, same bucket scope, dry-run by default. Six differences from rev 1, each
+traceable to a ruling. **Both extra changes were stated, not slipped in:**
+1. **Timeout 21,600 → 28,800 s on MEASURED grounds.** Publish stream-hashes **3.93 TB** then copies: hash
+   3.02–3.64 h + copy 3.0–3.7 h = **6.02–7.34 h**. **Rev 1's 21,600 s = 6.00 h sits BELOW the optimistic
+   estimate**, so publishing on rev 1 **SIGKILLs mid-publish** — the 2026-08-05 failure repeated, leaving an
+   unsealed prefix. **A third artifact tonight whose timeout was set for a smaller corpus.**
+2. **Explicit `logConfiguration`** — rev 1 declared **none**, and tonight a job returned SUCCEEDED with **zero
+   log streams**. *"Exit 0 is not acceptance"* requires output to exist. **PLAT-2 turned its own earlier catch
+   into a permanent property of the job def.**
+
+## The driver: everything derived from receipts, and every assertion PROVEN to fail
+`_ingest/final-dataset/PUBLISH/publish_driver.py`, **ETag `d212885e…5c37` == local md5.** `sources[]`, token and
+document totals, and the share-alike % are **read from the 185 receipts, never typed.**
+**6 mutations, 6 caught** — *"an assertion that has never failed is decoration"*: local path instead of `s3://`
+(refuses, **naming the staged-shard deletion that backs ruling 3**), **the GO's own `pretrain_tokens/v1`**,
+`pretrain_tokens_v1`, 0 receipts, 184 receipts, wrong shard total.
+🟢 **Those receipt guards are live protection right now, not hypothetical: the build is ~2% done, so the driver
+refuses a premature publish BY ARITHMETIC rather than by anyone remembering to wait.**
+
+## The cancelled dry-run — the reasoning is better than the action
+`86def2b8` went RUNNABLE; PLAT-2 cancelled it. **Explicitly NOT capacity ambiguity** — `desiredvCpus` is **384**,
+not 0, and the build's 138 queued children are competing **by design**, so its own discriminator reads legitimate
+contention. It cancelled because **the verdict was already known** (2% done ⇒ `derive()` refuses, proven
+locally) and **had it placed by taking a freed slot it would have FAILED mid-build and read as a BUILD failure**
+to anyone scanning the queue — *"I'd have manufactured a false alarm."* It used `cancel-job --reason` so the
+FAILED row **explains itself**, rather than becoming another undiagnosed entry like the census's 3.
+**Avoiding a self-inflicted false signal is worth more than the information the run would have produced.**
+
+Committed **`ec41837`** (not pushed), with `infra/12-dataset-publish-jobdef-rev2.json` as a **template with
+`<ACCT>` placeholders** per the template-vs-deployed ruling, and a stated verification recipe. Scrub clean.
 
 ---
 

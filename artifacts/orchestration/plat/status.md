@@ -4292,3 +4292,196 @@ committed file carries `<ACCT>` in 3 places. **They differ only by that substitu
 ```
 **Next: build to terminal → report the PDF/code rate → dry-run → publish → Gate A → promote (report the
 measured number).** Nothing else needs authorization.
+
+---
+
+# 🟠 ADDENDUM 35 — DISPATCH ORDER COSTS ~2 h, AND IT CORRECTS MY OWN MAKESPAN NUMBERS
+
+**Found while working out when PDF and code would start, so I could measure them.** The answer exposed a
+scheduling defect nobody has recorded.
+
+## The long children are at the END of the array
+
+Array index == position in the plan's bundle list (`--of 185`, so child *i* gets `bundles[i::185]` =
+`bundles[i]`). `MEASURED` from the staged plan:
+
+| index | bundle | est duration |
+|---|---|---|
+| 0–46 | cosmopedia + `dclm-001..047` — **running now** | 1.92–1.97 h each |
+| **101–104** | **`finepdfs-edu--train--p00..03of04`** | **7.55–7.56 h each** |
+| 152–159 | `nemotron-cc-math-3/-4plus` train parts | 5.51–6.08 h |
+| **171–177** | **`stackv2-edu--train--p00..06of07`** | **7.40 h each** |
+
+**Batch dispatches array children in index order**, so the four longest sources sit behind ~100 shorter
+bundles. Simulated at the measured rate, 47 slots:
+
+| dispatch order | makespan |
+|---|---|
+| **index order (what Batch actually does)** | **13.30 h** |
+| longest-processing-time-first | 11.34 h |
+| **penalty** | **1.97 h (17%)** |
+
+Under index order `stackv2-edu--train--p06of07` **starts at ~5.90 h and finishes at ~13.30 h** — it is
+the last thing running, alone, while 46 slots idle. **The makespan is set by the longest bundle that
+starts LAST**, which is a different quantity from "the longest bundle."
+
+## 🔧 This corrects MY OWN numbers — 11.49–11.91 h was optimistic
+
+My Addendum 28/30 makespans (11.49–12.87 h) came from **bin-packing simulations that were free to place
+any bundle in any slot.** The array dispatch does not grant that freedom: **order is fixed by index.**
+I measured the rate correctly and then fed it to a scheduler model the platform does not implement.
+
+**Corrected projection: ~13.3 h**, against 11.07 h `DERIVED` in the plan and my own 11.5–12.9 h.
+**Still inside "quote 11–15 h"** — the band held, which is the argument for having quoted a band.
+
+## Not actionable now, and I am not improvising a fix
+- **(a) Re-order the plan** → changes `plan_id` → a **new corpus identity**, discarding ~2 h of shards
+  already written under `29968a2b04008a8c`. Paying a corpus identity to save 2 h is the wrong trade.
+- **(b) Re-submit with a different order** → Batch has no such control; **array index *is* the order.**
+  It would mean 185 individual `submit-job` calls.
+- **(c) Submit the long children separately, ahead of the queue** → they would contend with the running
+  array for the same 384 vCPU, and `bundle_is_done` means the array child later **skips** them. Workable
+  in principle, but it is **a new submission pattern nobody authorized** and it risks two writers on one
+  bundle for a 2 h gain. **Not doing it.**
+
+**VERDICT: record it, do not act.** The build is healthy and the band still holds.
+
+## 🟢 The durable fix is free, and belongs at plan time
+**Emit bundles in DESCENDING token order in `plan_document`.** Then array index order *is*
+longest-processing-time-first, and the ~2 h penalty disappears for every future build. It is a pure
+ordering change — **no schema change, no new field, no `plan_id` semantics beyond the ordering itself** —
+and LPT is the classic 4/3-approximation for exactly this problem.
+
+⚠️ **One caveat for whoever implements it:** `plan_id` is a content hash over the registry +
+`SHARD_TOKENS`, and the bundle list's ORDER may or may not enter it. **Check that before assuming a
+re-ordering is free for an existing corpus** — for a *new* corpus it is free regardless.
+
+**This is the same class as the `size=48` catch: the plan was right about the work and wrong about how the
+platform would execute it.** Both were found by simulating the dispatch rather than reading the plan.
+
+## Status
+```
+47 RUNNING · 138 RUNNABLE · 0 FAILED · 384/384 vCPU
+first slot frees at ~1.92 h; index 47+ begins then; PDF/code first shards at ~3.93-4.00 h
+```
+**PDF and code have NOT started** (47 prefixes in S3, all cosmopedia/DCLM), so their rate remains the last
+unmeasured band. **They begin at ~3.9–4.0 h in.** I will report their measured rate when their first
+shards land.
+
+## ✅ The caveat I flagged is now SETTLED — bundle order IS in `plan_id`
+
+I wrote "check whether the bundle list's ORDER enters `plan_id` before assuming a re-ordering is free."
+**Checked, by execution:**
+
+```
+plan_id recomputed from the staged document : 29968a2b04008a8c   <- reproduces EXACTLY
+plan_id with bundles sorted DESC by tokens  : 6dbff19b87175cc0   <- CHANGED
+```
+
+**Mechanism** (`corpus_build.py:540-542`): `plan_id = sha256(json.dumps(doc, sort_keys=True, …))[:16]`.
+**`sort_keys=True` sorts DICT KEYS, not LIST elements** — and `bundles` is a list, so its order is part of
+the hashed bytes. A reordering is therefore a **new corpus identity**, not a free optimisation.
+
+**Two consequences, both now on measured ground rather than inference:**
+1. **Option (a) was correctly rejected.** Re-ordering to save 1.97 h would have cost `plan_id`
+   `29968a2b04008a8c` and every shard already written under it. **The rejection was right for a reason I
+   had only assumed; it is now proven.**
+2. **The durable fix is free ONLY for a corpus that has not started.** For a new build, emitting bundles
+   DESC by tokens costs nothing and buys ~17%. For *this* one it is unavailable at any acceptable price.
+   **Whoever implements it must know it moves `plan_id` — it is a pre-FREEZE decision, not a tuning knob.**
+
+**Bonus verification worth having:** the fact that `plan_id` **recomputes exactly** from the staged
+`plan.json` is independent confirmation that the staged plan is byte-intact and that my local tooling
+agrees with what the 47 children are reading. **That is the strongest available check on the staged input,
+and it cannot pass by coincidence** — the same reasoning the ledger applied when PLAT's independent run
+reproduced `68ebedaaddc7eb06`.
+
+## Monitoring, third attempt — and I corrected my own tooling twice more
+
+**Attempt 2** (persistent poll loop) worked — its first event `prefixes=47 unmeasured_sources_present=0`
+**matched my manual broker reading exactly**, so it was credentialled (via
+`credential_process`/`--profile sbsandbox`) and fail-closed on a non-zero exit. **But it would emit ~20
+identical "no change" events over the 3.4 h wait**, which is noise that trains a reader to ignore the
+channel — the same objection ENG raised to an unactionable red test.
+
+**Attempt 3, now armed:** a single-notification `until` loop that **exits when the condition is true**, so
+one event instead of twenty. It fails closed: a non-zero exit prints `WATCHDOG-BLIND rc=… ` with the error
+text rather than a reassuring zero.
+
+**I also removed a stray line from attempt 2** — a `claude mcp` call I had left in as a no-op. **A no-op
+inside a health check is exactly the decoration the golden rule forbids**; it made the loop look like it was
+verifying something it was not.
+
+**Verified before trusting it:** the underlying query returns `exit 0`, `prefix count: 47`,
+`unmeasured present: 0`. **Three iterations on my own watchdog tonight (fail-open → noisy → correct), each
+caught by comparing the tool's output against a measurement I already had.** The lesson is not "write it
+right first time"; it is that **a monitor must be validated against ground truth before it is trusted**,
+because a broken monitor and a healthy system produce the same output.
+
+## Timeline for the last unmeasured band
+```
+array createdAt      16:06:03 UTC
+first slot frees     ~18:01 UTC  (t+1.92 h)
+PDF/code/math start  ~20:03 UTC  (t+3.95 h)   <- the measurement I owe
+projected terminal   ~05:24 UTC  (t+13.30 h)
+```
+
+---
+
+# ✅ ADDENDUM 36 — GATE A / PROMOTE PIN THE **OLD** IMAGE, AND THAT IS PROVABLY FINE
+
+**Checked during the wait rather than assumed, because "the artifact that changed is not the artifact that
+was checked" cost this build the most time of any single error.**
+
+`edullm-validator:16` and `edullm-promote:2` both pin **`sha256:5fb76f66…a906`** — the image built from
+**`5450f53`**, i.e. **before file-sharding and before the surrogate.** The build runs
+`4df94c4c…babcae`. **Two different images in one pipeline is exactly the "two parallel lines each shipped
+an image" hazard**, so it needed settling, not waving through.
+
+## Verdict: correct as-is. Every file on the Gate A / promote path is BYTE-IDENTICAL.
+
+`shasum` on the git blobs at each commit:
+
+| file | 5450f53 vs HEAD |
+|---|---|
+| `validate.py` | **IDENTICAL** `20b241ff6f7e4929` |
+| `profiles/pretrain_tokens_v1.py` | **IDENTICAL** `db3d7c6e978f94c6` |
+| `manifest.py` | **IDENTICAL** `87531c66e79f117e` |
+| `s3.py` | **IDENTICAL** `6f5bcf44b8081f9b` |
+| `corpus.py` | DIFFERS `be1f7d52…` / `80ef007a…` |
+
+## 🔧 And I corrected my own too-quick conclusion mid-check
+I first grepped `validate.py`'s imports, saw no `corpus`, and concluded *"validate.py does not import
+corpus.py at all."* **Then I computed the full transitive closure and `corpus` IS in it** — reached via
+**`read.py:199`, a lazy `from .corpus import epoch_verdict` inside a function.** **My grep looked at
+top-level imports and missed a function-local one** — the same error shape as PLAT's B3 near-miss
+(*"absence of a string is not absence of behaviour"*), from the same direction.
+
+**So I checked the thing that actually matters — the symbol, not the file:**
+```
+epoch_verdict AST digest @5450f53 : 8ffba35f45b54251
+epoch_verdict AST digest @HEAD    : 8ffba35f45b54251   -> IDENTICAL
+corpus.py diff 5450f53..HEAD      : ADDS MAX_FILE_SHARDS and partition_ordinals; changes nothing existing
+```
+**`epoch_verdict` is the only `corpus.py` symbol reachable from the validator, and it is unchanged.** The
+diff is purely additive file-sharding machinery the validator never calls.
+
+**Conclusion: `edullm-validator:16` and `edullm-promote:2` are functionally identical to what a rebuild on
+`e38d007` would produce, for every code path they execute.** No re-registration, no new image, no
+mutation. **A digest mismatch is a question, not a defect — and this one answers clean.**
+
+**Worth stating as the general form:** *the right unit of comparison is the symbol the code path executes,
+not the file or the image.* Comparing images would have said "stale, rebuild"; comparing files would have
+said "corpus.py differs, investigate"; comparing the reachable symbol settles it in one call.
+
+## Both defs re-verified live while I was there
+```
+edullm-validator:16  ACTIVE  28,800 s  4 vCPU  cmd: validate --head-workers 16          (NO --promote)
+edullm-promote:2     ACTIVE  28,800 s  4 vCPU  cmd: validate --head-workers 16 --promote --promote-workers 16
+both roles: …:role/sbsandbox-intern-edullm-dataset-validator   <- the only principal the airlock permits
+both logs : awslogs, prefixes 'gatea' / 'promote'              <- output observable
+```
+**`:16` genuinely cannot promote** (no `--promote` flag), so the EventBridge target — which resolves
+unversioned to top ACTIVE — still cannot freeze anything. **Promotion remains a deliberate, separate
+submission.** `4 vCPU` is correct per the earlier ruling: `CopyObject` moves zero payload bytes through the
+container, so concurrency, not container size, is the lever.
