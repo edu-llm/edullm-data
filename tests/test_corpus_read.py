@@ -830,6 +830,119 @@ def test_both_gzip_format_spellings_resolve():
 
 
 # --------------------------------------------------------------------------------------
+# ONE format table — the gate and the readers cannot diverge
+# --------------------------------------------------------------------------------------
+#
+# There used to be THREE lists of readable formats: `corpus_build.READABLE_FORMATS` (which gates
+# the plan), a dict literal inside `corpus_build._reader_for` (which actually dispatched), and
+# `_READERS` here. Only `_READERS` carried `jsonl.gz`, so a `jsonl.gz` registry row was refused at
+# plan time by `_assert_readable` **although `read_jsonl_gz_documents` is registered for exactly
+# that spelling and reads it correctly** (the test above proves the reader works). A whole source
+# was droppable by a check that looked entirely legitimate.
+#
+# These tests deliberately do NOT spell the admitted set out. A test asserting
+# `{"parquet", "json.gz", "jsonl.gz"}` would be a FOURTH table — it would pass the day someone
+# re-hardcodes the gate, which is the failure being removed. They recompute the correspondence
+# from the live objects instead, so registering a reader without widening the gate, or widening
+# the gate past the readers, fails here.
+
+
+def test_the_gate_admits_exactly_the_formats_that_have_a_reader():
+    """The bidirectional check, recomputed from the two live structures.
+
+    Forward: every format the plan-time gate admits resolves to a callable, so the gate cannot
+    admit a row that then dies at dispatch. Backward: every registered reader's format is admitted,
+    so a working reader cannot be locked out — the `jsonl.gz` defect, stated as an assertion.
+    """
+    from edullm_data import corpus_build, corpus_read
+
+    gate = set(corpus_build.READABLE_FORMATS)
+    registered = set(corpus_read._READERS)
+
+    assert gate == registered, (
+        f"the plan-time gate and the reader registry disagree: gate-only={sorted(gate - registered)}, "
+        f"reader-only={sorted(registered - gate)}. Both must come from `_READERS`; a second list "
+        f"is what let `jsonl.gz` be refused while its reader worked."
+    )
+    for fmt in registered:
+        assert callable(corpus_read.reader_for_format(fmt)), f"{fmt} resolves to no callable"
+
+
+def test_the_gate_is_the_reader_registry_not_a_copy_of_it():
+    """Equal-today is not the property being defended — three lists were equal until they were not.
+
+    Mutating the registry must move the gate, in `corpus_build` as well as here. A `frozenset`
+    literal that happens to match would pass the test above and fail this one, which is the whole
+    point: the gate has to be DERIVED, not synchronised.
+    """
+    from edullm_data import corpus_build, corpus_read
+
+    assert corpus_build.READABLE_FORMATS is corpus_read.READABLE_FORMATS, (
+        "corpus_build must re-export the reader registry's key set, not define its own"
+    )
+
+    original = dict(corpus_read._READERS)
+    try:
+        corpus_read._READERS["mp3"] = "read_parquet_documents"
+        assert frozenset(corpus_read._READERS) == frozenset(original) | {"mp3"}
+        # Recomputed from the registry at call time, so the gate has already moved.
+        assert corpus_read.reader_for_format("mp3") is corpus_read.read_parquet_documents
+    finally:
+        corpus_read._READERS.clear()
+        corpus_read._READERS.update(original)
+
+    assert corpus_read.reader_for_format("mp3") is None
+
+
+def test_a_reader_is_resolved_by_name_at_call_time():
+    """`_READERS` stores NAMES, and that is load-bearing rather than incidental.
+
+    The offline build tests install a fake reader by assigning `corpus_read.read_parquet_documents`
+    (`test_corpus_build.py:663,756`). A table holding the function OBJECT would have bound the
+    original at import and driven the real reader while the test reported success — the
+    mock-that-does-nothing failure. Asserted by doing exactly what those tests do.
+    """
+    from edullm_data import corpus_read
+
+    def fake(*a, **k):
+        yield Document(id="x", text="y", source="s")
+
+    real = corpus_read.read_parquet_documents
+    corpus_read.read_parquet_documents = fake
+    try:
+        assert corpus_read.reader_for_format("parquet") is fake
+    finally:
+        corpus_read.read_parquet_documents = real
+    assert corpus_read.reader_for_format("parquet") is real
+
+
+def test_zstd_is_absent_from_the_registry_and_the_message_says_so():
+    """`.zst` has no reader and no consumer — the registry is 11 parquet + 6 json.gz, and `zst`
+    appears in `src/` only in comments and error strings, never in a code path. So the gap closes
+    by removal, not by adding a `zstandard` dependency nothing reads. This pins the error text to
+    the registry's real contents rather than to a remembered list."""
+    from edullm_data import corpus_build, corpus_read
+
+    assert "zst" not in " ".join(corpus_read._READERS)
+    with pytest.raises(ReadError) as exc:
+        list(read_documents("repo", "f.zst", _spec(file_format="json.zst"), {}))
+    # The message must quote what IS readable, recomputed — not a stale hand-written list.
+    assert str(sorted(corpus_read.READABLE_FORMATS)) in str(exc.value)
+
+    with pytest.raises(corpus_build.BuildDriverError) as build_exc:
+        corpus_build._assert_readable(
+            [
+                CorpusSpec(
+                    key="dclm", category="web-diverse", source_label="dclm",
+                    repo="mlfoundations/dclm-baseline-1.0", file_format="jsonl.zst",
+                    text_column="text", id_column="id", target_tokens=1, revision="a" * 40,
+                )
+            ]
+        )
+    assert str(sorted(corpus_build.READABLE_FORMATS)) in str(build_exc.value)
+
+
+# --------------------------------------------------------------------------------------
 # The short-document filter — the EOS-fraction floor made mechanical
 # --------------------------------------------------------------------------------------
 

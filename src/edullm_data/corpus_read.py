@@ -68,12 +68,14 @@ __all__ = [
     "GZIP_WBITS",
     "JSONL_CHUNK_BYTES",
     "LIST_MARKER_SEGMENTS",
+    "READABLE_FORMATS",
     "FilterStats",
     "ReadError",
     "filter_documents",
     "read_documents",
     "read_jsonl_gz_documents",
     "read_parquet_documents",
+    "reader_for_format",
 ]
 
 
@@ -741,15 +743,59 @@ def read_jsonl_gz_documents(
         )
 
 
-#: Which reader handles which `CorpusSpec.file_format`. Both spellings of the gzip form are live
-#: upstream — the dolmino `math` prefix mixes `*.jsonl`, `*.jsonl.gz`, `*.json.gz` and
-#: `*.json.zst` in ONE directory (`artifacts/reservoir/WEEK1-CORPUS-SURVEY.md:111`), so a
-#: registry row naming either spelling must resolve.
-_READERS: dict[str, Callable[..., Iterator[Document]]] = {
-    "parquet": read_parquet_documents,
-    "json.gz": read_jsonl_gz_documents,
-    "jsonl.gz": read_jsonl_gz_documents,
+#: Which reader handles which `CorpusSpec.file_format`. **THE SINGLE SOURCE OF TRUTH for what
+#: this package can read** — `READABLE_FORMATS` below is derived from it, and
+#: `corpus_build` re-exports that rather than keeping a list of its own.
+#:
+#: It used to be one of THREE tables. `corpus_build.READABLE_FORMATS` gated the plan, a private
+#: dict inside `corpus_build._reader_for` did the live dispatch, and this one served
+#: `read_documents`; the first two omitted `jsonl.gz` while this one had it, so a `jsonl.gz`
+#: registry row was refused at plan time **although the reader for it is right here and works** —
+#: `read_jsonl_gz_documents` serves both gzip keys. The rejection looked exactly like a
+#: legitimate format check, which is what made it dangerous. Three lists that agree today diverge
+#: again on the next edit, so the fix is derivation, not synchronisation.
+#:
+#: Both spellings of the gzip form are live upstream — the dolmino `math` prefix mixes `*.jsonl`,
+#: `*.jsonl.gz`, `*.json.gz` and `*.json.zst` in ONE directory
+#: (`artifacts/reservoir/WEEK1-CORPUS-SURVEY.md:111`), so a registry row naming either spelling
+#: must resolve.
+#:
+#: **Values are function NAMES, not function objects, and that is load-bearing.** Holding the
+#: callable would bind whatever object existed at import time, so the offline tests that swap in a
+#: fake by assigning `corpus_read.read_parquet_documents` (`test_corpus_build.py:663,756`) would
+#: drive the ORIGINAL reader while reporting success — the mock-that-does-nothing failure this
+#: module's tests are written to avoid. :func:`reader_for_format` resolves the name on every call.
+_READERS: dict[str, str] = {
+    "parquet": "read_parquet_documents",
+    "json.gz": "read_jsonl_gz_documents",
+    "jsonl.gz": "read_jsonl_gz_documents",
 }
+
+#: Every `CorpusSpec.file_format` a reader exists for. DERIVED from :data:`_READERS`, never
+#: written out again: registering a reader is what widens the plan-time gate, so the gate
+#: structurally cannot lag behind the readers. `corpus_build` imports this object itself.
+READABLE_FORMATS: frozenset[str] = frozenset(_READERS)
+
+
+def reader_for_format(file_format: str) -> Callable[..., Iterator[Document]] | None:
+    """The reader registered for `file_format`, or ``None`` if there is none.
+
+    The one dispatch lookup in the package — :func:`read_documents` and the build driver's
+    `_reader_for` both come through here, so "which formats can be read" has exactly one answer.
+
+    Resolved by NAME out of this module's namespace on every call, so a test that replaces
+    `corpus_read.read_parquet_documents` is honoured. See :data:`_READERS`.
+    """
+    name = _READERS.get(file_format)
+    if name is None:
+        return None
+    try:
+        return globals()[name]
+    except KeyError:  # pragma: no cover - a typo in _READERS, caught by the registry test
+        raise ReadError(
+            f"_READERS maps {file_format!r} to {name!r}, which is not a function in "
+            f"corpus_read. The reader table names its readers, so a rename must update it."
+        ) from None
 
 
 def read_documents(
@@ -761,18 +807,20 @@ def read_documents(
 ) -> Iterator[Document]:
     """Dispatch to the reader for `spec.file_format`.
 
-    A named seam so the per-source loop in the build driver does not grow a format `if`. It
-    refuses an unknown format rather than defaulting: upstream filenames lie about compression
-    (`WEEK1-CORPUS-SURVEY.md`'s trap 1 — suffix dispatch throws `BadGzipFile` mid-stream, hours
-    in, on a subset of shards), so a format this module has not been taught is a registry bug to
-    fix, not something to sniff at read time.
+    The seam the build driver reads through, so the per-source loop does not grow a format `if` —
+    and so there is no second dispatch table to drift from this one. It refuses an unknown format
+    rather than defaulting: upstream filenames lie about compression (`WEEK1-CORPUS-SURVEY.md`'s
+    trap 1 — suffix dispatch throws `BadGzipFile` mid-stream, hours in, on a subset of shards), so
+    a format this module has not been taught is a registry bug to fix, not something to sniff at
+    read time.
     """
-    reader = _READERS.get(spec.file_format)
+    reader = reader_for_format(spec.file_format)
     if reader is None:
         raise ReadError(
             f"{spec.key}: file_format {spec.file_format!r} has no reader. Known: "
-            f"{sorted(_READERS)}. `.zst` is NOT among them — Common Pile ships some prefixes as "
-            f"`.json.zst`, which needs a zstandard dependency this package does not declare."
+            f"{sorted(READABLE_FORMATS)}. `.zst` is NOT among them — Common Pile ships some "
+            f"prefixes as `.json.zst`, which needs a zstandard dependency this package does not "
+            f"declare."
         )
     return reader(repo, path, spec, headers, **kwargs)
 

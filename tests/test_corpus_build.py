@@ -412,6 +412,115 @@ def test_a_readable_source_passes():
     B._assert_readable([_spec(), _spec(key="cp", source_label="cp", file_format="json.gz")])
 
 
+def test_every_format_the_gate_admits_actually_dispatches_to_a_reader():
+    """THE defect this pair of functions used to have, asserted through the LIVE dispatch path.
+
+    `_reader_for` held its own dict literal — a third format table, and the one that actually ran.
+    It omitted `jsonl.gz` while `corpus_read._READERS` had it, so a `jsonl.gz` row was refused at
+    plan time although `read_jsonl_gz_documents` is registered for that exact spelling and reads
+    it correctly.
+
+    Driven through the real `_reader_for` for EVERY admitted format rather than by comparing two
+    sets, because a set comparison is satisfied by a copy — and a copy is what the gate was. This
+    fails if anyone reintroduces a literal inside `_reader_for`: a format the gate admits that the
+    dispatch does not know raises `BuildDriverError("no reader for ...")` right here.
+
+    The reader is faked (the two things needing a network are `hf_files` and the reader itself),
+    so what is exercised is dispatch and nothing else.
+    """
+    from edullm_data import corpus_read
+
+    for fmt in sorted(B.READABLE_FORMATS):
+        spec = _spec(file_format=fmt, target_tokens=SHARD_TOKENS)
+        B._assert_readable([spec])  # the gate admits it, by construction of the loop
+        bundle = _small(B.bundles_of(B.plan_document([spec]))[0])
+
+        reader_name = corpus_read._READERS[fmt]
+        called = []
+
+        def fake(repo, entry, sp, *a, _n=reader_name, **k):
+            called.append(_n)
+            yield Document(id=f"{_n}-0", text="lorem ipsum dolor sit " * 40, source="tiny")
+
+        real_hf_files = B.hf_files
+        real_reader = getattr(corpus_read, reader_name)
+        B.hf_files = lambda sp, headers=None: [{"path": "data/00000", "size": 1000}]
+        setattr(corpus_read, reader_name, fake)
+        try:
+            docs = list(B._reader_for(spec, bundle))
+        finally:
+            B.hf_files = real_hf_files
+            setattr(corpus_read, reader_name, real_reader)
+
+        assert called == [reader_name], (
+            f"{fmt}: the gate admits it but `_reader_for` dispatched to {called!r}. Every "
+            f"admitted format must reach its registered reader — a dispatch table separate from "
+            f"`corpus_read._READERS` is exactly the defect this test exists to prevent."
+        )
+        assert [d.id for d in docs] == [f"{reader_name}-0"]
+
+
+def test_every_admitted_format_can_also_be_LISTED_not_only_read():
+    """A FOURTH format-keyed table exists — `_PAYLOAD_EXT`, which `hf_files` uses to filter the
+    repo listing — and widening the gate without it moves a failure to a far worse place.
+
+    Deriving `READABLE_FORMATS` from the reader registry means registering a reader silently
+    admits registry rows. `hf_files` then raises `BuildDriverError` for a format `_PAYLOAD_EXT`
+    does not name — **at run time, inside a Batch container, after the job is billing**, which is
+    exactly the plan-time-vs-run-time trade `_assert_readable`'s docstring forbids. MEASURED
+    before this was fixed: a `jsonl.gz` spec passed the gate and then died with
+    "no payload extension known for 'jsonl.gz'".
+
+    Recomputed as a set difference over the two live tables, so a reader added without its
+    extensions fails here rather than on Batch.
+    """
+    missing = sorted(set(B.READABLE_FORMATS) - set(B._PAYLOAD_EXT))
+    assert not missing, (
+        f"{missing} are admitted by the plan-time gate but `hf_files` cannot list them. A format "
+        f"that is admitted-but-unlistable is worse than one honestly refused."
+    )
+    # The reconciliation is enforced at import, not merely tested — force the failure to prove the
+    # guard is real rather than a no-op that happens to be satisfied.
+    real = dict(B._PAYLOAD_EXT)
+    try:
+        B._PAYLOAD_EXT.pop("jsonl.gz")
+        with pytest.raises(BuildError, match="no entry in _PAYLOAD_EXT"):
+            B._assert_payload_extensions_cover_readers()
+    finally:
+        B._PAYLOAD_EXT.clear()
+        B._PAYLOAD_EXT.update(real)
+    B._assert_payload_extensions_cover_readers()
+
+
+def test_both_gzip_spellings_list_the_same_files():
+    """`json.gz` and `jsonl.gz` name ONE reader, so they must also name one listing filter.
+
+    Upstream mixes the spellings inside a single directory (the dolmino `math` prefix holds
+    `*.jsonl.gz` and `*.json.gz` together), so a row declaring either must pick up both — a
+    per-spelling filter would read half a source and report success.
+    """
+    assert B._PAYLOAD_EXT["jsonl.gz"] == B._PAYLOAD_EXT["json.gz"] == (".json.gz", ".jsonl.gz")
+
+
+def test_jsonl_gz_is_admitted_because_a_working_reader_is_registered_for_it():
+    """The measured false negative, named. `read_jsonl_gz_documents` serves BOTH gzip spellings —
+    the same function object under two keys — so refusing `jsonl.gz` dropped a source a working
+    reader could have read. Both spellings must reach the identical reader.
+
+    Recomputed from the registry rather than asserted as a literal: the claim is "these two keys
+    name one reader", which stays true under a rename.
+    """
+    from edullm_data import corpus_read
+
+    assert corpus_read._READERS["jsonl.gz"] == corpus_read._READERS["json.gz"]
+    assert (
+        corpus_read.reader_for_format("jsonl.gz")
+        is corpus_read.reader_for_format("json.gz")
+        is corpus_read.read_jsonl_gz_documents
+    )
+    B._assert_readable([_spec(key="dolmino", source_label="dolmino", file_format="jsonl.gz")])
+
+
 # --------------------------------------------------------------------------------------
 # Keys
 # --------------------------------------------------------------------------------------
@@ -643,7 +752,10 @@ def test_the_reader_stops_instead_of_walking_a_pool_far_larger_than_the_plan():
     """
     files_read = []
 
-    def reader(repo, entry, spec):
+    # `*a, **k` absorbs the `headers` argument `corpus_read.read_documents` passes through. The
+    # driver now reads via that seam rather than calling the reader directly, so a fake pinned to
+    # exactly three positionals would fail on the signature instead of on the behaviour under test.
+    def reader(repo, entry, spec, *a, **k):
         files_read.append(entry["path"])
         # Each "file" carries a whole shard's worth of characters at the assumed 4.0 chars/token.
         for i in range(200):
@@ -746,7 +858,9 @@ def _run_reader(spec, bundle, docs_per_file, n_files=400):
 
     files_read = []
 
-    def reader(repo, entry, sp):
+    # `*a, **k` absorbs `headers`: the driver reads through `corpus_read.read_documents`, which
+    # forwards it. Everything between `hf_files` and this fake is the production code path.
+    def reader(repo, entry, sp, *a, **k):
         files_read.append(entry["path"])
         yield from docs_per_file(entry["path"])
 
