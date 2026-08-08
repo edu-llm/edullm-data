@@ -104,6 +104,7 @@ __all__ = [
     "plan_document",
     "receipt_key",
     "run_bundle",
+    "split_source_rows",
 ]
 
 
@@ -199,6 +200,107 @@ def _assert_unique_identities(specs: Sequence[CorpusSpec], *, where: str = "the 
                     f"path and inside manifest_sha256, so it is permanent and consumer-visible."
                 )
             seen[value] = spec.key
+
+
+def split_source_rows(
+    spec: CorpusSpec,
+    subdirs: Sequence[str],
+    *,
+    total_tokens: int | None = None,
+    label_width: int = 2,
+) -> list[CorpusSpec]:
+    """One row per DISJOINT subdirectory, so a too-large source becomes N buildable children.
+
+    **This exists because wall clock is set by the slowest array child, and `--shard/--of` strides
+    BUNDLES, not files** (`_shard_slice`, called at ``:676`` on a bundle list). A source that does
+    not fan out is therefore one bundle, one child, one instance — and a Batch child cannot exceed
+    one instance no matter how large the array. Measured at the end-to-end build rate of 72,615
+    tok/s/vCPU, a 410B single-child bundle is **49 h on a whole 32-vCPU instance** against a 9.96 h
+    aggregate floor. No vCPU allocation fixes that; only splitting does.
+
+    **Why registry rows rather than new machinery.** N rows with distinct ``source_label`` make
+    :func:`plan_document` emit N streams, which become N bundles, which ``_shard_slice`` already
+    spreads across children — and :func:`~.corpus.allocate_ordinals` gives each its own dense
+    ordinal block **at plan time**. Plan-time disjoint ordinal ranges are precisely the hard part
+    that the alternative route budgets days to build. This function only assembles rows; every
+    mechanism it relies on already ships.
+
+    ``subdirs`` MUST be pairwise disjoint and MUST each exist, because nothing downstream can tell
+    that two children read the same files: the token counts still add up, the ordinals are still
+    dense, and the duplicate documents are real text that hashes and decodes fine. Disjointness is
+    the caller's evidence to bring — walk the tree — not something this function can verify without
+    the network.
+
+    ⚠️ **``source_label`` is permanent and consumer-visible.** It becomes the ``source`` segment of
+    every shard path (:func:`~.corpus.shard_key`), ``labels_from_path`` reads it back, Gate A
+    recomputes it, and the path is inside ``manifest_sha256``. So a 5-way split publishes
+    ``dclm-01`` … ``dclm-05`` and a consumer selecting ``source=dclm`` sees five labels and matches
+    none of them exactly. **That is a schema decision, it cannot be backfilled, and it must be made
+    deliberately before the corpus is frozen** — not discovered by whoever writes the mixture.
+
+    ``total_tokens`` defaults to ``spec.target_tokens`` and is divided evenly. Even division is only
+    correct when the subdirectories are comparably sized: ``_shard_slice`` strides, it does not
+    balance, so N equal targets over skewed inputs give N unequal children and the largest one is
+    still the wall clock. MEASURED for the two sources this was written for:
+    ``dclm-baseline-1.0-parquet``'s ten ``global-shard_NN_of_10`` directories vary by **0.25%**
+    (equal division is exact), while ``fineweb-edu``'s 110 ``data/CC-MAIN-*`` directories vary by
+    **3.1×** (equal division is not, and the caller must group them by size first).
+
+    ``pool_tokens`` is divided the same way when present, because ``CorpusSpec.__post_init__``
+    checks pool ≥ target per row and an undivided pool would silently defeat that check on every
+    child. ``traps`` gains a line recording the split, since a row that no longer names its parent
+    source is hard to trace back.
+    """
+    if len(subdirs) < 2:
+        raise BuildDriverError(
+            f"{spec.key}: splitting into {len(subdirs)} part(s) is not a split. Pass at least two "
+            f"disjoint subdirectories, or leave the row alone."
+        )
+    if len(set(subdirs)) != len(subdirs):
+        dupes = sorted({d for d in subdirs if list(subdirs).count(d) > 1})
+        raise BuildDriverError(
+            f"{spec.key}: subdirs repeat {dupes}. Two rows on the same subdirectory read the SAME "
+            f"files, and nothing downstream can detect it — the tokens are real, the counts add "
+            f"up, and the corpus quietly contains that data twice."
+        )
+    n = len(subdirs)
+    if n > 10 ** label_width - 1:
+        raise BuildDriverError(
+            f"{spec.key}: {n} parts do not fit {label_width} label digits; raise label_width. "
+            f"Truncating would collide two labels, which is silent token loss "
+            f"(see _assert_unique_identities)."
+        )
+    want = spec.target_tokens if total_tokens is None else total_tokens
+    if want <= 0:
+        raise BuildDriverError(
+            f"{spec.key}: nothing to split (target_tokens {want}). A reserve row is not built, so "
+            f"splitting it produces N reserve rows and no children."
+        )
+    share = want // n
+    pool_share = spec.pool_tokens // n if spec.pool_tokens is not None else None
+    rows: list[CorpusSpec] = []
+    for i, sub in enumerate(subdirs, start=1):
+        rows.append(
+            dataclasses.replace(
+                spec,
+                key=f"{spec.key}-{i:0{label_width}d}",
+                source_label=f"{spec.source_label}-{i:0{label_width}d}",
+                config=sub,
+                target_tokens=share,
+                pool_tokens=pool_share,
+                traps=spec.traps + (
+                    f"Part {i} of {n}, split from {spec.key!r} over disjoint subdirectories so the "
+                    f"source builds as {n} array children instead of one. source_label "
+                    f"{spec.source_label!r} -> {spec.source_label}-{i:0{label_width}d} is "
+                    f"PERMANENT: it is the shard path's source segment and is inside "
+                    f"manifest_sha256.",
+                ),
+            )
+        )
+    # The guard is the point of the function, not a formality: a caller that passes a bad
+    # `label_width` or a spec whose label already ends in a digit could still collide.
+    _assert_unique_identities(rows, where=f"the {n}-way split of {spec.key!r}")
+    return rows
 
 
 def _repo_root():

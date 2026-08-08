@@ -261,6 +261,130 @@ def test_load_registry_refuses_a_registry_file_with_a_duplicated_label(tmp_path)
         B.load_registry(str(p))
 
 
+# --------------------------------------------------------------------------------------
+# Splitting a too-large source into N array children (`split_source_rows`)
+# --------------------------------------------------------------------------------------
+
+
+def _split_spec(**over) -> CorpusSpec:
+    base = dict(
+        key="dclm-baseline", source_label="dclm", target_tokens=SHARD_TOKENS * 1000,
+        pool_tokens=SHARD_TOKENS * 8000, config="root",
+    )
+    base.update(over)
+    return _spec(**base)
+
+
+def test_a_split_source_becomes_N_bundles_each_reading_its_OWN_subdirectory():
+    """The whole point: N children, N disjoint inputs, and no child larger than 1/N.
+
+    Recomputes three separate properties rather than asserting the rows exist — the tokens are
+    conserved, every subdirectory survives into the plan, and the per-child work really is 1/N.
+    """
+    parent = _split_spec()
+    subs = [f"proc/global-shard_{i:02d}_of_10" for i in (1, 3, 5, 7, 9)]
+    rows = B.split_source_rows(parent, subs)
+
+    assert [r.source_label for r in rows] == [f"dclm-0{i}" for i in range(1, 6)]
+    assert sum(r.target_tokens for r in rows) == parent.target_tokens, "tokens must be conserved"
+
+    plan = B.plan_document(rows)
+    # Each child names its OWN subdirectory. This is the property that fails silently when labels
+    # collide — `spec_by_label` would hand every bundle the same config.
+    assert {b["config"] for b in plan["bundles"]} == set(subs)
+    assert len({b["config"] for b in plan["bundles"]}) == len(subs)
+
+    trains = [b for b in plan["bundles"] if b["split"] == "train"]
+    assert len(trains) == 5
+    biggest = max(b["tokens"] for b in trains)
+    unsplit = max(
+        b["tokens"] for b in B.plan_document([parent])["bundles"] if b["split"] == "train"
+    )
+    # Wall clock is the slowest child, so this ratio IS the speedup. Recomputed, not assumed.
+    assert biggest <= unsplit / 5 * 1.01, f"largest child {biggest:,} is not ~1/5 of {unsplit:,}"
+
+
+def test_each_split_child_gets_its_own_DISJOINT_ordinal_block_at_plan_time():
+    """Ordinals are the hard part the split route gets for free from `allocate_ordinals`.
+
+    Two children that each counted from zero would write `tokens/dclm-01/train-00000` and
+    `tokens/dclm-02/train-00000` — both parse, neither is rejected. The plan must hand out disjoint
+    dense blocks up front, and this recomputes that from the emitted paths.
+    """
+    rows = B.split_source_rows(_split_spec(), [f"d{i}" for i in range(4)])
+    plan = B.plan_document(rows)
+
+    blocks = {}
+    for b in plan["bundles"]:
+        if b["split"] != "train":
+            continue
+        blocks[b["source"]] = sorted(
+            int(p.rsplit("-", 1)[1].split(".")[0]) for p in b["shards"]
+        )
+    assert len(blocks) == 4
+    for src, ords in blocks.items():
+        assert ords == list(range(ords[0], ords[0] + len(ords))), f"{src} block is not contiguous"
+    flat = [o for ords in blocks.values() for o in ords]
+    assert len(set(flat)) == len(flat), "two children were handed the same ordinal"
+    assert sorted(flat) == list(range(len(flat))), "the union must be dense across the whole plan"
+
+
+def test_splitting_onto_a_REPEATED_subdirectory_is_refused():
+    """The failure no gate downstream can see: two children reading identical files.
+
+    The tokens are real, the digests differ (different ordinals), the counts add up. Only the
+    plan can catch it, so it must.
+    """
+    with pytest.raises(BuildError, match="subdirs repeat"):
+        B.split_source_rows(_split_spec(), ["a", "b", "a"])
+
+
+def test_a_one_way_split_and_a_reserve_row_are_refused():
+    with pytest.raises(BuildError, match="not a split"):
+        B.split_source_rows(_split_spec(), ["only"])
+    with pytest.raises(BuildError, match="nothing to split"):
+        B.split_source_rows(_split_spec(target_tokens=0), ["a", "b"])
+
+
+def test_the_split_divides_the_pool_too_so_the_epoch_guard_still_binds():
+    """`CorpusSpec.__post_init__` checks pool >= target PER ROW.
+
+    An undivided pool would leave each child claiming the parent's whole pool, so a row drawing
+    more than its subdirectory holds would pass a check designed to catch exactly that.
+    """
+    rows = B.split_source_rows(_split_spec(), ["a", "b", "c", "d"])
+    assert sum(r.pool_tokens for r in rows) <= _split_spec().pool_tokens
+    for r in rows:
+        assert r.pool_tokens >= r.target_tokens
+    # And the guard really is live per row: ask for more than a quarter-pool and it raises.
+    greedy = _split_spec(target_tokens=SHARD_TOKENS * 8000)
+    with pytest.raises(BuildError, match="pool"):
+        B.split_source_rows(greedy, ["a", "b"], total_tokens=SHARD_TOKENS * 8000 * 4)
+
+
+def test_split_labels_are_safe_path_segments_and_survive_the_round_trip_to_labels():
+    """`source_label` becomes the shard path's source segment and is inside `manifest_sha256`.
+
+    An unsafe segment is caught nowhere downstream, so the generated labels must satisfy
+    SAFE_SEGMENT_RE and must read back out of a real shard path unchanged.
+    """
+    from edullm_data.manifest import SAFE_SEGMENT_RE, labels_from_path
+
+    rows = B.split_source_rows(_split_spec(), [f"d{i}" for i in range(12)], label_width=2)
+    plan = B.plan_document(rows)
+    for b in plan["bundles"]:
+        assert SAFE_SEGMENT_RE.match(b["source"]), b["source"]
+        assert labels_from_path(b["shards"][0]) == {"source": b["source"]}, (
+            "the permanent, consumer-visible label must round-trip out of the path"
+        )
+
+
+def test_too_many_parts_for_the_label_width_is_refused_rather_than_truncated():
+    """Truncating `dclm-100` to `dclm-10` collides two labels — i.e. silent token loss."""
+    with pytest.raises(BuildError, match="label_width"):
+        B.split_source_rows(_split_spec(), [f"d{i}" for i in range(11)], label_width=1)
+
+
 def test_bundles_round_trip_through_the_plan():
     """A child reconstructs refs from the plan and never allocates one itself."""
     plan = B.plan_document([_spec()])
