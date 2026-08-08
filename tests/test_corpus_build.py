@@ -2821,3 +2821,42 @@ def test_file_sharding_composes_with_the_finephrase_id_partition():
     union = set().union(*per_child)
     assert union == {i for i in ids if format_for_id(i) == "faq"}
     assert sum(len(c) for c in per_child) == len(union), "an id was yielded by two children"
+
+
+def test_a_file_shard_part_records_its_part_in_the_receipt_so_verify_can_tell_it_from_a_retry():
+    """The one line that makes E15's fix work END TO END, and it is invisible without this test.
+
+    `verify_bundle_set` tells K legitimate file-shard siblings apart from a retry-that-did-not-
+    replace by grouping receipts on `(source, domain, split, file_shard)`. That only works if the
+    PRODUCER writes its part into the receipt. If `run_bundle` omits it, every sibling declares the
+    default `(0, 1)`, all K collapse onto one grouping key, and verify reports K duplicate retries
+    — after the build has already spent its full wall clock.
+
+    So this asserts the receipt's part is the part the BUNDLE was built for, recomputed from the
+    bundle rather than restated as a literal. Two agents' surfaces meet on this line: `Bundle`
+    carries `(index, of)` as one tuple, `Receipt` carries them flat.
+    """
+    from edullm_data.corpus_receipt import Receipt
+
+    spec = _spec(key="stackv2-edu", source_label="stackv2-edu",
+                 target_tokens=SHARD_TOKENS * 6, pool_tokens=SHARD_TOKENS * 600)
+    plan = B.plan_document([spec], file_shards={"stackv2-edu": 3})
+    parts = [b for b in B.bundles_of(plan) if b.split == "train"]
+    assert len(parts) == 3, "fixture must actually be file-sharded"
+
+    seen = []
+    for part in parts:
+        s3 = FakeS3()
+        _run(part, plan, spec, s3)
+        key = next(k for (b, k) in s3._store if "_receipts" in k)
+        got = Receipt.from_dict(json.loads(s3._store[(BUCKET, key)].decode()))
+        # Recomputed from the bundle, not typed as a constant.
+        assert (got.file_shard, got.file_shards) == part.file_shard, (
+            f"{part.bundle_id}: receipt declares ({got.file_shard}, {got.file_shards}) but the "
+            f"bundle is part {part.file_shard} — verify would group these siblings as retries"
+        )
+        seen.append(got.file_shard)
+
+    # The union is what verify needs: every index present exactly once, so the family is complete
+    # and no two siblings collide on the grouping key.
+    assert sorted(seen) == [0, 1, 2]

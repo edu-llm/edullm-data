@@ -1224,6 +1224,14 @@ def run_bundle(
         digests=digests,
         bundle_id=bundle.bundle_id,
         wheel_version=wheel_version,
+        # WITHOUT THESE TWO, E15 IS NOT FIXED END-TO-END. `verify_bundle_set` distinguishes K
+        # legitimate file-shard siblings from a retry-that-did-not-replace by grouping on
+        # `(source, domain, split, file_shard)` — so if every sibling's receipt declares the
+        # default `(0, 1)`, all K collapse onto one key and verify reports K duplicate retries.
+        # The build would then run its full ~11 h and fail its own verification at the end.
+        # `Bundle.file_shard` is the canonical `(index, of)` tuple; `Receipt` takes them flat.
+        file_shard=bundle.file_shard_index,
+        file_shards=bundle.file_shard_count,
         sources=(
             SourcePin(
                 key=spec.key, repo=spec.repo, revision=spec.revision or "", config=spec.config
