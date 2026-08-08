@@ -13,6 +13,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import random
+import warnings
 
 import pytest
 
@@ -1017,9 +1018,16 @@ def test_the_length_filter_still_drops_short_documents_and_reports_them():
     s3 = FakeS3()
     plan = B.plan_document([_spec()])
     bundle = _small(B.bundles_of(plan)[0])
-    info = B.run_bundle(bundle, plan, _spec(), s3=s3, bucket=BUCKET, prefix=PREFIX,
-                        documents=lambda sp, bu: short + long, tokenizer=WordTok(),
-                        eos_id=100257, vocab_size=100278, wheel_version="0.6.3")
+    # This fixture is 200 three-token documents against 400 long ones and the packer stops early,
+    # so it really does drop 64.6% — the attrition guard is CORRECT to fire on it. Caught rather
+    # than left as log noise: an expected warning that is merely tolerated is one nobody notices
+    # turning into an unexpected one.
+    from edullm_data.corpus_read import AttritionWarning
+
+    with pytest.warns(AttritionWarning, match="over the 40% threshold"):
+        info = B.run_bundle(bundle, plan, _spec(), s3=s3, bucket=BUCKET, prefix=PREFIX,
+                            documents=lambda sp, bu: short + long, tokenizer=WordTok(),
+                            eos_id=100257, vocab_size=100278, wheel_version="0.6.3")
     ln = info["length"]
     assert ln["min_tokens"] == plan["min_doc_tokens"]
     assert ln["dropped_short"] > 150, f"3-token documents must be dropped: {ln}"
@@ -1027,6 +1035,10 @@ def test_the_length_filter_still_drops_short_documents_and_reports_them():
     assert ln["mean_kept_tokens"] >= plan["min_doc_tokens"]
     # The two stats blocks have DIFFERENT denominators and must not be conflated.
     assert ln["seen"] <= info["filter"]["kept"]
+    # The guard's verdict agrees with the counters it was computed from, on a fixture written
+    # years-of-context ago for a different purpose — the cross-check that the wiring reads the
+    # right stats object of the two named `FilterStats`.
+    assert info["attrition"] and f"dropped {ln['dropped_short']}/{ln['seen']}" in info["attrition"][0]
 
 
 def test_an_empty_document_is_dropped_without_being_encoded():
@@ -1609,3 +1621,261 @@ def test_the_keep_block_is_absent_not_zeroed_when_no_keep_list_is_used():
     doc = json.loads(s3.get(BUCKET, info["receipt_key"]))
     assert "keep" not in doc, "no keep-list means no keep key at all"
     assert "filter" in doc, "the filter block is written regardless"
+
+
+# --------------------------------------------------------------------------------------
+# The attrition guard — `corpus_read.FilterStats.problems()` wired into the build path
+#
+# Until this, `problems()` had ZERO callers in `src/` and five in `tests/`: a guard exercised only
+# by its own tests, the same shape as the `families/` bug (CLAUDE.md gotcha 2) — a check that passes
+# in a checkout and protects nothing in production.
+#
+# Every test below RECOMPUTES. The distributions are constructed so the drop rate is a property of
+# the fixture that the test asserts independently, not a constant copied from the implementation.
+# --------------------------------------------------------------------------------------
+
+
+def _lognormal_free_docs(n: int, mean_tokens: float, cv: float, seed: int) -> list[Document]:
+    """`n` documents whose whitespace-token lengths are ~normal(mean_tokens, cv*mean_tokens).
+
+    Normal rather than lognormal because the LEDGER's measurement of `reddit_to_flashcards` is a
+    mean and a CV, and at CV 0.212 the two are indistinguishable for this purpose. Every word is
+    distinct-ish so `_verify_shard`'s `distinct_ids_min` is not the thing that fires.
+    """
+    rng = random.Random(seed)
+    out = []
+    for i in range(n):
+        length = max(1, int(round(rng.gauss(mean_tokens, mean_tokens * cv))))
+        out.append(Document(
+            id=f"d{i}", text=" ".join(f"w{rng.randrange(80000)}" for _ in range(length)),
+            source="tiny",
+        ))
+    return out
+
+
+def _measured_drop_fraction(docs, min_tokens: int) -> float:
+    """The drop rate recomputed from the fixture itself, with no reference to any build code."""
+    short = sum(1 for d in docs if len(d.text.split()) < min_tokens)
+    return short / len(docs)
+
+
+def test_a_source_that_drops_79_percent_fires_the_attrition_guard_with_the_real_numbers():
+    """THE dolma3 QA row, reproduced through the whole driver.
+
+    `reddit_to_flashcards`: mean 54.4 tokens, CV 0.212, 79.6% below the 64-token floor — 40.7% of
+    the QA pool by bytes, and the row the 14B draw was dropped over. Before this wiring `run_bundle`
+    built it, uploaded it, receipted it and returned 0 for it, silently.
+
+    The numbers are recomputed three ways and cross-checked, because a test that only asserted "a
+    string appeared" would be the decoration this change exists to remove: the fixture's own drop
+    rate, the counters the build reported, and the percentage printed inside the message.
+    """
+    from edullm_data.corpus import MIN_MEAN_DOC_TOKENS
+    from edullm_data.corpus_read import AttritionWarning
+
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    docs = _lognormal_free_docs(4000, mean_tokens=54.4, cv=0.212, seed=42)
+
+    # The fixture really has the shape the LEDGER measured — asserted before the build runs, so a
+    # later edit to the generator cannot quietly turn this into a test of a healthy source.
+    assert _measured_drop_fraction(docs, 64) == pytest.approx(0.79, abs=0.03)
+
+    s3 = FakeS3()
+    with pytest.warns(AttritionWarning) as caught:
+        info = B.run_bundle(
+            bundle, plan, _spec(), s3=s3, bucket=BUCKET, prefix=PREFIX,
+            documents=lambda sp, bu: docs, tokenizer=WordTok(), eos_id=100257,
+            vocab_size=100278, wheel_version="0.6.3",
+        )
+
+    L = info["length"]
+    # 1. The build's own counters close, and reproduce the fixture's rate.
+    assert L["seen"] == L["kept"] + L["dropped_short"] + L["dropped_empty"]
+    assert L["dropped_short"] / L["seen"] == pytest.approx(0.79, abs=0.03)
+    assert L["drop_fraction"] == pytest.approx(L["dropped_short"] / L["seen"], abs=0.0001)
+
+    # 2. The guard fired, and the message carries the same numbers rather than a generic string.
+    assert len(info["attrition"]) == 1, info["attrition"]
+    message = info["attrition"][0]
+    assert f"dropped {L['dropped_short']}/{L['seen']} documents" in message
+    assert f"({L['drop_fraction']:.1%})" in message
+    assert "over the 40% threshold" in message
+
+    # 3. The warning carries the bundle id — with 27 array children, an unattributed warning is
+    #    an alarm nobody can act on.
+    assert any(bundle.bundle_id in str(w.message) for w in caught)
+
+    # 4. THE HEART OF IT: the mean guard reports this bundle as SAFE, and the shards are valid.
+    #    Trimming 79% of a distribution centred at 54.4 RAISES the survivors' mean, so the guard
+    #    that looks like it covers this is anti-correlated with it. If the drop-rate clause is ever
+    #    deleted as redundant, this assertion is the record of what is left: nothing.
+    assert L["mean_kept_tokens"] > MIN_MEAN_DOC_TOKENS * 3, (
+        "the mean guard cannot fire on this shape — that is WHY the drop-rate guard is needed"
+    )
+    # 5. And the bundle SUCCEEDED. Warn, not raise: the shards are already in S3 by now.
+    assert info["shards"] > 0 and info["tokens_out"] > 0
+    assert s3.get(BUCKET, info["receipt_key"]), "a warned bundle is still a completed bundle"
+
+
+def test_a_drop_rate_just_under_the_threshold_stays_silent():
+    """The complement, and it is not optional: a guard that always complained would pass the test
+    above while telling an operator nothing. Constructed to straddle the 0.4 boundary, not to sit
+    far from it — a check calibrated to fire at 40% must be tested near 40%."""
+    from edullm_data.corpus_read import AttritionWarning
+
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    # 38% short by construction: 380 documents of 10 tokens, 620 of 300.
+    rng = random.Random(7)
+
+    def _doc(i, words):
+        return Document(id=f"d{i}", text=" ".join(
+            f"w{rng.randrange(80000)}" for _ in range(words)), source="tiny")
+
+    docs = [_doc(i, 10) for i in range(380)] + [_doc(i + 380, 300) for i in range(620)]
+    rng.shuffle(docs)
+    assert _measured_drop_fraction(docs, 64) == pytest.approx(0.38)
+
+    s3 = FakeS3()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        info = B.run_bundle(
+            bundle, plan, _spec(), s3=s3, bucket=BUCKET, prefix=PREFIX,
+            documents=lambda sp, bu: docs, tokenizer=WordTok(), eos_id=100257,
+            vocab_size=100278, wheel_version="0.6.3",
+        )
+
+    assert info["attrition"] == [], "0.38 is under 0.40 — the guard must not fire"
+    assert not [w for w in caught if issubclass(w.category, AttritionWarning)]
+    # The rate really was near the boundary rather than trivially clear of it, so this test would
+    # notice a threshold that drifted to 0.3 as well as one that drifted to 0.5.
+    assert 0.30 < info["length"]["drop_fraction"] < 0.40
+
+
+def test_the_attrition_key_is_an_empty_list_not_a_missing_key_on_a_healthy_bundle():
+    """`[]` means the guard RAN and found nothing; a missing key means nobody consulted it — which
+    is what every caller did before this change. The distinction is the whole point of the wiring,
+    so it is asserted rather than assumed."""
+    s3 = FakeS3()
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    info = _run(bundle, plan, _spec(), s3)
+    assert info["attrition"] == []
+    assert info["length"]["drop_fraction"] == 0.0
+
+
+def test_an_operator_can_make_attrition_fatal_with_no_code_change():
+    """Warn-not-raise is this driver's POLICY, and `problems()` explicitly leaves policy to its
+    caller. A site that disagrees must not have to patch `run_bundle` — the standard `warnings`
+    escalation is the seam, which is why `AttritionWarning` is its own category and not a bare
+    `RuntimeWarning` shared with the TOKENIZERS_PARALLELISM notice."""
+    from edullm_data.corpus_read import AttritionWarning
+
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    docs = _lognormal_free_docs(4000, mean_tokens=54.4, cv=0.212, seed=42)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", AttritionWarning)
+        with pytest.raises(AttritionWarning, match="over the 40% threshold"):
+            B.run_bundle(bundle, plan, _spec(), s3=FakeS3(), bucket=BUCKET, prefix=PREFIX,
+                         documents=lambda sp, bu: docs, tokenizer=WordTok(), eos_id=100257,
+                         vocab_size=100278, wheel_version="0.6.3")
+
+
+def test_cmd_run_prints_the_length_block_and_the_attrition_verdict(monkeypatch, capsys):
+    """`FilterRecord`'s docstring justifies keeping the length filter OUT of the receipt because
+    "it is returned below and printable". That was true of the value and false of the program:
+    `info["length"]` had no reader anywhere in `src/` — `_cmd_run` printed only the dedup block —
+    so on the Batch path the short-doc attrition that killed the dolma3 QA row survived NOWHERE:
+    not the receipt, not stdout, not CloudWatch.
+
+    Driven through the REAL `_cmd_run` with its I/O stubbed, not through a copy of its format
+    strings: a test that re-implemented the print would pass while the shipped function printed
+    nothing, which is precisely the failure being fixed.
+    """
+    import argparse
+
+    plan = B.plan_document([_spec()])
+    info = {
+        "bundle_id": "tiny--train", "receipt_key": "k", "receipt_sha256": "x",
+        "shards": 2, "tokens_out": 32768, "unfilled": 0,
+        "filter": {"seen": 3000, "kept": 3000, "duplicates": 0, "contaminated": 0,
+                   "normalization": "n"},
+        "keep": None,
+        "length": {"min_tokens": 64, "seen": 2200, "kept": 462, "dropped_short": 1738,
+                   "dropped_empty": 0, "kept_tokens": 32381, "mean_kept_tokens": 70.09,
+                   "drop_fraction": 0.79},
+        "attrition": ["dropped 1738/2200 documents (79.0%), over the 40% threshold."],
+    }
+
+    monkeypatch.setattr(B, "_require_batch", lambda **kw: None)
+    monkeypatch.setattr(B, "_assert_tokenizers_parallelism", lambda: None)
+    monkeypatch.setattr(B, "_s3", lambda **kw: FakeS3())
+    monkeypatch.setattr(B, "_load_plan", lambda *a, **kw: plan)
+    monkeypatch.setattr(B, "load_registry", lambda p: ([_spec()], {}))
+    monkeypatch.setattr(B, "load_tokenizer", lambda d: (WordTok(), 100257, 100278))
+    monkeypatch.setattr(B, "bundle_is_done", lambda *a, **kw: False)
+    monkeypatch.setattr(B, "run_bundle", lambda *a, **kw: info)
+
+    args = argparse.Namespace(
+        allow_local=True, bucket=BUCKET, prefix=PREFIX, plan_id=plan["plan_id"],
+        registry=None, shard=0, of=1, tokenizer_dir="/nonexistent",
+        no_decontaminate=True, force=True,
+    )
+    assert B._cmd_run(args) == 0
+
+    out = capsys.readouterr().out
+    # The length block reaches stdout, with the counts AND the rate.
+    assert "short=1,738" in out, out
+    assert "kept=462/2,200" in out, out
+    assert "drop=79.0%" in out, out
+    assert "mean_tok=70.09" in out, out
+    # The attrition verdict is printed on its own greppable line, attributed to a bundle — with 27
+    # array children an unattributed alarm cannot be acted on.
+    assert "ATTRITION tiny--train: dropped 1738/2200 documents (79.0%)" in out, out
+    # And the two denominators stay on separate lines. `filter.seen` counts documents entering
+    # dedup, `length.seen` counts those that survived it; one row carrying both is the
+    # `category_attrition` mistake in miniature.
+    done_line = next(ln for ln in out.splitlines() if ln.startswith("DONE "))
+    assert "3,000" in done_line and "2,200" not in done_line
+
+
+def test_cmd_run_prints_no_attrition_line_for_a_healthy_bundle(monkeypatch, capsys):
+    """The complement: a driver that printed ATTRITION unconditionally would make the line
+    worthless in a 27-child log."""
+    import argparse
+
+    plan = B.plan_document([_spec()])
+    info = {
+        "bundle_id": "tiny--train", "receipt_key": "k", "receipt_sha256": "x",
+        "shards": 2, "tokens_out": 32768, "unfilled": 0,
+        "filter": {"seen": 400, "kept": 400, "duplicates": 0, "contaminated": 0,
+                   "normalization": "n"},
+        "keep": None,
+        "length": {"min_tokens": 64, "seen": 400, "kept": 400, "dropped_short": 0,
+                   "dropped_empty": 0, "kept_tokens": 120000, "mean_kept_tokens": 300.0,
+                   "drop_fraction": 0.0},
+        "attrition": [],
+    }
+    monkeypatch.setattr(B, "_require_batch", lambda **kw: None)
+    monkeypatch.setattr(B, "_assert_tokenizers_parallelism", lambda: None)
+    monkeypatch.setattr(B, "_s3", lambda **kw: FakeS3())
+    monkeypatch.setattr(B, "_load_plan", lambda *a, **kw: plan)
+    monkeypatch.setattr(B, "load_registry", lambda p: ([_spec()], {}))
+    monkeypatch.setattr(B, "load_tokenizer", lambda d: (WordTok(), 100257, 100278))
+    monkeypatch.setattr(B, "bundle_is_done", lambda *a, **kw: False)
+    monkeypatch.setattr(B, "run_bundle", lambda *a, **kw: info)
+
+    args = argparse.Namespace(
+        allow_local=True, bucket=BUCKET, prefix=PREFIX, plan_id=plan["plan_id"],
+        registry=None, shard=0, of=1, tokenizer_dir="/nonexistent",
+        no_decontaminate=True, force=True,
+    )
+    assert B._cmd_run(args) == 0
+    out = capsys.readouterr().out
+    assert "ATTRITION" not in out
+    # The length line is UNCONDITIONAL, though — a healthy bundle's attrition rate is a number the
+    # pool arithmetic wants too, not only a failing one's.
+    assert "drop=0.0%" in out and "short=0" in out

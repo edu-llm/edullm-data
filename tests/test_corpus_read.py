@@ -958,6 +958,61 @@ def test_a_zero_floor_is_refused():
         list(filter_documents(_docs([10]), _words, min_tokens=0))
 
 
+def test_the_counters_close_and_a_broken_closure_invalidates_the_rate():
+    """`seen == kept + dropped_short + dropped_empty` USED to hold by construction — one three-way
+    branch in `filter_documents`. It no longer does: the length filter moved into
+    `corpus_pack.tokenize_documents`, where `seen` is incremented in one place and the outcomes in
+    three others, across a batched loop the consumer can abandon mid-batch. That arrangement has
+    already miscounted once for real (`corpus_pack.py:383-388`: 596 against 308). So the closure is
+    now MAINTAINED rather than guaranteed, and `problems()` recomputes it FIRST — a drop rate
+    computed from counters that do not close is not a rate of anything."""
+    stats = FilterStats()
+    list(filter_documents(_docs([10, 100, 100]), _words, stats=stats))
+    assert stats.seen == stats.accounted == 3
+    assert stats.problems() == []
+
+    # A counter that drifted the way the measured miscount drifted: `seen` over-counted.
+    stats.seen += 288
+    problems = stats.problems()
+    assert problems, "an unbalanced FilterStats must not pass silently"
+    assert "the counters do not close" in problems[0]
+    assert "+288 unaccounted" in problems[0], problems[0]
+    assert problems[0].startswith("the counters do not close"), (
+        "the closure complaint must come FIRST — every other number is read off these fields"
+    )
+
+
+def test_the_mean_guard_is_anti_correlated_with_heavy_short_doc_attrition():
+    """The reason `drop_fraction` cannot be dropped as redundant, proved on the distribution that
+    killed the 14B dolma3 QA row.
+
+    `reddit_to_flashcards` MEASURED at mean 54.4 tokens / CV 0.212 (LEDGER, 720 docs/dir, seed 42).
+    Trimming everything under a 64-token floor deletes ~79% of it — and RAISES the survivors' mean
+    far above the 20-token floor the mean clause tests. **The harder the source fails, the safer
+    that clause reports it.** Only the drop-rate clause sees this shape."""
+    import random as _random
+
+    from edullm_data.corpus import MIN_MEAN_DOC_TOKENS
+
+    rng = _random.Random(42)
+    lengths = [max(1, int(round(rng.gauss(54.4, 54.4 * 0.212)))) for _ in range(2000)]
+    stats = FilterStats()
+    list(filter_documents(_docs(lengths), _words, min_tokens=64, stats=stats))
+
+    assert stats.drop_fraction > 0.75, "the fixture must really be the failing shape"
+    # The guard that LOOKS like it covers this reports a 3.5x margin.
+    assert stats.mean_kept_tokens > MIN_MEAN_DOC_TOKENS * 3
+    assert stats.predicted_eos_fraction < 1.0 / MIN_MEAN_DOC_TOKENS
+
+    problems = stats.problems()
+    assert len(problems) == 1, problems
+    assert "over the 40% threshold" in problems[0]
+    assert "floor" not in problems[0], (
+        "the mean clause must be SILENT here — if it ever fires on this fixture the two clauses "
+        "have stopped being independent and this test is no longer proving anything"
+    )
+
+
 def test_a_custom_floor_is_honoured_and_recorded():
     """§3.3's measured recommendation is a >=50-token minimum, and it warns against going above
     ~200: at >=200 `table` loses 23% of its tokens because a markdown table IS legitimately a
