@@ -97,6 +97,24 @@ class S3(Protocol):
         into landing; payload bytes above laptop scale should originate in S3, not here."""
         ...
 
+    def put_bytes_verified(
+        self,
+        bucket: str,
+        key: str,
+        body: bytes,
+        *,
+        content_type: str | None = None,
+    ) -> str:
+        """Write ``body`` and make S3 PROVE it received those bytes. Returns the sha256 hex.
+
+        The golden rule applied to a write of an in-memory payload: the implementation computes
+        the digest from ``body`` itself, declares it as ``ChecksumSHA256``, and S3 recomputes it
+        server-side, so a corrupted body is rejected with ``BadDigest`` and never becomes an
+        object. Implementations MUST refuse a body at or over the 5 GiB single-PUT limit rather
+        than degrading to an unverified :meth:`put`.
+        """
+        ...
+
     def put_stream(
         self,
         bucket: str,
@@ -349,6 +367,71 @@ class Boto3S3:
             raise S3Error(f"verified upload of {key} failed: {e}") from e
         return h.hexdigest()
 
+    def put_bytes_verified(
+        self,
+        bucket: str,
+        key: str,
+        body: bytes,
+        *,
+        content_type: str | None = None,
+    ) -> str:
+        """:meth:`put_file_verified` for a payload already in memory. Returns the sha256 hex.
+
+        **Why this exists rather than a call to `put_file_verified`.** That method takes a local
+        path, and the one caller that needs this — `corpus_build.run_bundle`'s pack sink — holds a
+        ~100 MB shard as `bytes` that `corpus_pack` deliberately never spills to disk. Routing it
+        through a temporary file to reach a verified upload would add a full write and read of every
+        shard to buy a checksum, i.e. ~4 TB of local I/O across a 1.0T build, to avoid five lines.
+
+        **Why not `put(..., checksum_sha256=...)`.** A caller-supplied digest can describe bytes
+        other than the ones being sent, which is precisely the decoration the golden rule forbids:
+        it would read as verification and prove nothing. This computes the digest from the same
+        `body` object it hands to `put_object`, so the two cannot disagree.
+
+        **Single-part, and the reasoning is `put_file_verified`'s verbatim** — with one difference
+        worth stating because it is the opposite of the trap there. `put_object` has no multipart
+        path at all (boto3's 8 MiB `multipart_threshold` belongs to `upload_file`), so
+        `ChecksumSHA256` here is always a `FULL_OBJECT` digest and can never silently become a
+        composite of per-part digests. The 5 GiB guard is therefore about the hard single-PUT limit
+        rather than about checksum semantics — but it still **raises** instead of falling back to an
+        unverified `put`, because a caller who oversteps it wants to know, not to be quietly
+        downgraded to the write path this method exists to replace.
+
+        **The live evidence is `put_file_verified`'s, and it is the same API call.** 2026-08-01,
+        against real S3: a correct digest returned 200 with `ChecksumType: FULL_OBJECT`; a
+        deliberately corrupted one returned `BadDigest` — *"The SHA256 you specified did not match
+        the calculated checksum"* — and no object was created. The request this method issues
+        differs from that one only in whether `Body` is a file object or a `bytes`; boto3 sends the
+        same header either way. ⚠️ That is an argument by identity of the API call, NOT a second
+        live measurement. **The bytes-shaped path must have its own deliberate-corruption assertion
+        in the Phase 2 smoke test** before anything downstream is retired on the strength of it.
+        """
+        if not isinstance(body, (bytes, bytearray, memoryview)):
+            raise TypeError(f"put_bytes_verified body must be bytes-like, got {type(body).__name__}")
+        body = bytes(body)
+        if len(body) >= _MULTIPART_COPY_THRESHOLD:
+            raise S3Error(
+                f"{key} is {len(body)} bytes, at or over the {_MULTIPART_COPY_THRESHOLD}-byte "
+                f"single-PUT limit, so it cannot be uploaded with a whole-object ChecksumSHA256. "
+                f"Refusing rather than falling back to an unverified put(): the caller asked for a "
+                f"server-verified write and would otherwise get an unverified one that returns 200."
+            )
+        digest = hashlib.sha256(body).digest()
+        kwargs: dict = {
+            "Bucket": bucket,
+            "Key": key,
+            "Body": body,
+            "ChecksumAlgorithm": "SHA256",
+            "ChecksumSHA256": base64.b64encode(digest).decode("ascii"),
+        }
+        if content_type:
+            kwargs["ContentType"] = content_type
+        try:
+            self._c.put_object(**kwargs)
+        except Exception as e:  # noqa: BLE001
+            raise S3Error(f"verified upload of {key} failed: {e}") from e
+        return digest.hex()
+
     def put_stream(
         self,
         bucket: str,
@@ -532,6 +615,11 @@ class FakeS3:
         # Optional per-key overrides so a test can simulate a HEAD/actual-size mismatch
         # or a missing server checksum without corrupting the stored body.
         self._head_overrides: dict[tuple[str, str], dict] = {}
+        # The ``ChecksumSHA256`` each write DECLARED, if any. Kept apart from ``head``'s
+        # content-derived stand-in on purpose: `crc64nvme` there is recomputed from whatever bytes
+        # are stored and so can never disagree with them, which makes it useless for the question
+        # this records — did the caller ask S3 to verify, or did it just PUT and trust a 200?
+        self._declared_checksums: dict[tuple[str, str], str] = {}
 
     # -- test helpers (not part of the S3 protocol) --
     def seed(self, bucket: str, key: str, body: bytes) -> None:
@@ -641,6 +729,72 @@ class FakeS3:
             body = fh.read()
         self._store[(bucket, key)] = body
         return hashlib.sha256(body).hexdigest()
+
+    def put_bytes_verified(
+        self,
+        bucket: str,
+        key: str,
+        body: bytes,
+        *,
+        content_type: str | None = None,
+    ) -> str:
+        """Mirror the real client, INCLUDING its size refusal and S3's server-side recompute.
+
+        The size refusal is here for :meth:`put_file_verified`'s reason: a fake that accepts an
+        upload the real client rejects makes the guard untestable.
+
+        The **recompute** is here for a stronger reason. This method's entire value is that S3
+        re-derives the digest from the bytes it received and rejects a mismatch — a fake that just
+        stored the body would model an unverified `put` wearing a checksum's name, and every test
+        written against it would pass whether or not the header was ever sent. So the declared
+        digest goes through :meth:`_accept_verified_put`, which recomputes and raises. That method
+        is also the seam a test uses to declare a deliberately WRONG digest and observe the
+        rejection, which is the only way to prove the check is not decoration.
+        """
+        if not isinstance(body, (bytes, bytearray, memoryview)):
+            raise TypeError(f"put_bytes_verified body must be bytes-like, got {type(body).__name__}")
+        body = bytes(body)
+        if len(body) >= _MULTIPART_COPY_THRESHOLD:
+            raise S3Error(
+                f"{key} is {len(body)} bytes, at or over the {_MULTIPART_COPY_THRESHOLD}-byte "
+                f"single-PUT limit, so it cannot be uploaded with a whole-object ChecksumSHA256"
+            )
+        declared = base64.b64encode(hashlib.sha256(body).digest()).decode("ascii")
+        self._accept_verified_put(bucket, key, body, declared, content_type=content_type)
+        return hashlib.sha256(body).hexdigest()
+
+    def _accept_verified_put(
+        self,
+        bucket: str,
+        key: str,
+        body: bytes,
+        declared_sha256_b64: str,
+        *,
+        content_type: str | None = None,
+    ) -> None:
+        """S3's server side of a checksum-declaring PUT: recompute, compare, store or refuse.
+
+        Models the behaviour verified live on 2026-08-01 (`Boto3S3.put_file_verified`): a mismatch
+        returns ``BadDigest`` and **no object is created**, so the store is left untouched.
+        """
+        actual = base64.b64encode(hashlib.sha256(body).digest()).decode("ascii")
+        if declared_sha256_b64 != actual:
+            raise S3Error(
+                f"BadDigest: the SHA256 you specified for s3://{bucket}/{key} did not match the "
+                f"calculated checksum (declared {declared_sha256_b64}, calculated {actual}); no "
+                f"object was created"
+            )
+        self._declared_checksums[(bucket, key)] = declared_sha256_b64
+        self._store[(bucket, key)] = body
+
+    def declared_checksum(self, bucket: str, key: str) -> str | None:
+        """Test helper (not part of the S3 protocol): the ``ChecksumSHA256`` a write declared.
+
+        ``None`` for an object written by plain :meth:`put`, which declares nothing — so a test can
+        tell "uploaded with a server-verified checksum" from "uploaded and hoped", a distinction
+        the stored bytes are identical across.
+        """
+        return self._declared_checksums.get((bucket, key))
 
     def put_stream(
         self,
