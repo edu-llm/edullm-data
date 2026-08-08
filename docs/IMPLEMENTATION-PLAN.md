@@ -731,8 +731,9 @@ not merely the vocabulary it used.
 
 ## 8. Validation and publish topology
 
-### 8.1 Gate A costs 6 network round trips per object, and 5 of them are serial
+### 8.1 Gate A costs 8 network round trips per object, and 7 of them are serial
 
+The table below accounts for six of the eight; see the correction under it for the other two.
 MEASURED-IN-CODE, per manifest entry:
 
 | check | call | threaded? |
@@ -762,13 +763,16 @@ directly, so **those numbers are unaffected**; only the per-call attribution cha
 | objects | round trips | serial | with 16 head workers |
 |---|---|---|---|
 | 10,049 (**measured**) | 60,294 | **85 min** | ~71 min |
-| 20,000 (report's shard size) | 120,000 | **2.82 h** | ~2.35 h |
-| 40,000 (**code's shard size**) | 240,000 | **5.63 h** | ~4.7 h |
+| 20,000 (report's shard size) | 160,000 | **2.82 h** | ~2.47 h |
+| 40,000 (**code's shard size**) | 320,000 | **5.63 h** | ~4.93 h |
+
+Round trips are `objects × 8`; the wall-clock column is scaled from the **measured 507.5 ms/object**,
+so it is independent of the call count and unaffected by the §8.1 correction.
 
 **`--head-workers` alone barely helps, and the reason is Amdahl's law:** it threads exactly one of
-six calls, so even at infinite head workers the five serial calls still cost 83% of the original
-time. The CLI help is accurate but narrowly scoped — it describes *the decision loop*, while five of
-the six calls live in the profile checks that run afterwards.
+**eight** calls, so even at infinite head workers the seven serial calls still cost **87.5%** of the
+original time. The CLI help is accurate but narrowly scoped — it describes *the decision loop*, while
+seven of the eight calls live in the profile checks that run afterwards.
 
 **⚠️ The "1-hour validate cap" is UNVERIFIED and should not be planned against as fact.** What the
 repo actually records: `edullm-validator:7` was registered at `attemptDurationSeconds = 7200` (2 h),
@@ -791,8 +795,10 @@ both phases, so 20,000 objects at 16 workers is ~10–15 min.
    the size sweep; `profiles/pretrain_tokens_v1.py` has **zero** threading. At 16 workers, 40,000
    objects drops from 5.63 h to roughly **21 minutes**. This is task #10, and it is the right fix.
 3. **Drop the redundant HEAD.** The npy sniff and the decode windows both need the object size, and a
-   ranged GET already returns it in `Content-Range` — so the cached HEAD can go, taking 6 calls to 5.
-   Smaller win, but it is pure subtraction.
+   ranged GET already returns it in `Content-Range` — so the cached HEAD can go, taking 8 calls to 7.
+   Smaller win, but it is pure subtraction. **Already partly done and measured:** a call-counting spy
+   recorded **80,392 round trips before the HEAD-cache fix and 70,343 after (−12%)**, which is where
+   the 8-calls-per-object figure comes from.
 
 **Once this is fixed, shard size stops being forced by the validator** and can be chosen on mixture
 error and OLMo-core's read pattern — which is the correct basis. Note mixture error at the code's
