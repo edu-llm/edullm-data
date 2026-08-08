@@ -325,6 +325,12 @@ def _fan_out(ctx: GroupContext, jobs: list, fn) -> dict:
     """
     from concurrent.futures import ThreadPoolExecutor
 
+    # De-duplicated, order preserved. A manifest may list the same object twice, and a duplicated
+    # path must not cost two reads just because the fan-out did not look — the same guarantee
+    # ``validate._prefetch_heads`` gives for HEADs, and one Gate A relies on: `duplicate-shard-digest`
+    # exists precisely because duplicated entries occur in real manifests.
+    jobs = list(dict.fromkeys(jobs))
+
     def one(job):
         try:
             return fn(job)

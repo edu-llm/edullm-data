@@ -181,6 +181,35 @@ def test_threading_does_not_change_the_round_trip_COUNT_only_who_waits():
     )
 
 
+def test_a_duplicated_manifest_entry_never_costs_MORE_under_concurrency():
+    """Real manifests DO list the same object twice — `duplicate-shard-digest` exists because of
+    it. A fan-out that does not de-duplicate turns each duplicate into a second set of round trips,
+    silently spending the very latency it was added to save.
+
+    ⚠️ Written expecting parity with the serial path and CORRECTED by the measurement: the SERIAL
+    path re-reads a duplicate's decode windows (4 entries x 5 calls = 20), because only the size
+    HEAD was ever cached and the payload windows were not. So the honest claim is not equality but
+    a bound — threading must never cost MORE — plus the specific fact that the batch map absorbs
+    the duplicate for free, since it is keyed by (key, offset) and a duplicate derives identical
+    offsets.
+
+    Caching payload windows for the serial path too would close the remaining 5 calls, and is
+    deliberately NOT done here: a manifest-lifetime payload cache is the 2.6 GB memory hazard the
+    batching exists to avoid, for a saving that only appears on duplicated entries.
+    """
+    counts = {}
+    for workers in (1, 8):
+        ctx = _spy_ctx(n=3, check_workers=workers)
+        ctx.manifest["entries"].append(dict(ctx.manifest["entries"][0]))  # the same object twice
+        assert _run_all_checks(ctx) == []
+        assert ctx.s3.heads == 3, (workers, ctx.s3.heads)  # the size cache already handled HEADs
+        counts[workers] = ctx.s3.ranges
+
+    assert counts[8] <= counts[1], f"threading made a duplicate MORE expensive: {counts}"
+    # 3 distinct objects x (4 decode windows + 1 npy sniff); the 4th, duplicate entry is free.
+    assert counts[8] == 3 * 5, counts
+
+
 def test_the_violation_LIST_is_element_for_element_identical_at_every_worker_count():
     """A threading change that alters results is a correctness bug, not a speedup.
 
