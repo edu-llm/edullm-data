@@ -45,10 +45,14 @@ Publishing a replacement corpus is the open work. See `HANDOFF.md`.
 
 ## Install
 
-Public repo — the `git+https` install needs no auth. Pin a tag so the publisher and validator agree:
+Public repo — the `git+https` install needs no auth. Pin an exact rev so the publisher and validator
+agree. **This is a commit, not a tag, deliberately:** the newest tag is `v0.2.0`, which predates
+schema v2 and carries neither `labels=` nor `build_mixture()` (both landed 2026-07-30), and it also
+omits the `families/` wheel packaging that keeps Gate A on the family's declared bounds. `0.5.0` is
+what `pyproject.toml` declares and no `v0.5.0` tag exists yet; once one is cut, move this pin to it.
 
 ```bash
-uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.2.0"
+uv add "edullm-data @ git+https://github.com/edu-llm/edullm-data@38bf831a6c3f445e394784018441fd59288b876c"
 ```
 
 For local development, editable install with test extras:

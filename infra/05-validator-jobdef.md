@@ -13,8 +13,10 @@ needing something this workstation does not have:
 
 1. **Bake it into an image** (`infra/Dockerfile.validator`) and push to ECR. Needs Docker
    (not installed here) and `ecr:PutImage` (untested).
-2. **`pip install "edullm-data @ git+https://github.com/edu-llm/edullm-data@v0.2.0"`** at
-   container start (the repo is public, so no auth needed).
+2. **`pip install "edullm-data @ git+https://github.com/edu-llm/edullm-data@38bf831a6c3f445e394784018441fd59288b876c"`**
+   at container start (the repo is public, so no auth needed). An exact commit, not a tag: `v0.2.0`
+   omits the `families/` wheel packaging, so a validator installed from it silently falls back to
+   the profile's laxer decode bounds. No `v0.5.0` tag exists yet.
 
 The wheel itself builds cleanly (`python -m pip wheel . --no-deps` →
 `edullm_data-0.2.0-py3-none-any.whl`, ~115 KB), so nothing about the package blocks this.
