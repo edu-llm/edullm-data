@@ -68,6 +68,7 @@ __all__ = [
     "GZIP_WBITS",
     "JSONL_CHUNK_BYTES",
     "LIST_MARKER_SEGMENTS",
+    "AttritionWarning",
     "FilterStats",
     "ReadError",
     "filter_documents",
@@ -75,6 +76,23 @@ __all__ = [
     "read_jsonl_gz_documents",
     "read_parquet_documents",
 ]
+
+
+class AttritionWarning(UserWarning):
+    """A source delivered far fewer documents than the pool arithmetic assumed.
+
+    Its own category rather than a bare ``RuntimeWarning`` for two reasons, both practical.
+    ``corpus_pack._warn_if_parallelism_unset`` already emits a ``RuntimeWarning`` on this path, so a
+    test asserting on the generic class would pass for the wrong reason; and an operator who wants
+    to turn attrition into a hard stop can do it with one ``-W error::…AttritionWarning`` rather
+    than a code change, which is the right shape for a POLICY that :meth:`FilterStats.problems`
+    deliberately leaves to its caller.
+
+    ``UserWarning``, not ``RuntimeWarning``: nothing is malfunctioning. The shards this bundle wrote
+    passed every check ``corpus_pack._verify_shard`` makes. What is wrong is a NUMBER IN THE PLAN —
+    §2.1/§3.2 budgeted tokens this source will not deliver — and that is a message to a human, which
+    is what ``UserWarning`` means.
+    """
 
 
 class ReadError(BuildError):
@@ -818,6 +836,21 @@ class FilterStats:
         return self.dropped_short + self.dropped_empty
 
     @property
+    def accounted(self) -> int:
+        """``kept + dropped_short + dropped_empty`` — what :attr:`seen` must equal.
+
+        Named, rather than left implicit, because these counters are no longer maintained by
+        :func:`filter_documents`'s single three-way branch. The length filter moved into
+        ``corpus_pack.tokenize_documents`` (measured: the separate pass was ~91% of the build's
+        compute on 1 of 32 cores), where ``seen`` is incremented in one place and the three
+        outcomes in three others, across a batched loop the consumer can abandon mid-batch. That
+        arrangement has ALREADY produced a miscount once — ``corpus_pack.py:383-388`` records
+        596 against 308 when ``seen`` was counted per batch instead of per document. A closure
+        that used to hold by construction now holds by maintenance, so it is worth recomputing.
+        """
+        return self.kept + self.dropped_short + self.dropped_empty
+
+    @property
     def drop_fraction(self) -> float:
         return (self.dropped / self.seen) if self.seen else 0.0
 
@@ -843,8 +876,27 @@ class FilterStats:
         useful output is "which of these is wrong", not the first exception. The caller decides
         whether a 40% drop is acceptable for a given source; this only refuses to let it pass
         unmentioned.
+
+        ⚠️ **Read :attr:`mean_kept_tokens`'s clause below knowing it is ANTI-CORRELATED with the
+        failure it looks like it guards, and that :attr:`drop_fraction`'s clause is the only one
+        that catches that shape.** MEASURED 2026-08-08 on the `reddit_to_flashcards` distribution
+        (mean 54.4 tokens, CV 0.212) at the default ``min_tokens=64``: **79.0%** of documents are
+        dropped, and the survivors' mean is **70.09** tokens — **3.5x CLEAR** of the 20-token floor.
+        Trimming the bottom of a distribution RAISES the mean of what is left, so the harder a
+        source fails this way, the safer the mean clause reports it. Only the drop-rate clause
+        fires (0.790 against 0.4). Deleting the drop-rate clause as redundant would leave nothing.
         """
         out: list[str] = []
+        # First, because every count below is read off these fields and a broken closure makes all
+        # of them meaningless. `accounted`'s docstring has the measured miscount this catches.
+        if self.seen != self.accounted:
+            out.append(
+                f"the counters do not close: seen {self.seen} but {self.kept} kept + "
+                f"{self.dropped_short} short + {self.dropped_empty} empty = {self.accounted} "
+                f"({self.seen - self.accounted:+d} unaccounted). Every document is kept, dropped "
+                f"short, or dropped empty; there is no fourth channel, so the drop rate below is "
+                f"not a rate of anything and must not be read as one."
+            )
         if self.seen and not self.kept:
             out.append(
                 f"every one of {self.seen} documents was dropped. If the drop reason is "

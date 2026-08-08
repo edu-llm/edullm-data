@@ -69,6 +69,7 @@ import json
 import os
 import sys
 import time
+import warnings
 from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 
 from .corpus import (
@@ -689,6 +690,15 @@ def run_bundle(
     ⚠️ **What splitting bundles does NOT fix, so the win is not double-counted.** §8A.3: splitting a
     bundle relieves the OOM; the flat pre-pass is what actually fixes dedup. Splitting only stops it
     crashing. This parameter is the dedup half.
+
+    ATTRITION — this function WARNS, it does not fail
+    -------------------------------------------------
+    Returns ``attrition``: ``corpus_read.FilterStats.problems()``'s list of strings, also emitted as
+    :class:`~.corpus_read.AttritionWarning` and printed by ``_cmd_run``. **A non-empty list does not
+    fail the bundle**, and the long comment at the call site gives the three reasons — chiefly that
+    by the time these counters are final the shards are already in S3, so refusing here would pay a
+    bundle's full cost and then discard it. An operator who wants it fatal needs no code change:
+    ``python -W error::edullm_data.corpus_read.AttritionWarning -m edullm_data.corpus_build run …``.
     """
     from .corpus_filter import FilterStats, dedup_and_decontaminate
     from .corpus_pack import pack, tokenize_documents
@@ -760,6 +770,7 @@ def run_bundle(
     # receipt reports. Letting the length filter decrement its `kept` would break that identity
     # silently. `corpus_read.FilterStats` is the one with `dropped_short`/`dropped_tokens` and the
     # `mean_kept_tokens` that predicts the EOS fraction, so the length pass reports into its own.
+    from .corpus_read import AttritionWarning
     from .corpus_read import FilterStats as LengthStats
 
     length_stats = LengthStats(min_tokens=plan["min_doc_tokens"])
@@ -778,6 +789,60 @@ def run_bundle(
     if not results:
         raise BuildDriverError(f"{bundle.bundle_id}: pack returned no result")
     result = results[0]
+
+    # THE ATTRITION GUARD — `corpus_read.FilterStats.problems()`, which until now had ZERO callers
+    # in `src/` and was exercised only by its own tests (`grep -rn "problems()" src/` -> 0).
+    #
+    # WHAT IT CATCHES THAT NOTHING ELSE DOES, MEASURED
+    # ------------------------------------------------
+    # Reproduced here on 2026-08-08 through this function on `FakeS3`, using the LEDGER's
+    # `reddit_to_flashcards` distribution (mean 54.4 tokens, CV 0.212, the row that killed the 14B
+    # dolma3 QA draw), 4,000 documents, seed 42, `min_doc_tokens=64`:
+    #
+    #     length.seen 2,200   kept 462   dropped_short 1,738   drop_fraction 0.790
+    #     length.mean_kept_tokens 70.09          MIN_MEAN_DOC_TOKENS 20
+    #     run_bundle verdict: SUCCEEDED — 2 shards, 32,768 tokens, unfilled 0, receipt written
+    #
+    # A bundle that discarded 79% of its source published clean and silent. The three checks that
+    # look like they cover this each miss it for a different structural reason:
+    #
+    #   * `_verify_shard`'s EOS bound passes, correctly — the SHARDS are fine. 1/70.09 = 0.0143
+    #     against a 0.05 family maximum, a 3.5x margin. Nothing is wrong with the bytes.
+    #   * `problems()`'s own mean clause reports the bundle as 3.5x SAFE. Trimming the bottom of a
+    #     distribution RAISES the surviving mean, so that clause is ANTI-CORRELATED with this
+    #     defect: the harder the source fails, the healthier it reads.
+    #   * `receipt-empty-bundle` fires only at 100% loss, and names the symptom (no shards) rather
+    #     than the cause. At 79% there are shards, so it stays quiet.
+    #
+    # WARN, NOT RAISE, AND THE REASON IS THIS FUNCTION'S OWN HISTORY
+    # --------------------------------------------------------------
+    # `problems()`'s docstring reserves the policy for the caller ("the caller decides whether a 40%
+    # drop is acceptable"), so this is a decision made here, deliberately:
+    #
+    #   1. **It cannot be a gate at this point in the function because the work is already paid
+    #      for.** Read, tokenize, pack and upload have all completed; the shards are IN S3 by the
+    #      time these counters are final (the upload happens inside `pack`'s sink). Raising here
+    #      would burn a bundle's entire billable cost and then refuse it — the exact shape of the
+    #      `_drain_surplus` bug that failed 25 of 27 bundles at end-of-run, and of the `unused > 0`
+    #      check `_check_keep_accounting` had to remove for the same reason. Twice is a pattern.
+    #   2. **A raise here would also leave the uploaded shards orphaned** — written, not receipted,
+    #      so `bundle_is_done` reports the bundle unbuilt and the next run rewrites the same keys.
+    #   3. **40% attrition is not necessarily wrong**, which `problems()` says in its own message:
+    #      §3.3 EXPECTS 3.4-12.6% on FinePhrase, and a stricter floor legitimately costs more. The
+    #      condition means "a human must look at the pool arithmetic", not "these bytes are bad".
+    #
+    # So: recorded in the return value, emitted as a warning an operator can escalate to a hard
+    # error with `-W error::AttritionWarning` and no code change, and — the part that actually
+    # matters on Batch — PRINTED to stdout by `_cmd_run`, because `warnings` output goes to stderr
+    # and interleaves unpredictably with a 27-child array job's logs.
+    #
+    # ⚠️ THE PLACE THIS *SHOULD* GATE IS THE PRE-FLIGHT, NOT HERE. A sampled per-source mean is a
+    # PREDICTION; this is the only runtime check that the real distribution matches it. Making it
+    # cheap requires failing on a sample before the read, which is a plan-stage change and is not
+    # this one. Recorded so "we warn" is not mistaken for "we are covered".
+    attrition = length_stats.problems()
+    for problem in attrition:
+        warnings.warn(f"{bundle.bundle_id}: {problem}", AttritionWarning, stacklevel=2)
 
     # The determinism property, checked rather than asserted in prose. A keep-list that CHANGED
     # while this bundle ran would mean the filter is a shared mutable structure after all, and the
@@ -862,7 +927,17 @@ def run_bundle(
             "dropped_empty": length_stats.dropped_empty,
             "kept_tokens": length_stats.kept_tokens,
             "mean_kept_tokens": round(length_stats.mean_kept_tokens, 2),
+            # The rate, alongside the counts it is computed from — the one place a ratio is safe,
+            # because its denominator is the field directly above it. `FilterStats`'s "counts,
+            # never a ratio" rule guards against a numerator whose denominator a reader must GUESS
+            # (the `category_attrition` mistake); a rate shipped next to both its terms cannot be
+            # misread that way, and it is the quantity `problems()` thresholds on.
+            "drop_fraction": round(length_stats.drop_fraction, 4),
         },
+        # `problems()`'s verdict, carried out rather than left in stderr. Empty list means the
+        # guard RAN and found nothing — distinct from a caller that never consulted it, which is
+        # what every caller did before this. `_cmd_run` prints these; a test can assert on them.
+        "attrition": attrition,
     }
 
 
@@ -1012,6 +1087,27 @@ def _cmd_run(args) -> int:
               f"tokens={info['tokens_out']:,} docs={f['kept']:,}/{f['seen']:,} "
               f"dup={f['duplicates']:,} decon={f['contaminated']:,} "
               f"{time.monotonic() - t0:.0f}s", flush=True)
+        # The LENGTH filter's numbers, on their own line because they have their own denominator:
+        # `filter.seen` counts documents entering dedup, `length.seen` counts those that survived
+        # it AND reached the packer. Printing them on the DONE line would put two denominators in
+        # one row, which is the `category_attrition` mistake in miniature.
+        #
+        # ⚠️ This block was RETURNED and never printed. `FilterRecord`'s docstring justifies leaving
+        # `length` out of the receipt on the grounds that "it is returned below and printable" —
+        # true of the value, false of the program: `info["length"]` had no reader anywhere in
+        # `src/`. So on the Batch path the short-doc attrition that killed the dolma3 QA row
+        # survived NOWHERE — not the receipt, not stdout, not CloudWatch. Fixed here rather than by
+        # adding it to the receipt, because the receipt's own reasoning for excluding it is sound
+        # as long as this line exists.
+        L = info["length"]
+        print(f"     length {bundle.bundle_id} kept={L['kept']:,}/{L['seen']:,} "
+              f"short={L['dropped_short']:,} empty={L['dropped_empty']:,} "
+              f"drop={L['drop_fraction']:.1%} mean_tok={L['mean_kept_tokens']}", flush=True)
+        # stdout, not just the `warnings` channel: `warnings` writes to stderr, and a 27-child
+        # Batch array job's stderr interleaves with everything else. An attrition finding that is
+        # hard to locate in the logs is the same as one nobody reads.
+        for problem in info["attrition"]:
+            print(f"ATTRITION {bundle.bundle_id}: {problem}", flush=True)
     print(f"RUN_END built={done} skipped={skipped}", flush=True)
     return 0
 
