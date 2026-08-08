@@ -1993,3 +1993,359 @@ def test_cmd_run_prints_no_attrition_line_for_a_healthy_bundle(monkeypatch, caps
     # The length line is UNCONDITIONAL, though — a healthy bundle's attrition rate is a number the
     # pool arithmetic wants too, not only a failing one's.
     assert "drop=0.0%" in out and "short=0" in out
+
+
+# --------------------------------------------------------------------------------------
+# File-sharding: K children, one bundle, disjoint slices of the SOURCE FILES (§8A.5a)
+# --------------------------------------------------------------------------------------
+#
+# `--shard/--of` strides BUNDLES, so before this a bundle was always one child on one instance and
+# `stackv2-edu--train` was 107.46B = 51.38 h setting the whole makespan while 47 children idled.
+#
+# The union test below is the one that matters, and it is deliberately not a count. `_shard_slice`
+# is `items[shard::of]`; the classic failure is an off-by-one that drops files, and a
+# smaller-than-expected corpus does not look like an error — it looks like filter attrition. So the
+# assertion recomputes the union of the ACTUAL paths read and compares it to the whole file list.
+
+
+def _files_read_by(spec, bundle, tree):
+    """The paths `_reader_for` actually opens for one bundle, over a fake HF tree.
+
+    Drives the REAL `_reader_for` — not `_bundle_files` in isolation — so the test covers the wiring
+    as well as the slice. The budget is made unreachable (one tiny document per file) so the read
+    is bounded by the file list, which is what is under test; the budget's own stop is tested
+    separately by `test_the_reader_stops_instead_of_walking_a_pool_far_larger_than_the_plan`.
+    """
+    import edullm_data.corpus_build as mod
+    from edullm_data import corpus_read
+
+    read = []
+
+    def reader(repo, entry, sp, *a, **k):
+        read.append(entry["path"])
+        yield Document(id=f"{entry['path']}-0", text="tiny", source="tiny")
+
+    real_hf, real_reader = mod.hf_files, corpus_read.read_parquet_documents
+    mod.hf_files = lambda sp, headers=None: tree
+    corpus_read.read_parquet_documents = reader
+    try:
+        list(mod._reader_for(spec, bundle))
+    finally:
+        mod.hf_files = real_hf
+        corpus_read.read_parquet_documents = real_reader
+    return read
+
+
+def _sharded(bundle, shard: int, of: int):
+    """One sibling of a K-way file split, with its own 1/K slice of the refs.
+
+    The ref split mirrors what the plan does (`allocate_ordinals` at plan time): siblings hold
+    DISJOINT refs, which is exactly the premise `_reader_for` relies on when it does not divide the
+    read budget by K.
+    """
+    return dataclasses.replace(
+        bundle, file_shard=shard, file_shards=of, shards=bundle.shards[shard::of]
+    )
+
+
+@pytest.mark.parametrize("n_files,k", [
+    (57, 4),    # nemotron-cc-math-3 — 57/4 = 14,14,14,15. THE uneven case from the brief.
+    (95, 7),    # stackv2-edu at its carve K — 95/7 = 13 or 14. Also uneven.
+    (100, 4),   # finepdfs-edu — divides evenly.
+    (57, 3),    # nemotron-cc-math-3 at its carve K — divides evenly (19 each).
+    (46, 2),    # nemotron-cc-math-4plus — divides evenly.
+    (10, 3),    # small and uneven, so an off-by-one is visible by eye in a failure.
+    (5, 5),     # K == file count: every child gets exactly one file.
+    (7, 1),     # K == 1: the whole source, i.e. the pre-file-sharding behaviour.
+])
+def test_the_union_of_files_read_across_k_children_is_exactly_the_file_list(n_files, k):
+    """No file read twice, no file dropped — RECOMPUTED as a set union, never as a count.
+
+    A count assertion would pass on a stride that read file 3 twice and never read file 7. The real
+    failure mode is silent: files that no child reads are simply never in the corpus, and the
+    shortfall surfaces at `verify` as unfilled refs that look identical to filter attrition.
+
+    Both halves are asserted because they fail differently. Duplicates mean two children write the
+    same documents (and, in the plan, the same ordinals — see `_assert_file_shard_family`); drops
+    mean a silently short stream.
+    """
+    tree = [{"path": f"data/{i:05d}.parquet", "size": 1000} for i in range(n_files)]
+    spec = _spec(target_tokens=SHARD_TOKENS * 8)
+    whole = B.bundles_of(B.plan_document([spec]))[0]
+
+    per_child = [_files_read_by(spec, _sharded(whole, i, k), tree) for i in range(k)]
+    flat = [p for child in per_child for p in child]
+    expected = [e["path"] for e in tree]
+
+    assert sorted(flat) == sorted(expected), "the union of the K slices is not the file list"
+    assert len(flat) == len(set(flat)), "a file was read by more than one child"
+    assert set(flat) == set(expected), "a file was read by no child at all"
+    # Uneven division must still cover: the child sizes may differ by ONE and no more, which is
+    # what striding guarantees and what a contiguous or truncating split would not.
+    sizes = sorted(len(c) for c in per_child)
+    assert sizes[-1] - sizes[0] <= 1, f"stride left children unbalanced: {sizes}"
+
+
+def test_striding_not_contiguous_blocks_on_a_realistically_skewed_source():
+    """The stride must INTERLEAVE, because on the real sources the big files cluster.
+
+    MEASURED (ENG-EXEC, 2026-08-08, HF tree API at the pinned revisions): `stackv2-edu`'s 95 files
+    have CV 0.211 and 2.09x max/min, and the large ones are not spread evenly by name. Contiguous
+    blocks give a 1.132x worst-child byte imbalance against striding's 1.026x — 8.35 h versus
+    7.57 h on that one bundle. `_shard_slice`'s docstring asserts this; here it is measured.
+
+    Asserted on BYTES, not on file counts: equal counts of unequal files is exactly the trap. The
+    fixture puts the big files in one contiguous run, which is the shape the measurement found.
+    """
+    # 40 files; the last 12 are 4x the size of the rest, i.e. the "big ones cluster" shape.
+    # 12 big files over K=4 is 3 apiece under a stride, so striding balances EXACTLY here — the
+    # fixture is sized so the assertion can be a clean equality rather than an unjustifiable
+    # tolerance. Contiguous blocks of 10 put ALL 12 big files in the last two children.
+    tree = [{"path": f"data/{i:05d}.parquet", "size": 4000 if i >= 28 else 1000}
+            for i in range(40)]
+    by_path = {e["path"]: e["size"] for e in tree}
+    spec = _spec(target_tokens=SHARD_TOKENS * 8)
+    whole = B.bundles_of(B.plan_document([spec]))[0]
+    k = 4
+
+    strided = [sum(by_path[p] for p in _files_read_by(spec, _sharded(whole, i, k), tree))
+               for i in range(k)]
+    contiguous = [sum(e["size"] for e in tree[i * 10:(i + 1) * 10]) for i in range(k)]
+
+    # Striding is PERFECTLY balanced on this fixture; contiguous is 3.4x imbalanced.
+    assert max(strided) == min(strided), f"stride did not balance: {strided}"
+    assert max(contiguous) / min(contiguous) > 3.0, "fixture does not model the clustering"
+    assert max(strided) < max(contiguous), (
+        "the worst child under striding must be lighter than under contiguous blocks — this is "
+        "the whole reason _shard_slice strides"
+    )
+
+
+def test_the_slice_a_child_reads_does_not_depend_on_k_ordering_or_which_child_ran_first():
+    """Determinism: the file set is a pure function of (spec, file_shard, file_shards).
+
+    9 bundles / 4,137 shards previously re-ran byte-identical, and file-sharding must not cost that.
+    Running the children in reverse order, and twice, must give each child the same slice.
+    """
+    tree = [{"path": f"data/{i:05d}.parquet", "size": 1000} for i in range(57)]
+    spec = _spec(target_tokens=SHARD_TOKENS * 8)
+    whole = B.bundles_of(B.plan_document([spec]))[0]
+
+    forward = {i: _files_read_by(spec, _sharded(whole, i, 4), tree) for i in range(4)}
+    backward = {i: _files_read_by(spec, _sharded(whole, i, 4), tree) for i in reversed(range(4))}
+    assert forward == backward
+
+    # And the list order within a child is stable, not just the set — `pack` concatenates in read
+    # order, so a reordered slice is a different byte stream under the same plan_id.
+    again = {i: _files_read_by(spec, _sharded(whole, i, 4), tree) for i in range(4)}
+    assert forward == again
+    for i in range(4):
+        assert forward[i] == sorted(forward[i]), "hf_files is sorted; the slice must stay ordered"
+
+
+def test_k_equals_one_reads_every_file_exactly_as_before_file_sharding():
+    """The default must be byte-identical to the pre-file-sharding behaviour.
+
+    Every plan written before this schema change omits `file_shard`/`file_shards`, so the defaults
+    are not a convenience — they are what keeps an old plan readable.
+    """
+    tree = [{"path": f"data/{i:05d}.parquet", "size": 1000} for i in range(12)]
+    spec = _spec(target_tokens=SHARD_TOKENS * 8)
+    bundle = B.bundles_of(B.plan_document([spec]))[0]
+    assert (bundle.file_shard, bundle.file_shards) == (0, 1)
+    assert _files_read_by(spec, bundle, tree) == [e["path"] for e in tree]
+
+    # A plan entry with no file-shard keys at all reads as the whole source.
+    entry = dict(B.plan_document([spec])["bundles"][0])
+    assert "file_shards" not in entry, "plan_document is eng-11's; this test only reads it"
+    assert B.Bundle.from_plan_entry(entry).file_shards == 1
+
+
+def test_the_read_budget_is_not_divided_by_k_because_the_refs_already_are():
+    """THE budget decision, asserted rather than asserted-in-a-comment.
+
+    `budget = bundle.tokens * chars_per_token * headroom / keep_rate`, and `bundle.tokens` sums
+    THIS bundle's refs. The plan gives each of K siblings its own disjoint refs, so `bundle.tokens`
+    is already 1/K of the stream and dividing again would read 1/K of what the child needs — a
+    `verify` failure on unfilled refs AFTER the full billable run.
+
+    Measured through the reader: a K-way child must read ~1/K of the files the whole bundle reads,
+    because it needs 1/K of the tokens from 1/K of the pool. Both halves scale, so the FRACTION of
+    its own slice that it consumes is unchanged — which is why a bundle that could be filled before
+    the split can still be filled after it.
+    """
+    tree = [{"path": f"data/{i:05d}.parquet", "size": 1000} for i in range(400)]
+    spec = _spec(target_tokens=SHARD_TOKENS * 8)
+    whole = B.bundles_of(B.plan_document([spec]))[0]
+    k = 4
+
+    def with_fat_files(bundle):
+        """Each file holds a fixed slab of text, so 'files read' is a proxy for 'chars read'."""
+        import edullm_data.corpus_build as mod
+        from edullm_data import corpus_read
+
+        read = []
+
+        def reader(repo, entry, sp, *a, **k_):
+            read.append(entry["path"])
+            for i in range(20):
+                yield Document(id=f"{entry['path']}-{i}",
+                               text="x" * (SHARD_TOKENS * 4 // 20), source="tiny")
+
+        real_hf, real_reader = mod.hf_files, corpus_read.read_parquet_documents
+        mod.hf_files = lambda sp, headers=None: tree
+        corpus_read.read_parquet_documents = reader
+        try:
+            list(mod._reader_for(spec, bundle))
+        finally:
+            mod.hf_files = real_hf
+            corpus_read.read_parquet_documents = real_reader
+        return len(read)
+
+    whole_files = with_fat_files(whole)
+    child_files = [with_fat_files(_sharded(whole, i, k)) for i in range(k)]
+
+    # Each child stops after ~1/K of the whole bundle's read, because its refs are 1/K.
+    assert whole_files > k, "fixture too small to distinguish"
+    for i, n in enumerate(child_files):
+        assert n <= -(-whole_files // k) + 1, (
+            f"child {i} read {n} files against the whole bundle's {whole_files} over K={k}: the "
+            f"budget is being applied as if the child owed the WHOLE stream's tokens"
+        )
+    # And it is not the opposite error either — a budget divided by K again would read ~1/K^2.
+    assert sum(child_files) >= whole_files - k, (
+        f"K children read {sum(child_files)} files against the whole bundle's {whole_files}: the "
+        f"budget looks divided by K a second time, which starves every child"
+    )
+
+
+def test_a_bundle_whose_source_has_fewer_files_than_k_is_refused_before_reading():
+    """`items[4::5]` on a 5-file source is `[]`, and an empty read does NOT fail on its own.
+
+    The child yields nothing, packs nothing, writes a receipt, and leaves its refs unfilled — which
+    at `verify` is indistinguishable from filter attrition. Caught here, before the first byte.
+    """
+    tree = [{"path": f"data/{i:05d}.parquet", "size": 1000} for i in range(3)]
+    spec = _spec(target_tokens=SHARD_TOKENS * 8)
+    whole = B.bundles_of(B.plan_document([spec]))[0]
+    import edullm_data.corpus_build as mod
+
+    real_hf = mod.hf_files
+    mod.hf_files = lambda sp, headers=None: tree
+    try:
+        with pytest.raises(BuildError, match="only 3 payload files"):
+            list(mod._reader_for(spec, _sharded(whole, 2, 5)))
+    finally:
+        mod.hf_files = real_hf
+
+
+def test_an_out_of_range_file_shard_is_refused_when_the_bundle_is_built():
+    """Out of range is not a no-op — it is an empty slice, i.e. a silently empty bundle."""
+    with pytest.raises(BuildError, match="out of range"):
+        B.Bundle(bundle_id="b", source="s", domain=None, split="train", spec_key="k",
+                 shards=(), file_shard=3, file_shards=3)
+    with pytest.raises(BuildError, match="must be >= 1"):
+        B.Bundle(bundle_id="b", source="s", domain=None, split="train", spec_key="k",
+                 shards=(), file_shard=0, file_shards=0)
+
+
+def test_a_plan_that_gives_every_sibling_the_whole_shard_list_is_refused():
+    """The failure the no-division decision would turn into a silent K-fold duplication.
+
+    If all K siblings carry the full ref list, each reads K× what it needs and they all write the
+    SAME ordinals. Nothing downstream sees it: token counts add up, ordinals are dense, shards
+    decode, and in S3 the last writer wins. Only a whole-plan check can catch it.
+    """
+    spec = _spec(target_tokens=SHARD_TOKENS * 8)
+    plan = B.plan_document([spec])
+    train = next(e for e in plan["bundles"] if e["split"] == "train")
+    plan["bundles"] = [
+        {**train, "bundle_id": f"{train['bundle_id']}--f{i}", "file_shard": i, "file_shards": 3}
+        for i in range(3)
+    ]
+    with pytest.raises(BuildError, match="claimed by BOTH file_shard"):
+        B.bundles_of(plan)
+
+
+def test_a_missing_sibling_is_refused_so_files_are_never_silently_unread():
+    """file_shards=3 with only shards 0 and 1 present means every third file is read by nobody."""
+    spec = _spec(target_tokens=SHARD_TOKENS * 8)
+    plan = B.plan_document([spec])
+    train = next(e for e in plan["bundles"] if e["split"] == "train")
+    refs = train["shards"]
+    plan["bundles"] = [
+        {**train, "bundle_id": f"{train['bundle_id']}--f{i}", "file_shard": i, "file_shards": 3,
+         "shards": refs[i::3]}
+        for i in range(2)          # sibling 2 is missing
+    ]
+    with pytest.raises(BuildError, match=r"file_shard \[0, 1\], not \[0, 1, 2\]"):
+        B.bundles_of(plan)
+
+    # The same three siblings, complete and disjoint, are accepted.
+    plan["bundles"].append(
+        {**train, "bundle_id": f"{train['bundle_id']}--f2", "file_shard": 2, "file_shards": 3,
+         "shards": refs[2::3]}
+    )
+    got = B.bundles_of(plan)
+    assert sorted(b.file_shard for b in got) == [0, 1, 2]
+    # Disjoint AND complete over the ordinals, recomputed.
+    seen = [r.path for b in got for r in b.shards]
+    assert sorted(seen) == sorted(refs) and len(seen) == len(set(seen))
+
+
+def test_file_sharding_composes_with_the_finephrase_id_partition():
+    """The two partitions are orthogonal and BOTH must still apply.
+
+    FinePhrase keeps `sha256(id) % 4`; file-sharding keeps `files[k::K]`. A child of a sharded
+    FinePhrase bundle must yield exactly the intersection — its own files, filtered to its own ids.
+    Asserted against `format_for_id` recomputed on the spot, never via a spy on `keeps_id`,
+    because the partition has a history of being green and uncalled.
+    """
+    from edullm_data.reservoir_ids import format_for_id
+
+    ids = [f"<urn:uuid:0000-{i:06d}>" for i in range(600)]
+    text = "lorem ipsum dolor " * 10
+    tree = [{"path": f"data/{i:05d}.parquet", "size": 1000} for i in range(12)]
+    spec = _fp_spec("faq", target_tokens=SHARD_TOKENS * 8)
+    whole = B.bundles_of(B.plan_document([spec]))[0]
+
+    def run(bundle):
+        import edullm_data.corpus_build as mod
+        from edullm_data import corpus_read
+
+        files = []
+
+        def reader(repo, entry, sp, *a, **k):
+            files.append(entry["path"])
+            # Each file holds a distinct 50-id slab, so a dropped file is a dropped id block.
+            i = int(entry["path"][5:10])
+            for doc_id in ids[i * 50:(i + 1) * 50]:
+                yield Document(id=doc_id, text=text, source="synthetic-finephrase")
+
+        real_hf, real_reader = mod.hf_files, corpus_read.read_parquet_documents
+        mod.hf_files = lambda sp, headers=None: tree
+        corpus_read.read_parquet_documents = reader
+        try:
+            out = list(mod._reader_for(spec, bundle))
+        finally:
+            mod.hf_files = real_hf
+            corpus_read.read_parquet_documents = real_reader
+        return {d.id for d in out}, files
+
+    k = 5                                   # 12 files over 5 children: uneven
+    per_child, all_files = [], []
+    for i in range(k):
+        got, files = run(_sharded(whole, i, k))
+        per_child.append(got)
+        all_files += files
+
+    # The files still tile exactly.
+    assert sorted(all_files) == sorted(e["path"] for e in tree)
+    # The id partition still applies within every child — recomputed, not spied.
+    for got in per_child:
+        assert all(format_for_id(i) == "faq" for i in got)
+    # And the union is exactly the faq partition of the whole id set: file-sharding must not
+    # change WHICH documents the corpus contains, only which child reads them.
+    union = set().union(*per_child)
+    assert union == {i for i in ids if format_for_id(i) == "faq"}
+    assert sum(len(c) for c in per_child) == len(union), "an id was yielded by two children"
