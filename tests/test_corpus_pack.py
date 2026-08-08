@@ -1205,9 +1205,85 @@ def test_only_the_boundary_id_is_rewritten_not_every_special_token():
     """The dolma2 tokenizer defines 22 added tokens and all 22 parse from raw text, but only 100257
     is the document boundary. The other 21 are ordinary in-vocab ids — unusual, not dangerous — and
     rewriting them would modify documents to fix a problem that does not exist.
-    """
-    from edullm_data.corpus_pack import _BOUNDARY_MARKER_REWRITES, neutralize_boundary_markers
 
-    assert len(_BOUNDARY_MARKER_REWRITES) == 1
+    Asserted by BEHAVIOUR (what the function leaves alone), not by ``len(_BOUNDARY_MARKER_REWRITES)
+    == 1``, which is what this used to say. A length assertion states the policy without testing
+    it: it passes for a one-entry table that rewrites the wrong thing, and it FAILS for a correct
+    two-entry table — so whoever legitimately extended the table would delete the assertion, which
+    is exactly the moment it should have been doing work.
+    """
+    from edullm_data.corpus_pack import neutralize_boundary_markers
+
     for other in ("<|fim_prefix|>", "<|im_start|>", "|||EMAIL_ADDRESS|||", "<|pad|>"):
         assert neutralize_boundary_markers(f"x {other} y") == f"x {other} y", other
+
+
+def test_a_second_table_entry_is_ACTUALLY_REWRITTEN_whatever_prefix_it_has():
+    """B2. The guard used to be the hardcoded literal ``"<|"``, correct only because the table had
+    exactly one entry — a future addition not starting with ``<|`` would have been a SILENT no-op:
+    the guard returns early, the new rewrite never runs, every existing test still passes, and the
+    corpus ships with the false document boundaries the table exists to remove.
+
+    So this ADDS entries and checks they FIRE. Three shapes, because they are three different paths
+    through the derived guard:
+
+    * shares the ``<|`` prefix        -> guard narrows to ``"<|"``
+    * shares NOTHING with the first   -> guard collapses to ``""``, disabling the fast path
+    * a single non-``<|`` entry       -> guard is that literal; the old hardcoded ``"<|"`` would
+      have skipped it entirely
+    """
+    import edullm_data.corpus_pack as C
+
+    original = C._BOUNDARY_MARKER_REWRITES
+    try:
+        for table, probe, want in (
+            (
+                (("<|endoftext|>", "<| endoftext |>"), ("<|im_start|>", "<| im_start |>")),
+                "a <|endoftext|> b <|im_start|> c",
+                "a <| endoftext |> b <| im_start |> c",
+            ),
+            (
+                (("<|endoftext|>", "<| endoftext |>"), ("|||EOS|||", "||| EOS |||")),
+                "a <|endoftext|> b |||EOS||| c",
+                "a <| endoftext |> b ||| EOS ||| c",
+            ),
+            ((("|||EOS|||", "||| EOS |||"),), "a |||EOS||| b", "a ||| EOS ||| b"),
+        ):
+            C._BOUNDARY_MARKER_REWRITES = table
+            got = C.neutralize_boundary_markers(probe)
+            assert got == want, f"table={table} left {got!r}, wanted {want!r}"
+            # Still idempotent with the bigger table — resume depends on it.
+            assert C.neutralize_boundary_markers(got) == want
+            # And still free on clean text.
+            clean = "nothing to see here"
+            assert C.neutralize_boundary_markers(clean) is clean
+    finally:
+        C._BOUNDARY_MARKER_REWRITES = original
+
+
+def test_the_guard_is_derived_from_the_table_and_never_narrower_than_it():
+    """The invariant that makes the above unbreakable: whatever the table is, EVERY literal in it
+    must start with the guard — otherwise a document containing that literal passes the pre-scan
+    and skips its own rewrite.
+
+    RECOMPUTED over adversarial tables, rather than asserted for the one table that ships.
+    """
+    from edullm_data.corpus_pack import _BOUNDARY_MARKER_REWRITES, _boundary_marker_guard
+
+    for table in (
+        _BOUNDARY_MARKER_REWRITES,
+        (("<|endoftext|>", "x"),),
+        (("<|endoftext|>", "x"), ("<|im_start|>", "y")),
+        (("<|endoftext|>", "x"), ("|||EOS|||", "y")),
+        (("a", "x"), ("ab", "y")),  # one literal is a prefix of the other
+        (),
+    ):
+        guard = _boundary_marker_guard(table)
+        for literal, _ in table:
+            assert literal.startswith(guard), (
+                f"guard {guard!r} would skip {literal!r} — that rewrite is a silent no-op"
+            )
+
+    # The shipping table's guard is the WHOLE literal, so the fast path is strictly more selective
+    # than the `"<|"` it replaces: text containing `<|` but not the marker now skips the loop.
+    assert _boundary_marker_guard(_BOUNDARY_MARKER_REWRITES) == "<|endoftext|>"

@@ -601,13 +601,39 @@ def test_the_cli_sizes_the_http_pool_to_the_worker_count():
     )
     assert sized.meta.config.max_pool_connections == 18
 
-    # And the CLI wires it: the source must size the pool off the worker counts, not hardcode it.
-    import inspect
-
+    # And the CLI wires it. Asserted by RUNNING main() and recording what it asked for, not by
+    # grepping its source: a source-substring assertion passes on a `max(...)` that has silently
+    # stopped covering one of the worker knobs, which is exactly the regression that matters --
+    # a pool sized to a quarter of the concurrency in flight throttles with no error anywhere.
+    from edullm_data import s3 as S
     from edullm_data import validate as V
 
-    src = inspect.getsource(V.main)
-    assert "max_pool_connections" in src, "main() does not size the HTTP pool"
-    assert "max(args.head_workers, args.promote_workers)" in src, (
-        "the pool is not sized from the worker counts"
-    )
+    asked: list[int | None] = []
+    real_class = S.Boto3S3
+
+    class _Recorder:
+        @staticmethod
+        def default(region="us-east-1", *, max_pool_connections=None):
+            asked.append(max_pool_connections)
+            raise SystemExit(0)  # stop before any network call
+
+    S.Boto3S3 = _Recorder  # type: ignore[assignment]
+    try:
+        for argv, want in (
+            (["--prefix", "p/v1"], None),  # all defaults: the untouched client
+            (["--prefix", "p/v1", "--head-workers", "16"], 18),
+            (["--prefix", "p/v1", "--promote-workers", "16"], 18),
+            # The knob a source grep would have missed: check-workers ALONE must size the pool,
+            # because the profile checks issue 7 of Gate A's 8 round trips over the same client.
+            (["--prefix", "p/v1", "--check-workers", "32"], 34),
+            # ...and an explicit 1 must not inflate the pool just because head-workers is high.
+            (["--prefix", "p/v1", "--head-workers", "4", "--check-workers", "1"], None),
+        ):
+            asked.clear()
+            try:
+                V.main(argv)
+            except SystemExit:
+                pass
+            assert asked == [want], (argv, asked, want)
+    finally:
+        S.Boto3S3 = real_class  # type: ignore[assignment]

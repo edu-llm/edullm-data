@@ -223,26 +223,257 @@ def _observed_size(ctx: GroupContext, key: str) -> int:
     return int(sizes[key])
 
 
-def _sampled_ids(ctx: GroupContext, entry: ManifestEntry, dtype: "np.dtype") -> "np.ndarray":
-    """Read ~64 KB at seeded offsets and decode as ``dtype``. Uses the *actual* object size
-    from HEAD (not the declared ``bytes``) so a truncated tail is sampled honestly."""
+def _decode_plan(ctx: GroupContext, entry: ManifestEntry, dtype: "np.dtype") -> tuple[str, int, list[int]]:
+    """``(key, window_bytes, offsets)`` for one entry's decode sample.
+
+    Split out of :func:`_sampled_ids` so the *offsets* can be computed on the calling thread and
+    only the network reads fan out. The offsets are a pure function of ``(rng_seed, path, observed
+    size, itemsize)`` — no clock, no PRNG state — so a prefetch worker and a later sequential read
+    derive the identical window list, which is what makes the cache below safe to share.
+    """
     key = _object_key(ctx.prefix, entry.path)
     size = _observed_size(ctx, key)
     itemsize = dtype.itemsize
     if size < itemsize:
-        return np.empty(0, dtype=dtype)
+        return key, 0, []
     window = DECODE_SAMPLE_BYTES // _N_WINDOWS
     window -= window % itemsize
     window = max(window, itemsize)
     offsets = sample_offsets(
         _shard_seed(ctx, entry.path), size, window=window, n=_N_WINDOWS, align=itemsize
     )
-    chunks = [ctx.s3.get_range(ctx.landing_bucket, key, off, window) for off in offsets]
-    buf = b"".join(chunks)
+    return key, window, offsets
+
+
+def _decode_bytes(
+    ctx: GroupContext, entry: ManifestEntry, dtype: "np.dtype", prefetched: Mapping | None = None
+) -> bytes:
+    """The sampled bytes for one entry.
+
+    ``prefetched`` is the current batch's ``{(key, offset): bytes}`` window map, filled
+    concurrently by :func:`_prefetch_windows`. A miss falls back to reading the window here —
+    which is what makes the concurrency an optimisation rather than a dependency: with
+    ``prefetched=None`` this issues exactly the calls it issued before threading existed.
+
+    **Still an observation of S3, never the producer's claim.** Whether a window arrives from a
+    worker thread or from this line, it is bytes that came back from ``get_range`` against the
+    real object, so a truncated or zero-filled tail is still sampled and still fails.
+    """
+    key, window, offsets = _decode_plan(ctx, entry, dtype)
+    if not offsets:
+        return b""
+    out = []
+    for off in offsets:
+        chunk = None if prefetched is None else prefetched.get((key, off))
+        if chunk is None:
+            chunk = ctx.s3.get_range(ctx.landing_bucket, key, off, window)
+        out.append(chunk)
+    return b"".join(out)
+
+
+def _sampled_ids(
+    ctx: GroupContext, entry: ManifestEntry, dtype: "np.dtype", prefetched: Mapping | None = None
+) -> "np.ndarray":
+    """Read ~64 KB at seeded offsets and decode as ``dtype``. Uses the *actual* object size
+    from HEAD (not the declared ``bytes``) so a truncated tail is sampled honestly."""
+    buf = _decode_bytes(ctx, entry, dtype, prefetched)
+    itemsize = dtype.itemsize
     trim = len(buf) - (len(buf) % itemsize)
     if trim <= 0:
         return np.empty(0, dtype=dtype)
     return np.frombuffer(buf[:trim], dtype=dtype)
+
+
+# --------------------------------------------------------------------------------------
+# Concurrent prefetch — the only place this profile touches threads
+# --------------------------------------------------------------------------------------
+
+#: Objects per prefetch batch, as a multiple of the worker count. Batching rather than warming the
+#: whole manifest at once is a MEMORY bound, and it is load-bearing: the decode sample is 64 KB per
+#: object, so a whole-corpus prefetch of the 40,001-object 1.0T build would hold **~2.6 GB** — a
+#: third of the validator container's 8 GB (``vcpus: 4 / memory: 8192``, MEASURED on
+#: ``edullm-validator:14``) — to save latency the batched form saves anyway. At 16 workers a batch
+#: is 64 objects ≈ 4 MB in flight. 4 is enough to keep every worker fed across the batch boundary
+#: without the tail of one batch idling the pool for long.
+_PREFETCH_BATCH_MULTIPLE = 4
+
+
+def _workers(ctx: GroupContext) -> int:
+    """``ctx.check_workers``, defensively. ``getattr`` because a GroupContext built by an older
+    caller (or a test double that mimics the dataclass) may not carry the field at all, and a
+    profile must degrade to sequential rather than raise."""
+    try:
+        n = int(getattr(ctx, "check_workers", 1) or 1)
+    except (TypeError, ValueError):
+        return 1
+    return max(n, 1)
+
+
+def _batches(items: list, size: int):
+    for i in range(0, len(items), size):
+        yield items[i : i + size]
+
+
+def _fan_out(ctx: GroupContext, jobs: list, fn) -> dict:
+    """Run ``fn(job)`` for each job on ``check_workers`` threads; return ``{job: result}``.
+
+    Failures are recorded as absent, never raised. A prefetch that raised would convert one
+    unreadable object into a group-level ``profile-check-error`` and lose the precise per-entry
+    violation the sequential path produces; instead the miss falls through to the sequential read,
+    which re-issues the call and raises exactly as it does today. One extra round trip, on the
+    error path only.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    # De-duplicated, order preserved. A manifest may list the same object twice, and a duplicated
+    # path must not cost two reads just because the fan-out did not look — the same guarantee
+    # ``validate._prefetch_heads`` gives for HEADs, and one Gate A relies on: `duplicate-shard-digest`
+    # exists precisely because duplicated entries occur in real manifests.
+    jobs = list(dict.fromkeys(jobs))
+
+    def one(job):
+        try:
+            return fn(job)
+        except Exception:  # noqa: BLE001 - see the docstring; a miss is the designed fallback
+            return None
+
+    with ThreadPoolExecutor(max_workers=_workers(ctx)) as pool:
+        results = list(pool.map(one, jobs))  # map() yields in SUBMISSION order
+    return {job: r for job, r in zip(jobs, results) if r is not None}
+
+
+def _prefetch_sizes(ctx: GroupContext, keys: list[str]) -> None:
+    """Warm ``ctx.observations["object_sizes"]`` for ``keys``, concurrently.
+
+    **Why this is where the win is.** Gate A is ``objects x round trips x latency`` with the CPU
+    idle: MEASURED live on ``pretrain/reservoir-dolma2`` at ~85 min, **0.3% CPU**, ~15.8 round
+    trips/s over 10,049 objects (recorded at :func:`_observed_size`). This profile had **zero**
+    threading, so it waited for one round trip at a time for all of them. Latency per call does not
+    shrink; the number you wait for serially does.
+
+    The cache dict is created on the CALLING thread and workers only assign distinct keys into it,
+    so no two threads race to build it. ``dict.setdefault`` from several threads can otherwise
+    construct two dicts and silently drop one's writes.
+    """
+    sizes = ctx.observations.setdefault("object_sizes", {})
+    todo = [k for k in dict.fromkeys(keys) if k not in sizes]
+    if len(todo) <= 1 or _workers(ctx) <= 1:
+        return
+    got = _fan_out(ctx, todo, lambda k: int(ctx.s3.head(ctx.landing_bucket, k)["size"]))
+    for k, size in got.items():
+        sizes.setdefault(k, size)
+
+
+def _prefetch_windows(ctx: GroupContext, plans: list[tuple[str, int, list[int]]]) -> dict:
+    """Read every decode window in this batch concurrently; return ``{(key, offset): bytes}``.
+
+    Fanned out per WINDOW rather than per object: each object needs 4 spread-out reads
+    (``_N_WINDOWS``) that are independent of one another, so window granularity keeps the pool
+    busy with a quarter as many objects in flight — which is what bounds memory.
+
+    Returned rather than cached in ``ctx.observations`` on purpose. The map dies with the batch, so
+    peak resident sample bytes is ``batch x 64 KB`` instead of ``corpus x 64 KB``; nothing here
+    needs to outlive the loop that consumes it.
+    """
+    if _workers(ctx) <= 1:
+        return {}
+    jobs = [(key, off, window) for key, window, offsets in plans for off in offsets]
+    if len(jobs) <= 1:
+        return {}
+    got = _fan_out(ctx, jobs, lambda j: ctx.s3.get_range(ctx.landing_bucket, j[0], j[1], j[2]))
+    return {(key, off): body for (key, off, _w), body in got.items()}
+
+
+def _prefetch_first_bytes(ctx: GroupContext, keys: list[str]) -> dict:
+    """Read the leading 8 bytes (the ``\\x93NUMPY`` sniff) for this batch concurrently."""
+    todo = list(dict.fromkeys(keys))
+    if len(todo) <= 1 or _workers(ctx) <= 1:
+        return {}
+    return _fan_out(ctx, todo, lambda k: ctx.s3.get_range(ctx.landing_bucket, k, 0, 8))
+
+
+def _batch_size(ctx: GroupContext) -> int:
+    return max(_workers(ctx) * _PREFETCH_BATCH_MULTIPLE, 1)
+
+
+def _entries_with_decode_windows(ctx: GroupContext):
+    """``_entries`` plus, per entry, the batch window map its decode sample was prefetched into.
+
+    A GENERATOR over batches rather than a whole-manifest warm-up, because the sample is 64 KB per
+    object: warming all 40,001 objects of the 1.0T build at once would hold ~2.6 GB of a 8,192 MB
+    container to save latency that batching saves anyway (see ``_PREFETCH_BATCH_MULTIPLE``).
+
+    Order is exactly ``_entries``'s — manifest order — at every worker count. Only the *timing* of
+    the reads changes; a consumer sees the identical sequence of triples it saw when this profile
+    had no threading, plus a dict that is at worst empty.
+    """
+    it = _entries(ctx)
+    size = _batch_size(ctx)
+    while True:
+        batch = []
+        for _ in range(size):
+            try:
+                batch.append(next(it))
+            except StopIteration:
+                break
+        if not batch:
+            return
+        windows = _warm_decode_batch(ctx, batch)
+        for raw, entry, bad in batch:
+            yield raw, entry, bad, windows
+        if len(batch) < size:
+            return
+
+
+def _entries_with_first_bytes(ctx: GroupContext):
+    """``_entries`` plus, per entry, the batch's ``{key: first 8 bytes}`` map."""
+    it = _entries(ctx)
+    size = _batch_size(ctx)
+    while True:
+        batch = []
+        for _ in range(size):
+            try:
+                batch.append(next(it))
+            except StopIteration:
+                break
+        if not batch:
+            return
+        heads = _prefetch_first_bytes(
+            ctx, [_object_key(ctx.prefix, e.path) for _r, e, bad in batch if bad is None]
+        )
+        for raw, entry, bad in batch:
+            yield raw, entry, bad, heads
+        if len(batch) < size:
+            return
+
+
+def _warm_decode_batch(ctx: GroupContext, batch: list) -> dict:
+    """Sizes then windows for one batch of ``(raw, entry, bad)`` triples.
+
+    Two phases because the second depends on the first: the seeded offsets are derived from the
+    object's REAL size, so every HEAD in the batch must land before any window read can be planned.
+    Both phases are concurrent within themselves; the barrier between them is one batch deep, not
+    one corpus deep, which is the whole reason for batching.
+    """
+    if _workers(ctx) <= 1:
+        return {}
+    decodable = [
+        (entry, dt)
+        for _raw, entry, bad in batch
+        if bad is None
+        for dt in (_np_dtype(entry),)
+        if dt is not None and dt.kind in ("u", "i")
+    ]
+    if not decodable:
+        return {}
+    _prefetch_sizes(ctx, [_object_key(ctx.prefix, e.path) for e, _ in decodable])
+    plans = []
+    for entry, dt in decodable:
+        try:
+            plans.append(_decode_plan(ctx, entry, dt))
+        except Exception:  # noqa: BLE001 - an unreadable size is the sequential path's to report
+            continue
+    return _prefetch_windows(ctx, plans)
 
 
 # --------------------------------------------------------------------------------------
@@ -283,6 +514,12 @@ def check_decode_smoke(ctx: GroupContext) -> list[Violation]:
     Catches (per §7's table): wrong dtype / wrong endianness (ids past vocab), all-zeros or
     all-one-token shards (distinct too few), all-EOS shards, and partial zero-fill from a
     crashed writer.
+
+    **Concurrency.** The loop below is UNCHANGED and still walks entries one at a time in manifest
+    order; only the reads it waits on are batched ahead of it (``ctx.check_workers``). Every
+    violation is therefore appended in manifest order at any worker count, and each decision is
+    made from the same bytes for the same key — the same "prefetch facts, decide sequentially"
+    split ``validate._prefetch_heads`` uses for the decision loop.
     """
     out: list[Violation] = []
     tok = _tokenizer(ctx)
@@ -305,7 +542,7 @@ def check_decode_smoke(ctx: GroupContext) -> list[Violation]:
             )
         )
 
-    for raw, entry, bad in _entries(ctx):
+    for raw, entry, bad, windows in _entries_with_decode_windows(ctx):
         if bad is not None:
             out.append(bad)
             continue
@@ -313,7 +550,7 @@ def check_decode_smoke(ctx: GroupContext) -> list[Violation]:
         if dtype is None or dtype.kind not in ("u", "i"):
             # Not an integer token array — nothing to decode as token ids here.
             continue
-        ids = _sampled_ids(ctx, entry, dtype)
+        ids = _sampled_ids(ctx, entry, dtype, windows)
         n = int(ids.size)
         if n == 0:
             out.append(
@@ -428,14 +665,19 @@ def check_first_bytes_not_npy(ctx: GroupContext) -> list[Violation]:
     reading the leading bytes and finding a NumPy header exposes it. §5 is explicit that
     BOTH checks are needed; this is the byte-reading one, and it is the audit's actual
     7,557-object case.
+
+    Reads are batched ahead of the loop at ``ctx.check_workers``; the loop itself is unchanged and
+    still walks entries in manifest order, so the violation list is identical at any worker count.
     """
     out: list[Violation] = []
-    for raw, entry, bad in _entries(ctx):
+    for raw, entry, bad, heads in _entries_with_first_bytes(ctx):
         if bad is not None:
             out.append(bad)
             continue
         key = _object_key(ctx.prefix, entry.path)
-        head = ctx.s3.get_range(ctx.landing_bucket, key, 0, 8)
+        head = heads.get(key)
+        if head is None:
+            head = ctx.s3.get_range(ctx.landing_bucket, key, 0, 8)
         if head.startswith(_NPY_MAGIC):
             out.append(
                 Violation(
@@ -459,7 +701,14 @@ def check_seq_len_alignment(ctx: GroupContext) -> list[Violation]:
     if not isinstance(seq_len, int) or isinstance(seq_len, bool) or seq_len <= 0:
         return []  # no seq_len declared: not fixed-length-packed, nothing to check.
     out: list[Violation] = []
-    for raw, entry, bad in _entries(ctx):
+    entries = list(_entries(ctx))
+    # Sizes only — this check needs no payload bytes, so there is nothing to bound and the whole
+    # group can be warmed in one fan-out. In the ordinary case (`check_decode_smoke` ran first)
+    # every one of these is already cached and this issues zero calls.
+    _prefetch_sizes(
+        ctx, [_object_key(ctx.prefix, e.path) for _r, e, bad in entries if bad is None]
+    )
+    for raw, entry, bad in entries:
         if bad is not None:
             out.append(bad)
             continue
