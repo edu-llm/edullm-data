@@ -356,6 +356,13 @@ between what we measured and what we inherited is worth keeping visible.
 
 ## 13. Next steps
 
+> **This document decides WHAT to build. Two companions decide how and when, and you need both before
+> writing code or launching a job:**
+> - **`docs/IMPLEMENTATION-PLAN.md`** — build mechanics, and **five defects that would silently corrupt
+>   or discard the work.** None of them fails loudly.
+> - **`docs/BUILD-DEPENDENCY-GRAPH.md`** — the execution DAG, the **13.31 h** critical path, and what
+>   may run in parallel.
+
 1. **Confirm the model shape** (d_model, layers, expert width) so §2's active-parameter figures and
    every downstream token and cost number can be re-derived against the real config.
 2. **Wire the synthetic de-duplication predicate into the build path.** It exists and is tested on
@@ -366,8 +373,14 @@ between what we measured and what we inherited is worth keeping visible.
    already-published corpora.
 4. **Drop the source that ships GSM8K in chain-of-thought format** — 0.51% of tokens (§10).
 5. **Decide the label schema** (§11) — this one is unbackfillable.
-6. **Measure the three blocking unknowns** (§12).
-7. **Then ingest, source by source**, each as a separately approved job.
+6. **Measure the three blocking unknowns** (§12), and measure **in-region bandwidth** first — ten
+   minutes, and it calibrates every duration estimate in the implementation plan.
+7. **⚠️ Freeze this mix completely, and only then ingest.** An earlier version of this line read
+   *"then ingest, source by source, each as a separately approved job."* **That is superseded, and
+   following it destroys work:** shard ordinals are allocated across the whole plan in alphabetical
+   order, so adding one source renames **98% of shards** and voids **882B tokens** of finished
+   tokenization. Sources may still be *approved* and *run* one at a time — but **the plan must cover
+   all of them before the first job runs.**
 
 Every AWS job goes through the platform submission form and requires a human release. Nothing
 auto-publishes.

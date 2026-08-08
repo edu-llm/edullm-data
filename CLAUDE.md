@@ -4,18 +4,33 @@ You are working on **`edullm-data`**: the publisher, validator, and reader for t
 standard. Public repo: `github.com/edu-llm/edullm-data`. This file auto-loads on every launch; it
 orients you, it is not the spec.
 
-## ⚠️ ON THIS BRANCH (`final-dataset`), READ THESE TWO FIRST
+## ⚠️ ON THIS BRANCH (`final-dataset`), READ THESE FOUR, IN THIS ORDER
 
 This worktree is the **corpus build for the 96-expert flagship / 32-expert baseline MoEs**, which is
-newer than anything in `HANDOFF.md`:
+newer than anything in `HANDOFF.md`. Four documents, answering four different questions:
 
-1. **`HANDOFF-FINAL-DATASET.md`** — the living state of THIS work. Read it alone and you can continue.
-2. **`docs/FINAL-DATASET-REPORT.md`** (+ PDF) — the plan of record: mix, sources, measurement, and how
-   to draw the baseline subset from the same corpus.
+| # | read | answers | length |
+|---|---|---|---|
+| 1 | **`HANDOFF-FINAL-DATASET.md`** | **STATE** — what is done, what is next, what I got wrong | 258 lines |
+| 2 | **`docs/FINAL-DATASET-REPORT.md`** (+PDF) | **WHAT** to build — mix, sources, metrics, baseline recipe | 373 lines |
+| 3 | **`docs/IMPLEMENTATION-PLAN.md`** (+PDF) | **HOW** — 5 silent blockers, wall-clock, tokenizer verdict | 1,140 lines |
+| 4 | **`docs/BUILD-DEPENDENCY-GRAPH.md`** (+PDF) | **WHEN** — the DAG, the 13.31 h critical path, an orchestrator brief | 350 lines |
 
-Two things to know before touching any number: **Maple is a separate experiment and its configs must
-not be read or cited** (owner instruction), and the model shape in the report is **derived**, not
-given — confirm d_model and layer count with the owner before relying on token or cost figures.
+**If you are about to write code or launch a job, 3 and 4 are not optional.** The report says what the
+corpus should contain; it does **not** contain the five defects that would silently corrupt or discard
+the work.
+
+**Evidence** for 3 and 4 is in `artifacts/impl-plan/` (7 reports, 7,769 lines).
+`orchestrator-findings.md` indexes it, **including every claim of mine that was later refuted.**
+
+**Three things to know before touching any number:**
+
+- **Maple is a separate experiment; its configs must not be read or cited** (owner instruction).
+- The model shape in the report is **derived**, not given — confirm d_model and layer count with the
+  owner before relying on any token or cost figure.
+- **Do NOT act on the older "ingest source by source, each separately approved" advice.** Executed
+  literally it renames **98% of shards** and voids **882B tokens** per added source. Freeze the
+  complete plan first.
 
 `HANDOFF.md` below remains accurate about the **reservoir** corpus and the pipeline; it predates this
 work and does not describe it.

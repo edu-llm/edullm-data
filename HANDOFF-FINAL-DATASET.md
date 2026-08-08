@@ -126,10 +126,13 @@ HellaSwag, and publish it through this repo's airlock so it arrives validated, s
 
 | file | state |
 |---|---|
-| `docs/FINAL-DATASET-REPORT.md` + `.pdf` | ✅ **CURRENT — this is the plan of record.** 13 sections, self-contained, written for a first-time reader. 8-page PDF beside it. Its §9 is the baseline-subset recipe |
+| `docs/FINAL-DATASET-REPORT.md` + `.pdf` | ✅ **CURRENT — the plan of record for WHAT to build.** 13 sections, self-contained, first-time-reader framing. Its §9 is the baseline-subset recipe |
+| **`docs/IMPLEMENTATION-PLAN.md` + `.pdf`** | ✅ **CURRENT — HOW to build it.** 25 pages, 11 sections. **Five blockers, none of which fails loudly.** Also carries the wall-clock (§8A), the gigatoken verdict (§7), and two of my own retracted claims |
+| **`docs/BUILD-DEPENDENCY-GRAPH.md` + `.pdf`** | ✅ **CURRENT — WHEN to build each piece.** 33-node DAG, critical path **13.31 h**, and an orchestrator brief in §8 that can be handed to an agent verbatim |
+| `artifacts/impl-plan/*.md` | 7 audit reports, **7,769 lines**. Evidence behind the plan. `orchestrator-findings.md` is the index of my own findings and corrections |
 | `docs/FINAL-DATASET-MIX.md` | superseded stub pointing at the report; kept because older commits link to the filename |
 | `scripts/measure_finephrase_overlap.py` + `.sbatch` + README | FarmShare census of FinePhrase id overlap. **Selftest passes locally.** Now confirmatory only — the overlap was measured directly (0.2683 distinct on a complete-column read of 287,000 ids) |
-| `scripts/md2html.py` + `README-pdf.md` | Markdown→PDF via headless Chrome, since no converter is installed. Two commands in that README |
+| `scripts/md2html.py` + `README-pdf.md` | Markdown→PDF via headless Chrome. **Now renders mermaid too** — `--virtual-time-budget=20000` is REQUIRED or the diagram is silently missing |
 
 **17 research reports, 22,401 lines, in `artifacts/1t-research/` — on the MAIN checkout, not this
 worktree.** Before touching the mix, read `16` (regime), `17` (the reversal red-team), `15`
@@ -201,34 +204,48 @@ magnitudes.**
 - **The baseline model reuses the same corpus** at a different ratio vector (report §9) — shed
   knowledge-shaped data, raise reasoning-shaped. **No second dataset, no re-ingest.**
 
-## Next Steps (priority order)
+## Next Steps
 
-**Blockers — all pure code or measurement, no AWS approval needed:**
+> **⚠️ SUPERSEDED — do not follow the old "ingest source by source" advice.** A 2026-08-07 review found
+> that literally executing it **discards 98% of the work on every added source** (see blocker 1 below).
+> **`docs/BUILD-DEPENDENCY-GRAPH.md` §8 has the launch order as an orchestrator brief.** Read that
+> instead of reconstructing one from this list.
 
-1. **Wire `keeps_id` into the build path** (task #4). It exists, is tested on 287,000 ids, and is
-   called from nothing that writes data — so today's 59.6B of declared synthetic rests on ~17B of real
-   documents. Verified on the deployed branch: `corpus_read/build/filter/pack.py` reference it **zero
-   times**.
-2. **Fix `MoELoadBalancingLossGranularity`** (task #19) — defaults to `local_batch` in four places. At
-   10.66:1 with only **2 shared experts of 6 active**, Sigma-MoE-Tiny documents this as routing
-   **collapse** rather than merely suppressed specialization.
-   Cannot be annealed in: switching at 10% of training recovers only ~55%.
-3. **Fix the missing EOS in `gigatoken-superbpe`** (task #12) — `added_tokens: []` makes Gate A's EOS
-   check **skip silently** in two already-published corpora.
-4. **Drop `data_provenance_initiative`** (task #16) — it ships `fc-cot-cot_gsm8k` (GSM8K in Flan CoT
-   format) at 6 repeats and a ~9× cooldown upweight. **0.51% of tokens.**
+**The five blockers, from `IMPLEMENTATION-PLAN.md` §0. None of them fails loudly** — each either
+silently discards work or produces a corpus that passes every gate while being wrong.
 
-**Then the three blocking measurements** (tasks #14, #17, plus a footer count): Dolma 3 adult-content
-prevalence (a subagent saw explicit content at ~0.999 quality scores but **could not separate it from
-HuggingFace preview ordering** — sample at random offsets, not the preview endpoint); re-run Marin's
-13-gram scan on Nemotron-CC-Math post-PR-7051 (their published run **predates their own recall fix**
-and found **11,868 contaminated docs against a <902-doc removal budget**, including verbatim GSM8K
-*test* items at Jaccard 1.0); and a real dolma2 footer count for Nemotron-CC-Math, currently CARD-grade.
+| # | blocker | consequence | fix | task |
+|---|---|---|---|---|
+| 1 | **Ordinals shift when a source is added** | one 4B source renames **98% of shards**, voids **882B tokens** | freeze the FULL plan first — **0 code** | #20 |
+| 2 | **The FinePhrase de-dup predicate is never called** | 59.8B declared synthetic is **~18.5B distinct**; `epochs_for` reports green at ~4× true exposure | ~5 lines, at the reader | #21 |
+| 3 | **The dedup set OOMs at 1T** | `synthetic-finephrase-table` needs 19.37 GB in a 15.03 GB container | flat `np.uint64` → 1.80 GB | #22 |
+| 4 | **The decon index is built from 5-shot RENDERS** | 149,777 exact hashes are **dead** for MMLU/ARC/HellaSwag; ≥5% of ARC/HellaSwag items are shorter than one 13-gram | rebuild from raw fields | #24 |
+| 5 | **43% of bytes moved is the val split** | serving 0.39% of tokens | file-shard val bundles | #25 |
 
-**The mix and report are WRITTEN** (`docs/FINAL-DATASET-REPORT.md` + PDF, plan of record). Regenerate
-the PDF after any edit with the two commands in `scripts/README-pdf.md`.
+**Plus two that would embarrass us:** `tokenizers` is **not a declared dependency** while
+`corpus_build.py:631` imports it, so production resolves whatever PyPI served that morning (#23); and
+every Cosmopedia document begins with a leading space, which changes its first token under byte-level
+BPE (MEASURED 303/303 across all 8 configs).
 
-**Then ingest**, source by source, each as a separately-approved platform job.
+**Run FIRST, before trusting any duration:** measure **in-region S3 and HF CDN bandwidth** (#26, ~10
+min). Every read estimate borrows ~85 MB/s from an *S3* measurement; one reconciliation of the real
+build implies the HF CDN may be **~8.4 MB/s**. If so, staging becomes the most valuable decision in
+the plan.
+
+**Then the blocking measurements:** Dolma 3 adult-content prevalence at **random offsets** (#14 — a
+prior attempt could not separate signal from HuggingFace preview ordering); Nemotron-CC-Math's real
+dolma2 count (#17, and **it is gated — a human must accept the licence** before its text column can
+even be named); and mean document length for 5 unmeasured stage-2 sources.
+
+**Then**: freeze the mix → generate the plan → stage sources → **mandatory single-bundle smoke test**
+(`_reader_for` has never run against live HuggingFace from a Batch container, and the code says so) →
+build in waves → publish as **two datasets** → Gate A → `verify --deep` → promote.
+
+**Wall-clock: ~10 h fixed, ~36 h as-configured, 13.31 h critical path with correct parallelism.** Two
+stages don't merely run slowly today — Gate A at 5.6 h and `verify --deep` at 13.0 h each **exceed
+their job timeouts**, so the corpus could not be promoted at all.
+
+Regenerate any PDF after editing with the commands in `scripts/README-pdf.md`.
 
 ## Background agents
 
