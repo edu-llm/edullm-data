@@ -307,7 +307,8 @@ silently discards work or produces a corpus that passes every gate while being w
 
 | # | blocker | consequence | fix | task |
 |---|---|---|---|---|
-| 0 | **⚠️ NEW — one bundle cannot be split, so `BUILD` is 16.8 h not 6.6 h** | `--shard/--of` strides *bundles*, so DCLM's 410B is ONE child — **10.85 h even given a whole 32-vCPU instance.** The graph's 6.6 h floor was unreachable | plan-time ordinal ranges, **or** give DCLM a synthetic `domain_column` so it fans out for free | **#28** |
+| 0 | **⚠️ One bundle cannot be split, and at the real 384 vCPU cap this is now 4.9× the floor** | `--shard/--of` strides *bundles*, so DCLM's 410B is ONE child — **10.85 h even given a whole 32-vCPU instance**, against a **2.21 h** aggregate floor. FineWeb-Edu's 252B is the second at 6.67 h | **give DCLM a synthetic `domain_column` (~2 h, buys 8.64 h)** — NOT the 12 h ordinal-range route, which buys 0.64 h | **#28** |
+| 0b | **`verify --deep` re-establishes what S3 already enforces** | 1.49 h on the critical path for a guarantee a verified PUT gives free. But the sink at `corpus_build.py:463` declares **no checksum**, so today the re-hash is the only thing behind those bytes | declare `ChecksumSHA256` on the upload (~5 lines), **then** delete the job. **Inert until #10 lands** | **#29** |
 | 1 | **Ordinals shift when a source is added** | one 4B source renames **98% of shards**, voids **882B tokens** | freeze the FULL plan first — **0 code** | #20 |
 | 2 | **The FinePhrase de-dup predicate is never called** | the report already specifies the fix (36B from **one** partition); the code cannot express it. Draw 36B from all four and exposure returns at ~2.4× | ~5 lines, at the reader | #21 |
 | 3 | **The dedup set OOMs at 1T** | **DCLM needs 27.92 GB** in a 15.03 GB container — 1.44× worse than the bundle the plan named, and it was missing from the plan's table entirely | flat `np.uint64` → 2.60 GB | #22 |
@@ -341,11 +342,33 @@ and **keep `4plus_MIND` out of the pool** (it is a rewrite of `4plus`; including
 (`_reader_for` has never run against live HuggingFace from a Batch container, and the code says so) →
 build in waves → publish as **two datasets** → Gate A → `verify --deep` → promote.
 
-**Wall-clock: ~10 h of job time, ~36 h as-configured, and a 21.31 h critical path** — revised up from
-13.31 h on 2026-08-07 because that figure assumed `BUILD` = 6.6 h with blocker 0 unfixed, which is not
-achievable. With #28 done the path is **21.31 h**; without it, **23.54 h**. Two stages also don't merely run
-slowly today — Gate A at 5.6 h and `verify --deep` at 13.0 h each **exceed their job timeouts**, so the
-corpus could not be promoted at all.
+### ⚠️ Two infrastructure facts, MEASURED 2026-08-07, that reshaped every wall-clock figure
+
+Both from a dedicated read-only verification (`artifacts/impl-plan/cpu-env-verification.md`):
+
+1. **The CPU cap is 384 vCPU, not 128.** `sbsandbox-intern-edullm-cpu` reports `maxvCpus: 384`, ENABLED,
+   VALID; EC2 quota **1,152** (1,060 free); **one** queue targets it 1:1 with **zero** jobs queued;
+   `c7i.8xlarge` is offered in **all 5** of its AZs. **Nothing binds below 384.** The tokenize floor is
+   **2.21 h, not 6.61 h**, and **12** children fit rather than 4. The "128 vCPU hard floor" that every
+   figure rested on was a **3× understatement**.
+2. **H100 exists but has never run.** Both p5 CEs are ENABLED/VALID, the P quota is **768 not zero** — and a
+   prior probe recorded *"InsufficientInstanceCapacity in all five reachable AZs over 9h"* with **zero
+   SUCCEEDED jobs ever**. **Keep pricing on 8×A100 ($70k/89 days for 1.0T).** `ENABLED` is not evidence a
+   shape is submittable — I got this wrong first and the account's own job history corrected me.
+
+**And the 384 vCPU finding INVERTS blocker 0's fix.** At a 2.21 h floor, 12 h of ordinal-range code lands on
+the critical path in front of a build that barely takes 2 h:
+
+| | `BUILD` | code ahead | **path** |
+|---|---|---|---|
+| do nothing | 10.85 h | 4 h | **16.39 h** |
+| #28 as specified (12 h of code) | 2.21 h | 12 h | **15.75 h** — buys 0.64 h |
+| **#28 via `domain_column` (~2 h)** | 2.21 h | absorbed | **7.75 h** ✅ |
+
+**Wall-clock: 3.69 h of job time, ~35.7 h as-configured, and a 7.75–15.75 h critical path** depending
+entirely on how #28 is done. **Job time is now ~3 h against a ~8 h path — code dominates the schedule**, so
+quote the path. Gate A at 5.6 h still exceeds its timeout unfixed (#10); `verify --deep` should be **deleted
+rather than threaded** (#29).
 
 **Task ids `#NN` are defined in `docs/TASKS.md`** — they used to live only in a session task tool, so three
 documents referenced ids that a fresh agent could not resolve. That file is also the crosswalk to the graph

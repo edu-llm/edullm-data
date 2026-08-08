@@ -12,7 +12,7 @@ and Phase 0 item.
 
 | # | task | graph | Phase 0 | changes the plan? | est |
 |---|---|---|---|---|---|
-| **#28** | **File-shard the BIG bundles.** `--shard/--of` strides *bundles* (`corpus_build.py:676`), so DCLM's 410B lands in one child = **10.85 h even on a whole 32-vCPU instance**. Needs plan-time ordinal ranges. **The longest item and the new critical path** | **C3b** | **3b** | **YES** | 1–2 d |
+| **#28** | **Split the BIG bundles — the ROUTE matters more than the task.** `--shard/--of` strides *bundles*, so DCLM's 410B is one child at **10.85 h even on a whole 32-vCPU instance**; FineWeb-Edu's 252B is 6.67 h. **Try the synthetic `domain_column` fan-out first (~2 h → path 7.75 h); the 12 h ordinal-range route buys only 0.64 h over doing nothing** (break-even ~11.5 h) | **C3b** | **3b** | **YES** | **~2 h**, or 1–2 d |
 | #22 | **Replace the dedup set with a flat `np.uint64` pre-pass.** The `set` needs **27.92 GB** for DCLM in a 15.03 GB container (§5.2a) | A2a + A2b | 4 | no | 1 d |
 | #21 | **Wire the FinePhrase id partition** into `_reader_for`. Cannot be retrofitted after tokenization. **Ships with the budget correction or not at all** | C1 | 1 | **YES** | ~5 lines |
 | #9 | **Decide `SHARD_TOKENS`.** Code says 25,001,984; the report now agrees. Confirm and stop carrying two values | B6 | 11 | **YES** | 1 h |
@@ -23,7 +23,8 @@ and Phase 0 item.
 | # | task | graph | Phase 0 | est |
 |---|---|---|---|---|
 | #23 | **Pin `tokenizers`** in `pyproject.toml`. It is imported at `corpus_build.py:631` and declared nowhere | B1 | 5 | 1 line |
-| #10 | **Thread the Gate A profile checks + raise `max_pool_connections`.** ~100 lines, not the ~20 an earlier draft said | B3 | 6 | 1 d |
+| **#10** | **Thread the Gate A profile checks + raise `max_pool_connections`.** ~100 lines, not the ~20 an earlier draft said. **Ship this BEFORE #29** — deleting `verify --deep` exposes `GA1`, and unthreaded that is 5.08 h, which makes #29 worth exactly nothing | B3 | 6 | 1 d |
+| **#29** | **Declare `ChecksumSHA256` on the shard upload, then retire `verify --deep`.** `corpus_build.py:463` calls a plain `put` and computes the digest one line too late, so S3 never verifies it. A verified PUT is rejected server-side on mismatch (proven live: `BadDigest`, and **no object is created**), and `CopyObject` recomputes on the publish hop — so the 1.49 h re-hash is redundant **once the checksum is declared.** Keep the code for VENDORED corpora | **B7** | **13** | ~5 lines |
 | #16 | **Drop `data_provenance_initiative`** — ships GSM8K in Flan CoT format at 6 repeats. 0.51% of tokens | B4 | 9 | registry edit |
 | — | **Fix the boundary-marker prefix guard** in `corpus_pack.py`, and the test asserting the table length is 1 | B2 | 8 | ~5 lines |
 | — | **Record `FilterStats` in the receipt.** Until then no dedup claim is auditable | — | 7 | ~10 lines |

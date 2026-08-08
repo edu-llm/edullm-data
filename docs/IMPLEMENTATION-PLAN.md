@@ -20,7 +20,7 @@ produces a corpus that passes every gate while being wrong.
 
 | # | blocker | consequence if unfixed | fix | task |
 |---|---|---|---|---|
-| **0** | **⚠️ One bundle cannot be split, so `BUILD` is 16.8 h and not 6.6 h** | `--shard/--of` strides **bundles** (`corpus_build.py:676`), so DCLM's 410B is ONE child — **10.85 h even given an entire 32-vCPU instance.** A Batch child cannot exceed one instance, so no vCPU allocation fixes it. **Critical path 13.31 h → 21.31 h** | plan-time ordinal ranges, **or** a synthetic `domain_column` so DCLM fans out for free (§8A.5a) | **#28** |
+| **0** | **⚠️ One bundle cannot be split, and at the measured 384 vCPU cap it is 4.9× the floor** | `--shard/--of` strides **bundles** (`corpus_build.py:676`), so DCLM's 410B is ONE child — **10.85 h even given an entire 32-vCPU instance**, against a **2.21 h** aggregate floor. A Batch child cannot exceed one instance, so no vCPU allocation fixes it. FineWeb-Edu's 252B is second at 6.67 h | **a synthetic `domain_column` fan-out (~2 h, path 7.75 h)** — the 12 h ordinal-range route buys only 0.64 h (§8A.3) | **#28** |
 | 1 | **Ordinals shift when a source is added** | adding one 4B source renames **98% of shards** and voids **882B tokens** | freeze the full plan first — **0 code** | #20 |
 | 2 | **The FinePhrase de-dup predicate is never called** | the report already specifies the fix — **36B from ONE partition** — and the code cannot express it. Draw 36B from all four configs and exposure returns at ~2.4× on ~15B distinct documents (§0's detail below) | ~5 lines, at the reader | #21 |
 | 3 | **The dedup set OOMs at 1T** | **27.92 GB for the DCLM bundle** in a 15.03 GB container — 1.44× worse than the bundle an earlier draft named, and **absent from that draft's table** (§5.2a) | flat `np.uint64` → 2.60 GB | #22 |
@@ -40,13 +40,18 @@ leading space, which changes its first token under byte-level BPE.
 
 | | as configured today | with the fixes | floor |
 |---|---|---|---|
-| **job time, end to end** | **~36 h**, and two stages fail their timeouts outright | **~10 h** | 6.6 h of tokenize at the 128 vCPU cap |
-| **critical path** (incl. the code ahead of the jobs) | — | **21.31 h** | 8.81 h of jobs on the path |
+| **job time, end to end** | **~35.7 h**, and two stages fail their timeouts outright | **3.69 h** | 2.21 h of tokenize at the **measured 384 vCPU** cap |
+| **critical path** (incl. the code ahead of the jobs) | — | **7.75 h** cheap route / 15.75 h expensive | 3.25 h of jobs on the path |
 
-**Read those two rows as answering different questions.** ~10 h is the sum of job durations once the flags
-are passed. **21.31 h is the earliest the corpus can exist**, because 12.5 h of code and image build sit
-ahead of the first job — dominated by blocker 0's fix. Skipping that fix gives 23.54 h, so it pays for
-itself, but it does not make the ~10 h figure a delivery date.
+**Read those two rows as answering different questions.** 3.69 h is the sum of job durations once the flags
+are passed. **7.75 h is the earliest the corpus can exist**, because ~4.5 h of code and image build sit ahead
+of the first job.
+
+⚠️ **Both "fixed" figures dropped sharply on 2026-08-07, and it was a measurement, not an optimization.**
+They were ~10 h and 21.31 h, computed at a **128 vCPU** cap that turned out to be **384** (§8B.5 — quota
+1,152, one queue 1:1, all 5 AZs) and with `verify --deep` still in the path (§8.3a retires it). **The 3×
+capacity correction also inverted blocker 0's fix** — see §8A.3 — which is why the path is quoted as a range:
+the cheap route gives 7.75 h, the originally-specified one 15.75 h, and doing nothing 16.39 h.
 
 The 3.7× job-time gap is **entirely flags** — no new architecture. Five threading facilities
 exist in the package and work; **every default is 1**, and the registered job definitions do not pass
@@ -265,7 +270,7 @@ build is not as CPU-cheap as this section implies. Worth measuring in the same s
 
 **And there is no Batch timeout to design around.** `INGEST-CALIBRATION.md:19-22` corrects this
 in-repo: the 7200 s figure was *our own setting*, not a platform ceiling. The real constraint is the
-**128 vCPU compute environment**.
+**384 vCPU compute environment** (MEASURED — §8B.5; an earlier draft said 128).
 
 ---
 
@@ -970,6 +975,105 @@ former **0.33%** is the *same quantity computed at the withdrawn 50M shard size*
 measurement that disagrees. Both are far below any level that would matter, which is precisely why the
 constant should be decided on Gate A cost.)
 
+### 8.3a ⚠️ `verify --deep` asks a question the write path already answers — retire it
+
+**It is the single largest job on the critical path (1.49 h at 8 workers, 11.7 h serial), and it
+re-establishes a guarantee S3 gives for free.** Raised by the owner 2026-08-07: *"we already have
+comprehensive checks throughout — are they even necessary?"* For `verify --deep` the answer is no. For
+Gate A it is yes, and §8.3b says why the two differ.
+
+**What `verify --deep` does:** `_run_deep_rehashes` (`corpus_receipt.py:844`) re-reads every published
+object and recomputes its sha256 against the receipt. At 4 TB that is a full second read of the corpus.
+
+**Why it is redundant — three independent mechanisms, all MEASURED-IN-CODE:**
+
+1. **A verified PUT is rejected server-side on mismatch.** `s3.py:290` `put_file_verified` computes the
+   digest locally, declares `ChecksumSHA256`, and S3 recomputes it. **Verified live against S3 on
+   2026-08-01** (`s3.py:312-320`): a correct digest returns 200 with `ChecksumType: FULL_OBJECT`; a
+   deliberately corrupted one returns `BadDigest` — *"The SHA256 you specified did not match the
+   calculated checksum"* — and **a subsequent listing showed no object was created.** A corrupted body
+   cannot become an object that a later re-hash would catch, because it never becomes an object.
+2. **`CopyObject` recomputes the checksum.** Recorded at `s3.py:571-575`: *"real S3 **RECOMPUTES** the
+   checksum on CopyObject and on any overwrite, so a same-length replacement changes it."* `publish()`
+   moves shards by server-side copy, so the landing → `edullm-data` hop is checksum-verified too.
+3. **`bundle_is_done` already re-HEADs every shard and compares sizes** (`corpus_build.py:387-427`), and
+   Gate A's decision loop does it again against the manifest's declared `bytes`. Truncation — the failure
+   mode a size check catches — is covered twice before any re-hash runs.
+
+**⚠️ But there is a real gap that must be closed FIRST, and it inverts the order of operations.**
+`corpus_build.py:463`'s sink calls **plain `s3.put`, not the verified path**:
+
+```python
+def sink(ref: ShardRef, payload: bytes) -> None:
+    key = _assert_safe_key(f"{root}/{ref.path}")
+    s3.put(bucket, key, payload)          # ← no ChecksumSHA256 declared
+    digests[ref.path] = (hashlib.sha256(payload).hexdigest(), len(payload))
+```
+
+It computes the sha256 **after** the upload, for the receipt, and never declares it to S3. So mechanism 1
+**does not currently protect the build**, and `verify --deep` is the only thing standing behind those
+bytes. `put_file_verified` exists (`s3.py:290`) but takes a local path; the sink holds a `bytes` payload,
+so this needs a small bytes-shaped equivalent rather than a call swap.
+
+**Therefore, in this order and never the reverse:**
+
+| # | step | effort | effect |
+|---|---|---|---|
+| 1 | **Declare `ChecksumSHA256` on the shard upload.** The digest is already computed one line later — move it above the `put` and pass it. Guard >5 GiB (single-PUT limit); a 100 MB shard is far under | **~5 lines** | every shard becomes server-verified at write time |
+| 2 | **Then drop `verify --deep` from the publish path** for corpora we produce ourselves | job-def change | **−1.17 h from the critical path** |
+
+**Critical path 21.31 h → 20.14 h**, and one fewer job that can exceed its timeout (it is one of the two
+❌ rows in §8A.4).
+
+⚠️ **The saving is 1.17 h, not the 1.49 h the job itself costs**, and the difference is worth noting because
+it is the same shape as Amdahl's law elsewhere in this plan. `VD1` and `GA1` both sit between `PUB1` and
+`PR1`, running in parallel; deleting the longer one **exposes the shorter one** rather than removing its
+duration outright. Recomputed on the real DAG rather than subtracted: `PR1` now waits on `GA1`'s 0.32 h
+instead of `VD1`'s 1.49 h. **Deleting a parallel branch buys the difference, not the branch.**
+
+**What to keep it for.** `verify --deep` is the right tool for a **vendored** corpus, where the claim is
+"these bytes are byte-for-byte what the upstream published" and no local digest was ever declared to S3.
+`publish.py:706` already scopes exactly this and says so: the destination re-hash *"closes the source-hash
+→ server-side-copy window"* and is **"deliberately opt-in through `expected_payload`"* because *"ordinary
+large corpus publication does not make an external byte-for-byte source claim."* **Our corpus is the
+ordinary case.** Keep the code, keep it available, stop running it on every publish.
+
+**Two honest caveats:**
+
+- **Step 1 must be verified live, not assumed.** The 2026-08-01 evidence covers `put_file_verified`'s
+  file-shaped path. A bytes-shaped variant is the same API call with the same header, but the golden rule
+  says recompute rather than trust — **corrupt a digest deliberately in the smoke test (§9 Phase 2) and
+  confirm `BadDigest`.** One extra assertion in a job that is already running.
+- **This removes a defense against a class nobody has observed:** silent S3 bit-rot after a successful
+  write. S3 checks its own stored CRC64NVME on read and `fsck` samples it weekly
+  (`edullm-wu-fsck-nightly`, `cron(6 9 ? * MON *)`), so the corpus is not unmonitored — but the
+  per-publish full re-hash does go away. Given eleven-nines durability against 1.49 h on every publish,
+  that is the right trade. **Record it in `limitations[]` rather than leaving it implicit.**
+
+### 8.3b Gate A is NOT redundant, and the distinction is the golden rule
+
+The same question applied to Gate A gets the opposite answer, for a reason worth stating because it
+generalizes.
+
+**The build wrote the manifest and the objects from the same in-memory state.** A build-side check that
+they agree is a tautology — it compares a value to itself. Gate A runs in a **different process, from the
+bytes S3 actually returns**, which is the only place the comparison carries information:
+
+| Gate A check | what it recomputes | why the build cannot |
+|---|---|---|
+| `check_decode_smoke` (`:278`) | 4 ranged reads at seeded offsets, decoded | reads **what S3 returned**, not what the writer intended |
+| `check_first_bytes_not_npy` (`:421`) | the `\x93NUMPY` sniff | guards a **past** defect class (the ".npy lie") that a fresh writer would not reproduce but a *changed* writer might |
+| `check_entries_declare_token_counts` (`:253`) | `tokens × 4 == bytes` | manifest claim against object reality |
+| `check_seq_len_alignment` (`:452`) | shard/`seq_len` divisibility | free, cached |
+| label equality (`labels_from_path`) | `labels` recomputed from the key, compared by **full dict equality** | this is what makes a blocker-2-style mislabelling *detectable* |
+
+**And Gate A is cheap once threaded — 0.32 h (§8.3 item 2), against `verify --deep`'s 1.49 h for strictly
+less information.** Fix Gate A, retire the re-hash. That ordering is the whole recommendation.
+
+**The general rule this leaves behind:** *a check is redundant when another mechanism already refuses the
+bad state, and load-bearing when it is the first thing to read the bytes back from a different process.*
+`verify --deep` is the former once the sink declares its checksum. Gate A is the latter, permanently.
+
 ### 8.4 Publish as TWO datasets, not one
 
 `build_mixture` is scoped to exactly **one group of one dataset**, enforced in three places. And
@@ -1006,6 +1110,195 @@ So the fix belongs in the trainer's data loader, and the setting is already iden
 perplexity and +5–6 GSM8K**, and it **cannot be annealed in** — switching at 10% of training recovers
 only ~55%. With only 2 shared experts of 6 active, routing quality is load-bearing rather than
 incidental.
+
+---
+
+## 8B. Region placement — build in `us-east-1`, mirror if something needs `us-east-2`
+
+**Asked by the owner 2026-08-07: "I need the final dataset staged on us-east-2a. Maybe build through the
+pipeline in us-east-1 and then mirror?"** The mirror instinct is right. The `us-east-2a` part rests on a
+misconception worth correcting first, because it changes what is being asked for.
+
+### 8B.1 An S3 general-purpose bucket cannot live in an AZ
+
+**S3 general-purpose buckets are REGIONAL.** There is no `us-east-2a` placement for one — only
+`us-east-2`. S3 replicates across AZs within the region by itself; that is where the durability comes from
+and it is not a knob.
+
+The single exception is an **S3 Directory bucket (Express One Zone)**, which *is* single-AZ. It is the wrong
+tool here, for three independent reasons:
+
+| | Directory bucket | what we need |
+|---|---|---|
+| price | **~7× S3 Standard** per GB-month | 4.21 TB staged for two months (§3.2 budgets ~$194; this would be ~$1,350) |
+| API | different endpoint and semantics; **no `ChecksumSHA256`-on-PUT** in the same form | §8.3a makes that checksum the *reason* we can drop `verify --deep` |
+| access pattern | built for single-digit-ms reads by co-located compute | ours is a bulk sequential scan, which S3 Standard already serves at line rate |
+
+**So the real question is `us-east-1` versus `us-east-2`, as regions.**
+
+### 8B.2 Everything the pipeline needs is in `us-east-1`, and nothing is in `us-east-2`
+
+MEASURED 2026-08-07 via the read-only broker:
+
+| resource | `us-east-1` | `us-east-2` |
+|---|---|---|
+| `edullm-data` bucket | ✅ (`get-bucket-location` → `LocationConstraint: null`, which **means** us-east-1) | ❌ |
+| `edullm-landing` bucket | ✅ | ❌ |
+| Batch compute environments | **16, all ENABLED** | **none** — `describe-compute-environments` returns `[]` |
+| ECR images | `sbsandbox-intern-edullm-data`, digest-pinned | 2 repos, **neither ours** |
+| the airlock IAM Deny | ✅ the whole point of the design | would need rebuilding |
+| EventBridge promotion rule | ✅ (currently DISABLED, deliberately) | ❌ |
+
+**A move is therefore not a data-mirror; it is a second deployment** — compute environments, job queues,
+job definitions, ECR replication, the validator role and its Deny, the EventBridge rule. The `InternSandboxBoundary`
+does permit `us-east-2` (its region lock names `us-east-1`/`us-east-2`, per
+`PLATFORM-INTEGRATION.md:202`), so it is not *forbidden* — it is just unbuilt, and rebuilding the airlock
+is the part to be nervous about, since a subtly different Deny is worse than none.
+
+### 8B.3 The mirror, which is cheap and is the recommendation
+
+**Build, validate and promote in `us-east-1`. Then copy the frozen `vN` to `us-east-2` if something there
+needs it.**
+
+| property | figure | grade |
+|---|---|---|
+| egress, us-east-1 → us-east-2 | **$0.02/GB**, so ~**$80 one-time** for 4 TB | DERIVED at the published inter-region rate |
+| destination storage | ~$92/month for 4 TB S3 Standard | DERIVED at $0.023/GB-month |
+| the manifest is **region-portable** | it stores **keys, not URIs** — grep for `bucket`/`region` in `manifest.py` finds no field | MEASURED-IN-CODE |
+| the corpus is **frozen** | so the mirror is one-way and never needs reconciling | design invariant |
+| `Boto3S3.default(region="us-east-1")` is a **default, not a hardcode** | the only region literal in `s3.py` (`:193`); a caller passes its own | MEASURED-IN-CODE |
+
+Mechanism: `aws s3 sync` (or S3 Batch Replication for a one-shot). Copies are server-side, so the bytes
+never transit a client — **the failure mode from `publish-must-run-in-region` does not apply**, because
+nothing is being hashed locally.
+
+**Three things to get right:**
+
+1. **Mirror AFTER promotion, never before.** The mirror must copy the *validated* `vN`. Copying from
+   landing would reproduce the airlock's whole problem in a region with no validator to catch it.
+2. **`CopyObject` recomputes the checksum** (`s3.py:571-575`), so the copy is self-verifying — no
+   `verify --deep` needed on the far side either.
+3. **Copy the control files too** — `manifest.json`, `dataset.json`, and the generated `README.md`. The
+   README is a control file, not a manifest entry, so a payload-only sync silently drops it.
+
+### 8B.4 ⚠️ But confirm what actually needs `us-east-2` first, because it may cost more than $80
+
+**If the answer is "a training run," the region choice may be backwards.** The same
+`describe-compute-environments` sweep that found nothing in `us-east-2` also found, in `us-east-1`:
+
+- **`sbsandbox-intern-edullm-gpu-8xh100`: ENABLED, `p5.48xlarge` + `p5en.48xlarge`, maxvCpus 768.**
+- **`sbsandbox-intern-edullm-gpu-1xh100`: ENABLED, `p5.4xlarge`, maxvCpus 384.**
+
+`FINAL-DATASET-REPORT.md` §11 and `HANDOFF-FINAL-DATASET.md` both assert **"H100 IS NOT PROVISIONED"** and
+price the program on 8×A100 at **$70k / 89 days for 1.0T**. If those two environments are usable, the same
+budget is **$37k / 28 days** — and it is in `us-east-1`, so moving the corpus to `us-east-2` would cost
+access to it.
+
+⚠️ **ENABLED is not the same as obtainable.** A Batch compute environment can be ENABLED while the
+account's **EC2 P-instance quota is zero**, in which case every job fails to place — and p5 capacity is
+famously constrained. **The deciding evidence is the service quota, not the CE state**, and it is being
+verified separately (§8B.5). Do not re-price the program on this until that lands.
+
+**Recommendation: keep the build in `us-east-1`; mirror to `us-east-2` only for a named consumer, and say
+what it is.** $80 is cheap enough that it is not worth a long analysis — but a *region migration* is
+expensive enough that it is.
+
+### 8B.5 ✅ VERIFIED — the CPU cap is 384 vCPU, not 128, and the quota does not bind
+
+**§8A.3 treats "128 vCPU on one `c7i.8xlarge` type" as the one hard floor of this entire plan.** It is what
+makes tokenize 6.61 h, and it propagates into every wall-clock figure and into blocker 0.
+
+**That figure is REFUTED — a 3× understatement.** Verified 2026-08-07 by a dedicated read-only agent
+(`artifacts/impl-plan/cpu-env-verification.md`, all calls quoted there):
+
+| what | value | grade |
+|---|---|---|
+| `sbsandbox-intern-edullm-cpu` `maxvCpus` | **384** | MEASURED |
+| state / status | `ENABLED` / `VALID` — "ComputeEnvironment Healthy" | MEASURED |
+| type / allocation | `EC2` (On-Demand, **not** Spot) / `BEST_FIT_PROGRESSIVE` | MEASURED |
+| instance type | `c7i.8xlarge` — the "one type" half of the old claim is right | MEASURED |
+| **EC2 quota `L-1216C47A`** | **1,152 vCPU**, 92 in use → **1,060 free** | MEASURED |
+| queues targeting this CE | **exactly one, 1:1** | MEASURED |
+| jobs in all five pre-terminal states | **zero** — no contention | MEASURED |
+| `c7i.8xlarge` AZ coverage | **all 5 of the CE's AZs** (1a/1b/1c/1d/1f), ~4,090 free IPs per subnet | MEASURED |
+
+**All three things that could have bound below 384 were checked and none of them do.** The quota is 3× the
+CE ceiling, so **the binding constraint is a CloudFormation `maxvCpus` value with 768 vCPU of unused quota
+behind it** — raising it is a config change, not an AWS support ticket.
+
+**Consequence for the whole plan:**
+
+| | at 128 vCPU (the old assumption) | **at 384 vCPU (measured)** |
+|---|---|---|
+| 1.0T tokenize floor | 6.61 h | **2.21 h** |
+| concurrent `c7i.8xlarge` children | 4 | **12** |
+
+⚠️ **But this does NOT dissolve blocker 0 — it sharpens it.** A single Batch child still cannot exceed one
+instance, so DCLM's 410B is **still 10.85 h on its 32 vCPU**. Against a 2.21 h aggregate floor that child is
+now **4.9× the floor**, where before it was 1.6×. **More total capacity makes the un-splittable bundle a
+worse bottleneck, not a better one**, because the floor drops while the child does not. Blocker 0 and
+task #28 get *more* important, not less.
+
+**One honest gap the agent flagged itself:** obtainability of **12 concurrent** `c7i.8xlarge` is
+**UNVERIFIED** — no probe has demonstrated the scale-out. Low risk (mainstream type, one running now), but
+§8A.1 is a cautionary tale about exactly this assumption. **Confirm it in the Phase 2 smoke test** by
+requesting the full wave shape once.
+
+**Also measured, and reassuring:** `updatePolicy.jobExecutionTimeoutMinutes = 30` on this CE against 360 on
+every GPU CE. **It is the CE *update* policy — how long Batch waits for running jobs before replacing
+instances on a CE update — not a per-job timeout**, so it does not cap a multi-hour tokenize. Worth knowing
+before anyone updates the CE mid-build.
+
+### 8B.6 ⚠️ H100 is configured but NOT obtainable — and my earlier read of it was wrong
+
+I told the owner that `p5` being ENABLED might re-price the program from $70k/89 days to $37k/28 days.
+**That was wrong, and the evidence was already in the account.** `ENABLED` describes configuration, not
+capacity.
+
+| finding | grade |
+|---|---|
+| both H100 CEs exist as described, `ENABLED` / `VALID` | MEASURED |
+| **EC2 P-instance quota `L-417A185B` = 768, NOT zero** — so the quota is not the blocker | MEASURED |
+| a prior probe, `h100-capacity-probe-1785731833`: **"p5.48xlarge InsufficientInstanceCapacity in all five reachable AZs over 9h"** | MEASURED |
+| a platform cancellation: **"EC2 has returned InsufficientInstanceCapacity for every p5.4xlarge launch in every availability zone and this account has never held one… `gpu-1xh100` is now off the submission form. Resubmit on `gpu-8xa100`, which has capacity."** | MEASURED |
+| **zero SUCCEEDED jobs ever** on either H100 queue; both at `desiredvCpus: 0` | MEASURED |
+| 6 running `p4d.24xlarge` × 96 = **576 of the 768 P vCPU already committed**, leaving 192 = exactly one `p5.48xlarge` | DERIVED |
+
+**So `FINAL-DATASET-REPORT.md` §11's "H100 is not provisioned" is right in substance and wrong in
+mechanism** — it is not absent from the account, it is present and unobtainable. **Keep pricing the program
+on 8×A100 at $70k/89 days for 1.0T.** The report should name `gpu-8xa100` as the live large-GPU shape.
+
+**And this settles the region question in §8B.2's favour:** the usable large-GPU capacity is in
+`us-east-1`, so moving the corpus to `us-east-2` would separate the data from the only compute that can
+train on it.
+
+⚠️ **`p5en.48xlarge` is an H200, not an H100** (`GpuInfo.Gpus[0].Name = "H200"`), and is offered in only 2
+of that CE's 6 AZs. Anything reasoning about "the 8xH100 environment" is reasoning about two different
+accelerators.
+
+### 8B.7 ⚠️ The auto-cancel rule is fail-open for capacity failures — a starved job hangs forever
+
+Not asked for, and more operationally dangerous than either claim above.
+
+Every queue declares `CAPACITY:INSUFFICIENT_INSTANCE_CAPACITY → CANCEL after 1800s`. **But Batch leaves
+`statusReason` null for capacity failures, so the rule never matches** — measured verbatim in
+`diag-p5-statusreason-1785871745`. A job on a capacity-starved queue **sits in RUNNABLE indefinitely with no
+error and no cancellation.**
+
+**Reading the queue configuration alone gives you the opposite conclusion** — it looks like a 30-minute
+safety net. Two consequences for this build:
+
+1. **A stuck submission is silent.** Set a wall-clock expectation per job and check it yourself; do not rely
+   on the queue to fail fast.
+2. **`state: ENABLED` is not evidence a shape is submittable.** `gpu-1xh100` is `ENABLED`/`VALID` in the API
+   while removed from the submission form. **An inventory built from `describe-compute-environments`
+   overstates what can actually run** — which is precisely the error I made in §8B.6's first draft.
+
+**Two more from the same sweep:** a non-Batch **"lane"** path exists
+(`lane-grant.matherne-nemotron-cc-math-v1`, a `c7i.8xlarge` tagged `edullm:lane` with an `ExpiresAt`) that
+draws on the *same* standard-instance quota while being **invisible to `batch list-jobs`** — so "the queue is
+empty" does not mean "the quota is free". And the P-family CEs are **2.5× oversubscribed** in aggregate
+(768 + 384 + 768 configured against a 768 quota), meaning any two of them at full size cannot coexist.
 
 ---
 
@@ -1050,19 +1343,76 @@ exactly that error.*
 | A4 | promote | ~2 round trips/object, **already threaded** | `validate.py:1943-1948` |
 | A5 | id/fetch pass, post-fix | **67 s** (was projected 16.9 h) | `INGEST-CALIBRATION.md` banner |
 
-### 8A.3 The one hard floor: 128 vCPU
+### 8A.3 The one hard floor: **384 vCPU** (corrected 2026-08-07 — it was never 128)
 
-The compute environment caps at **128 vCPU on one `c7i.8xlarge` type**, and that cap is real (unlike
-the timeout). Tokenization is CPU-bound, so at A1's measured per-vCPU rate:
+The compute environment caps at **384 vCPU on one `c7i.8xlarge` type** — MEASURED, §8B.5, along with the
+three things that could have bound below it and do not (quota 1,152; one queue 1:1; all 5 AZs offer the
+type). **An earlier version of this section said 128 and treated it as "the one hard floor of this plan."
+That was a 3× understatement and it propagated into every figure below.**
+
+Tokenization is CPU-bound, so at A1's measured per-vCPU rate:
 
 | vCPU | rate | 1.0T tokenize |
 |---|---|---|
-| 32 | 10.5 M tok/s | 26.46 h |
+| 32 (one instance) | 10.5 M tok/s | 26.46 h |
 | 64 | 21.0 M tok/s | 13.23 h |
-| **128 (the cap)** | **42.0 M tok/s** | **6.61 h** |
+| 128 (**the withdrawn figure**) | 42.0 M tok/s | ~~6.61 h~~ |
+| **384 (the real cap)** | **126.0 M tok/s** | **2.21 h** |
 
-**6.61 h is the tokenize floor for 1.0T** no matter how bundles are sliced. Slicing does not lower it —
-it only prevents a long tail.
+**2.21 h is the tokenize floor for 1.0T**, and the cap allows **12 concurrent `c7i.8xlarge` children**.
+
+⚠️ **This makes blocker 0 WORSE, not better, and that is the counter-intuitive part.** Slicing still does
+not lower the aggregate floor — but the floor just dropped 3× while the largest **un-splittable child did
+not move at all**. DCLM's 410B is still 10.85 h on one instance's 32 vCPU:
+
+| | old (128 vCPU) | **new (384 vCPU)** |
+|---|---|---|
+| aggregate floor | 6.61 h | **2.21 h** |
+| DCLM as one child | 10.85 h | **10.85 h** — unchanged |
+| **child ÷ floor** | 1.6× | **4.9×** |
+
+**More capacity buys nothing until the un-splittable bundle is split.** Without task #28, `BUILD` is
+10.85 h regardless of the cap, and the extra 256 vCPU sit idle waiting for one child.
+
+#### ⚠️ But the 384 vCPU finding INVERTS how task #28 should be done, and this is the important part
+
+At 128 vCPU, item 3b was unambiguous: 12 h of ordinal-range code to turn a 16.8 h `BUILD` into 6.6 h.
+**At 384 vCPU the arithmetic flips, because the 12 h of code now lands on the critical path in front of a
+`BUILD` that is only 2.21 h.** Computed on the real DAG, not subtracted:
+
+| approach | `BUILD` | code ahead of it | **critical path** |
+|---|---|---|---|
+| **do nothing** — DCLM stays one child | 10.85 h | A2a 4 h | **16.39 h** |
+| **item 3b as specified** — plan-time ordinal ranges, ~12 h | 2.21 h | C3b 12 h | **15.75 h** |
+| **the `domain_column` alternative** (§8A.5a), ~2 h | 2.21 h | absorbed by A2a's 4 h | **7.75 h** ✅ |
+
+**The 12 h version buys 0.64 h. The 2 h version buys 8.64 h.** Break-even for item 3b is about **11.5 h of
+code** — so as specified it is within noise of not doing it at all, and the entire value of splitting DCLM
+now lives in doing it *cheaply*.
+
+**This changes the wave-0 instruction.** §8A.5a already noted the alternative — give DCLM a synthetic
+`domain_column` derived from its 27,938-file index so `allocate_ordinals` fans it out with no new mechanism —
+and flagged it as "worth considering because it may be free." **It is no longer an aside; it is the
+recommendation.** The agent on stream 4 should:
+
+1. **Try the `domain_column` fan-out first**, and time-box it. If it works, the path is ~7.75 h.
+2. **Only fall back to plan-time ordinal ranges if that fails** — and if the fallback looks like more than
+   ~11 h, **stop and reconsider doing nothing**, because at that point it is not paying for itself.
+
+**The cost of the `domain_column` route is a schema smell, not compute:** a `domain` label that is not
+semantically a domain (a file-index bucket), inside `PATH_LABEL_KEYS` and therefore inside
+`manifest_sha256` and unbackfillable. That is a real objection — it makes every per-domain predicate on DCLM
+meaningless. **Weigh it against 8.6 h of wall-clock and a 10 h reduction in Phase 0 code**, and decide
+before `FREEZE`, since both routes change the plan.
+
+⚠️ **All three rows assume `BUILD` reaches the 2.21 h aggregate floor once DCLM is split.** That requires
+the *other* large bundles to fit too — FineWeb-Edu at 252B is 6.67 h on one instance and also needs ≥5-way
+splitting (§8A.5a's table). **Splitting DCLM alone leaves FineWeb-Edu as the new binding child at 6.67 h**,
+which puts the path at ~12.2 h rather than 7.75 h. **Whichever route is chosen must cover both.**
+
+⚠️ **`desiredvCpus` is 0 and no probe has ever demonstrated 12 concurrent instances** (the agent flagged
+this itself). The quota and AZ coverage support it; obtainability is UNVERIFIED. **Request the full wave
+shape once in the Phase 2 smoke test** — the same job that already de-risks the live-HF read.
 
 ### 8A.4 Per-stage wall-clock, as-configured versus fixed
 
@@ -1070,12 +1420,28 @@ it only prevents a long tail.
 |---|---|---|---|
 | Pass 0 — stage 4.21 TB to S3 | 3.0 h | **0.5 h** | parallel copy children |
 | Pass 1 — dedup pre-pass (hash only) | 1.0 h | **0.3 h** | reads staged text in-region |
-| Pass 2 — build (read+filter+tokenize+pack) | 11.2 h | **6.6 h** | file-shard the big bundles; **6.6 h is the floor** |
+| Pass 2 — build (read+filter+tokenize+pack) | 10.85 h | **2.21 h** | split the big bundles; **2.21 h is the floor at the measured 384 vCPU** (§8A.3) |
 | Publish both stages (40,001 objects) | 2.0 h | **0.3 h** | `copy_workers` / `hash_workers` > 1 |
 | **Gate A validate** | **5.6 h** ❌ | **0.36 h** | thread the profile checks + raise the pool |
-| **`verify --deep`** | **13.0 h** ❌ | **1.66 h** | `--hash-workers 8` (**measured 7.82×**) |
+| **`verify --deep`** | **13.0 h** ❌ | **1.66 h**, or **0 h** | `--hash-workers 8` (**measured 7.82×**) — **or retire it entirely (§8.3a)** |
 | promote | 0.2 h | 0.02 h | already threaded |
-| **TOTAL** | **~36 h** | **~10 h** | |
+| **TOTAL** | **~35.7 h** | **~3.7 h** of job time | |
+
+**The "fixed" column moved on 2026-08-07** — it was ~10 h, computed at the withdrawn 128 vCPU cap and with
+`verify --deep` still in the path. At the measured 384 vCPU (§8A.3) and with the re-hash retired (§8.3a) the
+job total is **3.69 h**. The as-configured column is unchanged at **35.65 h** — its `BUILD` row was already
+the real single-child cost, so the cap correction does not touch it.
+
+**Quote the critical path, not this total.** At 3.69 h of job time, **code now dominates the schedule**: the
+path is **7.75–15.75 h depending on how task #28 is done** (§8A.3), and the spread between those two is
+entirely one implementation choice. A ~10× ratio between path and job time is the signal that the remaining
+work is engineering, not compute.
+
+**The `verify --deep` row is the one to delete rather than optimize (§8.3a).** It re-establishes a
+guarantee S3 enforces server-side on a verified PUT — proven live: a corrupted digest returns `BadDigest`
+and **no object is created**. Retiring it needs one ~5-line prerequisite (the sink at
+`corpus_build.py:463` currently uses a plain `put` and declares no checksum), and it removes **1.49 h from
+the critical path** plus one of the two ❌ timeout risks.
 
 **Both ❌ rows fail outright at 1.0T**, not merely run slowly: Gate A's 5.6 h and `verify --deep`'s
 13.0 h each exceed their job timeouts, so the corpus could not be promoted at all.
@@ -1101,21 +1467,21 @@ so a child alternates between fetching and encoding in one generator chain.
 The largest bundle at 1.0T is `stackv2-edu` at 6,361 shards = **159B tokens**. At A1's measured
 **0.328 M tok/s/vCPU**, its tokenize time depends entirely on how many vCPU that one child gets:
 
-| vCPU for this child | tokenize | read (10 Gbit/s) | total | fits the 6.61 h floor? |
+| vCPU for this child | tokenize | read (10 Gbit/s) | total | fits the **2.21 h** floor? |
 |---|---|---|---|---|
-| **8** (the wave shape in §9 Phase 3) | **16.83 h** | 0.16 h | **16.99 h** | **NO — 2.6× over** |
+| **8** (the wave shape an earlier draft specified) | **16.83 h** | 0.16 h | **16.99 h** | **NO — 7.6× over** |
 | 16 | 8.42 h | 0.16 h | 8.58 h | no |
-| 32 | 4.21 h | 0.16 h | 4.37 h | yes |
-| 32, at 2.5 Gbit/s instead of 10 | 4.21 h | 1.27 h | 5.48 h | yes |
-| **8, file-sharded 4 ways (32 vCPU total)** | **4.21 h** | 0.04 h | **4.25 h** | **yes** |
-| 8, file-sharded 8 ways (64 vCPU total) | 2.10 h | 0.02 h | **2.12 h** | yes |
+| **32 — one whole instance, the per-child MAXIMUM** | **4.21 h** | 0.16 h | **4.37 h** | **NO — 1.9× over** |
+| 32, at 2.5 Gbit/s instead of 10 | 4.21 h | 1.27 h | 5.48 h | no |
+| **split 2 ways × 32 vCPU (64 total)** | **2.10 h** | 0.08 h | **2.18 h** | **yes** |
+| split 4 ways × 32 vCPU (128 total) | 1.05 h | 0.04 h | **1.09 h** | yes |
 
-**⚠️ Corrected 2026-08-07, and this is a real defect in the earlier draft, not a presentational one.**
-The 4.21 h and 5.48 h figures were computed at **32 vCPU** while this same section specified **8 vCPU per
-child, 16 concurrent**. Those two statements are inconsistent: at 8 vCPU the bundle takes **16.83 h**,
-which does not merely miss the 6.61 h floor — **it is longer than the entire as-configured build**, and it
-would have been discovered only when the array's last child was still running eleven hours after the
-others finished.
+**⚠️ Corrected twice, and the second correction reverses the first's verdicts.** The original draft computed
+4.21 h at 32 vCPU while specifying 8 vCPU per child — inconsistent, and at 8 vCPU the bundle is 16.83 h.
+**Then the 384 vCPU measurement moved the floor from 6.61 h to 2.21 h, which flipped the "32 vCPU → yes"
+rows to `no`:** one whole instance is now 1.9× over the floor. **Since 32 vCPU is the per-child ceiling, the
+only remaining lever is splitting** — which is the same conclusion §8A.5a reaches for DCLM, arrived at from
+the opposite direction.
 
 ⚠️ **The read column varies with BANDWIDTH only — not with `_CHARS_PER_TOKEN`.** An earlier draft labelled
 these rows *"as-is (9.0 chars/token)"* versus *"fixed constants"*, which resurrects the constant §3.1
@@ -1126,14 +1492,16 @@ reaches. **Both numbers are bandwidth. Leave the constant at 9.0.**
 **The resolution, and it changes what task #25 means.** Two things are true at once and the earlier draft
 conflated them:
 
-- **Aggregate:** 1.0T ÷ (128 vCPU × 0.328 M/s) = **6.61 h**. That is the floor and it is real.
-- **Per child:** one bundle's duration is *its own* tokens ÷ *its own* vCPU. A 159B bundle is **15.9%** of
-  the corpus, so it needs ≥15.9% of the 128 vCPU — **at least 21 vCPU** — merely to finish when the
-  aggregate does.
+- **Aggregate:** 1.0T ÷ (**384** vCPU × 0.328 M/s) = **2.21 h** (§8A.3 — the cap is 384, not the 128 an
+  earlier draft used).
+- **Per child:** one bundle's duration is *its own* tokens ÷ *its own* vCPU, and **a Batch child cannot
+  exceed one instance (32 vCPU)**. A 159B bundle is 15.9% of the corpus, so it needs ≥15.9% of 384 —
+  **at least 61 vCPU, which is more than one instance holds.** It therefore *must* be split; no allocation
+  suffices.
 
-So the file-shard is **not** an optimization that buys 6.6 h → less. It is what makes **6.6 h reachable at
-all** under the stated wave shape. Either shard the big bundles or give them ≥32 vCPU each; the graph's
-`BUILD` = 6.6 h assumes one of the two, and §9 Phase 3 as written provides neither.
+So the split is **not** an optimization that buys 2.21 h → less. It is what makes **2.21 h reachable at
+all**. And because the cap is 3× what this section assumed, **the per-child problem got worse, not better**:
+the floor fell while no single child moved.
 
 **Tokenize is 96% of it once the read is fixed** (0.16 h against 4.21 h at 32 vCPU), which is why
 per-bundle vCPU allocation — not read bandwidth — is what to get right here. `_shard_slice` is already
@@ -1170,17 +1538,21 @@ tokens in one bundle**, because its `domain_column` is `None` so it does not fan
 **entire `c7i.8xlarge` to itself — all 32 vCPU, the whole compute environment's instance type** — that one
 child takes **10.85 h**:
 
-| bundle | B tokens | at 8 vCPU | at 32 vCPU (a whole instance) | shards needed to reach 6.6 h |
+| bundle | B tokens | at 8 vCPU | at 32 vCPU (a whole instance) | ways needed to reach the **2.21 h** floor |
 |---|---|---|---|---|
-| **DCLM-baseline** | **410.0** | **43.4 h** | **10.85 h** | **≥ 8 ways** |
-| FineWeb-Edu | 252.0 | 26.7 h | 6.67 h | ≥ 5 ways |
+| **DCLM-baseline** | **410.0** | **43.4 h** | **10.85 h** | **≥ 5 ways** |
+| **FineWeb-Edu** | **252.0** | 26.7 h | **6.67 h** | **≥ 4 ways** |
 | code (`stackv2`) | 108.0 | 11.4 h | 2.86 h | ≥ 2 ways |
 | FinePhrase, one partition | 36.0 | 3.8 h | 0.95 h | 1 (fits) |
 
-**So this is not an optimization at any wave shape.** The 128 vCPU cap is *on one instance type*, and a
+**Three bundles need splitting, not one.** The last column is against the **2.21 h** floor at 32 vCPU per
+child; an earlier draft computed it against 6.6 h and so understated the requirement. **Splitting DCLM alone
+leaves FineWeb-Edu binding at 6.67 h and the critical path at 12.21 h** rather than 7.75 h.
+
+**So this is not an optimization at any wave shape.** The 384 vCPU cap is *on one instance type*, and a
 single Batch child cannot exceed one instance, so **no vCPU allocation makes a 410B single-child bundle fit
-the 6.6 h floor.** Splitting it is the only lever. That is why item 3b is on the critical path and item 3
-(val bundles) is not.
+the 2.21 h floor.** Splitting it is the only lever — and at 384 vCPU that is *more* true than at 128, because
+the floor fell while the child did not. That is why item 3b matters and item 3 (val bundles) is deferrable.
 
 ⚠️ **One alternative worth considering before writing the code**, because it may be free: DCLM has a
 natural fan-out the plan currently discards. The parquet mirror is **27,938 files** (§4.1), and a
@@ -1276,6 +1648,7 @@ first job.
 | 10 | **Query the live validator timeout** | #11 | none | `edullm-validator:12`'s timeout is recorded nowhere | one read-only call |
 | **11** | **Decide `SHARD_TOKENS`** | **#9** | **B6** | **CHANGES THE PLAN** (§8.2). The code says 25,001,984; confirm and stop carrying two values | ~1 h |
 | **12** | **Rebuild the decontamination index from raw fields** | **#24** | **B5** | Blocker 4 (§6.2). **Gates `FREEZE` with only ~0.9 h of slack** — start it early | ~4 h |
+| **13** | **Declare `ChecksumSHA256` on the shard upload** (§8.3a) | **#29** | **B7** | The sink at `corpus_build.py:463` uses a plain `put`. **Prerequisite for retiring `verify --deep`, which is −1.49 h of critical path.** The digest is already computed one line later | **~5 lines** |
 
 **Two items the earlier draft omitted and the graph treats as gating:** #11/B6 and #12/B5. B5 in particular
 has the least slack of anything off the critical path.
@@ -1325,19 +1698,28 @@ critical path. Item 10 is a single read-only call. Item 3 is deferrable.
 so** (`corpus_build.py:901-904`). Run one bundle against the smallest source — `ubuntu-irc` at 1.75B
 tokens / 71 shards, the smallest real bundle in the reservoir — before committing an array job.
 
-**Twenty minutes to de-risk a 6.6-hour array.** The cheapest item in this plan.
+**Twenty minutes to de-risk a multi-hour array.** The cheapest item in this plan.
 
-### Phase 3 — the build, in waves — **6.6–11.2 h**
+**⚠️ Add two assertions to this same job, since it is already running** (§8A.3, §8.3a): request the **full
+wave shape** once to prove **12 concurrent `c7i.8xlarge`** is obtainable — configured and quota-backed, but
+never demonstrated — and **deliberately corrupt one declared `ChecksumSHA256`** to confirm S3 returns
+`BadDigest`, which is the evidence that lets `verify --deep` be retired.
 
-~100 bundles across 4–6 array waves at **8 vCPU each = 16 concurrent** under the 128 vCPU cap. Per-bundle
+### Phase 3 — the build, in waves — **2.21–10.85 h**
+
+~100 bundles at **32 vCPU each = 12 concurrent** under the **measured 384 vCPU** cap (§8B.5). Per-bundle
 resume already works: `bundle_is_done` re-HEADs and compares sizes, and re-running a lost bundle is
 byte-identical (verified — nine bundles reproduced identical digests).
 
-**6.6 h is the CPU floor** (§8A.3). The 11.2 h upper figure is what an unsliced run costs, because the
-159B-token `stackv2-edu` bundle alone is a 4.37–5.48 h single child.
+**2.21 h is the CPU floor** (§8A.3). **The 10.85 h upper figure is what an un-split run costs, and it is set
+by DCLM's 410B in one bundle** — not by `stackv2-edu`, which an earlier draft named. FineWeb-Edu at 6.67 h is
+next. **Three bundles need splitting to reach the floor** (§8A.5a).
 
-**Job def must pass:** enough vCPU per child to matter, and the wave shape. Nothing else here is
-flag-dependent.
+⚠️ **The wave shape changed with the cap correction.** An earlier draft said "8 vCPU each = 16 concurrent
+under the 128 vCPU cap." Both halves were wrong: the cap is 384, and **8 vCPU per child is too little for the
+big bundles** — DCLM at 8 vCPU is 43.4 h. **32 vCPU per child, 12 concurrent.**
+
+**Job def must pass:** 32 vCPU per child and the wave shape. Nothing else here is flag-dependent.
 
 ### Phase 4 — publish two datasets — **0.3–2.0 h publish, then validate**
 
@@ -1348,10 +1730,16 @@ flag-dependent.
 |---|---|---|---|
 | publish (hash + copy) | 0.3 h threaded / ~2 h at 1 | 0.03 h / 0.2 h | `--hash-workers`, `--copy-workers` |
 | **Gate A validate** | **0.32 h** threaded / **5.08 h ❌ serial** | 0.04 h / 0.56 h | needs the §8.3 code fix first |
-| **`verify --deep`** | **1.49 h** at 8 workers / **11.7 h ❌** | 0.17 h / 1.3 h | **`--hash-workers 8`** |
+| ~~**`verify --deep`**~~ | ~~1.49 h at 8 workers / 11.7 h ❌~~ → **RETIRE (§8.3a)** | ~~0.17 h / 1.3 h~~ | — once item 13 lands |
 | promote | ~1 min | ~7 s | already threaded |
 
-**Both ❌ figures exceed their job timeouts**, so they are failures rather than slow runs.
+**The ❌ figure exceeds its job timeout**, so it is a failure rather than a slow run.
+
+**`verify --deep` is struck rather than optimized.** §8.3a: it re-establishes what a verified PUT already
+guarantees server-side, and `CopyObject` recomputes the checksum on the publish hop. **Do not drop it until
+Phase 0 item 13 lands** — today's sink declares no checksum, so the re-hash is currently the only thing
+behind those bytes. With item 13 in, this row goes to zero and stage 1's publish-to-promote sequence is
+**0.3 + 0.32 + ~1 min ≈ 0.64 h**.
 
 ⚠️ **Writing a `manifest.json` fires EventBridge and promotes automatically.** To stage without
 promoting, cancel the validator job or disable the rule first. (On the reservoir the rule was left

@@ -14,7 +14,7 @@ newer than anything in `HANDOFF.md`. Four documents, answering four different qu
 | 1 | **`HANDOFF-FINAL-DATASET.md`** | **STATE** — what is done, what is next, what I got wrong |
 | 2 | **`docs/FINAL-DATASET-REPORT.md`** (+PDF) | **WHAT** to build — mix, sources, metrics, baseline recipe |
 | 3 | **`docs/IMPLEMENTATION-PLAN.md`** (+PDF) | **HOW** — six silent blockers, wall-clock, tokenizer verdict |
-| 4 | **`docs/BUILD-DEPENDENCY-GRAPH.md`** (+PDF) | **WHEN** — the DAG, the **21.31 h** critical path, an orchestrator brief |
+| 4 | **`docs/BUILD-DEPENDENCY-GRAPH.md`** (+PDF) | **WHEN** — the DAG, the **7.75 h** critical path (15.75 h if #28 takes the expensive route), an orchestrator brief |
 | 5 | **`docs/TASKS.md`** | **WHICH** — every `#NN` id, and the crosswalk to graph nodes and Phase 0 items |
 
 **If you are about to write code or launch a job, 3 and 4 are not optional.** The report says what the

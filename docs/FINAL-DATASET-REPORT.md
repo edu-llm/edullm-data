@@ -371,8 +371,27 @@ count halves Gate A, which is `objects × 8 × latency`. That trade is settled i
 **Do not change `SHARD_TOKENS` without re-deriving §8's object counts and every wall-clock figure that
 rests on them.**
 
-**Compute, on hardware that is actually provisioned.** H100 shapes are **not** currently available in
-this account; live profiles are T4 / L4 / L40S / A10G / 8×A100.
+**Compute, on hardware that is actually provisioned.** The live large-GPU shape is **`gpu-8xa100`**.
+
+⚠️ **Verified 2026-08-07, and the mechanism is not what this section used to say.** Two H100 compute
+environments **do exist** and are `ENABLED`/`VALID` in the API — but they have **never successfully run a
+job**, and the reason is capacity, not quota:
+
+- The EC2 P-instance quota is **768, not zero**.
+- A prior probe recorded **"p5.48xlarge InsufficientInstanceCapacity in all five reachable AZs over 9h"**,
+  and a platform cancellation states *"EC2 has returned InsufficientInstanceCapacity for every p5.4xlarge
+  launch in every availability zone and this account has never held one… Resubmit on `gpu-8xa100`, which has
+  capacity."*
+- **Zero SUCCEEDED jobs on either H100 queue.** 576 of the 768 P vCPU are already held by running
+  `p4d.24xlarge`, leaving room for exactly one `p5.48xlarge`.
+
+**So keep pricing on 8×A100 — the table below stands.** The correction matters because `ENABLED` in the API
+is *not* evidence a shape is submittable, and an inventory built from `describe-compute-environments`
+overstates what can run. (Also: `p5en.48xlarge` is an **H200**, not an H100.) Details in
+`IMPLEMENTATION-PLAN.md` §8B.6.
+
+**Unblocking H100 is still worth more than any budget decision available to us** — but it is a *capacity*
+conversation with AWS, not a quota increase.
 
 | training budget | 8×A100 (today) | 8×H100 (if unblocked) |
 |---|---|---|
@@ -435,7 +454,7 @@ between what we measured and what we inherited is worth keeping visible.
 > writing code or launching a job:**
 > - **`docs/IMPLEMENTATION-PLAN.md`** — build mechanics, and **six defects that would silently corrupt
 >   or discard the work.** None of them fails loudly.
-> - **`docs/BUILD-DEPENDENCY-GRAPH.md`** — the execution DAG, the **21.31 h** critical path, and what
+> - **`docs/BUILD-DEPENDENCY-GRAPH.md`** — the execution DAG, the **7.75 h** critical path, and what
 >   may run in parallel.
 > - **`docs/TASKS.md`** — every `#NN` id, and the crosswalk to graph nodes and Phase 0 items.
 

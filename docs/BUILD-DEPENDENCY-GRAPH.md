@@ -4,27 +4,50 @@
 long each step takes. This document says **what may run at the same time**, and it is written to be
 handed to an orchestrating agent.
 
-**The answer up front:** the critical path is **21.3 hours**, against **~36 h** if the work is run as
-written today. **8.81 h of that is jobs on the path; the other 12.5 h is code and the image build.**
+**The answer up front:** the critical path is **7.75 h if task #28 is done cheaply, 15.75 h if it is done as
+originally specified**, against **~36 h** run as written today. **Only 3.25 h of that is jobs on the path —
+code now dominates the schedule**, which is a change from every earlier version of this document.
 
-**⚠️ Revised upward from 13.31 h on 2026-08-07, and the reason is a defect, not a re-estimate.** The
-earlier figure assumed `BUILD` = 6.6 h with the big-bundle file-shard *deferred*. Those are incompatible:
-DCLM is **410B tokens in one non-fanning-out bundle**, which is **10.85 h even given an entire 32-vCPU
-instance to itself**, so 6.6 h was unreachable without work the graph had marked deferrable. Both repairs
-are now in the graph as **C3b**:
+**⚠️ Two 2026-08-07 findings reshaped this graph. Both are MEASURED; neither was known when it was written.**
 
-| scenario | `BUILD` | critical path |
-|---|---|---|
-| the old graph — C3b deferred, `BUILD` assumed 6.6 h | 6.6 h | 13.31 h ❌ **not achievable** |
-| C3b deferred, `BUILD` at its real single-child cost | ~16.8 h | **23.54 h** |
-| **C3b done (12 h of code, off to the side)** | **6.6 h** | **21.31 h** ✅ |
+1. **The CPU cap is 384 vCPU, not 128** (`IMPLEMENTATION-PLAN.md` §8B.5 — quota 1,152, one queue 1:1, all 5
+   AZs offer the type). **The tokenize floor is 2.21 h, not 6.61 h**, and 12 `c7i.8xlarge` children fit
+   rather than 4.
+2. **`verify --deep` is retirable** (§8.3a) — a verified PUT is rejected server-side on digest mismatch, so
+   the re-hash re-establishes a guarantee the write path already enforces. Needs `B7` first (~5 lines).
 
-So C3b buys **2.2 h of wall-clock** and, more importantly, it is what makes the 6.6 h floor a real number
-instead of an aspiration. See `IMPLEMENTATION-PLAN.md` §8A.5a.
+**And together they INVERT the C3b recommendation**, which is the single most important thing on this page:
 
-**The job-time floor is 8.81 h** — `SMOKE` 0.4 + `BUILD` 6.6 + `PUB1` 0.3 + `VD1` 1.49 + `PR1` 0.02, the
-jobs actually on the path. An earlier version of this line said **8.41 h** and summed a different set; §5
-now derives it explicitly so the two figures cannot drift again.
+| scenario | `BUILD` | code ahead of it | **critical path** |
+|---|---|---|---|
+| the graph as first written — C3b deferred, `BUILD` assumed 6.6 h | 6.6 h | A2a 4 h | 13.31 h ❌ **never achievable** |
+| **do nothing** — DCLM stays one un-splittable child | 10.85 h | A2a 4 h | **16.39 h** |
+| **C3b as specified** — plan-time ordinal ranges, ~12 h of code | 2.21 h | **C3b 12 h** | **15.75 h** — buys only 0.64 h |
+| **C3b via the `domain_column` fan-out**, ~2 h of code | 2.21 h | absorbed by A2a | **7.75 h** ✅ |
+
+**Break-even for C3b is ~11.5 h of code.** As originally specified (12 h) it is within noise of not doing it
+at all; done cheaply it is worth 8.6 h. **The instruction to stream 4 changes accordingly — see §6.**
+
+**The full history of this number, because it moved three times and each move had a cause:**
+
+| version | `BUILD` | path | what changed |
+|---|---|---|---|
+| as first written | 6.6 h | 13.31 h ❌ | assumed a floor its own deferred item made unreachable |
+| after blocker 0 | 6.6 h | 21.31 h | C3b added at 12 h, on the path |
+| after `B7` / retiring `VD1` | 6.6 h | 20.14 h | −1.17 h (not −1.49: `GA1` was parallel and gets exposed) |
+| **after the 384 vCPU measurement** | **2.21 h** | **7.75 h** ✅ / 15.75 h | the floor fell 3×, which **inverted** how C3b should be done |
+
+**Read the last row carefully: `BUILD` got 3× cheaper, so 12 h of code to protect it stopped being worth
+it.** The 7.75 h figure requires the *cheap* route; the 15.75 h figure is the same graph with the expensive
+one.
+
+**The job-time floor is 3.25 h** — `SMOKE` 0.4 + `BUILD` 2.21 + `PUB1` 0.3 + `GA1` 0.32 + `PR1` 0.02, the
+jobs actually on the path once `VD1` is retired and `BUILD` runs at the measured 384 vCPU. (Earlier versions
+of this line said 8.41 h, then 8.81 h, then 7.64 h, each summing a different set at a different cap; §5
+derives it explicitly so it cannot drift again.)
+
+**Everything above 3.25 h on the critical path is code and the image build** — which is why the C3b
+implementation choice, not any job flag, is now the largest single lever in this document.
 
 ---
 
@@ -35,7 +58,7 @@ Most parallelization mistakes here come from mixing these up.
 | currency | unit | what buys more of it | what caps it |
 |---|---|---|---|
 | **agent-hours** | code items | more agents in more worktrees | **file contention** (§3), not logic |
-| **wall-hours** | AWS jobs | more array children, more workers | **128 vCPU** compute environment |
+| **wall-hours** | AWS jobs | more array children, more workers | **384 vCPU** compute environment (MEASURED; it was never 128) |
 | **calendar** | human gates | nothing — you wait | approval latency, license acceptance |
 
 A code item and a job of the same nominal duration are **not** substitutable: 8 agent-hours of code can
@@ -62,7 +85,7 @@ graph LR
         A2b["A2b · keep-list consumer<br/>in run_bundle<br/><b>4 h</b> · owns run_bundle"]
         C1["C1 · FinePhrase id partition<br/>in _reader_for<br/><b>2 h</b> · CHANGES THE PLAN"]
         B6["B6 · shard-size decision<br/>SHARD_TOKENS in corpus.py<br/><b>1 h</b> · CHANGES THE PLAN"]
-        C3b["C3b · file-shard the BIG bundles<br/>plan-time ordinal ranges<br/><b>12 h</b> · WITHOUT IT BUILD IS 16.8 h"]
+        C3b["C3b · split the BIG bundles<br/>TRY domain_column fan-out FIRST (2 h)<br/>ordinal ranges = 12 h and buys only 0.64 h<br/>DCLM 410B + FineWeb-Edu 252B"]
     end
 
     subgraph CODE_PAR["CODE OFF THE CRITICAL PATH — fully parallel, distinct files"]
@@ -70,6 +93,7 @@ graph LR
         B2["B2 · boundary-marker guard<br/>corpus_pack.py + its test · <b>1 h</b>"]
         B3["B3 · thread Gate A + raise pool<br/>pretrain_tokens_v1.py + s3.py · <b>4 h</b>"]
         B4["B4 · drop data_provenance<br/>registry json · <b>0.2 h</b>"]
+        B7["B7 · ChecksumSHA256 on the sink<br/>corpus_build.py:463 · <b>0.2 h</b><br/>LETS VD1 BE DELETED"]
         B5["B5 · rebuild decon index<br/>raw fields, external repo · <b>4 h</b><br/>GATES FREEZE · only 0.9 h slack"]
         C3["C3 · file-shard VAL bundles<br/>_reader_for · <b>3 h</b> · DEFERRABLE<br/>NOT the same as C3b"]
         C11["C11 · wire bytes_fetched<br/>corpus_read.py · <b>2 h</b> · DEFERRABLE"]
@@ -83,14 +107,14 @@ graph LR
     STAGE["STAGE · copy 4.21 TB → S3<br/><b>0.5 h</b> parallel children"]
     PASS1["PASS1 · global dedup pre-pass<br/>256 partitions · <b>0.3 h</b>"]
 
-    BUILD["BUILD · ~100 bundles, 4–6 waves<br/>16 children × 8 vCPU<br/><b>6.6 h</b> · 128-vCPU FLOOR"]
+    BUILD["BUILD · ~100 bundles in waves<br/>12 children × 32 vCPU<br/><b>2.21 h</b> · 384-vCPU FLOOR (measured)"]
 
     PUB1["PUB1 · publish stage1<br/>36k obj · <b>0.3 h</b>"]
     PUB2["PUB2 · publish stage2<br/>4k obj · <b>0.03 h</b>"]
     GA1["GA1 · Gate A stage1<br/><b>0.32 h</b> threaded"]
     GA2["GA2 · Gate A stage2<br/><b>0.04 h</b>"]
-    VD1["VD1 · verify --deep stage1<br/><b>1.49 h</b> at 8 workers"]
-    VD2["VD2 · verify --deep stage2<br/><b>0.17 h</b>"]
+    VD1["VD1 · verify --deep stage1<br/>1.49 h · RETIRE once B7 lands<br/>S3 already enforces this"]
+    VD2["VD2 · verify --deep stage2<br/>0.17 h · RETIRE with VD1"]
     PR1["PR1 · promote stage1 · <b>0.02 h</b>"]
     PR2["PR2 · promote stage2 · <b>0.01 h</b>"]
     DONE(["CORPUS PUBLISHED"])
@@ -108,6 +132,7 @@ graph LR
     B2 --> IMG
     B3 --> IMG
     B4 --> IMG
+    B7 --> IMG
 
     C1 --> PLAN
     B6 --> PLAN
@@ -155,7 +180,8 @@ graph LR
     classDef defer fill:#616161,color:#fff,stroke:#424242
 
     class A2a,A2b,C3b,IMG,SMOKE,BUILD,PUB1,VD1,PR1 crit
-    class B1,B2,B3,B4,B5,M1,M2,M4 par
+    class B1,B2,B3,B4,B5,B7,M1,M2,M4 par
+    class VD1,VD2 defer
     class C3,C11,IMG2 defer
     class G1,FREEZE human
     class PASS1,STAGE,PLAN,PUB2,GA1,GA2,VD2,PR2 job
@@ -220,54 +246,93 @@ Adding a source after the plan is generated renames **98% of shards** and voids 
 (`IMPLEMENTATION-PLAN.md` §0). So the mix must be final first. **Its duration is a decision, not a
 computation** — it is the one node whose length no amount of parallelism touches.
 
-### S3 — `BUILD` is capped at 128 vCPU
-6.6 h is the tokenize floor at the cap: 1.0T ÷ (128 × 0.328 M tok/s/vCPU).
+### S3 — `BUILD` is capped at **384 vCPU** (measured; it was never 128)
+**2.21 h** is the tokenize floor at the real cap: 1.0T ÷ (384 × 0.328 M tok/s/vCPU). Verified 2026-08-07 —
+`maxvCpus: 384`, EC2 quota 1,152, one queue 1:1, `c7i.8xlarge` offered in all 5 of the CE's AZs
+(`IMPLEMENTATION-PLAN.md` §8B.5). The cap allows **12 concurrent children**, not 4.
 
-**⚠️ But 6.6 h is only reachable if the big bundles are file-sharded, and an earlier version of this graph
-had that backwards.** Per-child duration is *that child's* tokens ÷ *that child's* vCPU. The 159B-token
-`stackv2-edu` bundle is **15.9%** of the corpus, so at the wave shape of 8 vCPU × 16 children it takes
-**16.83 h** — longer than the entire as-configured build, and 2.6× past the floor. It needs **≥21 vCPU**
-just to finish when the aggregate does.
+**⚠️ But the floor is only reachable if the big bundles are split, and more capacity makes that WORSE.**
+Per-child duration is *that child's* tokens ÷ *that child's* vCPU, and a Batch child cannot exceed one
+instance. **DCLM is 410B in one non-fanning-out bundle — 10.85 h on its 32 vCPU, unchanged by the cap.**
+Against a 2.21 h aggregate floor that child is now **4.9× the floor**, where at 128 vCPU it was 1.6×.
 
-So **C3b (file-shard the big bundles) is a prerequisite of `BUILD` = 6.6 h**, not an optimization on top of
-it. Without it, `BUILD` is ~16.8 h and the critical path is **~23.5 h**, not 13.31 h. See
-`IMPLEMENTATION-PLAN.md` §8A.5 and §8A.5a — and note that `--shard/--of` strides **bundles**, so the
-capability does not exist in the code yet.
+**FineWeb-Edu is the second one, and it is easy to forget:** 252B = **6.67 h** on one instance. **Splitting
+DCLM alone leaves FineWeb-Edu binding at 6.67 h and the path at 12.21 h**, not 7.75 h. Whichever route
+stream 4 takes must cover both.
 
-### S4 — `VD1` cannot start until `PUB1` finishes
-`verify --deep` re-hashes published objects, so it is strictly after publish. At 8 workers it is 1.49 h,
-and it sits on the critical path with no way around it. **At `--hash-workers 1` it is 11.7 h and exceeds
-its timeout**, which is the single highest-value flag in the plan.
+**And `--shard/--of` strides *bundles*, so the capability does not exist in the code** — see
+`IMPLEMENTATION-PLAN.md` §8A.5a, including the cheap `domain_column` alternative that now decides whether
+this whole item is worth 0.64 h or 8.64 h.
+
+### S4 — ~~`VD1` cannot start until `PUB1` finishes~~ → **delete `VD1` instead**
+`verify --deep` re-hashes published objects, so it is strictly after publish. At 8 workers it is 1.49 h and
+it sits on the critical path; at `--hash-workers 1` it is 11.7 h and exceeds its timeout.
+
+**⚠️ But the right move is to retire it, not thread it** (`IMPLEMENTATION-PLAN.md` §8.3a). A verified PUT is
+rejected server-side on digest mismatch — proven live 2026-08-01: `BadDigest`, and **no object is created**
+— and `CopyObject` recomputes the checksum on the publish hop. So the re-hash re-establishes a guarantee the
+write path already enforces.
+
+**Prerequisite: `B7`.** `corpus_build.py:463`'s sink calls a plain `put` and declares no checksum, so today
+the re-hash *is* the only thing behind those bytes. **Ship `B7` (~5 lines) first, then delete `VD1`.** Never
+the reverse.
+
+**Effect: critical path 21.31 h → 20.14 h.** Note that is **1.17 h, not the 1.49 h `VD1` costs** — `VD1` and
+`GA1` run in parallel between `PUB1` and `PR1`, so deleting the longer branch **exposes** the shorter one.
+Deleting a parallel branch buys the *difference*, not the branch. Recomputed on the DAG, not subtracted.
+
+**S4 therefore stops being a hard serialization point at all** — the remaining `PUB1 → GA1 → PR1` chain is
+0.34 h.
 
 ---
 
 ## 5. The critical path, and everything with slack
 
-**Critical path — 21.31 h:**
+**Critical path — 7.75 h** with the cheap C3b route and `VD1` retired. The expensive C3b route gives 15.75 h; the difference is 12 h of code minus 2 h, sitting in front of `IMG`.
 
 | from → to | node | why it cannot move |
 |---|---|---|
-| 0.00 → 12.00 | **C3b** file-shard the big bundles | **the longest code item, and `BUILD` = 6.6 h is false without it** (S3) |
-| 12.00 → 12.50 | **IMG** image build | S1 |
-| 12.50 → 12.90 | **SMOKE** live-HF smoke test | mandatory; the path has never run |
-| 12.90 → 19.50 | **BUILD** ~100 bundles | S3, the 128 vCPU floor |
-| 19.50 → 19.80 | **PUB1** publish stage 1 | after build |
-| 19.80 → 21.29 | **VD1** verify --deep stage 1 | S4 |
-| 21.29 → 21.31 | **PR1** promote stage 1 | after both gates |
+| 0.00 → 4.00 | **A2a** hash pre-pass driver | the longest *unavoidable* code item; **C3b's cheap route hides inside this 4 h** |
+| 4.00 → 4.50 | **IMG** image build | S1 — one push, `edullm/**` only |
+| 4.50 → 4.90 | **SMOKE** live-HF smoke test | mandatory; the path has never run |
+| 4.90 → 7.11 | **BUILD** ~100 bundles | S3, the **384 vCPU** floor — 2.21 h |
+| 7.11 → 7.41 | **PUB1** publish stage 1 | after build |
+| 7.41 → 7.73 | **GA1** Gate A stage 1 | recomputes from bytes in a **different process** — the one gate that is not a tautology (`IMPLEMENTATION-PLAN.md` §8.3b) |
+| 7.73 → 7.75 | **PR1** promote stage 1 | after the gate |
 
-**Where the 8.81 h job floor comes from**, stated as a sum so it cannot drift from the headline again:
+**With the expensive C3b route, `C3b`'s 12 h replaces `A2a`'s 4 h at the head** and everything shifts +8 h.
+That single substitution is the whole 7.75 h ↔ 15.75 h spread.
+
+**Where the 3.25 h job floor comes from**, stated as a sum so it cannot drift from the headline again:
 
 | node | h | on the path? |
 |---|---|---|
 | SMOKE | 0.40 | ✅ |
-| BUILD | 6.60 | ✅ |
+| **BUILD** | **2.21** | ✅ — at 384 vCPU, was 6.60 at the withdrawn 128 |
 | PUB1 | 0.30 | ✅ |
-| VD1 | 1.49 | ✅ |
+| GA1 | 0.32 | ✅ — **it inherits VD1's slot on the path** |
 | PR1 | 0.02 | ✅ |
-| **subtotal — the job floor** | **8.81** | |
-| STAGE 0.5 · PASS1 0.3 · PLAN 0.05 | 0.85 | ❌ absorbed by C3b's 12 h of slack |
-| GA1 0.32 · PUB2/GA2/VD2/PR2 0.25 | 0.57 | ❌ parallel to VD1 |
-| **all job rows summed** | **10.23** | — |
+| **subtotal — the job floor** | **3.25** | |
+| STAGE 0.5 · PASS1 0.3 · PLAN 0.05 | 0.85 | ❌ absorbed by the code prefix's slack |
+| PUB2/GA2/PR2 | 0.08 | ❌ parallel to stage 1's tail |
+| ~~VD1 1.49 · VD2 0.17~~ | ~~1.66~~ | **retired — S4** |
+| **all remaining job rows summed** | **4.18** | — |
+
+⚠️ **`GA1` moved onto the critical path by deletion, not by getting slower.** It always ran in parallel with
+`VD1` between `PUB1` and `PR1`; removing the 1.49 h branch exposes the 0.32 h one. **That is why the saving
+is 1.17 h and not 1.49 h.**
+
+**And it makes `B3` (thread Gate A) a precondition for `B7` paying off at all.** Computed on the DAG:
+
+| | `GA1` threaded (`B3` done) | `GA1` unthreaded (5.08 h) |
+|---|---|---|
+| keep `VD1` | 21.31 h | **24.90 h** |
+| **delete `VD1`** | **20.14 h** ✅ | **24.90 h** |
+
+Without `B3`, `GA1`'s 5.08 h dominates and deleting `VD1` buys **exactly nothing** — the path is 24.90 h
+either way. So `B7` is not harmful on its own, it is simply **inert until `B3` lands**. Ship `B3` first, or
+ship them together; sequencing `B7` ahead of `B3` produces a change with no measurable effect and invites the
+conclusion that the analysis was wrong.
 
 **The remaining 12.5 h of the path is C3b (12.0) + IMG (0.5)** — code and image, not jobs. An earlier
 version of this document quoted an **8.41 h** floor that matched neither the job subtotal nor the full sum;
@@ -304,7 +369,7 @@ while stage 1 is still verifying, so stage 2 contributes **nothing** to the crit
 | 1 | **M1 bandwidth measurement** | job — **do this first, it recalibrates the rest** |
 | 2 | M2 Dolma3 sample + M4 doc lengths | job |
 | 3 | ~~Ask the owner to accept the Nemotron licence gate~~ ✅ **DONE** — measured at **134.0B** by a teammate with access | — |
-| 4 | **C3b + B6** — file-shard the big bundles **and** the shard-size constant. **Owns `corpus.py`'s plan surface: `allocate_ordinals`, `plan_document`, `SHARD_TOKENS`.** **START THIS FIRST — it is the critical path** | agent, worktree |
+| 4 | **C3b + B6** — split the big bundles **and** the shard-size constant. **Owns `corpus.py`'s plan surface: `allocate_ordinals`, `plan_document`, `SHARD_TOKENS`.** **Try the cheap route first — it is worth 8.64 h; the expensive one is worth 0.64 h** | agent, worktree |
 | 5 | **A2a** hash pre-pass driver (owns `corpus_filter.py`) | agent, worktree |
 | 6 | **A2b** keep-list consumer (owns `run_bundle`) | agent, worktree |
 | 7 | **C1** FinePhrase id partition (owns `_reader_for`) + **B5** rebuild the decon index (external repo) | agent, worktree |
@@ -334,8 +399,10 @@ Merge in order `_reader_for` → `run_bundle` → the rest. Push to an `edullm/*
 
 | tempting | why it does not help |
 |---|---|
-| More than 16 build children | 128 vCPU ÷ 8 = 16. More children just queue |
-| Splitting `BUILD` further | 6.6 h is the CPU floor at the cap, not a scheduling artifact |
+| More than 12 build children at 32 vCPU | **384** vCPU ÷ 32 = 12. More children just queue. (The old "16 × 8 vCPU" shape was sized on the withdrawn 128 cap **and** gave the big bundles too little vCPU each) |
+| Splitting `BUILD` below 2.21 h | that is the CPU floor at the measured cap, not a scheduling artifact |
+| **Threading `verify --deep` instead of deleting it** | S4 — S3 already enforces the guarantee on a verified PUT. Optimizing it is work spent keeping a redundant job |
+| **Raising `maxvCpus` past 384** | possible (1,152 of quota, 1,060 free) but pointless until the big bundles split — the un-splittable child is the constraint, not the cap |
 | Two container images | measured **0.1 h worse** — the second build lands on the critical path |
 | Parallelizing `STAGE` harder | it has ~4 h of slack; it is never the constraint |
 | Doing C3 / C11 now | deferrable, and they contend on the hottest function in the repo |
@@ -367,13 +434,28 @@ Hand this to the agent that runs wave 0. It encodes the constraints above as rul
 > rewrite of `4plus`, so including both double-counts.
 >
 > **Streams 4–7 (code, one worktree each, ONE FUNCTION each — NOT one file each):**
-> - **4 — START FIRST, THIS IS THE CRITICAL PATH:** file-shard the big bundles **and** settle
->   `SHARD_TOKENS`. Owns **`corpus.py`'s plan surface** — `allocate_ordinals`, `plan_document`,
->   `SHARD_TOKENS`. Both change every `plan_id`, so they cannot be two agents.
->   **Why it exists:** `--shard/--of` strides *bundles*, so DCLM's 410B is one child at **10.85 h even on a
->   whole 32-vCPU instance**, against a 6.6 h floor. Read `IMPLEMENTATION-PLAN.md` §8A.5a first — **and
->   evaluate the cheap alternative it names** (give DCLM a synthetic `domain_column` so it fans out with no
->   new mechanism) before writing ordinal-range code.
+> - **4 — the largest single lever in the plan, and it is a CHOICE, not a task:** split the big bundles
+>   **and** settle `SHARD_TOKENS`. Owns **`corpus.py`'s plan surface** — `allocate_ordinals`,
+>   `plan_document`, `SHARD_TOKENS`. Both change every `plan_id`, so they cannot be two agents.
+>
+>   **Why it exists:** `--shard/--of` strides *bundles*, so **DCLM's 410B is one child at 10.85 h even on a
+>   whole 32-vCPU instance** — and a Batch child cannot exceed one instance, so no vCPU allocation fixes it.
+>   **FineWeb-Edu's 252B is 6.67 h and is the second one; cover both or the floor is not reached.**
+>
+>   **⚠️ Read `IMPLEMENTATION-PLAN.md` §8A.3 and §8A.5a BEFORE writing code. The route decides everything:**
+>
+>   | route | code | critical path |
+>   |---|---|---|
+>   | **synthetic `domain_column` fan-out** — DCLM's parquet mirror is 27,938 files; a file-index-derived `domain` makes `allocate_ordinals` emit separate bundles **with no new mechanism** | **~2 h** | **7.75 h** ✅ |
+>   | plan-time ordinal ranges, as originally specified | ~12 h | 15.75 h |
+>   | do nothing | 0 | 16.39 h |
+>
+>   **The expensive route buys 0.64 h over doing nothing. The cheap one buys 8.64 h.** Break-even is ~11.5 h
+>   of code. **Try the cheap route first and time-box it.** Its cost is a schema smell — a `domain` label
+>   that is not semantically a domain, inside `manifest_sha256` and unbackfillable — which is a real
+>   objection worth raising with the owner, not a reason to silently pick the 12 h route.
+>   **If the fallback looks like more than ~11 h, stop and say so:** at that point doing nothing is
+>   competitive, and that is a finding rather than a failure.
 > - **5:** the flat-`np.uint64` hash pre-pass. Owns `corpus_filter.py`. **Size it for DCLM at 325M
 >   documents / 27.92 GB as a `set` (§5.2a), not for `finephrase-table`** — the plan's own table omitted
 >   the worst bundle.
@@ -391,11 +473,18 @@ Hand this to the agent that runs wave 0. It encodes the constraints above as rul
 > benchmark fields (question alone, question + each choice, question + correct answer) **in addition to**
 > the rendered form. **It gates the mix freeze — do not let it start late.**
 >
-> **Stream 8 (code, four distinct files, no coordination needed):** pin `tokenizers` in
+> **Stream 8 (code, five distinct files, no coordination needed):** pin `tokenizers` in
 > `pyproject.toml`; fix the boundary-marker prefix guard in `corpus_pack.py` **and** the test that
 > asserts the table length is 1; thread the Gate A profile checks in `pretrain_tokens_v1.py` **and**
 > raise `max_pool_connections` in `s3.py` (threading against a 10-connection pool self-throttles);
-> drop `data_provenance_initiative` from the registry.
+> drop `data_provenance_initiative` from the registry; **and `B7` — declare `ChecksumSHA256` on the shard
+> upload at `corpus_build.py:463`, which today calls a plain `put` and computes the digest one line too
+> late.**
+>
+> **⚠️ `B3` (thread Gate A) and `B7` are a pair, in that order.** `B7` is what lets `VD1` be deleted, but
+> deleting `VD1` exposes `GA1` — and at `GA1`'s unthreaded 5.08 h the path is 24.90 h whether `VD1` is there
+> or not, so **`B7` is inert until `B3` lands.** Ship `B3` first or ship both together. Do not report `B7`
+> as a win on its own; it will measure as nothing.
 >
 > **Do NOT start:** val-bundle file-sharding or the `bytes_fetched` wiring. Both are deferrable, both
 > contend with stream 6 on `_reader_for`, and including them adds ~5 agent-hours to the critical path
@@ -417,7 +506,15 @@ Hand this to the agent that runs wave 0. It encodes the constraints above as rul
 - **Durations for code items are estimates, not measurements.** The *ordering* is well-evidenced; the
   absolute agent-hours are my judgement. An earlier session's per-bundle ETAs were all retracted by
   their own author with the verdict *"every per-bundle ETA I gave was wrong, in both directions."*
-- **`BUILD`'s 6.6 h assumes linear vCPU scaling**, measured only at 32 vCPU. Never tested at 128.
+- **`BUILD`'s 2.21 h assumes linear vCPU scaling**, measured only at 32 vCPU. Never tested at 384 — and the
+  extrapolation is now **12×** rather than 4×, so this caveat carries more weight than it did.
+- **12 concurrent `c7i.8xlarge` has never been demonstrated.** `desiredvCpus` is 0; the quota (1,152) and AZ
+  coverage (all 5) support it, but obtainability is UNVERIFIED. Request the full wave shape once in `SMOKE`.
+- **The 1800 s auto-cancel rule is fail-open for capacity failures** — Batch leaves `statusReason` null, so
+  the rule never matches and a starved job sits in RUNNABLE **indefinitely, with no error**
+  (`IMPLEMENTATION-PLAN.md` §8B.7). Set your own wall-clock expectation per job; the queue will not fail fast.
+- **A non-Batch "lane" path draws on the same EC2 quota and is invisible to `batch list-jobs`**, so "the
+  queue is empty" is not "the quota is free."
 - **Every read duration assumes ~85 MB/s borrowed from an S3 measurement.** If the HF CDN is really
   ~8.4 MB/s, `STAGE` moves from 0.5 h to days and becomes critical. **M1 exists to settle exactly
   this — which is why it is wave 0, stream 1.**
