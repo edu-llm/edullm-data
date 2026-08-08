@@ -1,0 +1,55 @@
+{
+  "dataset": "HuggingFaceTB/finemath",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "method": "num_rows (exact) x mean_chars (/statistics, whole-split) x tokens/char (sampled); falls back to num_rows x sampled mean_tokens/doc when /statistics is unavailable",
+  "dataset_total_rows": 48283984,
+  "configs": [
+    {
+      "config": "finemath-4plus",
+      "split": "train",
+      "status": "ok",
+      "text_column": "text",
+      "text_column_chosen_by": "known-name",
+      "n_rows": 6699493,
+      "n_sampled": 135,
+      "n_distinct_offsets": 60,
+      "mean_tokens_per_doc": 1504.88,
+      "median_tokens_per_doc": 862,
+      "cv_tokens_per_doc": 1.532,
+      "mean_chars_per_doc_sampled": 5024.2,
+      "tokens_per_char": 0.29953,
+      "tokens_per_char_cv": 0.2136,
+      "tokens_per_byte": 0.29615,
+      "sample_mean_est_tokens": 10081942951,
+      "sample_mean_ci95": [
+        7598316831,
+        12773451857
+      ],
+      "sample_mean_rel_halfwidth": 0.2567,
+      "n_empty_text": 0,
+      "errors": [
+        "offset 3396833: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 3528010: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 3642097: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 3713581: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 3960620: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor"
+      ],
+      "upstream_token_column": "token_count",
+      "upstream_mean_tokens_per_doc": 1401.21,
+      "dolma2_to_upstream_ratio": 1.074,
+      "stats_available": true,
+      "stats_column": "text",
+      "stats_num_examples": 942120,
+      "stats_partial": true,
+      "stats_mean_chars": 5014.7,
+      "stats_median_chars": 2907.0,
+      "stats_ratio_est_tokens": 10063028784,
+      "estimator_divergence": 0.0019,
+      "est_total_tokens": 10063028784,
+      "estimator": "stats-ratio",
+      "confidence": "medium",
+      "confidence_note": "/statistics mean is partial; cross-checked against a random sample",
+      "parquet_bytes": 18365184633
+    }
+  ]
+}

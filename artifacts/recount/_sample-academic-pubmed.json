@@ -1,0 +1,25 @@
+{
+  "status": "ok",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "tokens_per_byte_ci95_cluster_bootstrap": [
+    0.24826128337749168,
+    0.25570899746168985
+  ],
+  "tokens_per_byte_ci95_rel_halfwidth": 0.0148,
+  "n_row_groups_sampled": 20,
+  "n_docs_sampled": 360,
+  "sample_text_bytes": 14124445,
+  "sample_tokens": 3558928,
+  "tokens_per_byte": 0.251969404815552,
+  "tokens_per_byte_doc_mean": 0.2575285797987842,
+  "tokens_per_byte_cv_per_doc": 0.2273389569335219,
+  "tokens_per_byte_cv_per_rowgroup": 0.03204834077121676,
+  "bytes_per_token": 3.9687358103338983,
+  "mean_doc_bytes_in_sample": 39234.569444444445,
+  "payload_bytes_read": 3037702277,
+  "errors": [],
+  "source": "pubmed",
+  "seed": 2337,
+  "text_bytes_corrected_raw": 158924718730,
+  "raw_tokens_estimate": 40044166788
+}

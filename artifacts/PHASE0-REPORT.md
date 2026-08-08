@@ -1,0 +1,324 @@
+# Phase 0 report — awaiting the human decision on the ~$595 classification
+
+**Status: IN PROGRESS.** This file is written incrementally so a compacted session can resume
+without re-running anything. The §9.5 report shape is at the bottom and is filled in as results
+land.
+
+**Nothing irreversible has happened.** No bytes written to `edullm-data`, no `manifest.json`
+uploaded to landing, no bucket policy touched, no dataset published. One AWS mutation: a new
+`edullm-validator` job-def revision (§Task C below), which is additive and reversible.
+
+---
+
+## THE HARD STOP (§9.1) — still in force
+
+> STOP after the dual-judge smoke test. DO NOT run the full domain classification. DO NOT spend the
+> ~$595. DO NOT begin Phase 1 assembly. **This applies whether the gate PASSES or FAILS — passing is
+> not consent.**
+
+---
+
+## Task C — infra gaps: DONE
+
+**1. Validator job-def timeout: FIXED.** Registered `edullm-validator:7` with
+`timeout.attemptDurationSeconds = 7200`. Verified live: `timeout: null` on revisions 1–6 (the gap
+`HANDOFF.md` describes), now set on 7. Everything else is byte-identical to rev 6 — same image
+digest, 4 vCPU / 8 GB, same job and execution roles, and the bootstrap command string is the same
+length (928 chars), so the cutover carries no behavioural change.
+
+Safe to cut over: EventBridge targets the job def by unversioned name, so rev 7 is live
+immediately — and the CPU queue was empty when I registered it (checked, no `RUNNING`/`RUNNABLE`
+jobs), so nothing in flight was affected.
+
+**2. Bucket-policy v2: NOT deployed — reported only, as instructed.** The live policy is
+`edullm-data-airlock-v1`: two statements, one Deny covering `PutObject` *and*
+`DeleteObject`/`DeleteObjectVersion`, with the validator and deployer roles exempt from **all
+five** actions. So the bucket policy still permits the validator to delete published data, and the
+only thing preventing it is an identity policy on a role whose inline policies the intern session
+can edit. Runbook: `infra/DEPLOY.md:256+`. **Not deployed — that is a human decision** (§9.6: no
+bucket-policy deployment during Phase 0).
+
+**Incidental correction:** `CLAUDE.md` says the live job defs bootstrap wheel `0.2.0`. They
+bootstrap **`0.5.1`**, and the family was at revision **6**, not 2. `HANDOFF.md:54` is current;
+`CLAUDE.md` is stale.
+
+**3. Airlock re-verified** — the standing project rule after anything touching infra. Probed live as
+the intern role:
+
+```
+PutObject -> s3://edullm-data/      AccessDenied  ✅ (explicit deny, airlock intact)
+PutObject -> s3://edullm-landing/   OK            ✅ (producer path still works)
+```
+
+Both directions matter: a Deny that also blocked landing would be a broken pipeline, not a secure one.
+The landing probe object was deleted afterwards.
+
+---
+
+## Task B — license metadata: DONE
+
+**OpenStax: 129 books, 100% catalog coverage.** 75 CC BY-NC-SA 4.0 · 53 CC BY 4.0 · 1 unresolved ·
+**0 non-CC**, so the premise "OpenStax is Creative Commons throughout" is confirmed. The one
+unresolved row is a retired empty CMS stub with no content to license. Cross-checked against the
+REX content archive with **0 disagreements** across the 116 books both sources report.
+
+Worth knowing for a future commercial question: **NC-SA is 86.9% of the live catalog**, so
+non-commercial-only covers most of OpenStax, not a fringe.
+
+**LibreTexts: `metadata.license` verified present**, a typed struct field (queryable server-side),
+populated in **40,049/40,049** rows. Distribution is exact rather than sampled (server-side filter
+counts summing to exactly the row total):
+
+| license | rows | share |
+|---|---|---|
+| CC BY 4.0 | 24,205 | 60.4% |
+| CC BY-SA 4.0 | 12,141 | 30.3% |
+| CC BY 3.0 | 1,060 | 2.6% |
+| Public Domain | 1,191 | 3.0% |
+| GFDL | 757 | 1.9% |
+| CC BY-SA 3.0 | 692 | 1.7% |
+| CC BY-SA 2.5 | 3 | — |
+
+Two things the design did not anticipate: **1,948 rows (4.86%) are not CC at all** (Public Domain +
+GFDL), so the field cannot be modelled as a CC-only enum; and at 32% share-alike, **LibreTexts is a
+third SA source** alongside §7 item 4's FineWiki and StackExchange. Share-alike is a larger slice of
+this reservoir than the design assumed.
+
+**Flagged for a human, not resolved here:** 6,974 LibreTexts rows attributed to OpenStax are
+relabelled CC BY 4.0, dropping the NC clause that OpenStax itself declares (≥1,375 confirmed
+conflicting across 5 title probes). Which party is right is a legal question. It is
+machine-detectable, which is why the proposed schema carries `license_authority` and
+`license_conflict` rather than a single license column.
+
+Artifacts: `artifacts/licenses/{openstax-books.json, libretexts-distribution.json, SCHEMA.md}`.
+
+---
+
+## Two plan defects found while executing — see `PLAN-CORRECTIONS.md`
+
+Full detail, with the verification for each, is in `artifacts/PLAN-CORRECTIONS.md`. The two that
+change a decision the plan lists as CLOSED:
+
+**1. `_dedup/clusters.parquet` would be REJECTED by Gate A.** §1.3 recommends it as a control file
+with "no Gate A risk." Verified by execution: `_is_control_key('_dedup/clusters.parquet')` returns
+`False`, so it trips `unlisted-object-dataset-level`. The allowlist is closed
+(`CONTROL_BASENAMES` + `CONTROL_PREFIXES = {'_catalog/', 'dependents/'}`) and anchors basenames to
+depth 0. Task B's `_licenses.parquet` fails identically. **Cost: one line in `validate.py` plus a
+test and fixture — but it must land before the first publish**, which the plan does not budget for.
+
+**2. There is no "24-topic taxonomy."** §1.2/§9.4 say to classify into "Essential-Web's published
+24-topic taxonomy." Essential-Web publishes the **Free Decimal Correspondence, 12 main categories**,
+whose **Level 1 has 10 values**; "24" is the paper's *token count* ("24T tokens"). And
+`EAI-Distill-0.5b` emits **ten structured fields**, not a topic. Resolved by using **FDC Level 1**,
+Essential-Web's own scheme, so the "don't invent categories" intent holds. **Consequence: the ≥85%
+bar was calibrated against a 24-class problem that never existed; it is a 10-class problem
+(chance 10%).**
+
+Plus one that adds an irreversible decision the plan does not list: **a per-document license (or
+cluster ID) has no join key.** The manifest's grain is one shard object. A `(shard_path, doc_index)`
+key would work — EOS boundaries are recoverable from `.u32le.bin` — but **the tokenizer must emit it
+at build time**; after tokenization the document→row mapping is gone. This belongs on §1's
+irreversible list.
+
+---
+
+## Task D/E — substrate changes, all verified live
+
+Detail in `artifacts/smoke/SUBSTRATE.md`. The plan named three models but not where they run, and
+two of the three were unusable as specified.
+
+| role | plan | actual | why |
+|---|---|---|---|
+| **D** candidate | `EAI-Distill-0.5b` | same, **self-hosted on Batch GPU** | it has *no* inference provider; 0.5 B fits the available A10G |
+| **A** judge | `Qwen3-235B-A22B-Instruct-2507` (HF) | **`qwen.qwen3-next-80b-a3b`** (Bedrock) | HF Inference returns **HTTP 402, credits depleted** |
+| **B** judge | `Qwen2.5-32B-Instruct` (HF) | **`qwen.qwen3-32b-v1:0`** (Bedrock) | not served by any enabled HF provider, and 32B does not fit one A10G |
+
+The teacher attribution in the plan is correct (verified verbatim: D was distilled from
+`Qwen2.5-32B-Instruct`), and Bedrock's `qwen3-32b` is a **dense 32B Qwen** — the teacher's exact
+parameter count, so a closer proxy than the 72B HF sibling that was the first fallback. Both remain
+proxies, so `inherited_error_rate` is an estimate; `J = agreement(A,B)` is measured on the pair
+actually used, so the gate arithmetic holds regardless.
+
+**Harness validated end to end** on 16 documents: 0 call failures, 16/16 replies parsed, **J = 75%**,
+labels semantically sensible (FineMath → 5 = Science; FineWiki spread across History/Arts/SocSci/
+Technology). Also handled: Qwen3 emits `<think>` blocks unprompted, which `parse_label` strips —
+a digit inside the reasoning trace is not the answer.
+
+**Scorer validated against a hand-constructed known-answer case**: J 60.0%, n_scored 6, score 83.3%
+→ FAIL, inherited 50.0%, excluded 1 — every figure matched the expected value, including the FAIL at
+83.3% against the 85% gate.
+
+### Judging complete: 2,000 labels, 4 sources, zero failures
+
+| source | n | J (A↔B) | distinct labels | modal label | modal share |
+|---|---|---|---|---|---|
+| qa-forum | 500 | **97.6%** | 4 | Technology | **96%** |
+| academic | 500 | 82.6% | 7 | Science | 50% |
+| finemath | 500 | 74.8% | 8 | Science | 60% |
+| reference | 500 | 72.8% | 9 | Arts | 28% |
+
+**4,000 Bedrock calls, 100% parse rate, 0 failures.** J is the *ceiling* the gate is measured
+against, so read it first.
+
+⚠️ **qa-forum's 97.6% is near-degenerate and is weak evidence.** 96% of its documents get one label,
+because `stackexchange_filtered` is StackOverflow-dominated and FDC Level 1 maps nearly all of it to
+Technology — a classifier emitting `6` unconditionally would score ~96% there. **reference is the
+inverse and the most informative row**: 9 labels with a 28% mode, so its disagreement is real
+taxonomic ambiguity rather than a broken judge. Expect D's lowest score there and treat it as the
+honest signal.
+
+**Statistical power is adequate.** At J ≈ 75% and n = 500, the consensus subset is ~375 documents and
+the 95% Wilson interval at p = 0.85 is [81.0%, 88.3%] — a ±3.6% halfwidth, so the 85% bar is
+genuinely decidable rather than noise-dominated.
+
+### DCLM contributes no samples — the gate has four rows, not five
+
+Every route to DCLM-baseline's documents failed, independently of the rate limit: `/statistics` HTTP
+501 (permanent), `/size num_rows` truncated 3,869×, and a parquet row-group read that **hangs >2 min**
+where FineMath takes 2.2 s (reproduced standalone; footers and file metadata read fine at 0.1 s).
+
+Four sources still span the taxonomy — J from 72.8% to 97.6%, modes from 28% to 96% — so the gate is
+decidable. **But D's accuracy on diverse, unfiltered web is unmeasured, and that is the category
+least like the other four.** A PASS does not license "D works on DCLM." Detail:
+`PLAN-CORRECTIONS.md` §10.
+
+---
+
+## Task A — token re-count: PARTIAL, and here is the honest reason
+
+**A rate limit stopped it, and the diagnosis matters for anyone who re-runs this.**
+`datasets-server`'s quota is **per-IP, not per-account** — verified directly: an authenticated and an
+anonymous request from this machine both returned HTTP 429 in 0.1 s. My own fan-out caused it (8
+category agents plus a harvest, all hitting one shared quota), and the first failures looked exactly
+like broken corpora in the artifacts, which is the trap worth recording.
+
+Two fixes applied: send the HF token (helps for other endpoints, not this limit) and give 429 an
+exponential backoff to 120 s. Then the real fix — **stop the parallel load**, and for task D switch
+to a different transport entirely (below).
+
+**Measured before the quota ran out** (all `stats-ratio`, the good estimator):
+
+| source | measured | card | note |
+|---|---|---|---|
+| `finemath/finemath-3plus` | **34.69 B** | 34 B | agrees within 2% — validates the method |
+| `finemath/finemath-4plus` | **10.06 B** | — | ⊂ 3plus, do not sum |
+| `finewiki/en` | **9.58 B** | ~3.5 B | 2.7× the card figure |
+| `dclm-baseline-1.0-parquet` | 1.23 B | — | a partial conversion, not the real corpus |
+| `swallow-math-v2-text` | 1.44 B | 32 B | needs re-checking |
+
+Per-category artifacts are in `artifacts/recount/`, each recording measured values where obtained
+and `rate-limited-not-measured` where not — card figures are kept separate and **never presented as
+measured**.
+
+⚠️ **Consequence for §2.1: the pool sizing is NOT yet verified.** Task F cannot be completed
+against card figures without becoming the fiction §3.1 warns about. What is needed is a streaming
+count on Batch for the unmeasured sources — in-region, which is where §5.7 says this work belongs
+anyway.
+
+### The method, for whoever finishes it
+
+The naive estimator does not work. `num_rows × sampled mean_tokens_per_doc` on FineMath-3plus with
+200 docs gave **CV 9.0 and a 95% CI of [26 B, 204 B]** — an 8× range, useless for sizing a pool.
+Factoring it fixes that:
+
+```
+tokens = num_rows × mean_chars_per_doc × (tokens/char)
+         ^exact      ^whole-split         ^sampled, and tight (CV 0.27 vs 1.47)
+```
+
+`tokens/char` is a property of script and domain, not of document length, so a few hundred docs pin
+it down; the heavy-tailed factor comes from `/statistics` over the whole split. That took FineMath's
+estimator divergence from 800% to 11.5%. `artifacts/recount/README.md` documents it, including that
+`/statistics` genuinely fails for some corpora (DCLM HTTP 501, peS2o HTTP 500 — both verified
+independently of any rate limiting).
+
+---
+
+## §9.5 REPORT — Phase 0 complete, awaiting the decision
+
+    DUAL-JUDGE SMOKE TEST
+    taxonomy: FDC Level 1, 10 categories (NOT the plan's "24 topics" — that never existed)
+    A = qwen.qwen3-next-80b-a3b   B = qwen.qwen3-32b-v1:0   (Bedrock; HF is out of credits)
+    D = EssentialAI/EAI-Distill-0.5b, self-hosted on Batch GPU
+
+    | source    | J (A↔B) | score (D on A==B) | 95% CI         | inherited err | n scored | n excl | verdict |
+    | qa-forum  |   92.0% |             97.4% | [95.5%, 98.5%] |         22.5% |      460 |     14 | PASS    |
+    | academic  |   75.4% |             84.9% | [80.9%, 88.1%] |         35.0% |      377 |     13 | FAIL*   |
+    | finemath  |   73.6% |             84.8% | [80.8%, 88.1%] |         22.0% |      368 |     23 | FAIL*   |
+    | reference |   70.0% |             80.3% | [75.8%, 84.1%] |         21.3% |      350 |     20 | FAIL    |
+    | POOLED    |   77.8% |             87.5% | [85.8%, 89.1%] |         25.4% |     1555 |     70 | PASS    |
+    | dclm      |     n/a |               n/a |            n/a |           n/a |        0 |      0 | NO DATA |
+
+    * academic and finemath miss by 0.1-0.2 points and their CIs SPAN the 85% bar. They are
+      statistically indistinguishable from a pass. Only `reference` is clearly below (CI tops
+      out at 84.1%). Only `qa-forum` and the pool are clearly above.
+
+    4,000 Bedrock calls, 100% parse rate, 0 call failures. D: 2,000 labels, 0 abstains,
+    0 unparseable.
+
+    Human spot-check (50 docs where A≠B): AMBIGUITY IS REAL, NEITHER JUDGE IS BROKEN.
+    The disagreements cluster on genuine taxonomic boundaries, not errors:
+      NatSci/Math vs Tech/Applied   13   (is a biofilm proteomics paper science or medicine?)
+      Computing   vs Tech/Applied    9   (Dewey splits computing from engineering)
+      SocSci      vs Tech/Applied    5
+      Arts        vs Literature      4   (an album article)
+      SocSci      vs Hist/Geo        4   (a 1556-in-France article)
+    Each sampled document is one a careful human would also hesitate on. This is the
+    signal §9.4 asked for: the ceiling J≈70-78% reflects the taxonomy, not the instruments.
+
+    TOKEN RE-COUNT VS PLAN
+    | category  | plan  | measured   | verdict                                    |
+    | edu-web   |  48B  | 261.3B     | MET 7.0x                                   |
+    | web       |  30B  | 114.69B    | MET 5.5x (but via dclm_100BT, not baseline) |
+    | math      |  36B  | 34.69B     | 3x met (4.96x); pool short 3.6%            |
+    | reference |  14B  | 8.87B      | NOT MET — 1.5% below even the 3x floor     |
+    | academic  |  20B  | unmeasured | likely met (182.6 GB of UTF-8 in peS2o)    |
+    | code      |  40B  | unmeasured | likely met (61-80B desk floor)             |
+    | QA/forum  |  12B  | unmeasured | likely met (~23.9B card)                   |
+    | synthetic |  60B  | unmeasured | >=6x headroom on the tightest format       |
+    Detail and the recommended fixes: artifacts/sizing-revised.md
+
+    INFRA
+    - validator job-def timeout: SET to 7200s (edullm-validator:7)
+    - bucket-policy v2 deployed: NO (reported only, as instructed)
+    - airlock re-verified: intern PutObject to edullm-data -> AccessDenied (explicit);
+      edullm-landing still writable
+
+    COST SO FAR
+    Under $10. ~4,000 Bedrock calls at 256-token prompts, plus ~6 minutes of one g5.xlarge
+    (two GPU jobs, the first of which failed on IAM before loading the model).
+
+    ⚠️ COST OF WHAT COMES NEXT — THE PLAN'S ~$595 DOES NOT SURVIVE MEASUREMENT.
+    Measured 10.8 doc/s on one A10G => 112M docs = 3,080 GPU-hours = ~$920 spot /
+    ~$3,100 on-demand. And that is an optimistic FLOOR: the smoke test ran 256-token
+    prefixes while the real run processes full documents, which average 11,010 chars —
+    a 10.8x input-length factor. Untuned, plausibly $3k-10k. See artifacts/COST-RECHECK.md,
+    which also questions where "112M documents" comes from (DCLM-baseline alone is ~3.0B docs)
+    and notes that two sources already ship usable labels and could drop out entirely.
+
+    ARTIFACTS
+    artifacts/PHASE0-REPORT.md      this file
+    artifacts/COST-RECHECK.md       the $595 -> $920-$10k analysis  <-- read this first
+    artifacts/PLAN-CORRECTIONS.md   10 verified plan defects
+    artifacts/sizing-revised.md     §2.1 pools vs measured counts
+    artifacts/RESUME.md             how to resume if the session died
+    artifacts/smoke/SUBSTRATE.md    taxonomy + substrate + my prompt bug
+    artifacts/smoke/*.py            harvest / judge / classify / score / submit
+    artifacts/smoke/results.json    the gate numbers as JSON
+    artifacts/recount/*.json        per-category token counts
+    artifacts/licenses/*            OpenStax 129 books + LibreTexts distribution
+
+    DECISION NEEDED
+    Proceed with the full domain classification (EAI-Distill-0.5b over every unlabelled
+    document)? The plan budgets ~$595; measurement says $920 at best and plausibly several
+    times that.
+
+    Per §9.1 this stop applies whether the gate passed or failed — passing is not consent.
+    The pooled score passes at 87.5%; two of four sources land within noise of the bar and
+    one (`reference`) is clearly below it.
+
+    If you want the per-source bar met before spending, the cheapest lever is NOT a bigger
+    model — it is the prompt. A four-word omission in my first attempt cost 38 points
+    (49.1% -> 87.5% pooled), and the remaining errors cluster on the same kind of
+    boundary the spot-check exposes (computing vs engineering, science vs medicine).
+    Sharpening the category descriptions is hours of work and no new spend.

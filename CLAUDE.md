@@ -13,10 +13,12 @@ orients you, it is not the spec.
 2. **`docs/ONBOARDING.md`** — the 2-minute mental model (the airlock, the bucket layout, the address
    shape `<family>/<name>/<version>/`, what the pipeline forces).
 3. **`CONTRIBUTING.md`** — the golden rule and how to add a profile.
-4. The full spec lives **outside this repo** at `../docs/dataset-creation/DATASET-STANDARD.md`
-   (+ `-DIAGRAMS.md`, + the motivating `s3-dataset-audit-2026-07-28.md`). If launched with this repo
-   as the root you won't have it in scope — `--add-dir ../docs` or read it on request. **If the code
-   and the standard disagree, the standard wins and this package has a bug.**
+4. **`docs/dataset-creation/DATASET-STANDARD.md`** — the full spec (+ `-DIAGRAMS.md`, + the motivating
+   `s3-dataset-audit-2026-07-28.md`). **In this repo as of 2026-07-31**; it used to live in `../docs`
+   and need `--add-dir`, which is why older notes mention that. No flag needed now. **If the code and
+   the standard disagree, the standard wins and this package has a bug** — which is the reason it is
+   versioned alongside the code: a document that adjudicates the implementation has to move with it,
+   or the two drift and nobody notices which is stale.
 
 ## The one rule that governs every check
 

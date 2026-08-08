@@ -1,0 +1,30 @@
+{
+  "dataset": "common-pile/stackv2_edu_filtered",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "method": "num_rows (exact) x mean_chars (/statistics, whole-split) x tokens/char (sampled); falls back to num_rows x sampled mean_tokens/doc when /statistics is unavailable",
+  "dataset_total_rows": 1240916,
+  "configs": [
+    {
+      "config": "default",
+      "split": "train",
+      "status": "RATE_LIMITED_NOT_MEASURED",
+      "errors": [
+        "offset 2396: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 29447: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 84901: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 130609: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor",
+        "offset 132087: {'_error': 'HTTP 429: <!DOCTYPE html>\\n<html class=\"\" lang=\"en\">\\n<head>\\n    <meta charset=\"utf-8\" />\\n    <meta\\n            name=\"viewpor"
+      ],
+      "n_rows": 1240916,
+      "text_column": null,
+      "parquet_bytes": 2715418552,
+      "failure_is_rate_limit": true,
+      "failure_cause": "HTTP 429 on every /rows call -- shared per-IP datasets-server quota saturated by ~13 concurrent recount jobs. NOT a corpus problem; retriable.",
+      "size_endpoint_partial": true,
+      "n_rows_used_by_tool_is_converted_prefix_only": 1240916,
+      "n_rows_estimated_full": 57038024,
+      "must_apply_partial_correction_on_rerun": true
+    }
+  ],
+  "see": "artifacts/recount/code.json"
+}

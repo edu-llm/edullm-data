@@ -1,0 +1,19 @@
+{
+  "status": "ok",
+  "dataset": "HuggingFaceFW/finepdfs-edu",
+  "config": "eng_Latn",
+  "text_column": "text",
+  "n_files_scanned": 100,
+  "n_files_total": 100,
+  "parquet_listing_partial": false,
+  "rows_covered": 23023372,
+  "text_bytes_raw_total_uncompressed": 575845767689,
+  "n_values": 23023372,
+  "length_prefix_overhead_bytes": 92093488,
+  "text_bytes_corrected": 575753674201,
+  "overhead_fraction": 0.00016,
+  "mean_text_bytes_per_doc": 25007.4,
+  "footer_bytes_fetched": 102001594,
+  "footer_http_requests": 200,
+  "errors": []
+}

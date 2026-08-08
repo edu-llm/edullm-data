@@ -1,0 +1,64 @@
+{
+  "common-pile/pubmed": {
+    "repo": "common-pile/pubmed",
+    "fitted_ratio": 3.66,
+    "mean_resid": 0.01026,
+    "wrap_counts": [
+      1,
+      2
+    ],
+    "recovered_bytes": 165123099723,
+    "recovered_GB": 165.123
+  },
+  "common-pile/pubmed_filtered": {
+    "repo": "common-pile/pubmed_filtered",
+    "fitted_ratio": 3.508,
+    "mean_resid": 0.00839,
+    "wrap_counts": [
+      1,
+      2
+    ],
+    "recovered_bytes": 152327099950,
+    "recovered_GB": 152.327
+  },
+  "common-pile/peS2o": {
+    "repo": "common-pile/peS2o",
+    "fitted_ratio": 3.234,
+    "mean_resid": 0.00078,
+    "wrap_counts": [
+      0
+    ],
+    "recovered_bytes": 192357297709,
+    "recovered_GB": 192.357
+  },
+  "common-pile/peS2o_filtered": {
+    "repo": "common-pile/peS2o_filtered",
+    "fitted_ratio": 3.293,
+    "mean_resid": 0.00076,
+    "wrap_counts": [
+      0
+    ],
+    "recovered_bytes": 187425883645,
+    "recovered_GB": 187.426
+  },
+  "common-pile/arxiv_papers": {
+    "repo": "common-pile/arxiv_papers",
+    "fitted_ratio": 3.466,
+    "mean_resid": 0.00918,
+    "wrap_counts": [
+      0
+    ],
+    "recovered_bytes": 21739234050,
+    "recovered_GB": 21.739
+  },
+  "common-pile/arxiv_papers_filtered": {
+    "repo": "common-pile/arxiv_papers_filtered",
+    "fitted_ratio": 3.399,
+    "mean_resid": 0.00704,
+    "wrap_counts": [
+      0
+    ],
+    "recovered_bytes": 20438300194,
+    "recovered_GB": 20.438
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "_note": "RAW recount.py output for HuggingFaceFW/finepdfs-edu/eng_Latn, preserved verbatim as the provenance for the tokens_per_char used in edu-web-finepdfs-edu.json. This run reached 60 of a targeted 300 documents before the shared per-IP datasets-server 429 quota cut it off. Its est_total_tokens (270.6B, sample-mean) is NOT a usable figure -- the parquet-footer scan later showed its doc-length factor was 68% too high. What IS usable from it is tokens_per_char / tokens_per_byte, which is a property of script and domain rather than of document length (CV 0.1279 here).",
+  "dataset": "HuggingFaceFW/finepdfs-edu",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "method": "num_rows (exact) x mean_chars (/statistics, whole-split) x tokens/char (sampled); falls back to num_rows x sampled mean_tokens/doc when /statistics is unavailable",
+  "dataset_total_rows": 49526501,
+  "configs": [
+    {
+      "config": "eng_Latn",
+      "split": "train",
+      "status": "ok",
+      "text_column": "text",
+      "text_column_chosen_by": "known-name",
+      "n_rows": 23023372,
+      "n_sampled": 60,
+      "n_distinct_offsets": 60,
+      "mean_tokens_per_doc": 11752.12,
+      "median_tokens_per_doc": 1171.5,
+      "cv_tokens_per_doc": 4.414,
+      "mean_chars_per_doc_sampled": 42009.4,
+      "tokens_per_char": 0.27975,
+      "tokens_per_char_cv": 0.1279,
+      "tokens_per_byte": 0.27873,
+      "sample_mean_est_tokens": 270573353804,
+      "sample_mean_ci95": [77259529420, 624911874510],
+      "sample_mean_rel_halfwidth": 1.012,
+      "n_empty_text": 0,
+      "stats_available": false,
+      "est_total_tokens": 270573353804,
+      "estimator": "sample-mean",
+      "confidence": "low",
+      "confidence_note": "no /statistics for this split, so the estimate is num_rows x a heavy-tailed sample mean; the CI is wide by nature (/statistics unavailable: 500)",
+      "upstream_token_column": "token_count",
+      "upstream_mean_tokens_per_doc": 11323.6,
+      "dolma2_to_upstream_ratio": 1.0378,
+      "errors_truncated": "5 x HTTP 429 at offsets 4781318, 4931206, 6411147, 6861134, 7329721 -- the shared per-IP quota, which ended the run early",
+      "parquet_bytes": 298670229506
+    }
+  ]
+}

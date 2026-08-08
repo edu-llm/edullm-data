@@ -1,0 +1,329 @@
+{
+  "status": "ok",
+  "source": "arxiv_papers",
+  "repo": "common-pile/raw_v0.1_parquet",
+  "collection": "RAW (unfiltered)",
+  "text_column": "text",
+  "schema": [
+    "id",
+    "text",
+    "len_category",
+    "source"
+  ],
+  "n_files": 8,
+  "n_files_total": 8,
+  "parquet_file_bytes_total": 6184841345,
+  "rows_covered": 304048,
+  "n_values": 304048,
+  "text_bytes_raw_total_uncompressed": 20697803926,
+  "length_prefix_overhead_bytes": 1216192,
+  "text_bytes_corrected": 20696587734,
+  "overhead_fraction": 5.9e-05,
+  "mean_text_bytes_per_doc": 68070.1,
+  "column_encodings": [
+    "PLAIN",
+    "RLE_DICTIONARY"
+  ],
+  "dictionary_encoded_chunks": 3,
+  "compressions": [
+    "ZSTD"
+  ],
+  "footer_bytes_fetched": 524288,
+  "footer_http_requests": 8,
+  "errors": [],
+  "_rowgroups": [
+    [
+      "arxiv_papers/data_0.parquet",
+      1137559184,
+      0,
+      10240
+    ],
+    [
+      "arxiv_papers/data_0.parquet",
+      1137559184,
+      1,
+      8192
+    ],
+    [
+      "arxiv_papers/data_0.parquet",
+      1137559184,
+      2,
+      8192
+    ],
+    [
+      "arxiv_papers/data_0.parquet",
+      1137559184,
+      3,
+      8192
+    ],
+    [
+      "arxiv_papers/data_0.parquet",
+      1137559184,
+      4,
+      8192
+    ],
+    [
+      "arxiv_papers/data_0.parquet",
+      1137559184,
+      5,
+      8192
+    ],
+    [
+      "arxiv_papers/data_0.parquet",
+      1137559184,
+      6,
+      8192
+    ],
+    [
+      "arxiv_papers/data_1.parquet",
+      1012613161,
+      0,
+      8192
+    ],
+    [
+      "arxiv_papers/data_1.parquet",
+      1012613161,
+      1,
+      8192
+    ],
+    [
+      "arxiv_papers/data_1.parquet",
+      1012613161,
+      2,
+      8192
+    ],
+    [
+      "arxiv_papers/data_1.parquet",
+      1012613161,
+      3,
+      8192
+    ],
+    [
+      "arxiv_papers/data_1.parquet",
+      1012613161,
+      4,
+      8192
+    ],
+    [
+      "arxiv_papers/data_1.parquet",
+      1012613161,
+      5,
+      8192
+    ],
+    [
+      "arxiv_papers/data_2.parquet",
+      1015438744,
+      0,
+      8192
+    ],
+    [
+      "arxiv_papers/data_2.parquet",
+      1015438744,
+      1,
+      8192
+    ],
+    [
+      "arxiv_papers/data_2.parquet",
+      1015438744,
+      2,
+      8192
+    ],
+    [
+      "arxiv_papers/data_2.parquet",
+      1015438744,
+      3,
+      8192
+    ],
+    [
+      "arxiv_papers/data_2.parquet",
+      1015438744,
+      4,
+      8192
+    ],
+    [
+      "arxiv_papers/data_2.parquet",
+      1015438744,
+      5,
+      8192
+    ],
+    [
+      "arxiv_papers/data_3.parquet",
+      1010027308,
+      0,
+      8192
+    ],
+    [
+      "arxiv_papers/data_3.parquet",
+      1010027308,
+      1,
+      8192
+    ],
+    [
+      "arxiv_papers/data_3.parquet",
+      1010027308,
+      2,
+      8192
+    ],
+    [
+      "arxiv_papers/data_3.parquet",
+      1010027308,
+      3,
+      8192
+    ],
+    [
+      "arxiv_papers/data_3.parquet",
+      1010027308,
+      4,
+      8192
+    ],
+    [
+      "arxiv_papers/data_3.parquet",
+      1010027308,
+      5,
+      8192
+    ],
+    [
+      "arxiv_papers/data_4.parquet",
+      1038843901,
+      0,
+      8192
+    ],
+    [
+      "arxiv_papers/data_4.parquet",
+      1038843901,
+      1,
+      8192
+    ],
+    [
+      "arxiv_papers/data_4.parquet",
+      1038843901,
+      2,
+      8192
+    ],
+    [
+      "arxiv_papers/data_4.parquet",
+      1038843901,
+      3,
+      8192
+    ],
+    [
+      "arxiv_papers/data_4.parquet",
+      1038843901,
+      4,
+      8192
+    ],
+    [
+      "arxiv_papers/data_4.parquet",
+      1038843901,
+      5,
+      8192
+    ],
+    [
+      "arxiv_papers/data_5.parquet",
+      842380609,
+      0,
+      8192
+    ],
+    [
+      "arxiv_papers/data_5.parquet",
+      842380609,
+      1,
+      8192
+    ],
+    [
+      "arxiv_papers/data_5.parquet",
+      842380609,
+      2,
+      8192
+    ],
+    [
+      "arxiv_papers/data_5.parquet",
+      842380609,
+      3,
+      8192
+    ],
+    [
+      "arxiv_papers/data_5.parquet",
+      842380609,
+      4,
+      8192
+    ],
+    [
+      "arxiv_papers/data_5.parquet",
+      842380609,
+      5,
+      997
+    ],
+    [
+      "arxiv_papers/data_6.parquet",
+      65040868,
+      0,
+      3045
+    ],
+    [
+      "arxiv_papers/data_7.parquet",
+      62937570,
+      0,
+      3046
+    ]
+  ],
+  "_per_file": [
+    {
+      "path": "arxiv_papers/data_0.parquet",
+      "file_bytes": 1137559184,
+      "rows": 59392,
+      "row_groups": 7,
+      "text_uncompressed": 3864746575
+    },
+    {
+      "path": "arxiv_papers/data_1.parquet",
+      "file_bytes": 1012613161,
+      "rows": 49152,
+      "row_groups": 6,
+      "text_uncompressed": 3391925397
+    },
+    {
+      "path": "arxiv_papers/data_2.parquet",
+      "file_bytes": 1015438744,
+      "rows": 49152,
+      "row_groups": 6,
+      "text_uncompressed": 3377390978
+    },
+    {
+      "path": "arxiv_papers/data_3.parquet",
+      "file_bytes": 1010027308,
+      "rows": 49152,
+      "row_groups": 6,
+      "text_uncompressed": 3357491693
+    },
+    {
+      "path": "arxiv_papers/data_4.parquet",
+      "file_bytes": 1038843901,
+      "rows": 49152,
+      "row_groups": 6,
+      "text_uncompressed": 3463283715
+    },
+    {
+      "path": "arxiv_papers/data_5.parquet",
+      "file_bytes": 842380609,
+      "rows": 41957,
+      "row_groups": 6,
+      "text_uncompressed": 2819436887
+    },
+    {
+      "path": "arxiv_papers/data_6.parquet",
+      "file_bytes": 65040868,
+      "rows": 3045,
+      "row_groups": 1,
+      "text_uncompressed": 215920143
+    },
+    {
+      "path": "arxiv_papers/data_7.parquet",
+      "file_bytes": 62937570,
+      "rows": 3046,
+      "row_groups": 1,
+      "text_uncompressed": 207608538
+    }
+  ],
+  "n_row_groups_total": 39
+}

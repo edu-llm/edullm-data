@@ -209,6 +209,73 @@ def test_extra_unlisted_shard():
     assert "unlisted-object" in _codes(r)
 
 
+# --------------------------------------------------------------------------------------
+# sidecar control files (_dedup/, _licenses/) — the PASSING and FAILING pair
+# --------------------------------------------------------------------------------------
+
+
+def test_sidecar_prefixes_are_control_files_at_any_depth():
+    """PASSING fixture. The two sidecars the design depends on — `_dedup/clusters.parquet`
+    (MinHash cluster IDs) and `_licenses/licenses.parquet` (per-source license strings) — are
+    control files, so a dataset carrying them passes Gate A unchanged. Both were rejected as
+    `unlisted-object-dataset-level` before.
+
+    Depth is checked too, because a PREFIX that only matched depth 1 would be a basename rule
+    wearing a prefix's clothes: adding a partitioned `_dedup/2026/part-00000.parquet` later must
+    not need another code change.
+    """
+    s3 = FakeS3()
+    _build(s3)
+    s3.seed(LANDING, f"{DID}/{VER}/_dedup/clusters.parquet", b"PAR1-cluster-table")
+    s3.seed(LANDING, f"{DID}/{VER}/_dedup/2026/part-00000.parquet", b"PAR1-nested")
+    s3.seed(LANDING, f"{DID}/{VER}/_licenses/licenses.parquet", b"PAR1-licenses")
+    s3.seed(LANDING, f"{DID}/{VER}/_licenses/spdx/map.json", b"{}")
+    r = V.validate_dataset(LANDING, f"{DID}/{VER}", s3, data_bucket=DATA)
+    assert r.ok, [str(v) for v in r.violations]
+    assert not {c for c in _codes(r) if c.startswith("unlisted-object")}
+
+
+def test_sidecar_allowlist_does_not_disable_the_exhaustiveness_sweep():
+    """FAILING fixture, and the one that matters. An allowlist too broad silently switches off
+    the check it lives in, so each of these must STILL be rejected:
+
+    * a payload-shaped object under a group prefix that no manifest lists,
+    * an object under a top-level prefix belonging to no declared group,
+    * a near-miss on the sidecar names — `_dedup` / `_licenses` WITHOUT the trailing slash are
+      not the control prefixes, and a bare `_licenses.parquet` at depth 0 is not one either
+      (`_licenses/` is; the prefix form is the sanctioned shape).
+    """
+    s3 = FakeS3()
+    _build(s3)
+    s3.seed(LANDING, f"{DID}/{VER}/tokens/random.parquet", b"PAR1-not-in-any-manifest")
+    s3.seed(LANDING, f"{DID}/{VER}/sneaky/val-00000.u32le.bin", _tokens_body(100))
+    s3.seed(LANDING, f"{DID}/{VER}/_dedupe-notes/clusters.parquet", b"PAR1-near-miss")
+    s3.seed(LANDING, f"{DID}/{VER}/_licenses.parquet", b"PAR1-depth-zero")
+    r = V.validate_dataset(LANDING, f"{DID}/{VER}", s3, data_bucket=DATA)
+    assert not r.ok
+    flagged = {v.path for v in r.violations if v.code.startswith("unlisted-object")}
+    assert "tokens/random.parquet" in flagged
+    assert "sneaky/val-00000.u32le.bin" in flagged
+    assert "_dedupe-notes/clusters.parquet" in flagged
+    assert "_licenses.parquet" in flagged
+
+
+def test_control_prefixes_are_all_unambiguously_not_group_names():
+    """A control prefix that could also be a group name would exempt real payload from the
+    sweep. Group names are the first path segment and are kebab-case `[a-z0-9-]`, so a leading
+    underscore is what makes a prefix unmistakable. `dependents/` is the grandfathered
+    exception; every other entry must lead with `_`, and none may be `_catalog/`-adjacent
+    enough to collide with the version resolver's namespace.
+    """
+    from edullm_data.contracts import CONTROL_PREFIXES
+
+    for cp in CONTROL_PREFIXES:
+        assert cp.endswith("/"), f"{cp!r} must end with / or it prefix-matches a sibling name"
+        assert cp.startswith("_") or cp == "dependents/", f"{cp!r} could be mistaken for a group"
+    assert "_dedup/" in CONTROL_PREFIXES
+    assert "_licenses/" in CONTROL_PREFIXES
+
+
 def test_head_size_mismatch():
     s3 = FakeS3()
     _build(s3)

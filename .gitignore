@@ -69,3 +69,14 @@ ipython_config.py
 # Local credentials / AWS scratch (never commit; the airlock is the boundary, §1)
 *.pem
 .aws/
+
+
+# Phase 0 smoke-test samples: real corpus text harvested from third-party datasets.
+# Findings and code are committed; the payload is not — it is reproducible from
+# artifacts/smoke/harvest_parquet.py with the recorded seed, and several sources are
+# share-alike (FineWiki, StackExchange) which we keep out of a public repo.
+artifacts/smoke/samples/
+artifacts/smoke/judges.jsonl
+artifacts/smoke/d_labels.jsonl
+artifacts/smoke/spot-check-50.jsonl
+__pycache__/

@@ -1,0 +1,58 @@
+{
+  "dataset": "HuggingFaceFW/fineweb-edu",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "method": "num_rows (exact) x mean_chars (/statistics, whole-split) x tokens/char (sampled); falls back to num_rows x sampled mean_tokens/doc when /statistics is unavailable",
+  "dataset_total_rows": 3496736741,
+  "restored_from_run": true,
+  "restored_from_run_note": "This is the RESULT of the successful run for this config. A later re-run, requested to rule out rate-limit truncation, overwrote this file with a status=FAILED body (all 5 offsets HTTP 429) and then a third attempt was stopped mid-flight when the 429 quota was diagnosed as per-IP rather than per-account. The measured values below are restored verbatim from the run that completed. Nothing here is estimated after the fact.",
+  "configs": [
+    {
+      "config": "sample-100BT",
+      "split": "train",
+      "status": "ok",
+      "text_column": "text",
+      "text_column_chosen_by": "known-name",
+      "n_rows": 97270686,
+      "n_sampled": 160,
+      "n_sampled_target": 300,
+      "n_sampled_shortfall_cause": "shared per-IP datasets-server 429 quota, NOT a corpus defect. The stats-ratio estimate does not depend on sample size for its heavy-tailed factor, so the shortfall affects only tokens_per_char (CV 0.1005 -- already tight).",
+      "n_distinct_offsets": 60,
+      "mean_tokens_per_doc": 1177.51,
+      "median_tokens_per_doc": 671.0,
+      "cv_tokens_per_doc": 1.59,
+      "mean_chars_per_doc_sampled": 5441.8,
+      "tokens_per_char": 0.21638,
+      "tokens_per_char_cv": 0.1005,
+      "tokens_per_byte": 0.21029,
+      "sample_mean_est_tokens": 114537448648,
+      "sample_mean_ci95": [89713361639, 145483509457],
+      "sample_mean_rel_halfwidth": 0.2435,
+      "n_empty_text": 0,
+
+      "stats_available": true,
+      "stats_column": "text",
+      "stats_num_examples": 1453000,
+      "stats_partial": true,
+      "stats_mean_chars": 4762.8,
+      "stats_median_chars": 2936.0,
+      "stats_ratio_est_tokens": 100244242760,
+      "estimator_divergence": 0.1248,
+
+      "est_total_tokens": 100244242760,
+      "estimator": "stats-ratio",
+      "confidence": "medium",
+      "confidence_note": "/statistics mean is PARTIAL -- it covers 1,453,000 of 97,270,686 rows, i.e. the head of the split, which biases the result if parquet row order correlates with crawl date. Cross-checked against a random-offset sample and the two independent estimators diverge only 12.5%, well under the 25% alarm threshold. tokens_per_char CV 0.1005 is tight. The card's 'around 100B gpt2 tokens' is confirmed to within 0.25%.",
+
+      "dolma2_to_upstream_ratio": 0.9946,
+      "dolma2_to_upstream_ratio_note": "vs the corpus's own gpt2-based token_count column (upstream mean 1,183.86 tokens/doc). dolma2 and gpt2 agree within 0.6% on this corpus, so FineWeb-Edu's advertised counts are usable as-is -- unlike peS2o's whitespace-word counts.",
+
+      "card_tokens": 100000000000,
+      "card_tokens_note": "card: 'sample-100BT: a subset randomly sampled from the whole dataset of around 100B gpt2 tokens'. Parent corpus is 1.3T tokens.",
+      "license": "odc-by",
+      "license_detail": "ODC-By v1.0. cardData license: odc-by; card 'Licensing Information' names Open Data Commons Attribution License (ODC-By) v1.0. Use also subject to CommonCrawl Terms of Use. Not gated.",
+      "lineage": "CommonCrawl HTML. FineWeb-Edu = FineWeb filtered at educational score >= 3 by a Snowflake-arctic-embed-based classifier trained on Llama3-70B-Instruct annotations; that removed 92% of FineWeb, leaving 1.3T tokens. sample-10BT subset-of sample-100BT subset-of sample-350BT subset-of fineweb-edu(1.3T) subset-of fineweb-edu-score-2(5.4T) subset-of fineweb. NOT globally deduplicated (a dedup'd variant lives in HuggingFaceTB/smollm-corpus).",
+      "optional_refinement": "A parquet-footer scan (artifacts/recount/_footer_chars.py) would make the doc-length factor exact and remove the partial-mean caveat entirely. The method was calibrated on this very dataset's sample-10BT config, where footers gave 4780.4 bytes/doc against /statistics' 4746.6 chars/doc -- 0.7% agreement, in the expected direction since bytes >= chars.",
+      "parquet_bytes": 286394522604
+    }
+  ]
+}

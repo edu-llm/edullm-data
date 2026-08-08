@@ -1,0 +1,2527 @@
+{
+  "status": "ok",
+  "source": "peS2o",
+  "repo": "common-pile/raw_v0.1_parquet",
+  "collection": "RAW (unfiltered)",
+  "text_column": "text",
+  "schema": [
+    "id",
+    "text",
+    "len_category",
+    "source"
+  ],
+  "n_files": 58,
+  "n_files_total": 58,
+  "parquet_file_bytes_total": 57353683587,
+  "rows_covered": 6294020,
+  "n_values": 6294020,
+  "text_bytes_raw_total_uncompressed": 188256796561,
+  "length_prefix_overhead_bytes": 25176080,
+  "text_bytes_corrected": 188231620481,
+  "overhead_fraction": 0.000134,
+  "mean_text_bytes_per_doc": 29906.4,
+  "column_encodings": [
+    "PLAIN",
+    "RLE_DICTIONARY"
+  ],
+  "dictionary_encoded_chunks": 3,
+  "compressions": [
+    "ZSTD"
+  ],
+  "footer_bytes_fetched": 3801088,
+  "footer_http_requests": 58,
+  "errors": [],
+  "_rowgroups": [
+    [
+      "peS2o/data_0.parquet",
+      1010159545,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_0.parquet",
+      1010159545,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_0.parquet",
+      1010159545,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_0.parquet",
+      1010159545,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_0.parquet",
+      1010159545,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_0.parquet",
+      1010159545,
+      5,
+      18500
+    ],
+    [
+      "peS2o/data_1.parquet",
+      1005150029,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_1.parquet",
+      1005150029,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_1.parquet",
+      1005150029,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_1.parquet",
+      1005150029,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_1.parquet",
+      1005150029,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_1.parquet",
+      1005150029,
+      5,
+      18437
+    ],
+    [
+      "peS2o/data_10.parquet",
+      1166301548,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_10.parquet",
+      1166301548,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_10.parquet",
+      1166301548,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_10.parquet",
+      1166301548,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_10.parquet",
+      1166301548,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_10.parquet",
+      1166301548,
+      5,
+      17807
+    ],
+    [
+      "peS2o/data_10.parquet",
+      1166301548,
+      6,
+      18432
+    ],
+    [
+      "peS2o/data_11.parquet",
+      1000223254,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_11.parquet",
+      1000223254,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_11.parquet",
+      1000223254,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_11.parquet",
+      1000223254,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_11.parquet",
+      1000223254,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_11.parquet",
+      1000223254,
+      5,
+      17807
+    ],
+    [
+      "peS2o/data_12.parquet",
+      1008094163,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_12.parquet",
+      1008094163,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_12.parquet",
+      1008094163,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_12.parquet",
+      1008094163,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_12.parquet",
+      1008094163,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_12.parquet",
+      1008094163,
+      5,
+      18497
+    ],
+    [
+      "peS2o/data_13.parquet",
+      1007352398,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_13.parquet",
+      1007352398,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_13.parquet",
+      1007352398,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_13.parquet",
+      1007352398,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_13.parquet",
+      1007352398,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_13.parquet",
+      1007352398,
+      5,
+      18497
+    ],
+    [
+      "peS2o/data_14.parquet",
+      1006484016,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_14.parquet",
+      1006484016,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_14.parquet",
+      1006484016,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_14.parquet",
+      1006484016,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_14.parquet",
+      1006484016,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_14.parquet",
+      1006484016,
+      5,
+      18437
+    ],
+    [
+      "peS2o/data_15.parquet",
+      1005568214,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_15.parquet",
+      1005568214,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_15.parquet",
+      1005568214,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_15.parquet",
+      1005568214,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_15.parquet",
+      1005568214,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_15.parquet",
+      1005568214,
+      5,
+      18437
+    ],
+    [
+      "peS2o/data_16.parquet",
+      1006627632,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_16.parquet",
+      1006627632,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_16.parquet",
+      1006627632,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_16.parquet",
+      1006627632,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_16.parquet",
+      1006627632,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_16.parquet",
+      1006627632,
+      5,
+      18437
+    ],
+    [
+      "peS2o/data_17.parquet",
+      1000313591,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_17.parquet",
+      1000313591,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_17.parquet",
+      1000313591,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_17.parquet",
+      1000313591,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_17.parquet",
+      1000313591,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_17.parquet",
+      1000313591,
+      5,
+      18051
+    ],
+    [
+      "peS2o/data_18.parquet",
+      1164220032,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_18.parquet",
+      1164220032,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_18.parquet",
+      1164220032,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_18.parquet",
+      1164220032,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_18.parquet",
+      1164220032,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_18.parquet",
+      1164220032,
+      5,
+      17388
+    ],
+    [
+      "peS2o/data_18.parquet",
+      1164220032,
+      6,
+      18432
+    ],
+    [
+      "peS2o/data_19.parquet",
+      1167570476,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_19.parquet",
+      1167570476,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_19.parquet",
+      1167570476,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_19.parquet",
+      1167570476,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_19.parquet",
+      1167570476,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_19.parquet",
+      1167570476,
+      5,
+      17388
+    ],
+    [
+      "peS2o/data_19.parquet",
+      1167570476,
+      6,
+      18432
+    ],
+    [
+      "peS2o/data_2.parquet",
+      1002193919,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_2.parquet",
+      1002193919,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_2.parquet",
+      1002193919,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_2.parquet",
+      1002193919,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_2.parquet",
+      1002193919,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_2.parquet",
+      1002193919,
+      5,
+      17892
+    ],
+    [
+      "peS2o/data_20.parquet",
+      1001595902,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_20.parquet",
+      1001595902,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_20.parquet",
+      1001595902,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_20.parquet",
+      1001595902,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_20.parquet",
+      1001595902,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_20.parquet",
+      1001595902,
+      5,
+      17807
+    ],
+    [
+      "peS2o/data_21.parquet",
+      1006985891,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_21.parquet",
+      1006985891,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_21.parquet",
+      1006985891,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_21.parquet",
+      1006985891,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_21.parquet",
+      1006985891,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_21.parquet",
+      1006985891,
+      5,
+      18497
+    ],
+    [
+      "peS2o/data_22.parquet",
+      1164650062,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_22.parquet",
+      1164650062,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_22.parquet",
+      1164650062,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_22.parquet",
+      1164650062,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_22.parquet",
+      1164650062,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_22.parquet",
+      1164650062,
+      5,
+      17388
+    ],
+    [
+      "peS2o/data_22.parquet",
+      1164650062,
+      6,
+      18432
+    ],
+    [
+      "peS2o/data_23.parquet",
+      1009617814,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_23.parquet",
+      1009617814,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_23.parquet",
+      1009617814,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_23.parquet",
+      1009617814,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_23.parquet",
+      1009617814,
+      4,
+      18437
+    ],
+    [
+      "peS2o/data_23.parquet",
+      1009617814,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_24.parquet",
+      1008156375,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_24.parquet",
+      1008156375,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_24.parquet",
+      1008156375,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_24.parquet",
+      1008156375,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_24.parquet",
+      1008156375,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_24.parquet",
+      1008156375,
+      5,
+      18442
+    ],
+    [
+      "peS2o/data_25.parquet",
+      1165028310,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_25.parquet",
+      1165028310,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_25.parquet",
+      1165028310,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_25.parquet",
+      1165028310,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_25.parquet",
+      1165028310,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_25.parquet",
+      1165028310,
+      5,
+      17388
+    ],
+    [
+      "peS2o/data_25.parquet",
+      1165028310,
+      6,
+      18432
+    ],
+    [
+      "peS2o/data_26.parquet",
+      1168035380,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_26.parquet",
+      1168035380,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_26.parquet",
+      1168035380,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_26.parquet",
+      1168035380,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_26.parquet",
+      1168035380,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_26.parquet",
+      1168035380,
+      5,
+      17807
+    ],
+    [
+      "peS2o/data_26.parquet",
+      1168035380,
+      6,
+      18432
+    ],
+    [
+      "peS2o/data_27.parquet",
+      1005303540,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_27.parquet",
+      1005303540,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_27.parquet",
+      1005303540,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_27.parquet",
+      1005303540,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_27.parquet",
+      1005303540,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_27.parquet",
+      1005303540,
+      5,
+      18437
+    ],
+    [
+      "peS2o/data_28.parquet",
+      1167405807,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_28.parquet",
+      1167405807,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_28.parquet",
+      1167405807,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_28.parquet",
+      1167405807,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_28.parquet",
+      1167405807,
+      4,
+      17807
+    ],
+    [
+      "peS2o/data_28.parquet",
+      1167405807,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_28.parquet",
+      1167405807,
+      6,
+      18432
+    ],
+    [
+      "peS2o/data_29.parquet",
+      1002384803,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_29.parquet",
+      1002384803,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_29.parquet",
+      1002384803,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_29.parquet",
+      1002384803,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_29.parquet",
+      1002384803,
+      4,
+      17892
+    ],
+    [
+      "peS2o/data_29.parquet",
+      1002384803,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_3.parquet",
+      1001622133,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_3.parquet",
+      1001622133,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_3.parquet",
+      1001622133,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_3.parquet",
+      1001622133,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_3.parquet",
+      1001622133,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_3.parquet",
+      1001622133,
+      5,
+      17892
+    ],
+    [
+      "peS2o/data_30.parquet",
+      1003537757,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_30.parquet",
+      1003537757,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_30.parquet",
+      1003537757,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_30.parquet",
+      1003537757,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_30.parquet",
+      1003537757,
+      4,
+      17892
+    ],
+    [
+      "peS2o/data_30.parquet",
+      1003537757,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_31.parquet",
+      1000176560,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_31.parquet",
+      1000176560,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_31.parquet",
+      1000176560,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_31.parquet",
+      1000176560,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_31.parquet",
+      1000176560,
+      4,
+      17811
+    ],
+    [
+      "peS2o/data_31.parquet",
+      1000176560,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_32.parquet",
+      1008555783,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_32.parquet",
+      1008555783,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_32.parquet",
+      1008555783,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_32.parquet",
+      1008555783,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_32.parquet",
+      1008555783,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_32.parquet",
+      1008555783,
+      5,
+      18659
+    ],
+    [
+      "peS2o/data_33.parquet",
+      1005326423,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_33.parquet",
+      1005326423,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_33.parquet",
+      1005326423,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_33.parquet",
+      1005326423,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_33.parquet",
+      1005326423,
+      4,
+      18051
+    ],
+    [
+      "peS2o/data_33.parquet",
+      1005326423,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_34.parquet",
+      1000666469,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_34.parquet",
+      1000666469,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_34.parquet",
+      1000666469,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_34.parquet",
+      1000666469,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_34.parquet",
+      1000666469,
+      4,
+      17833
+    ],
+    [
+      "peS2o/data_34.parquet",
+      1000666469,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_35.parquet",
+      1003865803,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_35.parquet",
+      1003865803,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_35.parquet",
+      1003865803,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_35.parquet",
+      1003865803,
+      3,
+      18051
+    ],
+    [
+      "peS2o/data_35.parquet",
+      1003865803,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_35.parquet",
+      1003865803,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_36.parquet",
+      1009408463,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_36.parquet",
+      1009408463,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_36.parquet",
+      1009408463,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_36.parquet",
+      1009408463,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_36.parquet",
+      1009408463,
+      4,
+      18659
+    ],
+    [
+      "peS2o/data_36.parquet",
+      1009408463,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_37.parquet",
+      1003907997,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_37.parquet",
+      1003907997,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_37.parquet",
+      1003907997,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_37.parquet",
+      1003907997,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_37.parquet",
+      1003907997,
+      4,
+      18051
+    ],
+    [
+      "peS2o/data_37.parquet",
+      1003907997,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_38.parquet",
+      1167527763,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_38.parquet",
+      1167527763,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_38.parquet",
+      1167527763,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_38.parquet",
+      1167527763,
+      3,
+      17391
+    ],
+    [
+      "peS2o/data_38.parquet",
+      1167527763,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_38.parquet",
+      1167527763,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_38.parquet",
+      1167527763,
+      6,
+      18432
+    ],
+    [
+      "peS2o/data_39.parquet",
+      1011627650,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_39.parquet",
+      1011627650,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_39.parquet",
+      1011627650,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_39.parquet",
+      1011627650,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_39.parquet",
+      1011627650,
+      4,
+      18659
+    ],
+    [
+      "peS2o/data_39.parquet",
+      1011627650,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_4.parquet",
+      1007125339,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_4.parquet",
+      1007125339,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_4.parquet",
+      1007125339,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_4.parquet",
+      1007125339,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_4.parquet",
+      1007125339,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_4.parquet",
+      1007125339,
+      5,
+      18497
+    ],
+    [
+      "peS2o/data_40.parquet",
+      1001381813,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_40.parquet",
+      1001381813,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_40.parquet",
+      1001381813,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_40.parquet",
+      1001381813,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_40.parquet",
+      1001381813,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_40.parquet",
+      1001381813,
+      5,
+      17830
+    ],
+    [
+      "peS2o/data_41.parquet",
+      1167306372,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_41.parquet",
+      1167306372,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_41.parquet",
+      1167306372,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_41.parquet",
+      1167306372,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_41.parquet",
+      1167306372,
+      4,
+      17830
+    ],
+    [
+      "peS2o/data_41.parquet",
+      1167306372,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_41.parquet",
+      1167306372,
+      6,
+      18432
+    ],
+    [
+      "peS2o/data_42.parquet",
+      1005946921,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_42.parquet",
+      1005946921,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_42.parquet",
+      1005946921,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_42.parquet",
+      1005946921,
+      3,
+      18055
+    ],
+    [
+      "peS2o/data_42.parquet",
+      1005946921,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_42.parquet",
+      1005946921,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_43.parquet",
+      1000930796,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_43.parquet",
+      1000930796,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_43.parquet",
+      1000930796,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_43.parquet",
+      1000930796,
+      3,
+      17830
+    ],
+    [
+      "peS2o/data_43.parquet",
+      1000930796,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_43.parquet",
+      1000930796,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_44.parquet",
+      1001526112,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_44.parquet",
+      1001526112,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_44.parquet",
+      1001526112,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_44.parquet",
+      1001526112,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_44.parquet",
+      1001526112,
+      4,
+      17830
+    ],
+    [
+      "peS2o/data_44.parquet",
+      1001526112,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_45.parquet",
+      1165295420,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_45.parquet",
+      1165295420,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_45.parquet",
+      1165295420,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_45.parquet",
+      1165295420,
+      3,
+      17388
+    ],
+    [
+      "peS2o/data_45.parquet",
+      1165295420,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_45.parquet",
+      1165295420,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_45.parquet",
+      1165295420,
+      6,
+      18432
+    ],
+    [
+      "peS2o/data_46.parquet",
+      1010098440,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_46.parquet",
+      1010098440,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_46.parquet",
+      1010098440,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_46.parquet",
+      1010098440,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_46.parquet",
+      1010098440,
+      4,
+      18659
+    ],
+    [
+      "peS2o/data_46.parquet",
+      1010098440,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_47.parquet",
+      1013072442,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_47.parquet",
+      1013072442,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_47.parquet",
+      1013072442,
+      2,
+      18659
+    ],
+    [
+      "peS2o/data_47.parquet",
+      1013072442,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_47.parquet",
+      1013072442,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_47.parquet",
+      1013072442,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_48.parquet",
+      1012864399,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_48.parquet",
+      1012864399,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_48.parquet",
+      1012864399,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_48.parquet",
+      1012864399,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_48.parquet",
+      1012864399,
+      4,
+      17807
+    ],
+    [
+      "peS2o/data_48.parquet",
+      1012864399,
+      5,
+      16384
+    ],
+    [
+      "peS2o/data_48.parquet",
+      1012864399,
+      6,
+      2326
+    ],
+    [
+      "peS2o/data_49.parquet",
+      728188904,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_49.parquet",
+      728188904,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_49.parquet",
+      728188904,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_49.parquet",
+      728188904,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_49.parquet",
+      728188904,
+      4,
+      6371
+    ],
+    [
+      "peS2o/data_5.parquet",
+      1009411761,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_5.parquet",
+      1009411761,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_5.parquet",
+      1009411761,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_5.parquet",
+      1009411761,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_5.parquet",
+      1009411761,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_5.parquet",
+      1009411761,
+      5,
+      18497
+    ],
+    [
+      "peS2o/data_50.parquet",
+      1003018911,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_50.parquet",
+      1003018911,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_50.parquet",
+      1003018911,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_50.parquet",
+      1003018911,
+      3,
+      18051
+    ],
+    [
+      "peS2o/data_50.parquet",
+      1003018911,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_50.parquet",
+      1003018911,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_51.parquet",
+      1168297100,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_51.parquet",
+      1168297100,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_51.parquet",
+      1168297100,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_51.parquet",
+      1168297100,
+      3,
+      17388
+    ],
+    [
+      "peS2o/data_51.parquet",
+      1168297100,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_51.parquet",
+      1168297100,
+      5,
+      18432
+    ],
+    [
+      "peS2o/data_51.parquet",
+      1168297100,
+      6,
+      18432
+    ],
+    [
+      "peS2o/data_52.parquet",
+      654651756,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_52.parquet",
+      654651756,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_52.parquet",
+      654651756,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_52.parquet",
+      654651756,
+      3,
+      16611
+    ],
+    [
+      "peS2o/data_53.parquet",
+      461653706,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_53.parquet",
+      461653706,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_53.parquet",
+      461653706,
+      2,
+      13955
+    ],
+    [
+      "peS2o/data_54.parquet",
+      720303334,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_54.parquet",
+      720303334,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_54.parquet",
+      720303334,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_54.parquet",
+      720303334,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_54.parquet",
+      720303334,
+      4,
+      5542
+    ],
+    [
+      "peS2o/data_55.parquet",
+      368319742,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_55.parquet",
+      368319742,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_55.parquet",
+      368319742,
+      2,
+      3494
+    ],
+    [
+      "peS2o/data_56.parquet",
+      746324966,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_56.parquet",
+      746324966,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_56.parquet",
+      746324966,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_56.parquet",
+      746324966,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_56.parquet",
+      746324966,
+      4,
+      8192
+    ],
+    [
+      "peS2o/data_57.parquet",
+      627287631,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_57.parquet",
+      627287631,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_57.parquet",
+      627287631,
+      2,
+      16384
+    ],
+    [
+      "peS2o/data_57.parquet",
+      627287631,
+      3,
+      12288
+    ],
+    [
+      "peS2o/data_6.parquet",
+      1003964289,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_6.parquet",
+      1003964289,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_6.parquet",
+      1003964289,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_6.parquet",
+      1003964289,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_6.parquet",
+      1003964289,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_6.parquet",
+      1003964289,
+      5,
+      17892
+    ],
+    [
+      "peS2o/data_7.parquet",
+      1000871442,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_7.parquet",
+      1000871442,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_7.parquet",
+      1000871442,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_7.parquet",
+      1000871442,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_7.parquet",
+      1000871442,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_7.parquet",
+      1000871442,
+      5,
+      17893
+    ],
+    [
+      "peS2o/data_8.parquet",
+      1003875926,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_8.parquet",
+      1003875926,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_8.parquet",
+      1003875926,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_8.parquet",
+      1003875926,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_8.parquet",
+      1003875926,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_8.parquet",
+      1003875926,
+      5,
+      17892
+    ],
+    [
+      "peS2o/data_9.parquet",
+      1006320563,
+      0,
+      18432
+    ],
+    [
+      "peS2o/data_9.parquet",
+      1006320563,
+      1,
+      18432
+    ],
+    [
+      "peS2o/data_9.parquet",
+      1006320563,
+      2,
+      18432
+    ],
+    [
+      "peS2o/data_9.parquet",
+      1006320563,
+      3,
+      18432
+    ],
+    [
+      "peS2o/data_9.parquet",
+      1006320563,
+      4,
+      18432
+    ],
+    [
+      "peS2o/data_9.parquet",
+      1006320563,
+      5,
+      18497
+    ]
+  ],
+  "_per_file": [
+    {
+      "path": "peS2o/data_0.parquet",
+      "file_bytes": 1010159545,
+      "rows": 110660,
+      "row_groups": 6,
+      "text_uncompressed": 3314352342
+    },
+    {
+      "path": "peS2o/data_1.parquet",
+      "file_bytes": 1005150029,
+      "rows": 110597,
+      "row_groups": 6,
+      "text_uncompressed": 3299633658
+    },
+    {
+      "path": "peS2o/data_10.parquet",
+      "file_bytes": 1166301548,
+      "rows": 128399,
+      "row_groups": 7,
+      "text_uncompressed": 3826471185
+    },
+    {
+      "path": "peS2o/data_11.parquet",
+      "file_bytes": 1000223254,
+      "rows": 109967,
+      "row_groups": 6,
+      "text_uncompressed": 3280983286
+    },
+    {
+      "path": "peS2o/data_12.parquet",
+      "file_bytes": 1008094163,
+      "rows": 110657,
+      "row_groups": 6,
+      "text_uncompressed": 3309226016
+    },
+    {
+      "path": "peS2o/data_13.parquet",
+      "file_bytes": 1007352398,
+      "rows": 110657,
+      "row_groups": 6,
+      "text_uncompressed": 3306301007
+    },
+    {
+      "path": "peS2o/data_14.parquet",
+      "file_bytes": 1006484016,
+      "rows": 110597,
+      "row_groups": 6,
+      "text_uncompressed": 3303252979
+    },
+    {
+      "path": "peS2o/data_15.parquet",
+      "file_bytes": 1005568214,
+      "rows": 110597,
+      "row_groups": 6,
+      "text_uncompressed": 3300605693
+    },
+    {
+      "path": "peS2o/data_16.parquet",
+      "file_bytes": 1006627632,
+      "rows": 110597,
+      "row_groups": 6,
+      "text_uncompressed": 3301719744
+    },
+    {
+      "path": "peS2o/data_17.parquet",
+      "file_bytes": 1000313591,
+      "rows": 110211,
+      "row_groups": 6,
+      "text_uncompressed": 3282498341
+    },
+    {
+      "path": "peS2o/data_18.parquet",
+      "file_bytes": 1164220032,
+      "rows": 127980,
+      "row_groups": 7,
+      "text_uncompressed": 3819760069
+    },
+    {
+      "path": "peS2o/data_19.parquet",
+      "file_bytes": 1167570476,
+      "rows": 127980,
+      "row_groups": 7,
+      "text_uncompressed": 3834614486
+    },
+    {
+      "path": "peS2o/data_2.parquet",
+      "file_bytes": 1002193919,
+      "rows": 110052,
+      "row_groups": 6,
+      "text_uncompressed": 3287831381
+    },
+    {
+      "path": "peS2o/data_20.parquet",
+      "file_bytes": 1001595902,
+      "rows": 109967,
+      "row_groups": 6,
+      "text_uncompressed": 3285827988
+    },
+    {
+      "path": "peS2o/data_21.parquet",
+      "file_bytes": 1006985891,
+      "rows": 110657,
+      "row_groups": 6,
+      "text_uncompressed": 3301352735
+    },
+    {
+      "path": "peS2o/data_22.parquet",
+      "file_bytes": 1164650062,
+      "rows": 127980,
+      "row_groups": 7,
+      "text_uncompressed": 3822435821
+    },
+    {
+      "path": "peS2o/data_23.parquet",
+      "file_bytes": 1009617814,
+      "rows": 110597,
+      "row_groups": 6,
+      "text_uncompressed": 3312504422
+    },
+    {
+      "path": "peS2o/data_24.parquet",
+      "file_bytes": 1008156375,
+      "rows": 110602,
+      "row_groups": 6,
+      "text_uncompressed": 3311449692
+    },
+    {
+      "path": "peS2o/data_25.parquet",
+      "file_bytes": 1165028310,
+      "rows": 127980,
+      "row_groups": 7,
+      "text_uncompressed": 3824133207
+    },
+    {
+      "path": "peS2o/data_26.parquet",
+      "file_bytes": 1168035380,
+      "rows": 128399,
+      "row_groups": 7,
+      "text_uncompressed": 3830934570
+    },
+    {
+      "path": "peS2o/data_27.parquet",
+      "file_bytes": 1005303540,
+      "rows": 110597,
+      "row_groups": 6,
+      "text_uncompressed": 3298966546
+    },
+    {
+      "path": "peS2o/data_28.parquet",
+      "file_bytes": 1167405807,
+      "rows": 128399,
+      "row_groups": 7,
+      "text_uncompressed": 3832113610
+    },
+    {
+      "path": "peS2o/data_29.parquet",
+      "file_bytes": 1002384803,
+      "rows": 110052,
+      "row_groups": 6,
+      "text_uncompressed": 3289159576
+    },
+    {
+      "path": "peS2o/data_3.parquet",
+      "file_bytes": 1001622133,
+      "rows": 110052,
+      "row_groups": 6,
+      "text_uncompressed": 3287264497
+    },
+    {
+      "path": "peS2o/data_30.parquet",
+      "file_bytes": 1003537757,
+      "rows": 110052,
+      "row_groups": 6,
+      "text_uncompressed": 3293500030
+    },
+    {
+      "path": "peS2o/data_31.parquet",
+      "file_bytes": 1000176560,
+      "rows": 109971,
+      "row_groups": 6,
+      "text_uncompressed": 3284028937
+    },
+    {
+      "path": "peS2o/data_32.parquet",
+      "file_bytes": 1008555783,
+      "rows": 110819,
+      "row_groups": 6,
+      "text_uncompressed": 3311712523
+    },
+    {
+      "path": "peS2o/data_33.parquet",
+      "file_bytes": 1005326423,
+      "rows": 110211,
+      "row_groups": 6,
+      "text_uncompressed": 3299479956
+    },
+    {
+      "path": "peS2o/data_34.parquet",
+      "file_bytes": 1000666469,
+      "rows": 109993,
+      "row_groups": 6,
+      "text_uncompressed": 3284752631
+    },
+    {
+      "path": "peS2o/data_35.parquet",
+      "file_bytes": 1003865803,
+      "rows": 110211,
+      "row_groups": 6,
+      "text_uncompressed": 3295120705
+    },
+    {
+      "path": "peS2o/data_36.parquet",
+      "file_bytes": 1009408463,
+      "rows": 110819,
+      "row_groups": 6,
+      "text_uncompressed": 3313112995
+    },
+    {
+      "path": "peS2o/data_37.parquet",
+      "file_bytes": 1003907997,
+      "rows": 110211,
+      "row_groups": 6,
+      "text_uncompressed": 3293200610
+    },
+    {
+      "path": "peS2o/data_38.parquet",
+      "file_bytes": 1167527763,
+      "rows": 127983,
+      "row_groups": 7,
+      "text_uncompressed": 3830931358
+    },
+    {
+      "path": "peS2o/data_39.parquet",
+      "file_bytes": 1011627650,
+      "rows": 110819,
+      "row_groups": 6,
+      "text_uncompressed": 3319631684
+    },
+    {
+      "path": "peS2o/data_4.parquet",
+      "file_bytes": 1007125339,
+      "rows": 110657,
+      "row_groups": 6,
+      "text_uncompressed": 3304252483
+    },
+    {
+      "path": "peS2o/data_40.parquet",
+      "file_bytes": 1001381813,
+      "rows": 109990,
+      "row_groups": 6,
+      "text_uncompressed": 3285090601
+    },
+    {
+      "path": "peS2o/data_41.parquet",
+      "file_bytes": 1167306372,
+      "rows": 128422,
+      "row_groups": 7,
+      "text_uncompressed": 3829856602
+    },
+    {
+      "path": "peS2o/data_42.parquet",
+      "file_bytes": 1005946921,
+      "rows": 110215,
+      "row_groups": 6,
+      "text_uncompressed": 3299496279
+    },
+    {
+      "path": "peS2o/data_43.parquet",
+      "file_bytes": 1000930796,
+      "rows": 109990,
+      "row_groups": 6,
+      "text_uncompressed": 3284001514
+    },
+    {
+      "path": "peS2o/data_44.parquet",
+      "file_bytes": 1001526112,
+      "rows": 109990,
+      "row_groups": 6,
+      "text_uncompressed": 3287102575
+    },
+    {
+      "path": "peS2o/data_45.parquet",
+      "file_bytes": 1165295420,
+      "rows": 127980,
+      "row_groups": 7,
+      "text_uncompressed": 3826173254
+    },
+    {
+      "path": "peS2o/data_46.parquet",
+      "file_bytes": 1010098440,
+      "rows": 110819,
+      "row_groups": 6,
+      "text_uncompressed": 3315533367
+    },
+    {
+      "path": "peS2o/data_47.parquet",
+      "file_bytes": 1013072442,
+      "rows": 110819,
+      "row_groups": 6,
+      "text_uncompressed": 3325020027
+    },
+    {
+      "path": "peS2o/data_48.parquet",
+      "file_bytes": 1012864399,
+      "rows": 110245,
+      "row_groups": 7,
+      "text_uncompressed": 3335732868
+    },
+    {
+      "path": "peS2o/data_49.parquet",
+      "file_bytes": 728188904,
+      "rows": 80099,
+      "row_groups": 5,
+      "text_uncompressed": 2389762543
+    },
+    {
+      "path": "peS2o/data_5.parquet",
+      "file_bytes": 1009411761,
+      "rows": 110657,
+      "row_groups": 6,
+      "text_uncompressed": 3312161350
+    },
+    {
+      "path": "peS2o/data_50.parquet",
+      "file_bytes": 1003018911,
+      "rows": 110211,
+      "row_groups": 6,
+      "text_uncompressed": 3293428126
+    },
+    {
+      "path": "peS2o/data_51.parquet",
+      "file_bytes": 1168297100,
+      "rows": 127980,
+      "row_groups": 7,
+      "text_uncompressed": 3834345259
+    },
+    {
+      "path": "peS2o/data_52.parquet",
+      "file_bytes": 654651756,
+      "rows": 71907,
+      "row_groups": 4,
+      "text_uncompressed": 2144738986
+    },
+    {
+      "path": "peS2o/data_53.parquet",
+      "file_bytes": 461653706,
+      "rows": 50819,
+      "row_groups": 3,
+      "text_uncompressed": 1515844753
+    },
+    {
+      "path": "peS2o/data_54.parquet",
+      "file_bytes": 720303334,
+      "rows": 79270,
+      "row_groups": 5,
+      "text_uncompressed": 2363039447
+    },
+    {
+      "path": "peS2o/data_55.parquet",
+      "file_bytes": 368319742,
+      "rows": 40358,
+      "row_groups": 3,
+      "text_uncompressed": 1206893337
+    },
+    {
+      "path": "peS2o/data_56.parquet",
+      "file_bytes": 746324966,
+      "rows": 81920,
+      "row_groups": 5,
+      "text_uncompressed": 2447065034
+    },
+    {
+      "path": "peS2o/data_57.parquet",
+      "file_bytes": 627287631,
+      "rows": 65536,
+      "row_groups": 4,
+      "text_uncompressed": 2095834255
+    },
+    {
+      "path": "peS2o/data_6.parquet",
+      "file_bytes": 1003964289,
+      "rows": 110052,
+      "row_groups": 6,
+      "text_uncompressed": 3294379709
+    },
+    {
+      "path": "peS2o/data_7.parquet",
+      "file_bytes": 1000871442,
+      "rows": 110053,
+      "row_groups": 6,
+      "text_uncompressed": 3283272120
+    },
+    {
+      "path": "peS2o/data_8.parquet",
+      "file_bytes": 1003875926,
+      "rows": 110052,
+      "row_groups": 6,
+      "text_uncompressed": 3294428026
+    },
+    {
+      "path": "peS2o/data_9.parquet",
+      "file_bytes": 1006320563,
+      "rows": 110657,
+      "row_groups": 6,
+      "text_uncompressed": 3300479766
+    }
+  ],
+  "n_row_groups_total": 347
+}

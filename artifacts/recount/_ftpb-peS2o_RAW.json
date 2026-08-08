@@ -1,0 +1,18 @@
+{
+  "repo": "common-pile/peS2o",
+  "status": "ok",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "n_shards_sampled": 102,
+  "n_shards_total": 102,
+  "n_docs_sampled": 816,
+  "sample_text_bytes": 25125249,
+  "sample_tokens": 5569874,
+  "tokens_per_byte": 0.22168433037220844,
+  "tokens_per_byte_cv_per_shard": 0.03909937837519747,
+  "tokens_per_byte_min_shard": 0.20317606027597399,
+  "tokens_per_byte_max_shard": 0.24626311664186346,
+  "bytes_per_token": 4.510918738915818,
+  "mean_doc_bytes_in_sample": 30790.746323529413,
+  "sampling": "head prefix of EVERY shard (see module docstring for the bias note)",
+  "errors": []
+}

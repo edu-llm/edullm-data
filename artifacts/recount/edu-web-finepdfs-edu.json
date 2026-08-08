@@ -1,0 +1,78 @@
+{
+  "dataset": "HuggingFaceFW/finepdfs-edu",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "method": "footer-ratio: exact_text_bytes(parquet footers, WHOLE split) x tokens_per_char(sampled). Substituted for the usual stats-ratio because /statistics is permanently broken for this corpus (see statistics_endpoint below).",
+  "dataset_total_rows": 49526501,
+  "hand_assembled": true,
+  "hand_assembled_note": "Assembled from two runs rather than one recount.py invocation, because no single invocation could produce a usable number here. Inputs: (a) artifacts/recount/_footer-finepdfs-edu.json -- a COMPLETE parquet-footer scan of all 100 files / all 23,023,372 rows, which succeeded; (b) tokens_per_char from a recount.py sampling run that reached 60 of a targeted 300 docs before the shared per-IP 429 quota cut it off, preserved verbatim at artifacts/recount/_raw-finepdfs-edu-sample60.json.",
+  "configs": [
+    {
+      "config": "eng_Latn",
+      "split": "train",
+      "status": "ok",
+      "n_rows": 23023372,
+      "text_column": "text",
+      "text_column_chosen_by": "known-name",
+      "text_column_note": "Verified against the live schema: eng_Latn has 10 string columns and `text` is the only payload one (next-longest values are file_path ~109 chars and url ~68). No nested payload here, unlike FinePhrase.",
+
+      "est_total_tokens": 161067000000,
+      "est_total_tokens_range": [156400000000, 161100000000],
+      "estimator": "footer-ratio",
+      "estimator_formula": "575,753,674,201 exact text bytes x 0.27975 tokens/char",
+      "confidence": "medium",
+      "confidence_note": "The heavy-tailed factor is EXACT -- a full footer scan of all 100 parquet files covering all 23,023,372 rows, a count that matched /size exactly. The headline figure is an UPPER BOUND because tokens_per_char is applied to BYTES and bytes >= chars; at bytes/char ~1.00-1.02 for English PDF text that gives 157-161B. The remaining weakness is tokens_per_char resting on 60 sampled docs rather than 300 (429 quota). tokens/char is a property of script+domain with CV 0.1279 here, so 60 docs constrains it far better than 60 docs would constrain document length -- hence medium, not high.",
+
+      "footer_scan": {
+        "n_files_scanned": 100,
+        "n_files_total": 100,
+        "parquet_listing_partial": false,
+        "rows_covered": 23023372,
+        "rows_covered_matches_size_endpoint": true,
+        "text_bytes_raw_total_uncompressed": 575845767689,
+        "length_prefix_overhead_bytes": 92093488,
+        "length_prefix_overhead_note": "parquet stores PLAIN-encoded BYTE_ARRAY as 4-byte length + utf8 payload, and total_uncompressed_size is post-encoding, so 4 bytes per value are subtracted. A 0.016% correction.",
+        "text_bytes_corrected": 575753674201,
+        "mean_text_bytes_per_doc": 25007.4,
+        "footer_bytes_fetched": 102001594,
+        "footer_http_requests": 200,
+        "no_payload_read": "Footers only, via HTTP Range against 298.7 GB of parquet. 102 MB transferred, nothing written to disk."
+      },
+
+      "sample": {
+        "n_sampled": 60,
+        "n_sampled_target": 300,
+        "n_sampled_shortfall_cause": "shared per-IP datasets-server 429 quota (~13 concurrent recount.py processes across agents), NOT a corpus defect",
+        "n_distinct_offsets": 60,
+        "tokens_per_char": 0.27975,
+        "tokens_per_char_cv": 0.1279,
+        "tokens_per_byte": 0.27873,
+        "mean_tokens_per_doc": 11752.12,
+        "median_tokens_per_doc": 1171.5,
+        "cv_tokens_per_doc": 4.414,
+        "mean_chars_per_doc_sampled": 42009.4,
+        "n_empty_text": 0
+      },
+
+      "sampling_bias_finding": "The 60-doc sample's mean document length (42,009.4 chars) overstates the true whole-split mean (25,007.4 bytes/doc from footers) by 68%. cv_tokens_per_doc was 4.414, with a median of 1,171 tokens against a mean of 11,752 -- a 10x mean/median gap. This is the README's heavy-tail warning firing on live data, and it is why the footer scan was worth doing.",
+
+      "discarded_sample_mean_estimate": {
+        "value": 270573353804,
+        "ci95": [77259529420, 624911874510],
+        "rel_halfwidth": 1.012,
+        "why_discarded": "num_rows x a heavy-tailed 60-doc sample mean. The footer scan shows its doc-length factor was 68% too high, so it overstates by ~1.68x. An 8x-wide CI cannot size a pool. Recorded as evidence, never as a measurement."
+      },
+
+      "statistics_endpoint": "PERMANENTLY BROKEN -- not a rate-limit, not a transient crashed job. Returns: \"Error for ListColumn=fw_edu_scores: error=StatisticsComputationError(\\\"Error for IntColumn=fw_edu_scores_len: ... len(bin_edges=[1, 2]) is 2 but bin_edges[0]=1 != bin_edges[1]=2\\\")\" -- a histogram bug on the unrelated fw_edu_scores column. Re-requested after the quota cleared and it failed identically. recount.py can therefore NEVER produce a stats-ratio number for this config; the footer method is the standing substitute.",
+
+      "dolma2_to_upstream_ratio": 1.0378,
+      "dolma2_to_upstream_ratio_note": "vs the corpus's own token_count column (upstream mean 11,323.6 tokens/doc on the same 60 docs). dolma2 counts finepdfs ~3.8% higher than upstream. Multiply card figures by this rather than re-counting.",
+
+      "card_tokens": 350000000000,
+      "card_tokens_note": "'350B+ tokens' covers ALL 69 languages, not eng_Latn. eng_Latn is 298.7 GB of 735.6 GB parquet (40.6%) and 23.02M of 49.53M rows (46.5%); the card publishes no per-language token table. Byte-share scaling implies ~142B for English, agreeing with the measured 161B within 13%.",
+      "license": "odc-by",
+      "license_detail": "ODC-By v1.0. cardData license: odc-by; card 'Licensing Information' names Open Data Commons Attribution License (ODC-By) v1.0. Use also subject to CommonCrawl Terms of Use. Not gated.",
+      "lineage": "PDF text extracted with rolmOCR from CommonCrawl PDFs, CC-MAIN-2013-20 through CC-MAIN-2025-08, filtered to the top 10% by an educational classifier (Qwen3-235B-A22B-Instruct-2507 annotations; a fixed score>=3 threshold would have kept only ~2%). GLOBALLY DEDUPLICATED, unlike fineweb-edu. Near-orthogonal to CC-HTML corpora per design doc §3.1.",
+      "parquet_bytes": 298670229506
+    }
+  ]
+}

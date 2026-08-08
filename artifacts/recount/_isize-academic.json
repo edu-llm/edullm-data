@@ -1,0 +1,1359 @@
+{
+  "common-pile/arxiv_papers": {
+    "repo": "common-pile/arxiv_papers",
+    "n_shards": 22,
+    "compressed_bytes": 6262555629,
+    "isize_sum_bytes": 21739234050,
+    "compression_ratio": 3.471303943286697,
+    "per_shard_ratio_min": 3.389731970603225,
+    "per_shard_ratio_max": 3.5684895444427425,
+    "wrap_suspected": false,
+    "per_shard": [
+      {
+        "path": "00000_arxiv-papers.jsonl.gz",
+        "compressed": 281829135,
+        "isize": 999957640
+      },
+      {
+        "path": "00001_arxiv-papers.jsonl.gz",
+        "compressed": 285437097,
+        "isize": 1000166496
+      },
+      {
+        "path": "00002_arxiv-papers.jsonl.gz",
+        "compressed": 288971586,
+        "isize": 1000011837
+      },
+      {
+        "path": "00003_arxiv-papers.jsonl.gz",
+        "compressed": 280233270,
+        "isize": 1000009494
+      },
+      {
+        "path": "00004_arxiv-papers.jsonl.gz",
+        "compressed": 285977680,
+        "isize": 1000073605
+      },
+      {
+        "path": "00005_arxiv-papers.jsonl.gz",
+        "compressed": 287354373,
+        "isize": 999990673
+      },
+      {
+        "path": "00006_arxiv-papers.jsonl.gz",
+        "compressed": 288548455,
+        "isize": 999990991
+      },
+      {
+        "path": "00007_arxiv-papers.jsonl.gz",
+        "compressed": 284410209,
+        "isize": 1000360458
+      },
+      {
+        "path": "00008_arxiv-papers.jsonl.gz",
+        "compressed": 289017331,
+        "isize": 1000002562
+      },
+      {
+        "path": "00009_arxiv-papers.jsonl.gz",
+        "compressed": 286876643,
+        "isize": 999973256
+      },
+      {
+        "path": "00010_arxiv-papers.jsonl.gz",
+        "compressed": 288865679,
+        "isize": 1000099618
+      },
+      {
+        "path": "00011_arxiv-papers.jsonl.gz",
+        "compressed": 288224789,
+        "isize": 1000066506
+      },
+      {
+        "path": "00012_arxiv-papers.jsonl.gz",
+        "compressed": 288473550,
+        "isize": 1000087624
+      },
+      {
+        "path": "00013_arxiv-papers.jsonl.gz",
+        "compressed": 291242583,
+        "isize": 1000028198
+      },
+      {
+        "path": "00014_arxiv-papers.jsonl.gz",
+        "compressed": 289582589,
+        "isize": 999989065
+      },
+      {
+        "path": "00015_arxiv-papers.jsonl.gz",
+        "compressed": 291392043,
+        "isize": 1000128159
+      },
+      {
+        "path": "00016_arxiv-papers.jsonl.gz",
+        "compressed": 291950199,
+        "isize": 1000031888
+      },
+      {
+        "path": "00017_arxiv-papers.jsonl.gz",
+        "compressed": 287908339,
+        "isize": 1000035782
+      },
+      {
+        "path": "00018_arxiv-papers.jsonl.gz",
+        "compressed": 284253308,
+        "isize": 1000070529
+      },
+      {
+        "path": "00019_arxiv-papers.jsonl.gz",
+        "compressed": 292808459,
+        "isize": 999946765
+      },
+      {
+        "path": "00020_arxiv-papers.jsonl.gz",
+        "compressed": 291452383,
+        "isize": 1000112567
+      },
+      {
+        "path": "00021_arxiv-papers.jsonl.gz",
+        "compressed": 217745929,
+        "isize": 738100337
+      }
+    ]
+  },
+  "common-pile/arxiv_papers_filtered": {
+    "repo": "common-pile/arxiv_papers_filtered",
+    "n_shards": 8,
+    "compressed_bytes": 6037455094,
+    "isize_sum_bytes": 20438300194,
+    "compression_ratio": 3.385250883987776,
+    "per_shard_ratio_min": 3.3345939616898117,
+    "per_shard_ratio_max": 3.4120116430382734,
+    "wrap_suspected": false,
+    "per_shard": [
+      {
+        "path": "arxiv-papers-0000.json.gz",
+        "compressed": 807211839,
+        "isize": 2745585775
+      },
+      {
+        "path": "arxiv-papers-0001.json.gz",
+        "compressed": 825104906,
+        "isize": 2815267546
+      },
+      {
+        "path": "arxiv-papers-0002.json.gz",
+        "compressed": 836455630,
+        "isize": 2843360046
+      },
+      {
+        "path": "arxiv-papers-0003.json.gz",
+        "compressed": 834877687,
+        "isize": 2843479502
+      },
+      {
+        "path": "arxiv-papers-0004.json.gz",
+        "compressed": 840154089,
+        "isize": 2838543219
+      },
+      {
+        "path": "arxiv-papers-0005.json.gz",
+        "compressed": 842526499,
+        "isize": 2834568081
+      },
+      {
+        "path": "arxiv-papers-0006.json.gz",
+        "compressed": 840230674,
+        "isize": 2814250933
+      },
+      {
+        "path": "arxiv-papers-0007.json.gz",
+        "compressed": 210893770,
+        "isize": 703245092
+      }
+    ]
+  },
+  "common-pile/peS2o": {
+    "repo": "common-pile/peS2o",
+    "n_shards": 102,
+    "compressed_bytes": 59465319664,
+    "isize_sum_bytes": 192357297709,
+    "compression_ratio": 3.2347811934062825,
+    "per_shard_ratio_min": 3.227854932402881,
+    "per_shard_ratio_max": 3.328116453827208,
+    "wrap_suspected": false,
+    "per_shard": [
+      {
+        "path": "v0/documents/peS2o-0000.json.gz",
+        "compressed": 27476973,
+        "isize": 89085187
+      },
+      {
+        "path": "v0/documents/peS2o-0001.json.gz",
+        "compressed": 644125132,
+        "isize": 2085472642
+      },
+      {
+        "path": "v0/documents/peS2o-0002.json.gz",
+        "compressed": 632866487,
+        "isize": 2046238435
+      },
+      {
+        "path": "v0/documents/peS2o-0003.json.gz",
+        "compressed": 645521635,
+        "isize": 2089215638
+      },
+      {
+        "path": "v0/documents/peS2o-0004.json.gz",
+        "compressed": 646927752,
+        "isize": 2092689038
+      },
+      {
+        "path": "v0/documents/peS2o-0005.json.gz",
+        "compressed": 645037360,
+        "isize": 2087400245
+      },
+      {
+        "path": "v0/documents/peS2o-0006.json.gz",
+        "compressed": 643791091,
+        "isize": 2083207397
+      },
+      {
+        "path": "v0/documents/peS2o-0007.json.gz",
+        "compressed": 645519471,
+        "isize": 2087543715
+      },
+      {
+        "path": "v0/documents/peS2o-0008.json.gz",
+        "compressed": 645417548,
+        "isize": 2086591531
+      },
+      {
+        "path": "v0/documents/peS2o-0009.json.gz",
+        "compressed": 644240255,
+        "isize": 2083735069
+      },
+      {
+        "path": "v0/documents/peS2o-0010.json.gz",
+        "compressed": 591725968,
+        "isize": 1913086944
+      },
+      {
+        "path": "v0/documents/peS2o-0011.json.gz",
+        "compressed": 601658383,
+        "isize": 1945476860
+      },
+      {
+        "path": "v0/documents/peS2o-0012.json.gz",
+        "compressed": 647125274,
+        "isize": 2092380850
+      },
+      {
+        "path": "v0/documents/peS2o-0013.json.gz",
+        "compressed": 647284065,
+        "isize": 2091242940
+      },
+      {
+        "path": "v0/documents/peS2o-0014.json.gz",
+        "compressed": 647365384,
+        "isize": 2093627640
+      },
+      {
+        "path": "v0/documents/peS2o-0015.json.gz",
+        "compressed": 643417293,
+        "isize": 2083034694
+      },
+      {
+        "path": "v0/documents/peS2o-0016.json.gz",
+        "compressed": 641657525,
+        "isize": 2075594377
+      },
+      {
+        "path": "v0/documents/peS2o-0017.json.gz",
+        "compressed": 645923022,
+        "isize": 2088801514
+      },
+      {
+        "path": "v0/documents/peS2o-0018.json.gz",
+        "compressed": 647316431,
+        "isize": 2092653681
+      },
+      {
+        "path": "v0/documents/peS2o-0019.json.gz",
+        "compressed": 649397895,
+        "isize": 2099384458
+      },
+      {
+        "path": "v0/documents/peS2o-0020.json.gz",
+        "compressed": 646906277,
+        "isize": 2092676502
+      },
+      {
+        "path": "v0/documents/peS2o-0021.json.gz",
+        "compressed": 645484506,
+        "isize": 2086394114
+      },
+      {
+        "path": "v0/documents/peS2o-0022.json.gz",
+        "compressed": 645080285,
+        "isize": 2087034796
+      },
+      {
+        "path": "v0/documents/peS2o-0023.json.gz",
+        "compressed": 160788278,
+        "isize": 519887449
+      },
+      {
+        "path": "v0/documents/peS2o-0024.json.gz",
+        "compressed": 646953077,
+        "isize": 2091493224
+      },
+      {
+        "path": "v0/documents/peS2o-0025.json.gz",
+        "compressed": 647120362,
+        "isize": 2091631823
+      },
+      {
+        "path": "v0/documents/peS2o-0026.json.gz",
+        "compressed": 645879924,
+        "isize": 2088469130
+      },
+      {
+        "path": "v0/documents/peS2o-0027.json.gz",
+        "compressed": 648232120,
+        "isize": 2095837272
+      },
+      {
+        "path": "v0/documents/peS2o-0028.json.gz",
+        "compressed": 644488103,
+        "isize": 2085386977
+      },
+      {
+        "path": "v0/documents/peS2o-0029.json.gz",
+        "compressed": 646118678,
+        "isize": 2089391687
+      },
+      {
+        "path": "v0/documents/peS2o-0030.json.gz",
+        "compressed": 641513155,
+        "isize": 2076525452
+      },
+      {
+        "path": "v0/documents/peS2o-0031.json.gz",
+        "compressed": 644153428,
+        "isize": 2084239280
+      },
+      {
+        "path": "v0/documents/peS2o-0032.json.gz",
+        "compressed": 644166044,
+        "isize": 2085191023
+      },
+      {
+        "path": "v0/documents/peS2o-0033.json.gz",
+        "compressed": 647267327,
+        "isize": 2094522722
+      },
+      {
+        "path": "v0/documents/peS2o-0034.json.gz",
+        "compressed": 645274828,
+        "isize": 2088265810
+      },
+      {
+        "path": "v0/documents/peS2o-0035.json.gz",
+        "compressed": 645019671,
+        "isize": 2084862408
+      },
+      {
+        "path": "v0/documents/peS2o-0036.json.gz",
+        "compressed": 600505986,
+        "isize": 1941045674
+      },
+      {
+        "path": "v0/documents/peS2o-0037.json.gz",
+        "compressed": 623956493,
+        "isize": 2016377282
+      },
+      {
+        "path": "v0/documents/peS2o-0038.json.gz",
+        "compressed": 651076968,
+        "isize": 2105590547
+      },
+      {
+        "path": "v0/documents/peS2o-0039.json.gz",
+        "compressed": 645051936,
+        "isize": 2087681733
+      },
+      {
+        "path": "v0/documents/peS2o-0040.json.gz",
+        "compressed": 249287216,
+        "isize": 806466630
+      },
+      {
+        "path": "v0/documents/peS2o-0041.json.gz",
+        "compressed": 645446669,
+        "isize": 2085840296
+      },
+      {
+        "path": "v0/documents/peS2o-0042.json.gz",
+        "compressed": 169918396,
+        "isize": 549514140
+      },
+      {
+        "path": "v0/documents/peS2o-0043.json.gz",
+        "compressed": 642525749,
+        "isize": 2078073687
+      },
+      {
+        "path": "v0/documents/peS2o-0044.json.gz",
+        "compressed": 643210902,
+        "isize": 2080442793
+      },
+      {
+        "path": "v0/documents/peS2o-0045.json.gz",
+        "compressed": 93146188,
+        "isize": 301332419
+      },
+      {
+        "path": "v0/documents/peS2o-0046.json.gz",
+        "compressed": 647053476,
+        "isize": 2092890704
+      },
+      {
+        "path": "v0/documents/peS2o-0047.json.gz",
+        "compressed": 219801181,
+        "isize": 711561795
+      },
+      {
+        "path": "v0/documents/peS2o-0048.json.gz",
+        "compressed": 647921001,
+        "isize": 2095925149
+      },
+      {
+        "path": "v0/documents/peS2o-0049.json.gz",
+        "compressed": 643519612,
+        "isize": 2083168438
+      },
+      {
+        "path": "v0/documents/peS2o-0050.json.gz",
+        "compressed": 647421484,
+        "isize": 2093346075
+      },
+      {
+        "path": "v0/documents/peS2o-0051.json.gz",
+        "compressed": 646790404,
+        "isize": 2091562038
+      },
+      {
+        "path": "v0/documents/peS2o-0052.json.gz",
+        "compressed": 633290077,
+        "isize": 2047993142
+      },
+      {
+        "path": "v0/documents/peS2o-0053.json.gz",
+        "compressed": 645392540,
+        "isize": 2086268965
+      },
+      {
+        "path": "v0/documents/peS2o-0054.json.gz",
+        "compressed": 584258657,
+        "isize": 1890772985
+      },
+      {
+        "path": "v0/documents/peS2o-0055.json.gz",
+        "compressed": 642574718,
+        "isize": 2077450338
+      },
+      {
+        "path": "v0/documents/peS2o-0056.json.gz",
+        "compressed": 645315552,
+        "isize": 2087723412
+      },
+      {
+        "path": "v0/documents/peS2o-0057.json.gz",
+        "compressed": 58619518,
+        "isize": 190052584
+      },
+      {
+        "path": "v0/documents/peS2o-0058.json.gz",
+        "compressed": 592281831,
+        "isize": 1914639263
+      },
+      {
+        "path": "v0/documents/peS2o-0059.json.gz",
+        "compressed": 648314570,
+        "isize": 2096188075
+      },
+      {
+        "path": "v0/documents/peS2o-0060.json.gz",
+        "compressed": 647790717,
+        "isize": 2097107332
+      },
+      {
+        "path": "v0/documents/peS2o-0061.json.gz",
+        "compressed": 647546939,
+        "isize": 2095159602
+      },
+      {
+        "path": "v0/documents/peS2o-0062.json.gz",
+        "compressed": 643236633,
+        "isize": 2079505229
+      },
+      {
+        "path": "v0/documents/peS2o-0063.json.gz",
+        "compressed": 647074657,
+        "isize": 2091049898
+      },
+      {
+        "path": "v0/documents/peS2o-0064.json.gz",
+        "compressed": 584098264,
+        "isize": 1889603157
+      },
+      {
+        "path": "v0/documents/peS2o-0065.json.gz",
+        "compressed": 647135971,
+        "isize": 2092597633
+      },
+      {
+        "path": "v0/documents/peS2o-0066.json.gz",
+        "compressed": 644572210,
+        "isize": 2083563391
+      },
+      {
+        "path": "v0/documents/peS2o-0067.json.gz",
+        "compressed": 648086718,
+        "isize": 2098475539
+      },
+      {
+        "path": "v0/documents/peS2o-0068.json.gz",
+        "compressed": 645335974,
+        "isize": 2086351853
+      },
+      {
+        "path": "v0/documents/peS2o-0069.json.gz",
+        "compressed": 642729292,
+        "isize": 2077581564
+      },
+      {
+        "path": "v0/documents/peS2o-0070.json.gz",
+        "compressed": 644599121,
+        "isize": 2083745918
+      },
+      {
+        "path": "v0/documents/peS2o-0071.json.gz",
+        "compressed": 648720097,
+        "isize": 2098249653
+      },
+      {
+        "path": "v0/documents/peS2o-0072.json.gz",
+        "compressed": 528740475,
+        "isize": 1710337308
+      },
+      {
+        "path": "v0/documents/peS2o-0073.json.gz",
+        "compressed": 647754304,
+        "isize": 2093312970
+      },
+      {
+        "path": "v0/documents/peS2o-0074.json.gz",
+        "compressed": 643629037,
+        "isize": 2081796415
+      },
+      {
+        "path": "v0/documents/peS2o-0075.json.gz",
+        "compressed": 69249179,
+        "isize": 223526304
+      },
+      {
+        "path": "v0/documents/peS2o-0076.json.gz",
+        "compressed": 641696257,
+        "isize": 2076254026
+      },
+      {
+        "path": "v0/documents/peS2o-0077.json.gz",
+        "compressed": 645778760,
+        "isize": 2088349298
+      },
+      {
+        "path": "v0/documents/peS2o-0078.json.gz",
+        "compressed": 44794595,
+        "isize": 145179171
+      },
+      {
+        "path": "v0/documents/peS2o-0079.json.gz",
+        "compressed": 647550191,
+        "isize": 2093228743
+      },
+      {
+        "path": "v0/documents/peS2o-0080.json.gz",
+        "compressed": 647313282,
+        "isize": 2095804659
+      },
+      {
+        "path": "v0/documents/peS2o-0081.json.gz",
+        "compressed": 645484527,
+        "isize": 2087777800
+      },
+      {
+        "path": "v0/documents/peS2o-0082.json.gz",
+        "compressed": 646719145,
+        "isize": 2091424119
+      },
+      {
+        "path": "v0/documents/peS2o-0083.json.gz",
+        "compressed": 643217109,
+        "isize": 2079233283
+      },
+      {
+        "path": "v0/documents/peS2o-0084.json.gz",
+        "compressed": 643290022,
+        "isize": 2078366698
+      },
+      {
+        "path": "v0/documents/peS2o-0085.json.gz",
+        "compressed": 233193454,
+        "isize": 752877027
+      },
+      {
+        "path": "v0/documents/peS2o-0086.json.gz",
+        "compressed": 643907831,
+        "isize": 2080903762
+      },
+      {
+        "path": "v0/documents/peS2o-0087.json.gz",
+        "compressed": 646178772,
+        "isize": 2091563992
+      },
+      {
+        "path": "v0/documents/peS2o-0088.json.gz",
+        "compressed": 645401323,
+        "isize": 2087532687
+      },
+      {
+        "path": "v0/documents/peS2o-0089.json.gz",
+        "compressed": 645267169,
+        "isize": 2086333068
+      },
+      {
+        "path": "v0/documents/peS2o-0090.json.gz",
+        "compressed": 646139396,
+        "isize": 2090338547
+      },
+      {
+        "path": "v0/documents/peS2o-0091.json.gz",
+        "compressed": 647113644,
+        "isize": 2093850729
+      },
+      {
+        "path": "v0/documents/peS2o-0092.json.gz",
+        "compressed": 648248683,
+        "isize": 2096818539
+      },
+      {
+        "path": "v0/documents/peS2o-0093.json.gz",
+        "compressed": 645803827,
+        "isize": 2087946807
+      },
+      {
+        "path": "v0/documents/peS2o-0094.json.gz",
+        "compressed": 648889746,
+        "isize": 2098730151
+      },
+      {
+        "path": "v0/documents/peS2o-0095.json.gz",
+        "compressed": 646407318,
+        "isize": 2089128409
+      },
+      {
+        "path": "v0/documents/peS2o-0096.json.gz",
+        "compressed": 544340862,
+        "isize": 1760289437
+      },
+      {
+        "path": "v0/documents/peS2o-0097.json.gz",
+        "compressed": 643534291,
+        "isize": 2080407101
+      },
+      {
+        "path": "v0/documents/peS2o-0098.json.gz",
+        "compressed": 648715548,
+        "isize": 2097773359
+      },
+      {
+        "path": "v0/documents/peS2o-0099.json.gz",
+        "compressed": 647642154,
+        "isize": 2094896099
+      },
+      {
+        "path": "v0/documents/peS2o-0100.json.gz",
+        "compressed": 191938970,
+        "isize": 620522422
+      },
+      {
+        "path": "v0/documents/peS2o-0101.json.gz",
+        "compressed": 411531069,
+        "isize": 1369623322
+      }
+    ]
+  },
+  "common-pile/peS2o_filtered": {
+    "repo": "common-pile/peS2o_filtered",
+    "n_shards": 91,
+    "compressed_bytes": 56901470324,
+    "isize_sum_bytes": 187425883645,
+    "compression_ratio": 3.2938671457483797,
+    "per_shard_ratio_min": 3.288786786030773,
+    "per_shard_ratio_max": 3.383807175335291,
+    "wrap_suspected": false,
+    "per_shard": [
+      {
+        "path": "peS2o-0000.json.gz",
+        "compressed": 652928967,
+        "isize": 2152045988
+      },
+      {
+        "path": "peS2o-0001.json.gz",
+        "compressed": 615005841,
+        "isize": 2024195418
+      },
+      {
+        "path": "peS2o-0002.json.gz",
+        "compressed": 627333684,
+        "isize": 2066818826
+      },
+      {
+        "path": "peS2o-0003.json.gz",
+        "compressed": 628614509,
+        "isize": 2070122549
+      },
+      {
+        "path": "peS2o-0004.json.gz",
+        "compressed": 626498415,
+        "isize": 2063997383
+      },
+      {
+        "path": "peS2o-0005.json.gz",
+        "compressed": 625062273,
+        "isize": 2059031281
+      },
+      {
+        "path": "peS2o-0006.json.gz",
+        "compressed": 627275807,
+        "isize": 2064842898
+      },
+      {
+        "path": "peS2o-0007.json.gz",
+        "compressed": 626727766,
+        "isize": 2062414899
+      },
+      {
+        "path": "peS2o-0008.json.gz",
+        "compressed": 625544585,
+        "isize": 2059730684
+      },
+      {
+        "path": "peS2o-0009.json.gz",
+        "compressed": 574957408,
+        "isize": 1892180732
+      },
+      {
+        "path": "peS2o-0010.json.gz",
+        "compressed": 584481268,
+        "isize": 1924029584
+      },
+      {
+        "path": "peS2o-0011.json.gz",
+        "compressed": 628066098,
+        "isize": 2067256184
+      },
+      {
+        "path": "peS2o-0012.json.gz",
+        "compressed": 628235760,
+        "isize": 2066133466
+      },
+      {
+        "path": "peS2o-0013.json.gz",
+        "compressed": 628647919,
+        "isize": 2069532758
+      },
+      {
+        "path": "peS2o-0014.json.gz",
+        "compressed": 623779082,
+        "isize": 2055787650
+      },
+      {
+        "path": "peS2o-0015.json.gz",
+        "compressed": 622533969,
+        "isize": 2049789814
+      },
+      {
+        "path": "peS2o-0016.json.gz",
+        "compressed": 626956855,
+        "isize": 2063965329
+      },
+      {
+        "path": "peS2o-0017.json.gz",
+        "compressed": 627186115,
+        "isize": 2064072768
+      },
+      {
+        "path": "peS2o-0018.json.gz",
+        "compressed": 629656256,
+        "isize": 2072139725
+      },
+      {
+        "path": "peS2o-0019.json.gz",
+        "compressed": 625571568,
+        "isize": 2060198648
+      },
+      {
+        "path": "peS2o-0020.json.gz",
+        "compressed": 625638833,
+        "isize": 2058652076
+      },
+      {
+        "path": "peS2o-0021.json.gz",
+        "compressed": 778731632,
+        "isize": 2564462356
+      },
+      {
+        "path": "peS2o-0022.json.gz",
+        "compressed": 626690597,
+        "isize": 2062355955
+      },
+      {
+        "path": "peS2o-0023.json.gz",
+        "compressed": 626889735,
+        "isize": 2062596101
+      },
+      {
+        "path": "peS2o-0024.json.gz",
+        "compressed": 625591777,
+        "isize": 2059362186
+      },
+      {
+        "path": "peS2o-0025.json.gz",
+        "compressed": 626833926,
+        "isize": 2063122310
+      },
+      {
+        "path": "peS2o-0026.json.gz",
+        "compressed": 623592406,
+        "isize": 2054055082
+      },
+      {
+        "path": "peS2o-0027.json.gz",
+        "compressed": 625386371,
+        "isize": 2059115591
+      },
+      {
+        "path": "peS2o-0028.json.gz",
+        "compressed": 615968480,
+        "isize": 2030150667
+      },
+      {
+        "path": "peS2o-0029.json.gz",
+        "compressed": 618597476,
+        "isize": 2037916374
+      },
+      {
+        "path": "peS2o-0030.json.gz",
+        "compressed": 619620739,
+        "isize": 2042118828
+      },
+      {
+        "path": "peS2o-0031.json.gz",
+        "compressed": 621330919,
+        "isize": 2047102235
+      },
+      {
+        "path": "peS2o-0032.json.gz",
+        "compressed": 618941265,
+        "isize": 2039223447
+      },
+      {
+        "path": "peS2o-0033.json.gz",
+        "compressed": 616849803,
+        "isize": 2030223623
+      },
+      {
+        "path": "peS2o-0034.json.gz",
+        "compressed": 575080633,
+        "isize": 1892699947
+      },
+      {
+        "path": "peS2o-0035.json.gz",
+        "compressed": 597456503,
+        "isize": 1966169496
+      },
+      {
+        "path": "peS2o-0036.json.gz",
+        "compressed": 623911179,
+        "isize": 2054510653
+      },
+      {
+        "path": "peS2o-0037.json.gz",
+        "compressed": 850534539,
+        "isize": 2802759550
+      },
+      {
+        "path": "peS2o-0038.json.gz",
+        "compressed": 775708260,
+        "isize": 2552775493
+      },
+      {
+        "path": "peS2o-0039.json.gz",
+        "compressed": 614020330,
+        "isize": 2022216134
+      },
+      {
+        "path": "peS2o-0040.json.gz",
+        "compressed": 701942246,
+        "isize": 2311974592
+      },
+      {
+        "path": "peS2o-0041.json.gz",
+        "compressed": 823620749,
+        "isize": 2713612094
+      },
+      {
+        "path": "peS2o-0042.json.gz",
+        "compressed": 617127787,
+        "isize": 2033042944
+      },
+      {
+        "path": "peS2o-0043.json.gz",
+        "compressed": 613515323,
+        "isize": 2022722917
+      },
+      {
+        "path": "peS2o-0044.json.gz",
+        "compressed": 617174476,
+        "isize": 2032005663
+      },
+      {
+        "path": "peS2o-0045.json.gz",
+        "compressed": 616539231,
+        "isize": 2030233577
+      },
+      {
+        "path": "peS2o-0046.json.gz",
+        "compressed": 603417975,
+        "isize": 1987375285
+      },
+      {
+        "path": "peS2o-0047.json.gz",
+        "compressed": 615102652,
+        "isize": 2024973536
+      },
+      {
+        "path": "peS2o-0048.json.gz",
+        "compressed": 556692399,
+        "isize": 1834617699
+      },
+      {
+        "path": "peS2o-0049.json.gz",
+        "compressed": 611418241,
+        "isize": 2013013169
+      },
+      {
+        "path": "peS2o-0050.json.gz",
+        "compressed": 668186617,
+        "isize": 2202012103
+      },
+      {
+        "path": "peS2o-0051.json.gz",
+        "compressed": 563727382,
+        "isize": 1855439034
+      },
+      {
+        "path": "peS2o-0052.json.gz",
+        "compressed": 616400868,
+        "isize": 2029571710
+      },
+      {
+        "path": "peS2o-0053.json.gz",
+        "compressed": 615774547,
+        "isize": 2030278071
+      },
+      {
+        "path": "peS2o-0054.json.gz",
+        "compressed": 615195710,
+        "isize": 2027436686
+      },
+      {
+        "path": "peS2o-0055.json.gz",
+        "compressed": 611714430,
+        "isize": 2013837782
+      },
+      {
+        "path": "peS2o-0056.json.gz",
+        "compressed": 615349746,
+        "isize": 2025187816
+      },
+      {
+        "path": "peS2o-0057.json.gz",
+        "compressed": 555857708,
+        "isize": 1831417404
+      },
+      {
+        "path": "peS2o-0058.json.gz",
+        "compressed": 615100228,
+        "isize": 2025962485
+      },
+      {
+        "path": "peS2o-0059.json.gz",
+        "compressed": 612201543,
+        "isize": 2015347115
+      },
+      {
+        "path": "peS2o-0060.json.gz",
+        "compressed": 615449722,
+        "isize": 2029825096
+      },
+      {
+        "path": "peS2o-0061.json.gz",
+        "compressed": 613014188,
+        "isize": 2018459404
+      },
+      {
+        "path": "peS2o-0062.json.gz",
+        "compressed": 609745668,
+        "isize": 2007270438
+      },
+      {
+        "path": "peS2o-0063.json.gz",
+        "compressed": 610658162,
+        "isize": 2010698325
+      },
+      {
+        "path": "peS2o-0064.json.gz",
+        "compressed": 616100235,
+        "isize": 2029254400
+      },
+      {
+        "path": "peS2o-0065.json.gz",
+        "compressed": 502993380,
+        "isize": 1657020419
+      },
+      {
+        "path": "peS2o-0066.json.gz",
+        "compressed": 615053727,
+        "isize": 2024060616
+      },
+      {
+        "path": "peS2o-0067.json.gz",
+        "compressed": 675133702,
+        "isize": 2223836343
+      },
+      {
+        "path": "peS2o-0068.json.gz",
+        "compressed": 608348157,
+        "isize": 2004780916
+      },
+      {
+        "path": "peS2o-0069.json.gz",
+        "compressed": 654903482,
+        "isize": 2157195042
+      },
+      {
+        "path": "peS2o-0070.json.gz",
+        "compressed": 614956126,
+        "isize": 2024695324
+      },
+      {
+        "path": "peS2o-0071.json.gz",
+        "compressed": 614267171,
+        "isize": 2025790659
+      },
+      {
+        "path": "peS2o-0072.json.gz",
+        "compressed": 611109388,
+        "isize": 2012893031
+      },
+      {
+        "path": "peS2o-0073.json.gz",
+        "compressed": 612656241,
+        "isize": 2017708745
+      },
+      {
+        "path": "peS2o-0074.json.gz",
+        "compressed": 609298155,
+        "isize": 2005782471
+      },
+      {
+        "path": "peS2o-0075.json.gz",
+        "compressed": 827434874,
+        "isize": 2722468859
+      },
+      {
+        "path": "peS2o-0076.json.gz",
+        "compressed": 609602355,
+        "isize": 2006478472
+      },
+      {
+        "path": "peS2o-0077.json.gz",
+        "compressed": 612401320,
+        "isize": 2018893560
+      },
+      {
+        "path": "peS2o-0078.json.gz",
+        "compressed": 611186370,
+        "isize": 2013284909
+      },
+      {
+        "path": "peS2o-0079.json.gz",
+        "compressed": 611466831,
+        "isize": 2013593359
+      },
+      {
+        "path": "peS2o-0080.json.gz",
+        "compressed": 611058526,
+        "isize": 2013517681
+      },
+      {
+        "path": "peS2o-0081.json.gz",
+        "compressed": 613208986,
+        "isize": 2020667062
+      },
+      {
+        "path": "peS2o-0082.json.gz",
+        "compressed": 614939770,
+        "isize": 2025591404
+      },
+      {
+        "path": "peS2o-0083.json.gz",
+        "compressed": 610915647,
+        "isize": 2011969667
+      },
+      {
+        "path": "peS2o-0084.json.gz",
+        "compressed": 616073952,
+        "isize": 2029385261
+      },
+      {
+        "path": "peS2o-0085.json.gz",
+        "compressed": 612886558,
+        "isize": 2017030527
+      },
+      {
+        "path": "peS2o-0086.json.gz",
+        "compressed": 515611292,
+        "isize": 1698157051
+      },
+      {
+        "path": "peS2o-0087.json.gz",
+        "compressed": 608724014,
+        "isize": 2004401730
+      },
+      {
+        "path": "peS2o-0088.json.gz",
+        "compressed": 614845192,
+        "isize": 2025022196
+      },
+      {
+        "path": "peS2o-0089.json.gz",
+        "compressed": 792943772,
+        "isize": 2612442888
+      },
+      {
+        "path": "peS2o-0090.json.gz",
+        "compressed": 405983955,
+        "isize": 1373771420
+      }
+    ]
+  },
+  "common-pile/pubmed": {
+    "repo": "common-pile/pubmed",
+    "n_shards": 17,
+    "compressed_bytes": 45310660997,
+    "isize_sum_bytes": 23389178955,
+    "compression_ratio": 0.516195933591624,
+    "per_shard_ratio_min": 0.5026818671985418,
+    "per_shard_ratio_max": 0.5876714778174934,
+    "wrap_suspected": true,
+    "per_shard": [
+      {
+        "path": "data/00000_pubmedcentral.jsonl.gz",
+        "compressed": 2777637817,
+        "isize": 1410345133
+      },
+      {
+        "path": "data/00001_pubmedcentral.jsonl.gz",
+        "compressed": 2805673228,
+        "isize": 1410361057
+      },
+      {
+        "path": "data/00002_pubmedcentral.jsonl.gz",
+        "compressed": 2800621215,
+        "isize": 1410004799
+      },
+      {
+        "path": "data/00003_pubmedcentral.jsonl.gz",
+        "compressed": 2785112610,
+        "isize": 1413181561
+      },
+      {
+        "path": "data/00004_pubmedcentral.jsonl.gz",
+        "compressed": 2775840088,
+        "isize": 1410350228
+      },
+      {
+        "path": "data/00005_pubmedcentral.jsonl.gz",
+        "compressed": 2759818547,
+        "isize": 1410337504
+      },
+      {
+        "path": "data/00006_pubmedcentral.jsonl.gz",
+        "compressed": 2752524632,
+        "isize": 1410292533
+      },
+      {
+        "path": "data/00007_pubmedcentral.jsonl.gz",
+        "compressed": 2732609559,
+        "isize": 1410343515
+      },
+      {
+        "path": "data/00008_pubmedcentral.jsonl.gz",
+        "compressed": 2739977001,
+        "isize": 1410305598
+      },
+      {
+        "path": "data/00009_pubmedcentral.jsonl.gz",
+        "compressed": 2715162816,
+        "isize": 1410280151
+      },
+      {
+        "path": "data/00010_pubmedcentral.jsonl.gz",
+        "compressed": 2715675007,
+        "isize": 1410344217
+      },
+      {
+        "path": "data/00011_pubmedcentral.jsonl.gz",
+        "compressed": 2718686928,
+        "isize": 1410335481
+      },
+      {
+        "path": "data/00012_pubmedcentral.jsonl.gz",
+        "compressed": 2700723588,
+        "isize": 1410277470
+      },
+      {
+        "path": "data/00013_pubmedcentral.jsonl.gz",
+        "compressed": 2695463232,
+        "isize": 1410372010
+      },
+      {
+        "path": "data/00014_pubmedcentral.jsonl.gz",
+        "compressed": 2711181345,
+        "isize": 1410346011
+      },
+      {
+        "path": "data/00015_pubmedcentral.jsonl.gz",
+        "compressed": 2726243444,
+        "isize": 1410307421
+      },
+      {
+        "path": "data/00016_pubmedcentral.jsonl.gz",
+        "compressed": 1397709940,
+        "isize": 821394266
+      }
+    ]
+  },
+  "common-pile/pubmed_filtered": {
+    "repo": "common-pile/pubmed_filtered",
+    "n_shards": 17,
+    "compressed_bytes": 43555182605,
+    "isize_sum_bytes": 10593179182,
+    "compression_ratio": 0.24321282906948336,
+    "per_shard_ratio_min": 0.1252892367933652,
+    "per_shard_ratio_max": 0.3153341595496543,
+    "wrap_suspected": true,
+    "per_shard": [
+      {
+        "path": "licensed_pubmed-0000.json.gz",
+        "compressed": 2584255849,
+        "isize": 323779443
+      },
+      {
+        "path": "licensed_pubmed-0001.json.gz",
+        "compressed": 2699667261,
+        "isize": 799808946
+      },
+      {
+        "path": "licensed_pubmed-0002.json.gz",
+        "compressed": 2704144015,
+        "isize": 695081103
+      },
+      {
+        "path": "licensed_pubmed-0003.json.gz",
+        "compressed": 2695060696,
+        "isize": 698076103
+      },
+      {
+        "path": "licensed_pubmed-0004.json.gz",
+        "compressed": 2679174176,
+        "isize": 662470343
+      },
+      {
+        "path": "licensed_pubmed-0005.json.gz",
+        "compressed": 2671835363,
+        "isize": 699405878
+      },
+      {
+        "path": "licensed_pubmed-0006.json.gz",
+        "compressed": 2660944348,
+        "isize": 684371898
+      },
+      {
+        "path": "licensed_pubmed-0007.json.gz",
+        "compressed": 2638479833,
+        "isize": 685295507
+      },
+      {
+        "path": "licensed_pubmed-0008.json.gz",
+        "compressed": 2639269576,
+        "isize": 669011427
+      },
+      {
+        "path": "licensed_pubmed-0009.json.gz",
+        "compressed": 2606831493,
+        "isize": 595321733
+      },
+      {
+        "path": "licensed_pubmed-0010.json.gz",
+        "compressed": 2611823845,
+        "isize": 639792515
+      },
+      {
+        "path": "licensed_pubmed-0011.json.gz",
+        "compressed": 2615844233,
+        "isize": 643238010
+      },
+      {
+        "path": "licensed_pubmed-0012.json.gz",
+        "compressed": 2597305751,
+        "isize": 615834438
+      },
+      {
+        "path": "licensed_pubmed-0013.json.gz",
+        "compressed": 2583810041,
+        "isize": 578234366
+      },
+      {
+        "path": "licensed_pubmed-0014.json.gz",
+        "compressed": 2602885268,
+        "isize": 582736468
+      },
+      {
+        "path": "licensed_pubmed-0015.json.gz",
+        "compressed": 2619726679,
+        "isize": 596872736
+      },
+      {
+        "path": "licensed_pubmed-0016.json.gz",
+        "compressed": 1344124178,
+        "isize": 423848268
+      }
+    ]
+  }
+}

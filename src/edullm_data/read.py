@@ -54,6 +54,30 @@ class SealMismatch(ReadError):
     """
 
 
+class PartialLabelCoverage(UserWarning):
+    """A ``labels=`` filter's key is absent from some entries, so they were dropped unasked.
+
+    A WARNING and not an error, and the line between the two is which failure it is:
+
+    * The dataset carries NO labels at all -> :class:`ReadError`. The result would be empty, and
+      an empty result is indistinguishable from "your filter matched nothing" — the caller
+      cannot tell a broken query from a true negative, so there is no honest value to return.
+    * The key exists on SOME entries -> this warning. The result is non-empty and exactly what
+      was asked for; what is wrong is the caller's mental model of what they asked for.
+      ``labels={"domain": "science"}`` against a corpus where only three sources inherited a
+      ``domain`` returns a real science slice — of three sources, silently excluding the rest.
+
+    Raising on the partial case would break a legitimate use: wanting only the labelled sources
+    is a reasonable request, and it is not expressible any other way. So the read succeeds and
+    says what it left out.
+
+    Its own class so that a caller who wants the strict reading can get it in one line —
+    ``warnings.simplefilter("error", PartialLabelCoverage)`` in a training entrypoint makes
+    every silent drop fatal, without also promoting unrelated ``UserWarning``s. That is the
+    right shape for "the default is permissive, the strict mode is opt-in and cheap."
+    """
+
+
 class MixedFormat(ReadError):
     """A group's fixed-width shards do not agree on how to decode them.
 
@@ -212,6 +236,7 @@ def dataset_paths(
     group: str | None = None,
     include_held_out: bool = False,
     labels: Mapping[str, str] | None = None,
+    warn_partial_labels: bool = True,
 ) -> ResolvedSplit:
     """Resolve a dataset to concrete object URIs + dtype.
 
@@ -227,6 +252,16 @@ def dataset_paths(
     an inflated row count is the failure ``validate``'s ``partition-rows-mismatch`` exists to
     catch on the write side. Asking for labels on an unlabelled dataset raises rather than
     returning nothing, so "this dataset has no labels" is distinguishable from "nothing matched".
+
+    ``warn_partial_labels`` (default on) covers the case between those two: a corpus where a
+    label key exists on SOME entries. Label depth is per-entry and legitimately mixed — a
+    ``domain`` segment is only present where the upstream source shipped one, so
+    ``labels={"domain": …}`` matches only the nested sources and silently discards every flat
+    one. That read is not wrong, and raising would break the legitimate "give me only the
+    labelled sources" request, so it succeeds and emits
+    :class:`PartialLabelCoverage` naming what it dropped. Pass ``False`` when the narrowing is
+    deliberate; ``warnings.simplefilter("error", PartialLabelCoverage)`` is the opposite dial
+    for a caller who wants it fatal.
 
     **``split=None`` returns TRAINABLE data only**, and every declared split separately in
     ``.splits`` / ``.train`` / ``.val``. Returning everything — which is what this used to do —
@@ -302,6 +337,8 @@ def dataset_paths(
                 f"layout, or a manifest written before schema v2). Returning an empty result "
                 f"would be indistinguishable from 'your filter matched nothing'."
             )
+        if warn_partial_labels:
+            _warn_partial_label_coverage(entries, labels, dataset_id, version, gname)
 
     def _label_filter(sel: list[Any]) -> list[Any]:
         return [e for e in sel if _matches_labels(e, labels)] if labels else sel
@@ -430,6 +467,111 @@ def _matches_labels(entry: Any, want: Mapping[str, str]) -> bool:
     """
     have = getattr(entry, "labels", None) or {}
     return all(have.get(k) == v for k, v in want.items())
+
+
+#: Label keys tried, in order, when naming which slices a partial-coverage filter dropped.
+#: ``source`` first because that is what the pretrain convention calls the top level
+#: (``manifest.PATH_LABEL_KEYS``) and what an operator recognizes. Falls back to the whole
+#: label dict for a family that labels by something else entirely — the message must stay
+#: useful for keys this module has never heard of.
+_EXCLUSION_NAME_KEYS: tuple[str, ...] = ("source", "corpus", "lang", "dataset")
+
+
+def _slice_name(entry: Any) -> str:
+    """A short human name for the slice an excluded entry belongs to.
+
+    Named from the keys the entry DOES carry, including keys that are part of the query. That
+    looks redundant and is not: under ``labels={"source": "arxiv", "domain": "python"}`` the
+    excluded arxiv shards are the answer — "you asked for arxiv AND a domain, and arxiv has no
+    domain at all, so you got none of it" is the message, and suppressing ``source=arxiv`` as
+    "already in your query" reduces it to ``<unlabelled>``, which names nothing.
+    """
+    have = getattr(entry, "labels", None) or {}
+    for key in _EXCLUSION_NAME_KEYS:
+        if key in have:
+            return f"{key}={have[key]}"
+    if have:
+        return ",".join(f"{k}={v}" for k, v in sorted(have.items()))
+    return "<no labels>"
+
+
+def _warn_partial_label_coverage(
+    entries: list[Any],
+    labels: Mapping[str, str],
+    dataset_id: str,
+    version: str,
+    gname: str,
+) -> None:
+    """Warn when a requested label KEY is missing from some entries, and say what that cost.
+
+    The gap this closes: ``_matches_labels`` requires every requested key to be present AND
+    equal, and label depth is per-entry — Gate A's ``_check_labels_match_path`` has no
+    uniformity requirement, so a group legitimately holds both ``tokens/dclm/train-*.bin`` and
+    ``tokens/essential-web/science/train-*.bin``. Ask that group for
+    ``labels={"domain": "science"}`` and DCLM does not fail to match on its value, it fails to
+    match on the key's ABSENCE. Nothing else notices: the result is non-empty, the counts are
+    internally consistent, and the caller believes they hold "the science slice" while holding
+    three sources out of ten.
+
+    So this reports the KEY-MISSING population only, not the value mismatches. A shard whose
+    ``domain`` is ``medicine`` was correctly excluded by a question it could answer; a shard
+    with no ``domain`` at all was excluded by a question that does not apply to it, which is
+    the part the caller did not intend and cannot see.
+
+    Counts come from ``entry.count`` where the entries agree on a summable unit, and are
+    omitted rather than guessed when they do not — a wrong number in a warning is worse than
+    no number, because it will be quoted.
+    """
+    import warnings
+
+    want_keys = frozenset(labels)
+    missing: list[Any] = []
+    kept: list[Any] = []
+    # Partitioned in ONE pass rather than by `e not in missing`: a reservoir group holds tens of
+    # thousands of entries and the membership test is O(n^2) on a dataclass __eq__, which would
+    # make a diagnostic the slowest thing in the read.
+    for entry in entries:
+        (kept if want_keys <= frozenset(getattr(entry, "labels", None) or {}) else missing).append(
+            entry
+        )
+    if not missing:
+        return
+
+    absent_keys = sorted(
+        {k for k in want_keys for e in missing if k not in (getattr(e, "labels", None) or {})}
+    )
+    by_slice: dict[str, list[Any]] = {}
+    for entry in missing:
+        by_slice.setdefault(_slice_name(entry), []).append(entry)
+
+    total, unit = _sum_counts(missing)
+    kept_total, kept_unit = _sum_counts(kept)
+
+    def _detail(sel: list[Any]) -> str:
+        n, u = _sum_counts(sel)
+        shards = f"{len(sel)} shard{'s' if len(sel) != 1 else ''}"
+        return f"{shards}, {n:,} {u}" if n is not None and u == unit else shards
+
+    excluded = "; ".join(f"{name} ({_detail(sel)})" for name, sel in sorted(by_slice.items()))
+    share = ""
+    if total is not None and kept_total is not None and kept_unit == unit:
+        denominator = total + kept_total
+        if denominator:
+            share = f" That is {total / denominator * 100:.1f}% of the group's {unit}."
+
+    warnings.warn(
+        f"labels={dict(labels)!r} on {dataset_id}/{version} group {gname!r}: the key(s) "
+        f"{absent_keys} are ABSENT from {len(missing)} of {len(entries)} entries, so those were "
+        f"excluded by the key not existing rather than by its value. Label depth is per-entry and "
+        f"legitimately mixed — a segment like 'domain' is present only where the source shipped "
+        f"one upstream — so this filter narrows to the labelled sources ONLY. Excluded: "
+        f"{excluded}.{share} This is a real result, not an error: pass "
+        f"warn_partial_labels=False if the narrowing is intended, select by a key every entry "
+        f"carries (usually 'source') to reach all of them, or "
+        f"warnings.simplefilter('error', PartialLabelCoverage) to make it fatal.",
+        PartialLabelCoverage,
+        stacklevel=3,
+    )
 
 
 def _sum_counts(entries: list[Any]) -> tuple[int | None, str | None]:
@@ -694,6 +836,7 @@ def build_mixture(
     require_validated: bool = True,
     group: str | None = None,
     split: str | None = "train",
+    warn_partial_labels: bool = True,
 ) -> ResolvedMixture:
     """Choose a weighted, seeded subset of one dataset.
 
@@ -715,6 +858,14 @@ def build_mixture(
     with different tokenizers whose vocab sizes are similar enough that every id still looks
     valid — semantically wrong and silent. Doing that safely needs a tokenizer-identity check
     across the datasets' ``depends_on`` pins, which is deliberately not built here.
+
+    ``warn_partial_labels`` behaves as in :func:`dataset_paths`, and is checked PER COMPONENT
+    because a mixture is where a partial-coverage predicate does real damage: a ``ratio`` is a
+    share of the budget, so a component whose predicate reaches only the nested sources still
+    draws its full ratio — the mix looks balanced, ``shortfall`` is empty, and the corpus is
+    composed of a fraction of the sources the caller believed they had named. The two entry
+    points warn on the same condition on purpose; a warning present in the direct read and
+    absent from the mixture would be a warning that fires only where it is least needed.
     """
     require_s3_adapter(s3, called_from="build_mixture()")
     if not sources:
@@ -753,7 +904,7 @@ def build_mixture(
         dataset_id, version, split=split, s3=s3, data_bucket=data_bucket,
         require_validated=require_validated, group=group,
     )
-    pool = _mixture_entries(
+    pool_group, pool = _mixture_entries(
         dataset_id, version, s3=s3, data_bucket=data_bucket, group=group, split=split,
     )
 
@@ -761,6 +912,9 @@ def build_mixture(
     counts: dict[str, int] = {}
     shortfall: dict[str, int] = {}
     unit: str | None = None
+    #: Distinct label-KEY sets already reported. Ten components keyed on ``domain`` describe one
+    #: coverage gap, not ten — repeating it per component would train the reader to skim past it.
+    warned_keysets: set[frozenset[str]] = set()
 
     for src in sources:
         matching = [e for e in pool if _matches_labels(e, src.labels)]
@@ -770,6 +924,12 @@ def build_mixture(
                 f"label keys — a predicate that matches nothing would otherwise contribute "
                 f"silently zero to the mixture."
             )
+        if warn_partial_labels and frozenset(src.labels) not in warned_keysets:
+            warned_keysets.add(frozenset(src.labels))
+            # Against `pool`, which is already split-filtered, so the reported exclusion covers
+            # the shards this mixture could actually have drawn — not held-out data it was never
+            # eligible for.
+            _warn_partial_label_coverage(pool, src.labels, dataset_id, version, pool_group)
         available, src_unit = _sum_counts(matching)
         if available is None:
             raise ReadError(
@@ -842,13 +1002,17 @@ def _mixture_entries(
     data_bucket: str,
     group: str | None,
     split: str | None,
-) -> list[Any]:
-    """The manifest entries a mixture may draw from, split-filtered the way the reader is.
+) -> tuple[str, list[Any]]:
+    """``(group_name, entries)`` a mixture may draw from, split-filtered the way the reader is.
 
     Kept separate from :func:`dataset_paths` because a mixture needs the ENTRIES (for their
     labels and counts), while ``dataset_paths`` returns URI strings. Both read the same manifest
     and apply the same trainable-split rule, so a mixture can never draw a held-out shard that
     an unsplit read would have withheld.
+
+    The group NAME comes back alongside because it is resolved here (``group=None`` on a
+    single-group dataset) and a diagnostic that names the wrong group, or no group, sends the
+    reader to the wrong manifest.
     """
     prefix = f"{dataset_id}/{version}"
     ds = _load_json(s3, data_bucket, f"{prefix}/dataset.json")
@@ -860,7 +1024,7 @@ def _mixture_entries(
     )
     entries = [ManifestEntry.from_dict(e) for e in manifest.get("entries", [])]
     if split is None:
-        return entries
+        return gname, entries
     # Recompute the split from each filename rather than trusting a declaration — the same
     # hardening dataset_paths applies, for the same reason.
     keep = []
@@ -870,7 +1034,7 @@ def _mixture_entries(
             continue  # not a split-bearing shard; a mixture is over shards
         if parsed[0] == split:
             keep.append(e)
-    return keep
+    return gname, keep
 
 
 __all__ = [
@@ -879,6 +1043,7 @@ __all__ = [
     "MixtureSource",
     "ResolvedMixture",
     "MixedFormat",
+    "PartialLabelCoverage",
     "SealMismatch",
     "resolve_latest",
     "verify_seal",

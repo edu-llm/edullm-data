@@ -1,0 +1,18 @@
+{
+  "repo": "common-pile/arxiv_papers",
+  "status": "ok",
+  "tokenizer": "allenai/dolma2-tokenizer",
+  "n_shards_sampled": 22,
+  "n_shards_total": 22,
+  "n_docs_sampled": 612,
+  "sample_text_bytes": 41355483,
+  "sample_tokens": 13635565,
+  "tokens_per_byte": 0.3297160137145539,
+  "tokens_per_byte_cv_per_shard": 0.06259002174856537,
+  "tokens_per_byte_min_shard": 0.2966757113866525,
+  "tokens_per_byte_max_shard": 0.3602254324406788,
+  "bytes_per_token": 3.0329130476074884,
+  "mean_doc_bytes_in_sample": 67574.31862745098,
+  "sampling": "head prefix of EVERY shard (see module docstring for the bias note)",
+  "errors": []
+}
