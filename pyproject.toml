@@ -38,6 +38,47 @@ dependencies = [
   # artifacts/reservoir/SEGFAULT-INVESTIGATION.md; ten hypotheses were tested, and citing a
   # refuted one as settled is how the next person loses an afternoon.
   "numpy<2.5",
+  # `tokenizers` DECIDES EVERY TOKEN ID IN THE CORPUS and was declared nowhere — resolved at
+  # container-build time to whatever PyPI served that morning, exactly the hazard the numpy note
+  # above exists to prevent. It matters MORE here, because the two failure modes are not alike: a
+  # numpy mismatch crashes, while a tokenizer change silently emits DIFFERENT ids that stay inside
+  # the vocabulary and decode cleanly. Every check this package owns would pass on the wrong bytes.
+  #
+  # Where the bounds come from, and why they are not "whatever is installed":
+  #
+  # * `>=0.21` is the FLOOR because 0.20.x resolves `\p{L}`/`\p{N}` through Oniguruma's Unicode 14
+  #   tables while later versions use newer ones, and the upstream maintainer closed that
+  #   divergence as WONTFIX. Two builds of the same document set on two mornings can therefore
+  #   disagree on recently-assigned codepoints, by design, with no gate of ours able to see it.
+  # * `<0.23` is the CEILING because 0.22.2 is what this suite runs against (VERIFIED by execution
+  #   in this environment) and 0.23.x is untested here. A minor bump in a Rust tokenizer is not a
+  #   safe-by-default upgrade for a corpus that is content-addressed and frozen once published:
+  #   a divergence found after the fact is a full re-copy, not a patch.
+  #
+  # This is a REPRODUCIBILITY bound, not a claim that 0.21–0.22 are byte-identical to each other.
+  # Nobody has run that differential; the range narrows the risk, and the version recorded in the
+  # build receipt is what actually names the implementation a given corpus was produced with.
+  #
+  # It is a hard dependency, not an extra, even though only `corpus_build.py:631` imports it (and
+  # does so inside a function). An optional-extra tokenizer is a dependency that is absent exactly
+  # where it matters most — the Batch build container — and it would fail hours into a multi-hour
+  # job instead of at install time.
+  "tokenizers>=0.21,<0.23",
+  # ⚠️ FOUND BY THE CHECK ADDED FOR `tokenizers` ABOVE, not by the task that added it:
+  # `pyarrow` was undeclared too, imported by `corpus_read.py` and `ingest_reservoir.py`. The code
+  # had already NOTICED without anyone acting on it — `corpus_read.py:404` reads "production
+  # resolved pyarrow 25.0.0 unpinned (`pyproject.toml:29`)", citing a line that declares numpy.
+  #
+  # This is the package that SEGFAULTED the live array job (`pre_buffer=True` dispatching range
+  # reads to Arrow's native C++ IO pool; exit 139 in 3 of 4 children). The call sites now pass
+  # `pre_buffer=False` explicitly precisely because the default is a per-API, per-version accident:
+  # measured on 24.0.0, `ParquetFile.__init__` defaults False while `pq.read_table` defaults True.
+  # An unpinned major can move any of those defaults again.
+  #
+  # The bounds are the versions actually RUN, and nothing wider: 24.0.0 is what this suite executes
+  # against (verified in this environment) and 25.0.0 is what production resolved. Below 24 is
+  # untested by anyone here, and 26 does not exist yet.
+  "pyarrow>=24,<26",
 ]
 
 [project.optional-dependencies]
