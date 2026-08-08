@@ -178,17 +178,28 @@ magnitudes.**
   `.u32le.bin`** — verified by range-read: no NumPy magic, valid ids <100,278 from byte 0. Their 5.93T
   is a **copy, not a re-tokenization.** ⚠️ Four of the nine reasons in `09-tokenizer-decision.md` are
   broken; `13-redteam-tokenizer-free.md` names them.
-- **Shard size 50,003,968 tokens** → ~20,000 objects at 1T. Both of my objections retracted (above).
+- **Shard size 50,003,968 tokens** → ~20,000 objects at 1.0T. Both of my objections retracted (above).
 - **Math is ONE artifact.** Nemotron-CC-Math-3+ refetches WARCs for URLs harvested from FineMath +
   OpenWebMath + MegaMath, so it nearly *contains* them; taking it plus any of them double-counts.
-- **Code ~15% of stage 1, 20–25% of the cooldown.** Aryabumi measured world knowledge at **−3.4% by
-  25% code** — caveat, at 470M only.
+- **Code 10% of stage 1, 18% of the cooldown** (the report's tables are authoritative). Aryabumi
+  measured reasoning peaking near 25% code while **world knowledge is already −3.4% at 25%** and −31%
+  at 75% — so code belongs late and concentrated. Caveat: that sweep ran only at 470M, so it does not
+  bracket our ~1.9B active.
 - **Gate on MMLU and GSM8K directly, and use BPB not accuracy.** AI2 abandoned accuracy at 1B/100B as
   *"too difficult to show improvement"*; an accuracy harness at ~1.9B active returns chance on every
   arm. Knowledge collapse is the most reproducible harm in this literature and **no loss-based gate
   sees it.**
 - **Nobody earns a decontamination TRUST verdict** across 17 audited corpora. Tier 1 = exclude 9 items
   at source, **<1% of tokens, carrying nearly all the value.**
+- **Two stages, not a flat mix** — 900B bulk at 77% web, 100B cooldown at 32%. Verified against OLMo 2
+  §2.3 directly. A flat share is wrong in *shape*, not just level.
+- **QA and worked examples are SEPARATE categories**, because they move our headline metrics in
+  opposite directions: MC-format QA is **+3.2 MMLU / −1.2 GSM8K**, reasoning traces are **−1.5 MMLU /
+  +8.4 GSM8K**. A single blended share would be arithmetically wrong. QA saturates at **~14% of the
+  anneal**. And the honest MMLU expectation from QA data is **+0** — the one experiment above the
+  ~400B MCF threshold (8B/1T) gives +0.2/−1.1.
+- **The baseline model reuses the same corpus** at a different ratio vector (report §9) — shed
+  knowledge-shaped data, raise reasoning-shaped. **No second dataset, no re-ingest.**
 
 ## Next Steps (priority order)
 
