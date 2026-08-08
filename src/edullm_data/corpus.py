@@ -77,15 +77,51 @@ class BuildError(RuntimeError):
 #: one full sequence yields ZERO instances and is silently skipped rather than erroring.
 SEQ_LEN = 8192
 
-#: Tokens per shard: ``3052 * 8192``. Two independent constraints pick this number.
+#: Tokens per shard: ``3052 * 8192`` = 25,001,984 (100.0 MB at uint32).
 #:
-#: 1. It must be an exact multiple of :data:`SEQ_LEN`, or ``check_seq_len_alignment``
-#:    (``profiles/pretrain_tokens_v1.py:426``) rejects the object — it recomputes
-#:    ``bytes % (dtype_size * seq_len)`` from a real ``head`` and requires zero.
-#: 2. ~100 MB / ~10,400 objects is the finest granularity whose Gate A pass (~1.4 h) still fits
-#:    the 7200 s validator timeout with margin. §2.2 measured p90 mixture error at 0.6% @20%
-#:    weight and 2.4% @5%; halving to 10M tokens triples Gate A to 3.45 h and BREAKS the
-#:    deployed validator, as well as doubling OLMo-core's per-sample linear path scan.
+#: **Constraint 1 — hard, and the only one that is still a constraint.** It must be an exact
+#: multiple of :data:`SEQ_LEN`, or ``check_seq_len_alignment``
+#: (``profiles/pretrain_tokens_v1.py:426``) rejects the object — it recomputes
+#: ``bytes % (dtype_size * seq_len)`` from a real ``head`` and requires zero. 25,001,984 / 8192 =
+#: 3052.0 exactly. This rules out non-multiples; it does not pick between multiples.
+#:
+#: **Constraint 2 — the Gate A argument, which no longer holds as written. Re-derived 2026-08-08.**
+#: This comment used to read *"~10,400 objects ... fits the 7200 s validator timeout with margin"*.
+#: Both of its premises have since moved, and NOT in directions that cancel:
+#:
+#: * The live timeout is **14,400 s**, not 7200 — ``edullm-validator`` rev **14**, MEASURED via
+#:   ``batch describe-job-definitions --status ACTIVE``.
+#: * ~10,400 objects is the **252.6B reservoir**. At the 1.0T target this constant gives **~40,000
+#:   objects** — 4x more.
+#:
+#: Gate A is ``objects x 8 round trips``, MEASURED at **507.5 ms/object** (10,049 objects in ~85
+#: min, recorded at ``pretrain_tokens_v1.py:205-210``). So at 1.0T: **5.64 h serial, 4.98 h even
+#: with ``--head-workers 16``** — which EXCEEDS 14,400 s by 41%. The break-even is 28,373 objects
+#: = 709B tokens, and splitting the corpus into the planned two datasets does not rescue it either
+#: (stage 1 alone is ~36,000 objects = 5.07 h).
+#:
+#: **The value nonetheless stays, because shard size is the wrong lever for that cost.** Threading
+#: the Gate A profile checks and raising ``max_pool_connections`` (task #10) takes 40,000 objects to
+#: ~0.35 h; halving the shard would buy 2.8 h against #10's 5.3 h, and #10 is needed regardless.
+#: Paying a permanent, unbackfillable schema price to work around a fixable code defect is the
+#: wrong trade. See ``IMPLEMENTATION-PLAN.md`` §8.3 and ``FINAL-DATASET-REPORT.md`` §11.
+#:
+#: ⚠️ **So #10 is a PREREQUISITE for publishing 1.0T at this size, not an optimization.**
+#:
+#: Two other figures that circulate, both settled: **50,003,968** (~20,000 objects) appeared in an
+#: early ``FINAL-DATASET-REPORT.md`` §11 draft and in **no commit** — withdrawn; note
+#: ``artifacts/impl-plan/pipeline-scale-audit.md`` still reasons from it throughout. **10M** was
+#: rejected for tripling Gate A *against the old 7200 s cap*; that specific reason is now void, but
+#: 10M stays rejected on the surviving ground — it doubles OLMo-core's per-sample linear
+#: ``self.offsets`` scan, in the training hot loop.
+#:
+#: Mixture error from whole-shard selection is ``1 / shards_per_component`` = **0.007%-0.278%**
+#: across the stage-1 sources at this size. (``DATASET-DESIGN-reservoir.md:537``'s "4.8% @5%
+#: weight" table is wrong by ~15x per ``HANDOFF-FINAL-DATASET.md:175`` — do not cite it.)
+#:
+#: ⚠️ Changing this constant changes every ``plan_id``: it is serialized into the plan document
+#: (``corpus_build.plan_document``), whose sha256 IS the id. Re-derive §8's object counts and every
+#: wall-clock figure resting on them before touching it.
 SHARD_TOKENS = 3052 * SEQ_LEN
 
 #: Alias kept because "tokens per file" is what the packer's loop variable means locally, and
