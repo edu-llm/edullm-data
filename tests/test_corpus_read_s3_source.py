@@ -419,3 +419,56 @@ def test_the_entry_dict_carries_its_own_bucket_so_no_caller_reparses_the_uri():
     assert entry["bucket"] == BUCKET
     got = list(read_parquet_documents(_spec().repo, entry, _spec(), s3=s3))
     assert [d.id for d in got] == ["doc-00000", "doc-00001"]
+
+
+# ======================================================================================
+# 7. THE COMPOSITION — a STAGED file with a NESTED column, through the arrow extraction
+# ======================================================================================
+
+
+def test_a_staged_nested_file_reads_correctly_through_the_arrow_native_extraction():
+    """🔴 **The two changes of this branch, composed — and this IS the production path.**
+
+    The `s3://` transport (this file) and the arrow-native nested extraction
+    (`test_corpus_read_arrow_native.py`) were built for different reasons and each is tested alone.
+    Nothing tested them TOGETHER, and a staged nested source is exactly what
+    `nemotron-cc-math-*` will be if its schema ever nests — and what a future gated FinePhrase-shaped
+    source would be on day one.
+
+    The fixture carries an INTERIOR empty list (row 2 of 7), because that is the case where the
+    flatten-based extraction shifts every later row by one and each document takes the NEXT one's
+    text. Combined with the staged transport there is no reference to fall back on: the tokens are
+    real, the counts add up, and only the pairing is wrong.
+    """
+    rows = [{"id": f"n{i}", "text": f"REWRITE {i} synthetic body ",
+             "source_text": f"ORIGINAL {i} web body "} for i in range(7)]
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    lists = [[{"text": r["text"]}] for r in rows]
+    lists[2] = []  # interior: rows 3..6 shift under a naive zip
+    table = pa.table({
+        "id": pa.array([r["id"] for r in rows]),
+        "text": pa.array([r["source_text"] for r in rows]),
+        "rollout_results": pa.array(lists, type=pa.list_(pa.struct([("text", pa.string())]))),
+    })
+    buf = io.BytesIO()
+    pq.write_table(table, buf, row_group_size=3)  # several row groups, as real files have
+
+    s3 = FakeS3()
+    key = f"{PREFIX}/nested-staged.parquet"
+    s3.seed(BUCKET, key, buf.getvalue())
+    spec = _spec(text_column="rollout_results.list.element.text")
+    got = list(read_documents(spec.repo, key, spec, s3=s3))
+
+    assert [d.id for d in got] == ["n0", "n1", "n3", "n4", "n5", "n6"], (
+        "the payload-less row must be skipped and every survivor must keep its own id"
+    )
+    for d in got:
+        assert f"REWRITE {d.id[1:]} " in d.text, (
+            f"{d.id} carries {d.text[:32]!r} — the row alignment shifted across the staged read"
+        )
+    assert not any("ORIGINAL" in d.text for d in got), "read the SOURCE document, not the rewrite"
+    # And the transport really was S3: the same spec with no client refuses.
+    with pytest.raises(ReadError, match="no `s3=` client"):
+        list(read_documents(spec.repo, key, spec))
