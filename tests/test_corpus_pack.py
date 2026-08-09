@@ -283,6 +283,92 @@ def test_batching_does_not_change_the_output_or_its_order():
     assert len(one) == 23
 
 
+def test_a_batch_is_bounded_by_characters_not_only_by_document_count():
+    """THE `pre-1929-books` OOM (array index 164, exit 137), as a test.
+
+    `_ENCODE_BATCH = 1_000` was sized on "a ~2 KB mean" — the reservoir's web prose. `pre-1929-books`
+    is BOOKS at a MEASURED 371-402 KB mean, so one 1,000-document batch was 403 MiB of text = 100.6 M
+    tokens, and `tokenizers` holds a `Vec<Encoding>` (69.8 B/token) for the whole batch: 10,916 MiB
+    MEASURED end-to-end, inside a 14,336 MiB container.
+
+    ⚠️ **A document-count bound is not a memory bound**, because the mean document size is a property
+    of the source. This asserts the CHARACTER bound holds, which is the one expressed in the quantity
+    memory is proportional to. Without it, the only thing standing between this build and a repeat is
+    that nobody added a source of large documents — which is how it happened the first time.
+    """
+    from edullm_data.corpus_pack import _batched
+
+    big = "x" * 400_000  # one pre-1929-books-sized document
+    batches = list(_batched([big] * 1_000, 1_000, max_chars=32 * 1024 * 1024))
+
+    # The count bound alone would give ONE batch of 400 MB. The char bound splits it.
+    assert len(batches) > 1, "a 400 MB run of documents was NOT split — the char bound is not applied"
+    for b in batches:
+        assert sum(len(t) for t in b) <= 32 * 1024 * 1024 or len(b) == 1
+    assert sum(len(b) for b in batches) == 1_000, "documents were lost or duplicated by batching"
+
+
+def test_a_single_document_larger_than_the_cap_is_still_emitted_alone():
+    """A document is INDIVISIBLE here — splitting it would split its token stream and its EOS.
+
+    So the largest single document is the irreducible floor, and it must be emitted rather than
+    dropped or deferred forever. MEASURED on the largest real `pre-1929-books` document
+    (11,970,219 chars -> 3.30 M tokens): 323 MiB, which fits any container we run.
+    """
+    from edullm_data.corpus_pack import _batched
+
+    oversize = "y" * (40 * 1024 * 1024)
+    batches = list(_batched(["a", oversize, "b"], 1_000, max_chars=8 * 1024 * 1024))
+    flat = [t for b in batches for t in b]
+    assert flat == ["a", oversize, "b"], "an oversize document was dropped or reordered"
+    assert [oversize] in batches, "the oversize document must be alone in its own batch"
+
+
+def test_the_character_bound_does_not_change_a_single_output_byte():
+    """The batch boundary is an FFI-crossing detail, never an output property.
+
+    `tokenize_documents` yields one array per document in input order regardless of how the batch was
+    cut, so shard bytes, `plan_id` and every receipt digest are unaffected. This is the assertion that
+    makes the fix safe to ship mid-corpus: it is a resource change, not a data change.
+
+    ⚠️ Driven by REPLACING `_batched`, not by monkeypatching `_ENCODE_BATCH_CHARS`. The constant is a
+    default argument, bound at definition time — proven by execution, `inspect.signature` still
+    reports 33,554,432 after the module attribute is reassigned — so a test that patched the constant
+    would pass while exercising the unbounded path and asserting nothing. That is the decoration this
+    repo's golden rule forbids, and it is the shape this very test nearly shipped as.
+    """
+    import edullm_data.corpus_pack as CP
+
+    enc = fake_tokenizer()
+    texts = [f"doc {i} " + "word " * (i * 50) for i in range(40)]
+    unbounded = [
+        a.tobytes()
+        for a in tokenize_documents(texts, enc, eos_id=EOS, vocab_size=VOCAB, batch_size=1_000)
+    ]
+
+    original = CP._batched
+    seen_batches: list[int] = []
+
+    def tiny_cap(items, n, max_chars=512):
+        for b in original(items, n, 512):
+            seen_batches.append(len(b))
+            yield b
+
+    try:
+        CP._batched = tiny_cap
+        bounded = [
+            a.tobytes()
+            for a in tokenize_documents(texts, enc, eos_id=EOS, vocab_size=VOCAB, batch_size=1_000)
+        ]
+    finally:
+        CP._batched = original
+
+    # The cap must actually have bound, or the comparison below is vacuous.
+    assert len(seen_batches) > 1, "the 512-char cap produced ONE batch — the test proved nothing"
+    assert bounded == unbounded, "the character bound changed the output bytes"
+    assert len(bounded) == 40
+
+
 def test_an_id_at_or_past_vocab_raises_instead_of_wrapping():
     """The uint32 cast CANNOT fail: `2**33` assigned into a `<u4` buffer becomes 0, silently. Gate A
     would then recompute the same range assertion after a full copy."""

@@ -4491,6 +4491,140 @@ existing preflight assert still holds.
 
 ---
 
+# ✅ THE BEHAVIOURAL LABELS ASSERT — written, mutation-proven 4/4, and it fails on the exact wrong image
+```
+OK labels BEHAVIOURAL: records=3 bytes=371 tokens_in=49 mtld=[54.88, 63.0, 17.0]
+   schema=edullm-doc-labels/v1  spec=mtld-bidirectional-mccarthy-jarvis-2010/ttr0.72
+OK mixed-set guard wired into verify_bundle_set
+```
+It runs **collect → finish → encode → decode → verify** with real MTLD on real text.
+
+| mutation | caught |
+|---|---|
+| **`corpus_labels` absent (the pre-labels image)** | ✅ `ModuleNotFoundError` |
+| token conservation wrong | ✅ `labels-token-conservation-broken` |
+| document-count mismatch | ✅ `labels-document-count-mismatch` |
+| truncated sidecar | ✅ `BuildError: header claims 252 bytes, object holds 127` |
+
+🔑 **M1 is the one that matters: it fails on exactly the image we must not ship.** That is what *"behavioural,
+not a version string"* was meant to buy — **and it is the fifth time tonight a version string would have passed
+on wrong code.** The other four: rev 13's `0.9.1` assert passing on the unlabelled image; `edullm-validator:16`
+vs `:17` differing only by `--head-workers` with no version change; two commits both claiming `0.7.4` with
+different `distinct_ids` bounds; and the `0.5.1` wheel carrying a Gate A function present in no commit anywhere.
+
+## 🔧 THE RECOMPUTING CHECK REJECTED PLAT'S OWN PLAUSIBLE TEST — and was right
+Three of its own errors surfaced while writing the assert. Two were API guesses. **The third is the finding:**
+it set `tokens_in = sum(n_tokens)` and `verify_labels` **refused it, with the arithmetic spelled out** —
+> *"sum(n_tokens + 1) over 3 labels is 49 but `PackResult.tokens_in` is 46 (+3). Every document contributes its
+> content tokens plus one EOS; there is no fourth channel."*
+
+**A validator that merely confirmed the author's arithmetic would have taught them nothing.** This is the golden
+rule — *recompute, never trust* — catching **the person writing the check**, which is the hardest case for it to
+catch and the one that proves it is not decoration.
+
+**And three API errors surfaced in a preflight written to prevent silent failure** — which is PLAT's own
+argument, adopted: **dry-run a job def's assert locally BEFORE registering it, not in a container.** A preflight
+that has never been executed is itself unverified code.
+
+## State — everything staged, one call from registration
+```
+build ref  origin/edullm/final-dataset-phase0 = b7bdfb8   (CEO-verified)
+local HEAD 01bd06e → merge-base IS b7bdfb8, touches status.md ONLY — no code, no registry
+re-verified from the PUSHED ref via git archive, non-emptiness asserted first:
+  registry md5 c44cc714…  ·  plan_id 364cb4dd488a5761  ·  __version__ 0.9.1
+  corpus_labels present  ·  bundle_is_done label-aware  ·  infra/09 + infra/11 on ref
+```
+**Prepared and pending only the OOM verdict:** `memory 15,806 (or OOM-DIAGNOSE's figure)` +
+`PLAN_ID=364cb4dd488a5761` + `--labels` + the 4-part behavioural assert + existing corpus/file-shards/tokenizer
+guards + the digest the `b7bdfb8` build produces.
+
+**Nothing built, nothing registered, nothing submitted.** Rule DISABLED, re-verification wired into the publish
+step, **third drift = STOP.**
+
+**PLAT also confirmed my push was worth making despite my wrong reason:** *"`infra/11` is the policy for the very
+role the build job assumes, and it existed in AWS on no ref at all — that's the 401 shape exactly: verified in
+one place, unwired in another."*
+
+---
+
+# ✅ THE FOURTH OOM IS SOLVED — and the fix is CODE, not memory. Ruling: keep 14,336 MiB.
+
+## The cause: `_ENCODE_BATCH = 1_000` **documents**, on a source whose documents are books
+`corpus_pack.py:203`. Its own comment justified itself: *"1,000 documents at a ~2 KB mean is ~2 MB of text in
+flight."* **That mean is a property of the SOURCE, not of the module.**
+
+| source | mean doc | 1,000-doc batch |
+|---|---|---|
+| stackv2-edu | 7 KB | 6.7 MiB |
+| pubmed / pes2o | 28–30 KB | ~27 MiB |
+| **pre-1929-books** | **371–402 KB** | **403.5 MiB — 185–200× the assumed mean** |
+
+**MEASURED** by ranged read + streaming gunzip, nothing downloaded: 28 objects / 16.59 GB, mean 370,563 chars
+(n=502) and 402,457 (n=696, second-half mean 420,649 — **so not head-of-file bias**), max single doc 11.97 MB.
+One batch = **100.6 M tokens**, and `tokenizers` holds a `Vec<Encoding>` for the whole batch at **69.8 B/token**
+(MEASURED-IN-CODE from the library's field layout) plus **44 B/token** for `[enc.ids for enc in …]`.
+
+**End-to-end through the real path, unique documents so dedup cannot collapse them:**
+| docs/batch | tokens | **combined peak** |
+|---|---|---|
+| 250 | 26.2 M | 2,858 MiB |
+| 500 | 50.6 M | 5,505 MiB |
+| **1,000 (shipped)** | **100.6 M** | **10,916 MiB** |
+
+**113.8–114.4 B/token, linear — a deterministic law, not a noisy draw.** 10,916 MiB inside a 14,336 MiB
+container, on top of the decon index and baseline. **That is the OOM.**
+**And it honoured the instrument warning**: its own `ru_maxrss` draws spanned 3.65–5.15 GiB on identical input,
+reproducing the instability, so it quoted the structural figure instead.
+
+## 🔴 **15,806 MiB WOULD NOT HAVE BEEN ENOUGH.** My approved number was a coin flip.
+The term is **10,916 MiB and scales with batch TOKEN count, which was uncapped.** 15,806 gives **1.45× against
+a term with no upper bound.** PLAT's refusal to call the raise sufficient for all four failures — *"one look now
+is cheap; hour 11 is not"* — **was correct, and I had already approved the number.**
+
+## ⚖️ RULING — **land the code fix, keep memory at 14,336 MiB.** No raise on the build def.
+`_batched` now flushes on **characters** — the quantity memory is actually proportional to — whichever limit
+binds first. **CEO-verified live at `corpus_pack.py:251` and `:501`, executable, not a comment.**
+| cap | peak | rate |
+|---|---|---|
+| unbounded | 10,916 MiB | 2.13 M tok/s |
+| **32 MiB (chosen)** | **1,129 MiB** | **1.93 M tok/s — 9.7× less memory at 91% of the rate** |
+| 8 MiB | 316 MiB | 1.25 M tok/s (−41%) |
+Below 16 MiB throughput falls ~40% because `encode_batch` stops filling the rayon pool — **a measured floor, so
+32 MiB is a trade, not a round number.** Small-document sources are untouched: 1,000 docs stays well under the cap.
+
+**BYTE-IDENTICAL, proven on real documents:** sha256 over all output arrays at unbounded / 32 MiB / 1 MiB is
+`c8679fb00a821920…` on all three — 298 docs, 30,512,296 tokens. **CEO-verified: `plan_id` is still
+`364cb4dd488a5761`; `tests/test_corpus_pack.py` 74 passed; suite 1,570.**
+**A resource change, not a data change** — shard bytes and every receipt digest unaffected, so it is safe to
+land on the rebuild. **Container budget at the fix, all terms summed pessimistically: 3,481 MiB → 4.12× headroom
+inside today's 14,336.**
+
+**This is the second time tonight a two-line fix beat a memory raise** (`combine_chunks` was the first).
+**Both were found only because someone refused to accept a raise as a fix for an unexplained failure.**
+
+## 🔴 SECOND FINDING — `stackv2-edu` is ALSO `json.gz`. The OOM tally was off by one.
+**CEO-verified from the registry:** `finepdfs-edu` parquet · `reasoning-traces` parquet · **`pre-1929-books`
+json.gz · `stackv2-edu` json.gz.** So **two of four OOMs were parquet/row-group and two were `json.gz`** —
+I recorded "three of four explained by the row-group term" and that was **wrong by one**.
+**`stackv2-edu`'s geometry is benign** (mean 7 KB, worst window 9.7 MiB), **so the batch term does not explain
+it either. Its cause is UNVERIFIED.** Two unsettled candidates: its `SeenHashes` is the **largest** of the four
+(~120 M docs → the 10.3 GB the docstring itself names), and it carries `domain_column:
+metadata.gha_language` with 73 values. **The char bound bounds it regardless — but it is not explained, and I
+am recording it as such rather than declaring victory on four.**
+
+## 🔧 It caught one of its own tests being decoration
+It monkeypatched `_ENCODE_BATCH_CHARS` — **but that is a DEFAULT ARGUMENT, bound at definition time**;
+`inspect.signature` still reported the old value after reassignment. **The test passed while exercising the
+unbounded path and asserting nothing.** Rewritten to replace `_batched`, plus an assert that the cap actually
+bound. **All 3 tests mutation-proven.**
+
+**Named unverified:** Rust allocator overhead above the structural 69.8 B/token; whether `tokenizers` frees
+per-document mid-batch; `tokenizer.json` resident size (50 MiB is an estimate); and `stackv2-edu`'s cause.
+**`_ENCODE_BATCH_CHARS` must be asserted BEHAVIOURALLY in the preflight — a version string passes on either
+image.**
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of

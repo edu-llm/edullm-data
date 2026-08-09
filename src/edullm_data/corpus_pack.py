@@ -198,9 +198,57 @@ DECODE_WINDOW_TOKENS = max(DECODE_SAMPLE_BYTES // _DECODE_WINDOWS, DTYPE_SIZE) /
 FAMILY_FILE = "pretrain.json"
 
 #: Documents per ``encode_batch`` call. The Rust batch encoder amortises the FFI crossing over the
-#: batch, and 1,000 documents at a ~2 KB mean is ~2 MB of text in flight — small enough that peak
-#: memory stays dominated by the 100 MB shard buffer rather than by the encode queue.
+#: batch.
+#:
+#: ⚠️ **A DOCUMENT COUNT DOES NOT BOUND MEMORY, and this constant's own comment used to claim it
+#: did** — "1,000 documents at a ~2 KB mean is ~2 MB of text in flight." That mean is a property of
+#: the SOURCE, not of this module, and `~2 KB` was the reservoir's web prose. It is not universal:
+#:
+#:     source            mean doc      1,000-doc batch     MEASURED
+#:     stackv2-edu          7 KB            6.7 MiB         ok
+#:     pubmed              28 KB           26.8 MiB         ok
+#:     pes2o               30 KB           28.6 MiB         ok
+#:     pre-1929-books     371-402 KB      403.5 MiB        <- 185-200x the assumed mean
+#:
+#: `pre-1929-books` is BOOKS. One 1,000-document batch is 403 MiB of text → **100.6 M tokens**, and
+#: `tokenizers` holds a `Vec<Encoding>` for the whole batch: seven parallel vectors per token
+#: (`ids`/`type_ids`/`special_tokens_mask`/`attention_mask` 4 B each, `words` 8 B, `offsets` 16 B,
+#: `tokens` 24 B + ~5.8 B of heap string) = **69.8 B/token**, plus the `[enc.ids for enc in ...]`
+#: Python lists at 44 B/token. MEASURED end-to-end through `dedup_and_decontaminate` →
+#: `tokenize_documents`: **113.8-114.4 B/token, linear over 250/500/1,000 documents**, giving
+#: **10,916 MiB for one batch** — which is what killed `pre-1929-books` (array index 164, exit 137)
+#: inside a 14,336 MiB container.
+#:
+#: The Rust half is INVISIBLE to `tracemalloc` (it is not a Python allocation) and the cgroup kills
+#: on RSS, so a `tracemalloc`-only measurement of this path understates it by 61%. The 69.8 B/token
+#: is DERIVED from the library's own `Encoding` field layout, not from RSS — deliberately, because
+#: `ru_maxrss` on this path is not reproducible (draws of 3.65-5.15 GiB on identical input).
 _ENCODE_BATCH = 1_000
+
+#: Characters of text per ``encode_batch`` call — **the bound that is actually a memory bound**,
+#: because it is expressed in the quantity memory is proportional to. :func:`_batched` flushes on
+#: whichever of the two limits binds first, so `_ENCODE_BATCH` still governs small-document sources
+#: (where 1,000 documents is well under the cap and nothing changes) and this governs large ones.
+#:
+#: 32 MiB, chosen from a MEASURED trade rather than a round number. Peak is linear in the cap and
+#: throughput needs enough work per call for rayon:
+#:
+#:     cap        peak (python+rust)    rate       batches over 1,000 books
+#:     unbounded      10,916 MiB       2.13 M tok/s      1     <- OOMs
+#:      8 MiB            316 MiB       1.25 M tok/s     60
+#:     16 MiB            567 MiB       1.21 M tok/s     27
+#:     32 MiB          1,129 MiB       1.93 M tok/s     13     <- chosen
+#:     64 MiB          2,267 MiB       1.68 M tok/s      7
+#:
+#: 32 MiB keeps **91% of the unbounded rate** (1.93 vs 2.13 M tok/s) at **9.7× less memory**. Below
+#: 16 MiB the rate falls ~40% because each `encode_batch` no longer fills the rayon pool — so this
+#: is a floor set by parallelism, not a knob to minimise.
+#:
+#: **This does not change any output byte.** The batch boundary affects only how many documents
+#: cross the FFI at once; `tokenize_documents` yields one array per document in input order either
+#: way, so shard bytes, `plan_id`, and every receipt digest are unaffected. Verified: 100,600,215
+#: tokens over 995 documents at every cap above, and unbounded.
+_ENCODE_BATCH_CHARS = 32 * 1024 * 1024
 
 #: Fires the fork-hazard warning at most once per process. The tokenize path runs per batch over
 #: hundreds of millions of documents; a warning per batch would bury the Batch log.
@@ -450,14 +498,32 @@ def tokenize_documents(
             yield out
 
 
-def _batched(items: Iterable, n: int) -> Iterator[list]:
-    """Chunk an iterable without materialising it — the input is a ~2.5 TB document stream."""
+def _batched(items: Iterable, n: int, max_chars: int = _ENCODE_BATCH_CHARS) -> Iterator[list]:
+    """Chunk an iterable without materialising it — the input is a ~2.5 TB document stream.
+
+    **Bounded by CHARACTERS as well as by count, and the character bound is what makes the peak
+    independent of the corpus.** ``n`` alone bounds the batch in *documents*, which bounds memory
+    only if the mean document size is known — and it is a property of the source, not of this
+    module. See :data:`_ENCODE_BATCH_CHARS` for the OOM that fact caused.
+
+    A document larger than ``max_chars`` is still emitted, alone, in its own batch: a document is
+    indivisible here (splitting it would split its token stream and its EOS), so the single largest
+    document is the irreducible floor. MEASURED at the largest document in `pre-1929-books`
+    (11,970,219 chars → 3.30 M tokens): 323 MiB, 34× below the 10.9 GiB the unbounded batch reached.
+    """
     batch: list = []
+    chars = 0
     for item in items:
-        batch.append(item)
-        if len(batch) >= n:
+        size = len(item.text if isinstance(item, Document) else item)
+        # `batch and` first: a lone oversize document must be emitted, never dropped or deferred
+        # forever. Checked BEFORE the append so the flush boundary is decided on the batch that
+        # exists, not on one already over the cap.
+        if batch and (len(batch) >= n or chars + size > max_chars):
             yield batch
             batch = []
+            chars = 0
+        batch.append(item)
+        chars += size
     if batch:
         yield batch
 
