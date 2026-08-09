@@ -529,3 +529,79 @@ that matters:
 
 **What I did NOT do:** no job-def registration, no AWS call of any kind. This is a measurement and a
 recommendation.
+
+---
+
+# ✅ ENG-EXEC-3 — F1 and F5 INDEPENDENTLY RE-VERIFIED (I did not take the audit's word)
+
+Both were inputs to decisions I was asked to make, so both were re-run rather than cited.
+
+## F1 — the `bincount` intp cast: **CONFIRMED, exactly 8.00 B/elem**
+
+`tracemalloc` over numpy's allocation domain at n = 20,000,000, varying only the input dtype:
+
+| input dtype | counts MiB | traced peak MiB | extra B/elem |
+|---|---|---|---|
+| **`<u4`** (ours) | 152.6 | **305.2** | **8.00** |
+| `intp` | 152.6 | 152.6 | **0.00** |
+| `<i4` | 152.6 | 305.2 | 8.00 |
+| `<u8` | 152.6 | 305.2 | 8.00 |
+
+`np.intp` is `int64` (itemsize 8) on this platform, and `np.bincount` requires it — so a `<u4` input
+is copied whole and the copy is held live across the count. **AUDIT's number reproduces to the
+hundredth of a byte.**
+
+At N = 478,575,435 (= 39,205 × 12,207, recomputed from the checked-in registry):
+
+| term | B/elem | GiB at N |
+|---|---|---|
+| `s3.get()` bytes pinned by the `frombuffer` view | 4 | 1.78 |
+| **`bincount`'s intp cast** | **8** | **3.57** |
+| `counts` int64 | 8 | 3.57 |
+| `(counts == 1)` bool temp | 1 | 0.45 |
+| **total** | **21** | **9.36** |
+
+| container | occupancy | verdict |
+|---|---|---|
+| 8,192 MiB | **117.0%** | 🔴 **OOM** — the ledger's 7.13 GiB figure said 89% |
+| 14,336 MiB | 66.9% | fits |
+| 16,384 MiB | 58.5% | fits |
+| **24,576 MiB** | **39.0%** | fits, and covers the build OOM too |
+
+**AUDIT's fix stands: raise the memory, do NOT split the vector.** Splitting makes ordinal order
+load-bearing (F8) with no code or test guarding it.
+
+## F5 — the `[a,b,c,a]` claim: **REFUTED, reproduced under 8 variants**
+
+I rebuilt `mtld_one_direction` under threshold ∈ {0.70, 0.71, 0.72, 0.75} × comparison ∈ {`<=`, `<`}:
+
+```
+vector       0.72,<=  0.72,<   0.75,<=  0.75,<   0.71,<=  0.71,<   0.70,<=  0.70,<
+[a,b,c,a]     4.4800   4.4800   4.0000   4.0000   4.6400   4.6400   4.8000   4.8000
+```
+
+**`0.72,<=` and `0.72,<` are IDENTICAL** — the docstring's claim is refuted, and the trace in the
+docstring says why: at `w4` the ratio is 0.75, *above* the threshold, so neither spelling closes.
+What the vector **does** discriminate is the threshold VALUE — all four differ. The real module
+returns 4.48, matching `0.72,<=`. Docstring corrected in place, with the covering test named.
+
+---
+
+# 🔴 ENG-EXEC-3 — A STALE `PLAN_ID` IN BOTH DRIVERS, and it would have been SILENT
+
+Not on my task list; found by grepping for the old id after updating the test literal.
+
+**`curriculum_driver.PLAN_ID` and `publish_driver.PLAN_ID` both still said
+`29968a2b04008a8c`.** It is a PATH COMPONENT — `_ingest/final-dataset/<PLAN_ID>/`. Consequences, and
+neither looks like a wrong-plan error:
+
+* `curriculum_driver` would list an empty `_labels/` and `_receipts/` and report **"no labels — the
+  build ran without `--labels`, or has not finished"** and **"no receipts"**. Both read as *the build
+  is incomplete*, not as *you are reading the wrong prefix*.
+* `publish_driver.SOURCE` is built from it, so it would have **published a prefix that is not this
+  corpus** — or, more likely, an empty one.
+
+Both repinned to `364cb4dd488a5761`, and
+`tests/test_curriculum_driver.test_BOTH_drivers_pin_the_SAME_plan_id_as_the_checked_in_registry`
+now asserts all three agree — against the value **recomputed from the registry**, not against a
+second literal. Three places had to agree and nothing made them.
