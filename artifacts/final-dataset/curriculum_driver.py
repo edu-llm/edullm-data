@@ -130,33 +130,82 @@ def parent_manifest(s3) -> dict:
     return json.loads(s3.get("edullm-data", key))
 
 
-def build_axis(manifest: dict):
-    """The chunk axis, plus the arithmetic cross-checks."""
-    from edullm_data.corpus_order import chunk_axis_from_manifest
+def build_axis(manifest: dict, *, split: str = "train"):
+    """The chunk axis for one split, DERIVED from the parent's manifest. **Never a constant.**
 
-    axis = chunk_axis_from_manifest(manifest, split="train")
-    if len(axis.keys) != PLAN_TRAIN_SHARDS:
+    🔴 **F2 — THE WORST DEFECT IN THIS FILE, AND IT WAS ALREADY WRONG AGAINST THE LIVE BUILD.**
+    This function was called and its `axis.n_chunks` was used **only in the print below**, while the
+    numbers that reached `group_meta_for` and `identity_order` came from a hard-coded
+    `PLAN_*_SHARDS x 12,207`. That product assumes **every shard is exactly full**, and shards are
+    not: a stream's last shard is short whenever its realized stream underruns its final ref
+    (`corpus_pack.py:840-853`), and an `unfilled` ref is not written at all — a whole 12,207-chunk
+    hole.
+
+    **MEASURED against the live build at 88% done, ONE source (`stackv2-edu`):** 6 short train shards
+    = 38,736 chunks short, and **7 short val shards = 29,880 chunks = 2.40% error on val already.**
+    With 132 train streams each taking one short tail shard, the train count over-declares by up to
+    ~1.6 M chunks.
+
+    **The two outcomes were asymmetric and the smaller one was the dangerous one.** The train pair
+    would have failed Gate A loudly (`permutation-wrong-length`, a 6-7 h publish thrown away, and
+    recoverable). The **val pair was internally consistent** — `identity_order(n_val)` and the
+    declared `block_count` came from the same wrong constant — so **it would have PASSED Gate A** and
+    shipped a vector indexing 29,880+ chunks the parent does not have. A gate that catches the big
+    error and waves the small one through is the worst available outcome, and it is the argument for
+    deriving over asserting stated by the artifact itself.
+
+    The constant product is retained as a printed UPPER BOUND with an explicit disagreement warning,
+    because the disagreement is a real signal (a short tail shard is normal) and silence about it
+    would be a second way to lose the same information.
+    """
+    from edullm_data.corpus_order import chunk_axis_from_manifest, chunk_counts
+
+    axis = chunk_axis_from_manifest(manifest, split=split)
+    want_shards = PLAN_TRAIN_SHARDS if split == "train" else PLAN_VAL_SHARDS
+    if len(axis.keys) != want_shards:
         raise SystemExit(
-            f"REFUSING: the parent manifest holds {len(axis.keys):,} train shards, the plan says "
-            f"{PLAN_TRAIN_SHARDS:,}. A missing shard shifts every chunk index past it, and the "
+            f"REFUSING: the parent manifest holds {len(axis.keys):,} {split} shards, the plan says "
+            f"{want_shards:,}. A missing shard shifts every chunk index past it, and the "
             f"resulting permutation is still bijective."
         )
+    per_shard = chunk_counts([PLAN_SHARD_TOKENS])[0]
+    upper = want_shards * per_shard
     full = [t for t in axis.tokens if t == PLAN_SHARD_TOKENS]
-    print(f"axis: {len(axis.keys):,} train shards, {len(full):,} at exactly "
-          f"{PLAN_SHARD_TOKENS:,} tokens, {axis.n_chunks:,} chunks "
+    short = [(k, t) for k, t in zip(axis.keys, axis.tokens) if t != PLAN_SHARD_TOKENS]
+    print(f"axis[{split}]: {len(axis.keys):,} shards, {len(full):,} at exactly "
+          f"{PLAN_SHARD_TOKENS:,} tokens, **{axis.n_chunks:,} chunks DERIVED** "
           f"({axis.n_chunks * 4:,} B as uint32), rule={axis.rule}")
+    if axis.n_chunks != upper:
+        # NOT a failure. A short tail shard is the normal shape; what was a failure is declaring the
+        # upper bound as if it were the count.
+        print(f"  ⚠️ the constant product {want_shards:,} x {per_shard:,} = {upper:,} is "
+              f"{upper - axis.n_chunks:+,} chunks ({(upper - axis.n_chunks) / upper:+.4%}) from the "
+              f"derived count, across {len(short):,} short shard(s). THE DERIVED VALUE IS USED. "
+              f"(F2: the constant was previously what got declared, and it is what made the val "
+              f"pair internally consistent and therefore able to pass Gate A while wrong.)")
+        for k, t in short[:5]:
+            print(f"     short: {k} {t:,} tokens ({per_shard - max(0, (t - 1) // 2048):,} chunks short)")
+    else:
+        print(f"  the constant product {upper:,} agrees exactly — every shard is full.")
     return axis
 
 
-def load_streams(s3):
-    """Every bundle's labels, assembled into per-STREAM arrays in file_shard order.
+def load_streams(s3, *, split: str = "train"):
+    """Every bundle's labels, as ONE ``StreamLabels`` PER PART. **Never concatenated across parts.**
 
-    ⚠️ **A stream is K bundles under file-sharding** (stackv2-edu 7, finepdfs-edu 4,
-    nemotron-cc-math-3 3, -4plus 2), built by K separate Batch children. The packer fills the
-    stream's ordinal block part by part in index order, so the stream's token space is the
-    CONCATENATION of its parts in `file_shard` index order. Assembling them in any other order —
-    S3 listing order, receipt order, dict order — silently reassigns every document past the first
-    part to the wrong difficulty.
+    🔴 **F3 — THIS FUNCTION USED TO CONCATENATE THE K PARTS AND THAT WAS THE DEFECT.** Under
+    file-sharding a stream is K bundles (stackv2-edu 7, finepdfs-edu 4, nemotron-cc-math-3 3,
+    -4plus 2), and **each is its own `pack()` call with its own tail truncation and surplus drop** —
+    so each part's `tokens_in` exceeds its shards' `tokens_out` by a DIFFERENT amount. Concatenating
+    them into one token space while `build_order` advanced its cursor by `tokens_out` made the gap
+    accrue once per boundary, and **every chunk after the first boundary was attributed to the wrong
+    document** — MEASURED, with `build_order` returning a perfect permutation and raising nothing.
+    23.5% of this corpus (232 B of 986 B tokens) is in a file-sharded stream.
+
+    Each part now carries its own `part` index, so `build_order` gives it a cursor starting at 0 in
+    its own labelled space. The ordering-of-parts concern the previous docstring was about does not
+    disappear, it becomes **unnecessary**: nothing is concatenated, so nothing can be concatenated in
+    the wrong order. The completeness check is kept — a MISSING part still means unlabelled chunks.
     """
     import numpy as np
 
@@ -180,6 +229,8 @@ def load_streams(s3):
                     f"REFUSING: {obj['Key']} declares plan_id {ls.plan_id!r}, not {PLAN_ID!r}. "
                     f"Labels from another plan describe a different document stream."
                 )
+            if ls.split != split:
+                continue
             # The part index is the `--pNNofNN` suffix of the bundle id (`_bundle_id`); its absence
             # means an unsharded stream, i.e. part 0 of 1.
             idx = 0
@@ -201,20 +252,60 @@ def load_streams(s3):
                 f"labelled and their chunks have no difficulty; a repeated one means two parts "
                 f"claim the same slice."
             )
-        strides = np.concatenate(
-            [np.add(ls.records["n_tokens"].astype(np.int64), 1) for _, ls in members]
-        )
-        scores = np.concatenate([ls.records["mtld"].astype(np.float64) for _, ls in members])
-        streams.append(
-            StreamLabels(source=key[0], domain=key[1], split=key[2], strides=strides, mtld=scores)
-        )
+        # ONE StreamLabels PER PART. No np.concatenate across members — that WAS the F3 bug.
+        for idx, ls in members:
+            streams.append(StreamLabels(
+                source=key[0], domain=key[1], split=key[2],
+                strides=np.add(ls.records["n_tokens"].astype(np.int64), 1),
+                mtld=ls.records["mtld"].astype(np.float64),
+                part=idx,
+            ))
     if not streams:
         raise SystemExit(
-            f"REFUSING: no labels under {lprefix}. The build ran without --labels, or has not "
-            f"finished. Publishing an order vector over unlabelled tokens is not possible and "
+            f"REFUSING: no {split!r} labels under {lprefix}. The build ran without --labels, or has "
+            f"not finished. Publishing an order vector over unlabelled tokens is not possible and "
             f"inventing difficulties for them would be worse."
         )
     return streams
+
+
+def load_receipts(s3):
+    """Every receipt for this plan. **The only correct source of the shard -> part mapping.**
+
+    🔴 A shard KEY cannot name which of a stream's K children wrote it — MEASURED:
+    `labels_from_path("tokens/stackv2-edu/train-35260.u32le.bin")` yields `{'source': 'stackv2-edu'}`.
+    All 7 children write into `tokens/stackv2-edu/` with globally-allocated ordinals, because parts
+    deliberately share the `source` path segment (that is the whole difference from
+    `split_source_rows`). A receipt names both: its `bundle_id` carries `--pNNofNN` and its `shards`
+    list names exactly the keys that child wrote.
+
+    **The previous code built the mapping with `labels_from_path` and hard-coded `"train"` as the
+    split** — so every shard resolved to part 0 of its stream, which is precisely the collapse F3 is
+    about, and every val shard would have been mislabelled as train had the val axis existed.
+    """
+    from edullm_data.corpus_receipt import read_receipt
+
+    out, token = [], None
+    rprefix = f"{PREFIX}/{PLAN_ID}/_receipts/"
+    while True:
+        kw = {"Bucket": BUCKET, "Prefix": rprefix, "MaxKeys": 1000}
+        if token:
+            kw["ContinuationToken"] = token
+        page = s3.client.list_objects_v2(**kw)
+        for obj in page.get("Contents", []):
+            if obj["Key"].endswith(".json"):
+                out.append(read_receipt(s3, BUCKET, obj["Key"]))
+        if not page.get("IsTruncated"):
+            break
+        token = page.get("NextContinuationToken")
+    if not out:
+        raise SystemExit(
+            f"REFUSING: no receipts under {rprefix}. Without them a shard cannot be attributed to "
+            f"the file-shard PART that wrote it, and `labels_from_path` structurally cannot supply "
+            f"it — every shard would collapse onto part 0 and 23.5% of the corpus would be "
+            f"mis-ranked, silently (F3)."
+        )
+    return out
 
 
 def group_meta_for(n_train: int, n_val: int) -> dict:
@@ -276,42 +367,79 @@ def main() -> int:
     from edullm_data.corpus_order import SEQ_LEN_CHUNK, chunk_counts
 
     per_shard = chunk_counts([PLAN_SHARD_TOKENS])[0]
-    n_train = PLAN_TRAIN_SHARDS * per_shard
-    n_val = PLAN_VAL_SHARDS * per_shard
+    # ⚠️ UPPER BOUNDS, printed only. These are NOT what gets declared — see build_axis' F2 note. The
+    # products assume every shard is exactly full, and MEASURED against the live build one source
+    # alone put val 2.40% out. `n_train`/`n_val` are DERIVED from the manifest below.
+    upper_train = PLAN_TRAIN_SHARDS * per_shard
+    upper_val = PLAN_VAL_SHARDS * per_shard
     print(f"chunk rule      : (tokens - 1) // {SEQ_LEN_CHUNK} = {per_shard:,} per full shard")
     print(f"                  ⚠️ OLMo-core's own numpy_dataset.py:679 gives "
           f"{PLAN_SHARD_TOKENS // SEQ_LEN_CHUNK:,} — see the F-C6 finding")
-    print(f"train chunks    : {PLAN_TRAIN_SHARDS:,} x {per_shard:,} = {n_train:,} "
-          f"({n_train * 4:,} B = {n_train * 4 / 1e9:.2f} GB)")
-    print(f"val chunks      : {PLAN_VAL_SHARDS:,} x {per_shard:,} = {n_val:,}")
+    print(f"train chunks    : <= {PLAN_TRAIN_SHARDS:,} x {per_shard:,} = {upper_train:,} "
+          f"({upper_train * 4:,} B = {upper_train * 4 / 1e9:.2f} GB)  ⚠️ UPPER BOUND, not the count")
+    print(f"val chunks      : <= {PLAN_VAL_SHARDS:,} x {per_shard:,} = {upper_val:,}"
+          f"  ⚠️ UPPER BOUND, not the count")
     print(f"max_order_bytes : {MAX_ORDER_BYTES:,} (profile default is 536,870,912)")
 
     if args.plan:
-        print("\nPLAN ONLY — no S3 call made. The publish path additionally requires "
-              "PARENT_VERSION and PARENT_MANIFEST_SHA256, which are UNFILLED by design.")
+        print("\nPLAN ONLY — no S3 call made. Both figures above are UPPER BOUNDS from the constant "
+              "product; the real counts are DERIVED from the parent's manifest and are only "
+              "available with S3 (--build). The publish path additionally requires PARENT_VERSION "
+              "and PARENT_MANIFEST_SHA256, which are UNFILLED by design.")
         return 0
 
     assert_invariants()
     print(f"INVARIANTS_OK profile={PROFILE} parent={PARENT_DATASET_ID}/{PARENT_VERSION}")
 
-    from edullm_data.corpus_order import build_order, identity_order
-    from edullm_data.manifest import labels_from_path
+    from edullm_data.corpus_order import (
+        build_order,
+        identity_order,
+        shard_stream_from_receipts,
+    )
     from edullm_data.s3 import Boto3S3
 
     s3 = Boto3S3.default()
-    axis = build_axis(parent_manifest(s3))
-    streams = load_streams(s3)
-    print(f"labels: {len(streams)} streams, "
-          f"{sum(s.documents for s in streams):,} documents, "
-          f"{sum(s.n_tokens for s in streams):,} labelled tokens")
+    manifest = parent_manifest(s3)
 
-    mapping = {}
-    for key in axis.keys:
-        lab = labels_from_path(key)
-        mapping[key] = (lab.get("source", ""), lab.get("domain"), "train")
+    # F2. BOTH axes derived from the manifest, and `n_val` from the VAL axis rather than a constant.
+    # The val pair was the dangerous half: `identity_order(constant)` and a declared `block_count`
+    # from the same constant are internally consistent, so Gate A passed them while the vector
+    # indexed chunks the parent does not have.
+    axis = build_axis(manifest, split="train")
+    val_axis = build_axis(manifest, split="val")
+    n_train = axis.n_chunks
+    n_val = val_axis.n_chunks
+    print(f"DERIVED n_train={n_train:,} n_val={n_val:,} "
+          f"(constant products were {upper_train:,} / {upper_val:,})")
+
+    # F3. The shard -> PART mapping comes from RECEIPTS. `labels_from_path` cannot name the part —
+    # every shard would collapse onto part 0 of its stream and 23.5% of the corpus would be
+    # mis-ranked while the vector stayed a perfect permutation.
+    receipts = load_receipts(s3)
+    mapping = shard_stream_from_receipts(receipts)
+    print(f"receipts: {len(receipts):,}, mapping {len(mapping):,} shard keys to parts")
+    missing = [k for k in axis.keys if k not in mapping]
+    if missing:
+        raise SystemExit(
+            f"REFUSING: {len(missing):,} train shards in the parent manifest are named by NO "
+            f"receipt (e.g. {missing[:3]}). Their chunks cannot be attributed to a part, and "
+            f"guessing part 0 is the F3 collapse."
+        )
+
+    streams = load_streams(s3, split="train")
+    val_streams = load_streams(s3, split="val")
+    print(f"labels: {len(streams)} train parts / {len(val_streams)} val parts, "
+          f"{sum(s.documents for s in streams):,} train documents, "
+          f"{sum(s.n_tokens for s in streams):,} labelled train tokens")
 
     order = build_order(axis, streams, shard_stream=mapping, metric="mtld")
     ident = identity_order(n_val)
+    if order.size != n_train:
+        raise SystemExit(
+            f"REFUSING: build_order returned {order.size:,} indices against the derived axis's "
+            f"{n_train:,}. These cannot disagree; if they do, the declared block_count would be "
+            f"right for one of them and wrong for the other."
+        )
     print(f"ORDER_OK train {order.size:,} indices, val {ident.size:,} indices")
 
     import os
@@ -344,7 +472,15 @@ def main() -> int:
             "vector reordering the parent's 2048-token training chunks by ascending bidirectional "
             "MTLD, lowest (least lexically diverse, easiest) first"
         ),
-        profile={GROUP: PROFILE},
+        # F12. The GROUPS are `mtld-train` and `mtld-val` — `publish.build_plan` groups by FIRST PATH
+        # SEGMENT (`publish.py:346-354`) and this driver stages `{GROUP}-train/` and `{GROUP}-val/`.
+        # `{GROUP: PROFILE}` keyed the bare `mtld`, which no group is called, and `profile_for`
+        # (`publish.py:400-408`) raises `PublishError` on a group with no mapping entry. Reproduced:
+        # "group 'mtld-train' has no profile in the profile mapping {'mtld': 'token-order/v1'}".
+        # `group_meta_for` already used the suffixed names — so the author knew, and this was the one
+        # line that also needed them. It raises before any byte moves, which is why it is cheap; but
+        # it is also proof that `--go` had never been run.
+        profile={f"{GROUP}-train": PROFILE, f"{GROUP}-val": PROFILE},
         s3=s3,
         created_at=datetime.datetime.now(datetime.timezone.utc).isoformat(),
         group_meta=group_meta_for(n_train, n_val),
