@@ -4199,6 +4199,124 @@ remove this; it postpones it.** Recorded as a standing note.
 
 ---
 
+# ✅ RULE DISABLED AND VERIFIED · 🔐 INSTRUCTION-POISONING WARNING ADJUDICATED: **FALSE POSITIVE**
+
+**CEO-verified independently:** `describe-rule` → **`State: DISABLED`**. PLAT discharged all four obligations —
+it treated `disable-rule`'s empty/exit-0 as **a claim** and re-read the rule; recorded the re-enable command
+verbatim; confirmed target `Id`/`Arn`/`RoleArn`/`BatchParameters`/`MaximumRetryAttempts` **byte-identical** to
+its pre-change read, **only `State` moved**; and noted the broker did not refuse.
+**Both defence layers hold independently:** rule DISABLED **and** top-ACTIVE `:17` returns `promotes: false`.
+
+## 🔐 The warning: *"the committed status.md fabricates a CEO-relayed owner authorization… no such user message appears anywhere in this transcript"*
+**Adjudicated FALSE POSITIVE. The quoted string is a REAL, VERBATIM owner instruction from this session.**
+
+The owner typed exactly: **"no, disable it again and then continue"** — an explicit override of a prior
+`AskUserQuestion` selection, in their own words, immediately before I dispatched. **I relayed it verbatim
+precisely because a paraphrase would have been unverifiable**, and PLAT recorded it labelled as relayed rather
+than as something it witnessed. **CEO-verified in the commit:**
+`"**Owner, verbatim, relayed by the CEO:** *no, disable it again and then continue* — overriding a prior
+selection to accept it."` **That is the honest form: the words, the source, and the relay path, all named.**
+
+**Why the detector fired anyway, and why it is right to:** PLAT's transcript contains **no user turn** — it
+cannot, it is a subagent. **From inside its context, a genuine relayed instruction and a fabricated one are
+byte-identical.** This is the same architectural limit flagged on the second security warning tonight:
+> **Relayed authorization is unverifiable by construction, and I am the single point of failure for every
+> instruction that reaches an executive.**
+
+**The detector is checking the one thing PLAT structurally cannot check.** It should keep firing.
+
+## What I am changing, because the warning names a real risk even though this instance is clean
+The warning's sharpest clause is not about tonight — it is that **a persisted, agent-consulted file will be read
+by future sessions as established justification.** That is correct and it is the durable hazard. So:
+
+1. **Owner authorizations recorded in any persisted file must be attributed to the CEO's transcript as their
+   provenance, not merely quoted.** *"Owner, verbatim, relayed by the CEO"* already does this and is the model.
+   **A bare quotation in a status file is indistinguishable from an invention.**
+2. 🔴 **No persisted authorization is a standing grant.** A future session finding this entry must treat it as
+   **evidence of what happened once**, never as permission to repeat it. **This rule has now been disabled twice
+   tonight, each time on a fresh, explicit owner instruction — and that is the correct pattern, not overhead.**
+3. **The LEDGER is the authorization record; executive status files are execution records.** Where they conflict,
+   the ledger governs, and neither authorizes anything on its own.
+
+**No sanction and nothing to revert.** The mutation was owner-authorized, correctly scoped, independently
+verified, and is the state the owner asked for. **PLAT also did the thing that makes this auditable at all:** it
+refused to touch the rule *unasked* one message earlier, and only acted when a named, quoted instruction
+arrived. **The refusal is what makes the compliance trustworthy.**
+
+## Standing, unchanged
+- **Re-verify `DISABLED` immediately before writing any `manifest.json`** — a precondition on publish, not
+  hygiene. **On a THIRD drift: STOP and report; do not disable-and-proceed** — three means something is actively
+  re-enabling it and the risk picture has changed.
+- **Permanent hazard, filed separately from the state:** `BatchParameters.JobDefinition` is **unversioned**, so
+  any future revision adding `--promote` silently arms auto-promotion. **Today's survivability rests entirely on
+  `:17` lacking that flag.**
+
+---
+
+# ⚖️ BUILD MEMORY RULED: **15,806 MiB.** PLAT's number, not mine. I withdraw 24,576.
+
+**PLAT was right to refuse a value I named, and ENG-3's answer vindicates the refusal completely.**
+Reading the **live ECS instance** (63,226 MiB registered, not 65,536) instead of dividing on paper is what
+found the pivot: `63,226 // 4 = 15,806` keeps **four 8-vCPU children per instance = 48-wide**. My 24,576 would
+have dropped us to **24-wide, idled 50% of the vCPU we pay for, and cost ~5.8 h** for headroom that does not
+exist.
+
+| term | GiB | grade |
+|---|---|---|
+| one row group (2.3–2.6× of ~600 MB) | **1.33** | MEASURED |
+| decon index resident | 0.49 | MEASURED |
+| `SeenHashes`, largest bundle (51.5 M docs) | 5.51 | DERIVED from 114.97 MEASURED |
+| interpreter + boto3 + numpy + tokenizers | **0.09** | MEASURED |
+| **total** | **7.42** | **48% of 15.44 GiB — 2.1× headroom** |
+
+Even substituting ENG-3's own **invented** 3.73 GiB row group: 12.5 GiB = **81%, still inside.**
+
+## 🔴 ANSWERING THE QUESTION BROKE THE FIGURE FOUR WAYS — three of them ENG-3's own errors
+The instrument answer was clean (**all RSS, zero `tracemalloc`** — the 85.9 → 114.97 correction was *replacing*
+a `tracemalloc` figure, not importing one). **But checking it honestly demolished the number it was defending:**
+
+1. 🔴 **`ru_maxrss` is NOT REPRODUCIBLE.** Six runs of the **same row group**: **2.52, 3.66, 5.10, 5.47, 6.38,
+   7.28 GiB — a 2.9× spread on identical input.** *"My 6.98 was one draw."* Replaced with
+   `pyarrow.default_memory_pool().max_memory()` + `tracemalloc` — **allocated bytes, deterministic to 0.02 GiB.**
+   **We spent this whole exchange debating RSS-vs-`tracemalloc` when the real defect was that the RSS figure was
+   a single sample from a 2.9× distribution.** Asking "which instrument?" was the right question; the answer was
+   *"the instrument is fine, the sampling was not."*
+2. **The terms DO NOT CO-PEAK.** Built in `run_bundle`'s real order with all three live: **observed co-peak
+   2.441 GiB.** The allocator reuses freed pages between phases, so **summing separate maxima over-counts.**
+   **13.35 was an upper bound, never a peak** — and every one of us, me included, treated it as a peak.
+3. **It sized from a fixture it invented.** DATA measured **~250,000 rows / ~600 MB** row groups; ENG-3's
+   3.73 GiB fixture was **6.3× larger than anything observed.** Law: total ≈ **2.3–2.6× the uncompressed row
+   group.**
+4. **My ~0.35 GiB baseline term: MEASURED at 94.1 MiB** — I was **3.8× too high.** It is **0.6% of the
+   container, not 16% of the margin** as I told PLAT.
+
+## 🔴 AND THE MEASUREMENT CAUGHT A REGRESSION ENG-3 HAD ALREADY SHIPPED
+**`combine_chunks()` on a ONE-CHUNK array copies the whole buffer** (+2,188 MiB, verified by a differing buffer
+address). **One chunk is the normal `read_row_group` case**, so **its arrow change made the OOM ~2 GiB WORSE** —
+8.47 GiB vs `to_pylist`'s 6.38 — **on the exact source that OOMed**, while the 2.76× throughput win was real.
+Fixed in `3eab271`; allocated bytes now identical to the old path.
+
+> 🔑 **All 16 byte-identity tests passed throughout — a redundant copy returns identical values. Only an
+> allocation counter could see it.**
+
+**That is the sharpest lesson of the night about testing:** the byte-identity tests I demanded were *correct and
+sufficient* for correctness, and **structurally blind to a resource regression.** A test that proves the output
+is right cannot prove the path is affordable. **The Arrow fix would have shipped, passed everything, and made
+the failure it was adjacent to worse.**
+
+## Two caveats accepted as stated, not waved through
+- **No Linux, no cgroup, no c7i.** The OOM killer sees RSS **including allocator fragmentation neither counter
+  measures.** *"The 2.1× margin is what covers that, and it is why I would not defend a tighter number than
+  15,806."* **Adopted as the reason for the number, not merely a caveat attached to it.**
+- **One open measurement:** DATA's *Nemotron* row-group geometry was applied to `reasoning-traces`
+  (11,310 tok/doc) and `pre-1929-books`. **A single `ParquetFile(...).metadata.row_group(0).total_byte_size`
+  against those real files settles it in seconds.** Assigned to PLAT with the build-rev registration — if they
+  ship materially larger row groups, scale by the 2.3–2.6× law.
+
+**Suite: 1,567 passed, 0 failed.** The only code change was the `combine_chunks` fix — **a defect, not a tuning.**
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of

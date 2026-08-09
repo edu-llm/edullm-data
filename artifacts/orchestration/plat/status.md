@@ -4882,3 +4882,83 @@ something is actively re-enabling it, which changes the risk picture rather than
 it does not remove it. **Any future `edullm-validator` revision that adds `--promote` silently arms
 auto-promotion regardless of the rule's state.** Today `:17` cannot promote, which is the only reason the
 drift was survivable. **Release-checklist note, not a state to re-check.**
+
+---
+
+# 🛑 ADDENDUM 42 — I CANNOT REGISTER A MEMORY-ONLY REV 14: rev 13's `PLAN_ID` IS NOW STALE.
+# ✅ And the two row-group checks are done — `reasoning-traces` ships a **3.053 GiB** row group.
+
+## 🔴 The blocker: the 401 fix landed, so `plan_id` MOVED, and rev 13 bakes the old one
+The instruction was "register the build def at 15,806 MiB" — i.e. rev 13 + memory. **But `f568620`
+("feat(read): s3:// staged sources — the 401 fix, wired end to end") has landed, and it changed the
+registry**, so I recomputed rather than assume:
+
+```
+plan_id from the CURRENT registry : 364cb4dd488a5761      <- matches the CEO's driver repin
+edullm-reservoir-build:13 bakes   : 29968a2b04008a8c      <- STALE
+bundles 185 · shards 39,307 · tokens 982,752,985,088     (unchanged)
+```
+
+**A memory-only rev 14 would build `29968a2b04008a8c`** — the plan whose `_ingest/` prefix holds the
+**33,633 shards and 169 receipts of the FAILED run**, under a registry that no longer describes it. Worse,
+`bundle_is_done` would find those 169 receipts **valid for that plan_id** and **SKIP them**, so rev 14 would
+"succeed" in ~1 h having rebuilt only the 16 failures — **producing exactly the unlabelled/mixed corpus
+Option (c) was refused for**, and against a stale registry.
+
+**So `PLAN_ID` must change to `364cb4dd488a5761` in the same revision.** That is a second field, and the
+CEO named only memory. **Per the standing rule I am stopping to ask rather than substituting** — the more so
+because `PLAN_ID` is the field that decides *which corpus gets built*.
+
+⚠️ **And it is not only `PLAN_ID`.** Rev 13's inline preflight asserts
+`fs.get('stackv2-edu')==7` and `d['_corpus'].startswith('pretrain/final-dataset')` — both still true — but it
+also hard-asserts `edullm_data.__version__=='0.9.1'`, and **MERGE-EXEC's branch may bump it.** The new rev
+must be built against the merge SHA and its assert set re-derived, not copied. **That is step 3 anyway**, so
+the clean answer is **one revision, not two**: fold memory + `PLAN_ID` + the labels flag + the behavioural
+assert into the rev I register *after* the image exists.
+
+**Registering a memory-only rev 14 now would burn a revision that nothing can safely submit.** I recommend
+skipping it and doing it once, correctly, at step 3.
+
+## ✅ ROW-GROUP CHECK 1 — `reasoning-traces`: **3.053 GiB row group, and there is only ONE**
+`MEASURED` by ranged footer read of the real file at the pinned revision (no full download):
+```
+part_000000.parquet  1,412,348,603 B   (30 files in the config)
+num_row_groups : 1                       <-- ONE
+num_rows       : 50,000
+row_group(0).total_byte_size : 3,278,226,008 B = 3.053 GiB
+```
+
+| basis | row group | vs measured |
+|---|---|---|
+| DATA's Nemotron figure (the law's basis) | ~0.559 GiB | **5.2× smaller** |
+| ENG-3's "invented" fixture | 3.73 GiB | 0.82× — **it was REALISTIC, not pessimistic** |
+| **MEASURED `reasoning-traces`** | **3.053 GiB** | — |
+
+**Applying the 2.3–2.6× law: 7.02–7.94 GiB = 45–51% of the 15.44 GiB container → 1.94× headroom. It FITS.**
+
+🔑 **The material finding for the CEO: ENG-3's fixture was not invented too large — it was 0.82× of a real
+file.** Its "81% of container" figure is近 the truth for this source. **The instinct to flag it was right and
+the self-criticism was too harsh** — sizing from DATA's Nemotron geometry is what would have understated it,
+by 5.2×.
+
+⚠️ **`num_row_groups == 1` is the part that cannot be engineered away.** `read_row_group(0)` materialises the
+whole 3.05 GiB; **no chunking, file-sharding, or splitting reduces it** — structurally identical to the OOM
+diagnosis. **And `reasoning-traces` was one of the four OOM bundles (idx 167, exit 137).** The measurement
+explains that failure directly.
+
+## ✅ ROW-GROUP CHECK 2 — `pre-1929-books`: **MOOT BY FORMAT.** The law does not apply.
+```
+file_format = json.gz     -> NO row groups exist
+```
+It is read by the streaming gunzip path in 8 MiB chunks, **not `read_row_group`**. So the 2.3–2.6× row-group
+law is **inapplicable**, and applying Nemotron's parquet geometry to it — as was flagged — would have been a
+category error, not merely a scaling error. **Its OOM (idx 164) has a different cause and is NOT explained by
+the row-group term.** 🔴 **That is an open question, not a closed one:** whatever killed `pre-1929-books` at
+14,336 MiB is unexplained, and 15,806 MiB is only a 10% raise. **Flagging it rather than assuming the raise
+covers it.**
+
+## Net recommendation
+1. **Do not register a memory-only rev 14.** Fold memory + `PLAN_ID=364cb4dd488a5761` + `--labels` + the
+   behavioural assert into ONE revision at step 3, on MERGE-EXEC's SHA.
+2. **15,806 MiB is confirmed sufficient for `reasoning-traces`** at 1.94× headroom, on measured geometry.
+3. 🔴 **`pre-1929-books`'s OOM is still unexplained** — json.gz, no row groups. Worth one look before launch.
