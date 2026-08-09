@@ -3902,6 +3902,248 @@ explained before the rebuild's ETA is quoted.**
 
 ---
 
+# ✅ THE FINEPHRASE OUTLIER IS EXPLAINED — nested column confirmed, and it is **REDUCIBLE**
+
+**PLAT refuted the artifact hypothesis first, three ways**, before confirming the interesting one:
+`finephrase-*` is **not in `_file_shards`** (K=1) and each row is its own `source_label` → own prefix, so **no
+K-aggregation is possible**; it then caught **a second artifact risk in its own numbers** (train and val share a
+prefix) and re-measured train-only; and it flagged that `finephrase-faq` is one of the 16 failures, so its
+series is a partial. **The outlier survives all three corrections: 0.26–0.34× against flat controls at
+0.78–1.04×.**
+
+**My nested-column hypothesis is CONFIRMED, and localized to one call:**
+```
+                     arrow READ      to_pylist()
+FLAT   text          0.0009 s        0.0021 s
+NESTED rollout..text 0.0009 s        0.0076 s   ← 3.6×
+```
+**The arrow read is IDENTICAL — column projection works fine.** The entire penalty is **`to_pylist()` at
+`corpus_read.py:579`**, building a Python list-of-dicts per row instead of a bare string. Implied slowdown
+2.86–3.74× vs measured 2.7–3.6×; **the arithmetic closes and the residual is inside the flat controls' own
+spread.**
+
+## 🔧 CEO ERROR #19 — I called the cost "irreducible without a schema change." Wrong on both halves.
+```
+current      to_pylist(list<struct>)          0.0096 s
+arrow-native list_flatten + .field('text')    0.0028 s   → 3.4× faster
+```
+**Nearly all of it is recoverable with NO schema change. The schema is fine; the MATERIALISATION STRATEGY is the
+cost.** I attributed a cost to the data's shape when it belonged to how we read it — and I stated it as settled
+rather than as a hypothesis. **PLAT tested the claim I told it to test *and* the framing I attached to it.**
+
+## 🔴 SCHEDULING CONSEQUENCE — FinePhrase is the NEW critical path
+36B tokens (3.7%) across 4 rows → **12.6–16.5 h per child, longer than the 9.31 h PDF child that set the last
+makespan.** And **it cannot currently be split — it is not in `_file_shards`.**
+
+**RULING — take BOTH cheap fixes; they are independent and neither is speculative:**
+1. **Add `_file_shards` for the four FinePhrase rows.** **Nearly free, because `plan_id` is already moving for
+   the 401 fix** — the cost of a registry change is already sunk. Not taking it now means paying a second
+   `plan_id` move later.
+2. **Land the Arrow-native read** (`list_flatten` + `.field('text')`) — **3.4×, no schema change**, and it
+   benefits every nested source, not just FinePhrase. Assigned to ENG-EXEC-2.
+
+Together these take the FinePhrase children from 12.6–16.5 h to roughly **1.2–1.5 h each**, which removes them
+from the critical path entirely rather than merely shortening it.
+
+## 🏆 PLAT REFUSED TO QUOTE AN ETA, AND THE REASON IS THE BEST SENTENCE OF THE NIGHT
+> *"The makespan depends on three pending inputs (401 registry fix, OOM memory raise, FinePhrase splitting). Any
+> number now would be **quoted before its inputs exist**, which is the error this ledger catches most often."*
+
+**Correct, and it is exactly the discipline I failed at with 11.07 h — a number I quoted from a bin-packing
+simulation whose scheduler the platform does not implement.** No ETA until the inputs land.
+
+---
+
+# 🔴 AUDIT VERDICT ON `ef732ee`: **MERGE WITH FIXES.** The library is good; the DRIVER must not be run.
+
+Full findings: `artifacts/orchestration/audit/curriculum-findings.md` (424 lines). **Every severe defect is in
+`artifacts/final-dataset/curriculum_driver.py` — the one file with ZERO test coverage.** The library
+(`corpus_mtld`, `corpus_labels`, `corpus_order`, the `on_document` hook, `Receipt.labels`) is sound: constants
+bit-for-bit, `plan_id` provably unmoved, shard bytes provably identical, 1490 passing.
+**That is not a coincidence — it is the argument for the coverage rule, stated by the defect distribution
+itself.**
+
+## 🔴🔴 F2 — the driver hard-codes `shards × 12,207`, ignoring the axis it correctly derives
+`curriculum_driver.py:278-280`. `build_axis()` at `:302` derives the **real** axis from the manifest's `bytes` —
+and **`axis.n_chunks` is then used only in a `print`.** Both `block_count` and `identity_order(n_val)` come from
+the constant product, which assumes **every shard is exactly full.**
+**MEASURED against the live build:** 6 short train shards (38,736 chunks short) and **7 short val shards =
+29,880 chunks = 2.40% error on val already**, from one source, at 88% done. Train over-declares by up to ~1.6 M.
+🔴 **The train pair fails Gate A loudly; the VAL PAIR IS INTERNALLY CONSISTENT AND PASSES** — shipping a vector
+that indexes chunks the parent does not have. **A gate that catches the big error and waves through the small
+one is the worst possible outcome**, and it is exactly why deriving beats asserting.
+
+## 🔴🔴 F3 — the chunk-owner cursor DRIFTS at every file-shard part boundary. 23.5% of the corpus. Silent.
+`corpus_order.py:427` advances the cursor by `axis.tokens[i]` (**`tokens_out`**) while the labelled space
+advances by **`tokens_in`** — and the gap accrues **once per part**. **MEASURED on a constructed 2-part stream:
+`build_order` returned a PERFECT PERMUTATION with every chunk after the boundary attributed to the WRONG
+DOCUMENT.**
+**No check catches it.** The `labelled >= held` test becomes *more* satisfied by the drift, and Gate A's
+`bincount` sees a valid permutation. Affects `_file_shards`: **232B of 986B tokens** (stackv2-edu 7,
+finepdfs-edu 4, nemotron-cc-math-3 3, -4plus 2).
+**This is my file-sharding ruling colliding with the labeling brief for the second time** — the first was
+`source_doc` per-stream contiguity. **A fix that widens a scope invalidates every uniqueness assumption inside
+the old scope; I have now paid for that lesson twice on the same change.**
+
+## 🔴 F1 — my 7.13 GiB Gate A figure is REFUTED. Real peak **~9.36 GiB in an 8 GiB container.**
+It omitted **`np.bincount`'s intp cast**. PROVEN by `tracemalloc` over numpy's allocation domain: a `<u4` input
+costs **exactly 8.00 B/elem extra**; an `intp` input costs 0.00. **That is 3.57 GiB at N.**
+**Fix: raise the validator to ≥16,384 MiB — do NOT split the vector**, because splitting makes ordinal order
+load-bearing (F8). I recorded 7.13 GiB as "measured at full scale"; it was measured, and incomplete.
+
+## 🔴 F4 — CONFIRMED LIVE, and the version assert would have passed on the WRONG image
+`edullm-reservoir-build:13` has **no `--labels`**, and its preflight asserts `__version__=='0.9.1'` while
+`ef732ee` **does not bump the version** — so **the assertion passes on the unlabelled image.**
+**A version string is not a code identity, for the fourth time tonight**, and this time the check we built to
+catch it would have confirmed the defect. Needs a job-def revision **and** a version bump **and** a
+behaviour-level assert (`hasattr`-style), not a version comparison.
+
+## 🔴 F12 — `profile={GROUP: PROFILE}` keys `mtld`; the driver stages `mtld-train`/`mtld-val`. `publish()` raises.
+**CEO ERROR #16's exact shape.** `group_meta_for` gets the suffixes right — **so the author knew, and missed the
+one line that also needed them.** Loud and cheap, **and it proves `--go` has never been run.**
+
+## 🟠 F5 — the MTLD constants reproduce bit-for-bit, but one CURRICULUM-EXEC claim is REFUTED
+All five vectors verified. But a 6-variant mutation matrix shows **`[a,b,c,a]` discriminates the threshold
+(0.72/0.75/0.71/0.70 all differ) but NOT `<=` vs `<`** — at `w4` the ratio is 0.75, above threshold, so neither
+spelling closes. **The docstring's claim is wrong.** The `<=` case *is* covered by the t29 boundary test
+(hand-traced: ratio exactly 18/25 = 0.72; inclusive 15.3208, strict 29.435, `float(n)` 29.0 — all three differ).
+**Coverage adequate but concentrated: 5 of 6 vectors are insensitive to every mutation.**
+
+## 🟠 F6 — the 2.80% overhead: right route, mixed denominator
+Route A correct; route B's rejection sound (**multiplying a rate by an aggregate share is the cap×rate error
+class**). But the numerator is laptop-measured — AUDIT got **186 µs/doc = 1.66%**, 0.59× the claim. **The
+honest answer is we do not know until it runs on c7i, the direction is safe, and one bundle's wall clock settles
+it free.**
+
+## ✅ F9 — the degenerate-shard path I flagged is UNREACHABLE, but unasserted
+`corpus_pack:840-846` refuses anything under one `SEQ_LEN` (8,192 tokens = 3 chunks) — **4× above the loader's
+`chunks<=0` skip**, and both formulas agree on the skip condition across 10 test values. **But nothing asserts
+it:** a 20-byte shard fed to `chunk_axis_from_manifest` yields `chunks=(9,0,9)` and `build_order` succeeds.
+**Add a build-time raise.**
+
+## ✅ What held under attack
+`plan_id` independently recomputed as `29968a2b04008a8c`; the guard asserts the **literal**, not a recomputation;
+the byte-identity test compares **real payload bytes**; the vacuity proof is genuine and asserts both branches;
+EOS-first chunk, ties, and short-doc attacks all pass; **`tokens_in` proven the correct denominator from
+`PackResult` in both `partial_source` modes**; labels format solid with **explicit `<`-prefixed endianness** and
+14.2957 B/doc reproduced.
+
+## ⚖️ RULING — the gate order is AUDIT's, adopted verbatim
+**Before relaunch:** **F13** (label-aware resume) · **F4** (job def + version bump + behaviour assert).
+**Before `--go`:** **F2** (derive `block_count`) · **F3** (part boundaries) · **F12** (profile keys) ·
+**F1** (validator ≥16,384 MiB).
+**Should:** F9 guard · F7 record-count check · F11 two tests · F5/F13 docstrings · F6 re-measure.
+> **"A 13 h rebuild on the library code with F13 and F4 fixed is safe. A publish on this driver is not."**
+
+**And the driver gets tests before it runs — every existing axis fixture is uniform-length, which is precisely
+the shape F2 and F3 turn on.**
+
+---
+
+# ⚠️ ENG-EXEC-2 DIED MID-FLIGHT (API `ENOTFOUND`) — state recovered, work is COHERENT
+
+**CEO-verified recovery, because a partial fix is more dangerous than none:**
+```
+branch  agent/eng-exec-2/s3-source-oom-arrow   (NO new commit — all work uncommitted)
+modified: corpus_read.py · corpus_build.py · corpus-registry.json · LEDGER.md · audit findings
+new:      tests/test_corpus_read_s3_source.py   → 19 passed in 0.37 s
+per-file: every corpus test file passes individually (117/29/30/23/71/77/19/134/18)
+ONE failure, everywhere: test_plan_id_is_unchanged_by_the_labels_work
+```
+
+## ✅ The one failure is CORRECT BEHAVIOUR — the guard firing as designed
+```
+assert '364cb4dd488a5761' == '29968a2b04008a8c'
+"plan_id moved… The curriculum change touched the PLAN SURFACE… Revert whatever entered plan_document."
+```
+**The registry changed for the 401 fix, so `plan_id` moved — exactly as I predicted when approving option (b).**
+The literal assertion did its job and **stopped at the right place**; ENG-2 died before reaching **Task 3**, which
+is precisely the task that replaces it. **A test failing for the reason it was written is not a regression.**
+
+**NEW `PLAN_ID` = `364cb4dd488a5761`** (from `29968a2b04008a8c`). ENG-2's last report: **same 185 bundles, same
+shard counts, same tokens** — so the registry change added a source path, not work.
+
+## 🔧 A CEO diagnostic error, caught within three calls
+I ran the full suite, hit a 2-minute timeout, and wrote *"the suite now HANGS"* — then isolated it. **Nothing
+hangs.** `test_corpus_build.py` alone is 17.8 s and the suite is simply slower than the 120 s I allowed. **I
+inferred a failure mode from a tool timeout**, which is the same class as reading an `AccessDenied` as an
+absolute capability denial. **A timeout is a statement about my budget, not about the code.**
+
+---
+
+# ✅ ENG-EXEC-3 — ALL FIXES LANDED. 9 commits, **1,567 passed, 0 failed.** Nothing merged, no AWS.
+
+## 🔴 THE OOM DIAGNOSIS IS THE OPPOSITE OF WHAT EVERYONE ASSUMED — including me
+**`SeenHashes` is NOT the term.** The four OOM bundles have **the four SMALLEST dedup sets in the plan**, and
+`finephrase-table--train` carries the **largest (5.51 GiB, 50× the two that died) and SUCCEEDED.**
+
+**The real term is ONE PARQUET ROW GROUP** — `corpus_read.py:840` decodes a row group to arrow and `to_pylist()`s
+it **while `table` is still referenced.** MEASURED in clean subprocesses:
+| shape | row group | **peak** |
+|---|---|---|
+| 248,420 × 5,251 B (real Nemotron) | 1.23 GiB | **3.95 GiB** |
+| 100,000 × 40,000 B (reasoning traces, 11,310 tok/doc) | 3.73 GiB | **6.98 GiB** |
+
+🔴 **AND FILE-SHARDING CANNOT REDUCE IT AT ALL.** `_shard_slice` strides the *file list*
+(`ingest_reservoir.py:779`); **a row group is inside one file.** Confirmed by the live failures — **`p03of04`
+and `p04of07` were ALREADY sharded when they OOMed.**
+**So my "fixed by the bundle-splitting already on the critical path" was not merely unverified — it was
+structurally impossible.** Splitting files cannot shrink a row group. Worst case **~13.35 GiB against 14.00**.
+
+**Two more inherited constants corrected, same class:** `SeenHashes` 85.9 B/entry is **`tracemalloc`; peak RSS is
+114.97** — and *the cgroup kills on RSS*. The decon index's "~250 MB" is **527 MiB resident / 579 parse peak.**
+**Every memory number in this ledger was measured with the wrong instrument for the thing that kills the process.**
+
+**→ PLAT: raise `14,336 → ≥24,576 MiB`.** It also covers **F1**, independently re-verified (8.00 B/elem exactly;
+9.36 GiB at N = **117% of 8 GiB**).
+
+## 🔴 OFF-LIST AND SILENT — both drivers still hard-coded the OLD `PLAN_ID`
+`PLAN_ID = 29968a2b04008a8c` **is a path component.** With the registry changed:
+- `curriculum_driver` would report *"no labels — the build ran without `--labels`"* — **a true-sounding message
+  about the wrong prefix.**
+- `publish_driver.SOURCE` derives from it → **it would have published a prefix that is not this corpus.**
+**Neither reads as a wrong-plan error.** Both repinned to **`364cb4dd488a5761`**, with a test asserting all three
+places agree **against the value recomputed from the registry** — not against each other.
+**I moved `plan_id` deliberately and did not chase its consumers. A derived constant copied into a second place
+is a second source of truth.**
+
+## 🏆 THREE OF ITS OWN TESTS WERE WRONG, AND IT FOUND ALL THREE BY MUTATION
+1. **The F3 test used MONOTONE scores** — correct and drifted owners give the **identical permutation**, so it
+   **passed on broken code.** Part 1 now scores below part 0, plus a test asserting the fixture discriminates.
+2. **The F2 test proved `build_axis` derives correctly — then mutating `main()` to use the constant left all 17
+   green.** *"Computes the right answer, then declares a constant"* **is exactly what F2 was. It reproduced the
+   bug inside the test suite.**
+3. **The F12 test asserted a string was absent from `getsource` and failed on the COMMENT explaining the fix.**
+   Added `_code_text`, stripping comments via the tokenizer.
+**Every fix ships with a mutation that reverts it and a count of what fails.** That is the standard.
+
+## Fixes, all mutation-verified
+| | fix | tests | mutation |
+|---|---|---|---|
+| **F13** | `bundle_is_done(labels=)` + `_check_set_labels` | 7 | revert → 4 fail |
+| **F3** | `part` in `StreamLabels.key`; `shard_stream_from_receipts` | 8 | revert → 3 fail |
+| **F9** | zero-chunk shard refused | 3 | — |
+| **F2/F12** driver | derive both axes; suffixed profile keys | 20 | revert → 3 fail |
+| **Task 3** | two `plan_id` assertions **+ a third proving the pair is not redundant** | 3 | — |
+| **Task 4** | arrow-native, **2.76× faster, byte-identical** | 17 | naive zip → 4 fail |
+
+**And it verified ENG-2's `s3://` reader rather than accepting it** — walked the **AST for string constants, not
+a grep**: zero `nemotron` literals in executable code. **Document order is deterministic and the test seeds
+`FakeS3` BACKWARDS**, so it exercises the sort rather than a coincidence — which matters because `_bundle_files`
+takes a **stride** and `source_doc` is a counter over the pulled stream.
+
+## Named unverified — accepted as stated
+- **No container has read a staged row live.** All tests use `FakeS3`; real `Boto3S3.get_range` short-read
+  behaviour is **modelled, not observed.**
+- The **~0.35 GiB interpreter+boto3+numpy baseline** in the OOM model — *"the four failures are explained without
+  it; the margin is not."*
+- **F6** (MTLD overhead) still needs one bundle's c7i wall clock.
+- 🔴 **F4 is PLAT's and OPEN: the job def has no `--labels`, and its preflight asserts `__version__=='0.9.1'`,
+  which the labelled code ALSO says — the assert passes on the unlabelled image.** F13 makes a labelled relaunch
+  *correct*; it does not make the job def *request* one. **NOTHING RELAUNCHES UNTIL F4 LANDS.**
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of

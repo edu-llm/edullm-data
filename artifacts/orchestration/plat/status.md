@@ -4680,3 +4680,150 @@ gave now would be a number quoted before its inputs exist**, which is the error 
 ## What I have NOT done
 Nothing killed (the array is terminal), nothing registered, nothing submitted. The Arrow-native read and the
 `_file_shards` addition are both **ENG surfaces**; the memory raise is A2 but **awaits ENG's measured peak**.
+
+---
+
+# 🔴 ADDENDUM 39 — THE MEMORY RAISE: **24,576 MiB IS THE WRONG NUMBER.** It halves concurrency for nothing.
+
+## The instance packing is MEASURED, not spec-sheet
+I read the live ECS container instance rather than dividing 64 GiB on paper:
+```
+ecs describe-container-instances -> registeredResources
+  MEMORY 63,226 MiB      CPU 32,768 units (8 vCPU = 8,192)      type c7i.8xlarge
+```
+**63,226 MiB, not 65,536** — ECS/AMI overhead takes 2,310 MiB. **That difference is exactly what decides
+this question**, and a paper calculation would have got it wrong.
+
+## 🔴 The requested 24,576 MiB idles HALF the fleet
+
+| memory | children/instance | concurrent | makespan | verdict |
+|---|---|---|---|---|
+| 14,336 (today) | 4 | 48 | 18.14 h | **OOMs — 13,671 MiB needed** |
+| **15,806** | **4** | **48** | **18.14 h** | ✅ **clears the peak, keeps 48-wide** |
+| 16,384 | 3 | 36 | 20.11 h | 25% of CPU idles |
+| 20,480 | 3 | 36 | 20.11 h | 25% idles |
+| **24,576 (requested)** | **2** | **24** | **23.95 h** | 🔴 **50% of CPU idles, +5.8 h** |
+
+**The pivot: `63,226 // 4 = 15,806 MiB`.** That is the largest per-child memory that still packs **four**
+8-vCPU children onto a 32-vCPU instance. Against ENG-3's measured worst case of **13.35 GiB = 13,671 MiB**
+it leaves **2,135 MiB of headroom (15.6%)**.
+
+**Above 15,806 the instance runs out of memory before it runs out of CPU**, so each instance drops to 3 or 2
+children and the vCPU we are paying for sits idle. **24,576 MiB costs ~5.8 h of wall clock and buys 10.9 GiB
+of headroom nobody measured a need for.**
+
+**→ MY RECOMMENDATION: `memory = 15,806 MiB`, not 24,576.** If ENG-3's 13.35 GiB is a hard ceiling this is
+sufficient with 15.6% margin. **If they believe the peak can exceed 15.4 GiB, then the right move is not more
+memory per child — it is fixing the row-group term**, because every MiB past 15,806 costs concurrency.
+
+⚠️ **One caveat I will not paper over:** 15.6% headroom is thinner than I would choose blind, and the OOM
+killer acts on **RSS**, which ENG-3 has just shown is *larger* than the `tracemalloc` figures this project
+has been quoting. **If their 13.35 GiB is itself a `tracemalloc` number, it is an underestimate and 15,806
+may not be enough.** That question decides between "15,806 and keep 48-wide" and "24,576 and accept 24-wide",
+and **only ENG-3 can answer it** — I am flagging it rather than guessing, per the instrument correction they
+just issued.
+
+## F1 — Gate A and promote need it too, and here there is NO trade-off
+`edullm-validator:16` and `edullm-promote:2` are **4 vCPU / 8,192 MiB**, and ENG-3's Gate A peak is
+**9.36 GiB = 9,585 MiB → 117% of the limit. Both will OOM.**
+
+🔑 **`edullm-promote:2` carries the Gate A peak, which is easy to miss.** CEO-verifiable at
+`validate.py:2536-2556`: the promote path calls **`validate_dataset(...)` first, in the same process**, and
+only then `_promote_or_reconcile`. **Promote is Gate A plus a copy phase, not a copy phase alone.**
+
+**Raising these costs nothing** — Gate A runs as a single job, so instance packing is irrelevant to it.
+**No concurrency is traded.** 12,288 MiB gives 28% headroom over 9,585.
+
+## ANSWER TO "one revision or two": **THREE**
+| def | vCPU | today | needs | why |
+|---|---|---|---|---|
+| `edullm-reservoir-build` | 8 | 14,336 | **15,806** | row-group peak 13,671 MiB; capped by 4-per-instance packing |
+| `edullm-validator` | 4 | 8,192 | **12,288** | Gate A peak 9,585 MiB; packing irrelevant |
+| `edullm-promote` | 4 | 8,192 | **12,288** | **runs Gate A in-process**, same peak |
+
+They are three separate job definitions with different vCPU shapes; **no single revision can serve them.**
+
+## Two independent confirmations of ENG-3's diagnosis, from MY live results
+1. **File-sharding cannot fix the OOM — proven by the failures themselves.** The OOM'd bundles include
+   **`finepdfs-edu--train--p03of04`** and **`stackv2-edu--train--p04of07`** — *already file-sharded*, K=4 and
+   K=7, and they still died. `_shard_slice` strides the **file list**; a row group lives **inside** one file.
+   **My live results are the empirical proof of ENG-3's structural argument.**
+2. **The dedup set is not the term.** `finephrase-table--train` carries the largest dedup set in the plan and
+   **SUCCEEDED**, while the four smallest died. Consistent with ENG-3 and inconsistent with `SeenHashes`.
+
+## Nothing registered
+Per the capability-mutation rule I am bringing the numbers first. **I have registered nothing.** The three
+raises are inside A2 but the *value* was named as 24,576 and I am recommending 15,806 for the build — that is
+a correction to a named value, so it needs the CEO's word before I act.
+
+---
+
+# ✅ ADDENDUM 40 — `edullm-validator:17` and `edullm-promote:3` REGISTERED at 12,288 MiB
+# 🔴 AND THE AUTO-PROMOTION RULE IS **ENABLED** AGAIN. The ledger says DISABLED.
+
+## Registered — cited by NUMBER, verified live
+```
+edullm-validator:17  ACTIVE  4 vCPU / 12,288 MiB  28,800 s  cmd: validate --head-workers 16   (NO --promote)
+edullm-promote:3     ACTIVE  4 vCPU / 12,288 MiB  28,800 s  cmd: validate --head-workers 16 --promote --promote-workers 16
+both: role …-edullm-dataset-validator · image sha256:5fb76f66…a906 · logs gatea / promote
+```
+**Diffed field-by-field against `:16` and `:2` before registering: `memory 8192 -> 12288` is the ONLY real
+difference.** 28% headroom over the measured 9,585 MiB peak.
+
+🔧 **My diff first reported "image CHANGED" and that was MY OWN artifact** — I compared an 8-character
+truncation against a 9-character one. I asserted the **full** digests equal before registering
+(`dig == LIVE` → True on both) rather than shipping on a comparison I had not validated. **A comparison
+harness can be wrong in the direction that invents a difference, not only in the direction that hides one.**
+
+## 🔴 THE FINDING: `edullm-landing-manifest-created` is `State: ENABLED`
+
+```
+events describe-rule -> "State": "ENABLED"
+target: job-queue sbsandbox-intern-edullm-cpu
+        BatchParameters.JobDefinition = "edullm-validator"   <- UNVERSIONED
+```
+**The ledger records this rule as DISABLED**, applied and verified as an owner-authorized mutation earlier
+tonight (*"`aws events disable-rule …` → `"State": "DISABLED"`"*). **It is ENABLED now.** I did not touch it.
+`describe-rule` carries no `LastModified`, so **who and when is `UNVERIFIED`** — most likely a concurrent
+session, exactly as happened once before on this same rule (the Wave-0 recovery found it ENABLED against
+three documents asserting DISABLED). **Second occurrence of the same drift on the same rule.**
+
+## Blast radius — bounded, and my own registration just narrowed it
+The target names the job def **unversioned**, so it resolves to **top ACTIVE = rev 17**, and **rev 17 has no
+`--promote` flag → Gate A only. It CANNOT cross the airlock.**
+
+| | before my registration | after |
+|---|---|---|
+| unversioned resolves to | rev 16 — Gate A only, **8,192 MiB → would OOM at 117%** | rev 17 — Gate A only, **12,288 MiB → fits** |
+
+**So an accidental trigger now completes instead of OOMing, and still cannot promote.** That is an
+improvement, but it was **incidental to the raise, not designed** — recording it as luck, not foresight.
+
+## ⚠️ The live hazard is on THIS build's path, not hypothetical
+**`publish()` writes `manifest.json` to `edullm-landing/pretrain/edu-mix-983b/vN/`.** With the rule ENABLED
+that PUT **auto-fires a validator job**. So Gate A would run **unbidden**, possibly **concurrently** with the
+Gate A I submit deliberately — two validators on one prefix.
+
+**Severity assessment, stated honestly rather than inflated:**
+- It **cannot promote** (rev 17 lacks the flag), so the irreversible step is still gated. ✅
+- Concurrent Gate A runs are **not obviously harmful**: the verdict depends on the **set** of violations, not
+  their order (`validate.py:713`), and the promote path guards mutated sources with `PreconditionFailed` →
+  `LandingSourceChangedError` (`:2074`). But **two runs racing on the same `_VALIDATED.json`/`_REJECTED.json`
+  is a state I cannot prove safe from a read-only session**, and it costs a duplicate 0.36 h Gate A.
+- The real cost is **loss of control over sequencing**: the plan is publish → backup-is-already-there →
+  Gate A → promote, **and an auto-fired Gate A inserts itself between publish and my submission.**
+
+## ⛔ I am NOT disabling it — that mutation is not mine
+Disabling this rule was **escalated to the owner** the first time it came up, precisely because it is a live
+infra mutation whose authorization the CEO could not delegate inside a subagent prompt. **The same reasoning
+applies now**, and nothing in tonight's grants (A1–A7, or the two revisions just approved) names it.
+**Reporting instead.**
+
+**Recommended, for the CEO to decide:**
+1. **`aws events disable-rule --name edullm-landing-manifest-created`** before `publish()` runs. One
+   reversible call; re-enable is the same command with `enable-rule`.
+2. **Or accept it**, on the grounds that rev 17 cannot promote — but then **expect an unbidden Gate A job to
+   appear at publish time** and do not read it as an intrusion.
+3. ⚠️ **Either way, note the standing trap: the target is UNVERSIONED.** Any future revision that adds
+   `--promote` to `edullm-validator` would **silently arm auto-promotion**. That is a permanent structural
+   hazard, not a state — worth a note wherever the release checklist lives.
