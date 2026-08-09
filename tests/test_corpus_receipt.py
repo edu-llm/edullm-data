@@ -785,6 +785,141 @@ def test_the_set_checks_run_without_s3_at_all():
     assert codes == ["bundle-set-incomplete"]
 
 
+# --------------------------------------------------------------------------------------
+# F13 — the labels delegation `_check_labels`' docstring promised and nothing implemented
+# --------------------------------------------------------------------------------------
+
+
+def _with_labels(receipt: Receipt, s3=None) -> Receipt:
+    """The same receipt, carrying a LabelRecord that is TRUE about a REAL sidecar.
+
+    Built with `build_label_set` + `encode_labels` and (when `s3` is given) seeded, rather than typed
+    as a plausible-looking dict. Two reasons, and both were found the hard way: the per-receipt
+    `_check_labels` genuinely re-GETs and re-hashes the object, so a fabricated digest makes every
+    bundle dirty and the test stops being about the SET; and the sidecar's own conservation identity
+    is `sum(n_tokens + 1) == tokens_in`, so the record rows have to be arithmetic, not decoration.
+    """
+    from edullm_data.corpus_labels import (
+        DocumentLabel,
+        build_label_set,
+        encode_labels,
+        labels_key,
+    )
+
+    n = receipt.documents
+    # `sum(n_tokens + 1) == receipt.tokens_in` exactly, with the remainder on the last row.
+    each = receipt.tokens_in // n - 1
+    rows = [
+        DocumentLabel(source_doc=i, n_tokens=each, source_path="data/part-00000.parquet",
+                      mtld=12.5 + i % 7)
+        for i in range(n)
+    ]
+    rows[-1] = DocumentLabel(
+        source_doc=n - 1, n_tokens=receipt.tokens_in - n * (each + 1) + each,
+        source_path="data/part-00000.parquet", mtld=12.5,
+    )
+    ls = build_label_set(
+        rows, plan_id=receipt.plan_id, bundle_id=receipt.bundle_id, stream=receipt.stream,
+        tokens_in=receipt.tokens_in,
+    )
+    body = encode_labels(ls)
+    key = labels_key(PREFIX, receipt.plan_id, receipt.bundle_id)
+    if s3 is not None:
+        s3.seed(BUCKET, key, body)
+    doc = receipt.to_dict()
+    doc["labels"] = {
+        "key": key,
+        "sha256": _sha(body),
+        "bytes": len(body),
+        "documents": n,
+        "tokens_in": receipt.tokens_in,
+        "mtld_spec": ls.mtld_spec,
+    }
+    return Receipt.from_dict(doc)
+
+
+def test_a_MIXED_label_set_is_refused_and_no_other_check_can_see_it():
+    """🔴 **The 2026-08-09 shape: 169 bundles without labels, 16 with.**
+
+    Every bundle here is individually spotless — asserted, because that is the entire finding. A
+    receipt whose `labels` is None is not a violation (`_check_labels` returns `[]`, correctly: one
+    receipt cannot know what the run asked for), the shards are all present at the right size, and no
+    other set-level check mentions labels. So a corpus with 12% label coverage passed everything and
+    the first complaint came from `build_order`, at the very end, as "stream X supplied NO labels" for
+    116 of 132 streams.
+    """
+    receipts, s3 = _bundle_set()
+    receipts[0] = _with_labels(receipts[0], s3)
+
+    for r in receipts:
+        assert verify_receipt(r, s3, BUCKET) == [], (
+            "every bundle must be individually clean, or this test is not about the SET"
+        )
+
+    violations = verify_bundle_set(receipts, STREAMS)
+    assert _codes(violations) == ["bundle-set-mixed-labels"], violations
+    # The message names the MINORITY side and says which side it is — the actionable question is
+    # "what do I re-run", and on the real shape the minority is the labelled one.
+    assert receipts[0].bundle_id in violations[0].message
+    assert "HAVE" in violations[0].message
+
+
+def test_all_labelled_and_none_labelled_are_BOTH_clean():
+    """All-or-none, not all.
+
+    A corpus with no labels anywhere is legitimate — every dataset published before the curriculum
+    workstream is exactly that, and a check that condemned them would be wrong. What cannot be
+    legitimate is the SPLIT. Both uniform states asserted, because a check that only tested the
+    mixed case would pass on an implementation that flagged every unlabelled corpus.
+    """
+    receipts, s3 = _bundle_set()
+    assert verify_bundle_set(receipts, STREAMS, s3=s3, bucket=BUCKET) == []
+
+    labelled = [_with_labels(r, s3) for r in receipts]
+    # WITH s3, so the per-receipt re-hash of every sidecar runs too: a uniformly labelled set must be
+    # clean all the way down, not merely clean at the set level.
+    assert verify_bundle_set(labelled, STREAMS, s3=s3, bucket=BUCKET) == []
+
+
+def test_the_minority_side_is_named_in_whichever_direction_it_falls():
+    """The inverse shape — mostly labelled, a few not — is the one a partial retry produces, and its
+    message must name the unlabelled few rather than printing 169 ids of the healthy majority."""
+    streams = STREAMS + [("pes2o", None, "train")]
+    receipts, s3 = _bundle_set(streams)
+    receipts = [_with_labels(r, s3) for r in receipts[:-1]] + [receipts[-1]]
+
+    violations = verify_bundle_set(receipts, streams)
+    assert _codes(violations) == ["bundle-set-mixed-labels"], violations
+    assert "LACK" in violations[0].message
+    assert receipts[-1].bundle_id in violations[0].message
+    # And it does NOT list the three healthy ones.
+    assert not any(r.bundle_id in violations[0].message for r in receipts[:-1])
+
+
+def test_the_docstring_promise_and_the_implementation_are_the_same_object():
+    """🔴 **The trap that produced F13: a docstring describing a delegation nobody implemented.**
+
+    `_check_labels` deferred the all-or-none policy to `verify_bundle_set` in prose, and
+    `verify_bundle_set` did not contain the string `labels` at all — found by grepping the function,
+    not by reading the sentence. This asserts the promise is now cashable BY THE SAME MEANS the audit
+    used to find it missing: the delegate is named in the deferring docstring, and it is reachable
+    from the function that was promised to call it.
+    """
+    import inspect
+
+    from edullm_data import corpus_receipt as R
+
+    deferral = inspect.getsource(R._check_labels)
+    assert "_check_set_labels" in deferral, (
+        "the deferral must name its delegate, so the next reader can check it exists"
+    )
+    assert "_check_set_labels(" in inspect.getsource(R.verify_bundle_set), (
+        "verify_bundle_set does not call the check its own docstring delegates to — the exact F13 "
+        "shape, which is what a docstring-only promise looks like from the outside"
+    )
+    assert "bundle-set-mixed-labels" in inspect.getsource(R._check_set_labels)
+
+
 def test_per_receipt_violations_are_concatenated_when_s3_is_supplied():
     receipts, s3 = _bundle_set()
     s3.delete(BUCKET, f"{PREFIX}/{shard_key('dclm', None, 'train', 0)}")

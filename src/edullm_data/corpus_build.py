@@ -895,6 +895,8 @@ def bundle_is_done(
     s3: Any,
     bucket: str,
     prefix: str,
+    *,
+    labels: bool = False,
 ) -> bool:
     """True only when the receipt exists AND every shard it names is in S3 at the right size.
 
@@ -907,6 +909,44 @@ def bundle_is_done(
 
     Not a re-hash — that is `verify --deep`. Re-hashing here would make every resume a second full
     read of the corpus.
+
+    ``labels`` — WHAT THE RUN IS ASKING FOR, and why "done" cannot be decided without it
+    ------------------------------------------------------------------------------------
+    **A bundle built without curriculum labels is not "done" for a run that requested them.** Before
+    this parameter existed, "done" was a statement about SHARD BYTES alone, and the labels sidecar is
+    a second output the same predicate has to cover — otherwise the definition of finished silently
+    excludes half of what the job was told to produce.
+
+    This is not hypothetical. On 2026-08-09 a 185-bundle build went **TERMINAL at 169 succeeded / 16
+    failed**, all 169 unlabelled. The obvious next command — relaunch with ``--labels`` — would have
+    **skipped all 169** (their receipts are valid, their shards are all present at the right size)
+    **and labelled only the 16**, producing a corpus with ~12% label coverage. And **no gate would
+    have fired**, for two reasons that were each verified in code rather than reasoned about:
+    ``corpus_receipt._check_labels`` returns ``[]`` when ``receipt.labels is None`` (a deliberate
+    per-receipt scope limit, since a receipt cannot know what the run asked for), and
+    ``verify_bundle_set`` emits only ``bundle-set-incomplete`` /
+    ``bundle-set-unexpected-stream`` / the file-shard family violations — it had no labels logic at
+    all. The failure would have surfaced at the very END, from
+    ``corpus_order.build_order``'s *"stream X supplied NO labels"* refusal, for 116 of 132 streams,
+    where it reads like a driver bug rather than a resume-semantics one.
+
+    So the fix belongs HERE, in the predicate that decides what work to skip, and the polarity is
+    one-directional on purpose:
+
+    * ``labels=True`` and the receipt has none -> **NOT done.** Rebuild it.
+    * ``labels=False`` and the receipt HAS labels -> **still done.** The labels are a strict
+      superset of what this run was asked for; discarding a correct labelled bundle because the
+      operator forgot a flag would be the same class of destructive over-reaction that ``--force``
+      exists to make explicit. Note the asymmetry is deliberate and it is why this is a boolean
+      "requested" rather than an equality on the receipt's field.
+
+    Default ``False``: an omitted argument must mean "labels not requested", so every existing caller
+    and every historical receipt keeps its current answer. **A default of True would silently declare
+    the entire published corpus unbuilt.**
+
+    ⚠️ **This makes a labelled relaunch correct by construction, and it is strictly better than
+    ``--force`` on all 185** — which does the same work but has to be remembered every time, and
+    which is not re-runnable: a ``--force`` run interrupted at bundle 100 rebuilds all 100 again.
     """
     from .corpus_receipt import read_receipt
 
@@ -917,6 +957,10 @@ def bundle_is_done(
         return False
     if receipt.plan_id != plan_id:
         return False  # a receipt from another plan says nothing about this one
+    # Checked BEFORE the shard HEADs, so a labelled relaunch over a fully unlabelled corpus costs
+    # one GET per bundle instead of one GET plus 4,298 HEADs — and the answer is the same either way.
+    if labels and receipt.labels is None:
+        return False
     declared = {r.path for r in receipt.shards}
     if declared != {r.path for r in bundle.shards}:
         return False
@@ -1506,9 +1550,16 @@ def _cmd_run(args) -> int:
         print(f"DECON index {len(index.exact_hashes):,} exact + "
               f"{len(index.ngram_hashes):,} ngrams", flush=True)
 
+    # Read ONCE, here, and passed to both `bundle_is_done` and `run_bundle`. Two `getattr` calls
+    # would be two chances for the resume predicate and the builder to disagree about what this run
+    # is producing — and that disagreement is exactly the F13 failure in a different spelling.
+    want_labels = bool(getattr(args, "labels", False))
+
     done = skipped = 0
     for bundle in mine:
-        if not args.force and bundle_is_done(bundle, args.plan_id, s3, args.bucket, args.prefix):
+        if not args.force and bundle_is_done(
+            bundle, args.plan_id, s3, args.bucket, args.prefix, labels=want_labels
+        ):
             skipped += 1
             print(f"SKIP {bundle.bundle_id} (receipt + all shards present)", flush=True)
             continue
@@ -1521,12 +1572,13 @@ def _cmd_run(args) -> int:
             # than through a signature every test would have to grow.
             documents=lambda sp, bu: _reader_for(sp, bu, s3=s3),
             tokenizer=tok, eos_id=eos, vocab_size=vocab,
-            # `getattr` with the off default, matching `_cmd_verify`'s `hash_workers` handling: a
-            # hand-built Namespace (every test constructs one) has no `labels` attribute, and an
-            # AttributeError there would make an unrelated flag's addition break the driver's own
-            # tests. Off is also the correct reading of "not requested".
+            # `want_labels` above, resolved with `getattr` and the off default to match
+            # `_cmd_verify`'s `hash_workers` handling: a hand-built Namespace (every test constructs
+            # one) has no `labels` attribute, and an AttributeError there would make an unrelated
+            # flag's addition break the driver's own tests. Off is the correct reading of "not
+            # requested". THE SAME VALUE the skip predicate used — see `want_labels`.
             wheel_version=_wheel_version(), index=index,
-            labels=getattr(args, "labels", False),
+            labels=want_labels,
         )
         done += 1
         f = info["filter"]

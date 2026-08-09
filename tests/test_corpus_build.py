@@ -597,6 +597,183 @@ def test_a_missing_receipt_is_not_done():
     assert B.bundle_is_done(_small(B.bundles_of(plan)[0]), plan["plan_id"], s3, BUCKET, PREFIX) is False
 
 
+# --------------------------------------------------------------------------------------
+# F13 — resume must know what the run was ASKED to produce, not just what bytes exist
+# --------------------------------------------------------------------------------------
+
+
+def _run_labelled(bundle, plan, spec, s3, *, labels: bool):
+    """The same `_run` with `source_path` populated, which the labels sidecar requires."""
+    docs = [
+        Document(id=d.id, text=d.text, source=d.source, domain=d.domain,
+                 source_path=f"data/part-{i % 2:05d}.parquet")
+        for i, d in enumerate(_docs())
+    ]
+    return B.run_bundle(
+        _small(bundle), plan, spec, s3=s3, bucket=BUCKET, prefix=PREFIX,
+        documents=lambda sp, bu: docs, tokenizer=WordTok(), eos_id=100257, vocab_size=100278,
+        wheel_version="0.6.3", labels=labels,
+    )
+
+
+def test_an_unlabelled_bundle_is_NOT_done_for_a_run_that_asked_for_labels():
+    """🔴 **THE RELAUNCH BLOCKER. This is the mutation the whole fix exists to make fail.**
+
+    On 2026-08-09 a 185-bundle build went TERMINAL at 169 succeeded / 16 failed, all 169 UNLABELLED.
+    The obvious next command — relaunch with `--labels` — would have skipped all 169 (valid receipts,
+    every shard present at the right size) and labelled only the 16: **~12% label coverage, and no
+    gate would have fired.** `corpus_receipt._check_labels` returns `[]` on a receipt whose `labels`
+    is None, and `verify_bundle_set` had no labels logic at all. The failure surfaced only at
+    `build_order`, at the very end, as "stream X supplied NO labels" for 116 of 132 streams.
+
+    So "done" cannot be a statement about shard bytes alone once a second output exists. Asserted in
+    BOTH directions on the SAME bundle, because a one-directional test would pass on a predicate that
+    simply always returns False when `labels=True`.
+    """
+    s3 = FakeS3()
+    plan = B.plan_document([_spec()])
+    pid = plan["plan_id"]
+    bundle = _small(B.bundles_of(plan)[0])
+    _run_labelled(bundle, plan, _spec(), s3, labels=False)
+
+    from edullm_data.corpus_receipt import read_receipt
+    key = B.receipt_key(PREFIX, pid, bundle.bundle_id)
+    assert read_receipt(s3, BUCKET, key).labels is None, "fixture must be unlabelled to discriminate"
+
+    # The bytes are all there, so the OLD definition of done is satisfied — and that is the point.
+    assert B.bundle_is_done(bundle, pid, s3, BUCKET, PREFIX) is True
+    assert B.bundle_is_done(bundle, pid, s3, BUCKET, PREFIX, labels=False) is True
+    assert B.bundle_is_done(bundle, pid, s3, BUCKET, PREFIX, labels=True) is False, (
+        "an unlabelled bundle was declared done for a --labels run: a relaunch would skip it and "
+        "the corpus would ship a curriculum covering only the rebuilt fraction"
+    )
+
+
+def test_a_labelled_bundle_IS_done_for_a_run_that_asked_for_labels_and_for_one_that_did_not():
+    """The other half, and the asymmetry is deliberate.
+
+    `labels=True` over a labelled bundle must skip — otherwise the fix turns every resume into a full
+    rebuild and the 169-bundle saving it exists to enable is lost. And `labels=False` over a LABELLED
+    bundle must ALSO skip: the labels are a strict superset of what that run asked for, and
+    rebuilding to discard them would be the destructive over-reaction `--force` exists to make
+    explicit.
+    """
+    s3 = FakeS3()
+    plan = B.plan_document([_spec()])
+    pid = plan["plan_id"]
+    bundle = _small(B.bundles_of(plan)[0])
+    _run_labelled(bundle, plan, _spec(), s3, labels=True)
+
+    from edullm_data.corpus_receipt import read_receipt
+    rec = read_receipt(s3, BUCKET, B.receipt_key(PREFIX, pid, bundle.bundle_id))
+    assert rec.labels is not None and rec.labels.documents > 0, "fixture must be labelled"
+
+    assert B.bundle_is_done(bundle, pid, s3, BUCKET, PREFIX, labels=True) is True
+    assert B.bundle_is_done(bundle, pid, s3, BUCKET, PREFIX, labels=False) is True
+    # The shard checks are NOT weakened by the labels branch: a labelled bundle missing a shard is
+    # still not done. Otherwise the new early-return would have bypassed the original guarantee.
+    # The key is taken from the STORE, not rebuilt from the receipt, so this cannot pass by deleting
+    # a key nothing reads.
+    shard_key = sorted(k for (b, k) in s3._store if b == BUCKET and k.endswith(".u32le.bin"))[0]
+    s3._store.pop((BUCKET, shard_key))
+    assert B.bundle_is_done(bundle, pid, s3, BUCKET, PREFIX, labels=True) is False
+    assert B.bundle_is_done(bundle, pid, s3, BUCKET, PREFIX, labels=False) is False
+
+
+def test_the_default_is_labels_not_requested_so_every_historical_receipt_stays_done():
+    """A default of `True` would declare the entire published corpus unbuilt.
+
+    Asserted positionally, with no keyword at all, because the risk is a signature change silently
+    altering what ~20 existing call sites and every historical receipt mean by "done".
+    """
+    s3 = FakeS3()
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    _run_labelled(bundle, plan, _spec(), s3, labels=False)
+    assert B.bundle_is_done(bundle, plan["plan_id"], s3, BUCKET, PREFIX) is True
+
+    import inspect
+    sig = inspect.signature(B.bundle_is_done)
+    assert sig.parameters["labels"].default is False
+    assert sig.parameters["labels"].kind is inspect.Parameter.KEYWORD_ONLY, (
+        "keyword-only, so no positional caller can pass a bucket/prefix into it by accident"
+    )
+
+
+def test_the_run_driver_passes_its_labels_flag_into_the_skip_decision(monkeypatch):
+    """🔴 The predicate being label-aware is worthless if `_cmd_run` does not tell it.
+
+    This is the seam the audit's F13 note ends on — the fix is ~5 lines and most of them are the
+    wiring. Driven through the REAL `_cmd_run` with a captured `bundle_is_done`, so a future refactor
+    that drops the keyword fails here rather than at the end of a 13 h build.
+
+    **`run_bundle` is captured too, and the two must AGREE.** A driver that told the skip predicate
+    `True` and the builder `False` would rebuild every bundle and label none of them — the same
+    12%-coverage corpus by a different route, and no gate between here and `build_order` sees it.
+    """
+    import argparse
+
+    plan = B.plan_document([_spec()])
+    asked_skip: list[bool] = []
+    asked_build: list[bool] = []
+
+    def _capture_done(bundle, plan_id, s3, bucket, prefix, *, labels=False):
+        asked_skip.append(labels)
+        return False  # never skip, so `run_bundle` is reached and its flag is observable too
+
+    def _capture_run(*a, **kw):
+        asked_build.append(kw["labels"])
+        return {
+            "bundle_id": "tiny--train", "receipt_key": "k", "receipt_sha256": "x",
+            "shards": 1, "tokens_out": 1, "unfilled": 0,
+            "filter": {"seen": 1, "kept": 1, "duplicates": 0, "contaminated": 0,
+                       "normalization": "n"},
+            "keep": None,
+            "length": {"min_tokens": 64, "seen": 1, "kept": 1, "dropped_short": 0,
+                       "dropped_empty": 0, "kept_tokens": 1, "mean_kept_tokens": 1.0,
+                       "drop_fraction": 0.0},
+            "attrition": [],
+        }
+
+    monkeypatch.setattr(B, "_require_batch", lambda **kw: None)
+    monkeypatch.setattr(B, "_assert_tokenizers_parallelism", lambda: None)
+    monkeypatch.setattr(B, "_s3", lambda **kw: FakeS3())
+    monkeypatch.setattr(B, "_load_plan", lambda *a, **kw: plan)
+    monkeypatch.setattr(B, "load_registry", lambda p: ([_spec()], {}))
+    monkeypatch.setattr(B, "load_tokenizer", lambda d: (WordTok(), 100257, 100278))
+    monkeypatch.setattr(B, "bundle_is_done", _capture_done)
+    monkeypatch.setattr(B, "run_bundle", _capture_run)
+
+    def _args(**over):
+        base = dict(
+            allow_local=True, bucket=BUCKET, prefix=PREFIX, plan_id=plan["plan_id"],
+            registry=None, shard=0, of=1, tokenizer_dir="/nonexistent",
+            no_decontaminate=True, force=False,
+        )
+        base.update(over)
+        return argparse.Namespace(**base)
+
+    for want in (True, False):
+        asked_skip.clear()
+        asked_build.clear()
+        assert B._cmd_run(_args(labels=want)) == 0
+        assert asked_skip and all(v is want for v in asked_skip), (
+            f"_cmd_run(labels={want}) told the skip predicate {asked_skip}"
+        )
+        assert asked_build == asked_skip, (
+            "the skip predicate and the builder were told different things about labels — a build "
+            "that rebuilds everything and labels nothing is the same 12%-coverage corpus"
+        )
+
+    # And with NO `labels` attribute at all — every hand-built Namespace in this suite, and the shape
+    # a job def registered before the flag existed produces. Must read as "not requested", not raise.
+    asked_skip.clear()
+    asked_build.clear()
+    assert B._cmd_run(_args()) == 0
+    assert asked_skip and all(v is False for v in asked_skip)
+    assert asked_build == asked_skip
+
+
 def test_the_receipt_is_written_only_after_its_shards_verify():
     """Order matters: a receipt over broken shards is how a later run skips broken work.
 

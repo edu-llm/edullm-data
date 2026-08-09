@@ -989,6 +989,13 @@ def _check_labels(receipt: Receipt, s3: S3, bucket: str) -> list[Violation]:
     a property of the SET and is the failure mode that actually matters (a partial ordering that
     silently omits whole sources). Smuggling the policy in as a per-receipt default would fail every
     historical receipt.
+
+    ✅ **That delegation is now IMPLEMENTED** — :func:`_check_set_labels`, emitting
+    ``bundle-set-mixed-labels``. It was not, for as long as the paragraph above claimed it, and the
+    audit that found the gap found it by grepping ``verify_bundle_set`` for the string ``labels``
+    rather than by reading this sentence. **A docstring describing a delegation is indistinguishable
+    from a docstring describing a wish;** the pair of them is only honest because the named function
+    exists and has a test that fails when it is deleted.
     """
     record = receipt.labels
     if record is None:
@@ -1717,6 +1724,7 @@ def verify_bundle_set(
     v += _check_set_file_shard_families(by_stream, expected)
 
     v += _check_set_provenance(receipts)
+    v += _check_set_labels(receipts)
     v += _check_set_shards(receipts)
 
     if s3 is not None and bucket is not None:
@@ -1922,6 +1930,67 @@ def _check_set_file_shard_families(
                         owner[shard.path] = r.file_shard
 
     return v
+
+
+def _check_set_labels(receipts: Sequence[Receipt]) -> list[Violation]:
+    """ALL bundles carry curriculum labels, or NONE do. A mixed set is the silent failure.
+
+    **This function is the delegation :func:`_check_labels` promised and nobody implemented.** Its
+    docstring said the all-or-none policy *"is a property of the SET and is the failure mode that
+    actually matters (a partial ordering that silently omits whole sources) —* ``verify_bundle_set``
+    *is where it belongs"*, and ``verify_bundle_set`` did not contain the string ``labels`` at all.
+    A comment describing a fix reads exactly like a comment describing a defect, which is why this
+    was found by an audit and not by reading.
+
+    **Why the mixed set is worse than either uniform case, and why no other check reaches it.**
+    Every bundle in a partially-labelled corpus is individually valid: its shards are present at the
+    right size, its receipt verifies, and :func:`_check_labels` returns ``[]`` on a receipt whose
+    ``labels`` is ``None`` — correctly, since a single receipt cannot know what the run asked for.
+    So the corpus passes every gate, and the curriculum built over it covers only the labelled
+    fraction. The 2026-08-09 build made this concrete: 169 unlabelled bundles + 16 labelled would
+    have been **~12% label coverage**, and the first thing to notice would have been
+    ``corpus_order.build_order`` refusing 116 of 132 streams at the very end of the pipeline.
+
+    **All-or-none, not all.** A corpus with no labels anywhere is legitimate — every published
+    dataset before the curriculum workstream is exactly that, and this check must not retroactively
+    condemn them. What cannot be legitimate is the SPLIT, because it means the operator's intent
+    changed partway through a set that will be published as one artifact.
+
+    ⚠️ **This does not replace ``corpus_build.bundle_is_done``'s label-awareness, it backstops it.**
+    That predicate stops a mixed set from being CREATED by a resume; this one stops one from being
+    published if it is created some other way (two operators, two job-def revisions, a hand re-run).
+    Neither is sufficient alone: the resume fix cannot see a set assembled from two separate runs,
+    and this check fires only at ``verify`` time, after the compute is already spent.
+    """
+    if not receipts:
+        return []
+    labelled = sorted(r.bundle_id for r in receipts if r.labels is not None)
+    bare = sorted(r.bundle_id for r in receipts if r.labels is None)
+    if not labelled or not bare:
+        return []
+
+    # Name the SMALLER side, and say which side it is. The actionable question is "what do I
+    # re-run", and on the shape this was written for (169 unlabelled / 16 labelled) the minority is
+    # the labelled one — so a message hardcoded to list "the ones missing labels" would print 169
+    # bundle ids and bury the answer.
+    minority, majority, which = (
+        (labelled, bare, "HAVE") if len(labelled) <= len(bare) else (bare, labelled, "LACK")
+    )
+    shown = ", ".join(minority[:10]) + (f", … (+{len(minority) - 10} more)" if len(minority) > 10 else "")
+    return [
+        Violation(
+            "bundle-set-mixed-labels",
+            f"{len(labelled)} of {len(receipts)} receipts carry curriculum labels and "
+            f"{len(bare)} do not. **A partially-labelled corpus passes every other check**: each "
+            f"bundle's shards are present at the right size, each receipt verifies, and the "
+            f"per-receipt labels check is skipped entirely when a receipt has none — so the "
+            f"curriculum built over this corpus would order only the labelled "
+            f"{len(labelled) / len(receipts):.1%} of it and silently omit the rest. The "
+            f"{len(minority)} that {which} labels: {shown}. Re-run so the set is uniform — "
+            f"`corpus_build run --labels` now rebuilds exactly the bundles that lack them "
+            f"(bundle_is_done is label-aware), so this needs no --force.",
+        )
+    ]
 
 
 def _check_set_provenance(receipts: Sequence[Receipt]) -> list[Violation]:
