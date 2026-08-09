@@ -1,0 +1,81 @@
+{
+  "_README": [
+    "TEMPLATE, NOT THE DEPLOYED ARTIFACT. The live policy on s3://edullm-data-us-east-2 differs",
+    "from this file by EXACTLY ONE substitution: <ACCOUNT_ID> -> the real 12-digit account id.",
+    "Nothing else differs. The placeholder is here because this is a public repo (CLAUDE.md).",
+    "",
+    "VERIFY THE DEPLOYED POLICY MATCHES THIS TEMPLATE — run this, do not eyeball it.",
+    "STEP 1, get the live policy + account id. In an agent session a bare `aws` has NO",
+    "credentials (everything goes through the sb-aws broker), so fetch them that way and",
+    "paste the JSON into /tmp/live.json. From a normally-configured shell the plain CLI works:",
+    "  aws s3api get-bucket-policy --bucket edullm-data-us-east-2 --query Policy --output text \\",
+    "    > /tmp/live.json",
+    "  aws sts get-caller-identity --query Account --output text          # -> ACCT",
+    "STEP 2, compare (ACCT = the 12-digit id from step 1):",
+    "  python3 - <<'EOF'",
+    "  import json",
+    "  ACCT='000000000000'   # <-- paste the real id from step 1",
+    "  live=json.load(open('/tmp/live.json'))",
+    "  t=json.load(open('infra/09-mirror-bucket-policy.json')); t.pop('_README',None)",
+    "  t=json.loads(json.dumps(t).replace('<ACCOUNT_ID>',ACCT))",
+    "  def norm(o):  # S3 collapses single-element lists to bare strings; that is not a drift",
+    "      if isinstance(o,dict):  return {k:norm(v) for k,v in o.items()}",
+    "      if isinstance(o,list):  return norm(o[0]) if len(o)==1 else [norm(x) for x in o]",
+    "      return o",
+    "  print('MATCH' if norm(live)==norm(t) else 'DRIFT'); assert norm(live)==norm(t)",
+    "  EOF",
+    "VERIFIED 2026-08-08: this comparison returns MATCH against the deployed policy.",
+    "",
+    "The norm() step is required, not a fudge: S3 rewrites a one-element aws:PrincipalArn LIST",
+    "into a bare STRING on read-back, so a plain diff reports a false difference on a correct",
+    "deployment. A check that cries wolf gets ignored, which defeats the point of having one.",
+    "",
+    "A template nobody diffs against production is how a wheel shipped a Gate A function that",
+    "existed in no commit (CLAUDE.md, the 0.5.1 incident). Run the diff, do not assume.",
+    "",
+    "POSTURE: WRITE-CLOSED BY DESIGN. Only the infra deployer is exempt from the write Deny, and",
+    "that is solely so this policy stays editable. There is deliberately NO mirror-writer role, so",
+    "the bucket cannot receive the SS8B.3 sync until someone explicitly decides who writes to it",
+    "and adds them here. Owner ruling, 2026-08-08."
+  ],
+  "Version": "2012-10-17",
+  "Id": "edullm-data-us-east-2-airlock-v2",
+  "Statement": [
+    {
+      "Sid": "OnlyMirrorWriterWrites",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": [
+        "s3:PutObject",
+        "s3:PutObjectTagging",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": "arn:aws:s3:::edullm-data-us-east-2/*",
+      "Condition": {
+        "ArnNotEqualsIfExists": {
+          "aws:PrincipalArn": [
+            "arn:aws:iam::<ACCOUNT_ID>:role/sbsandbox-intern-edullm-infra-deployer"
+          ]
+        },
+        "BoolIfExists": {
+          "aws:PrincipalIsAWSService": "false"
+        }
+      }
+    },
+    {
+      "Sid": "NobodyDeletesPublishedData",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": [
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion"
+      ],
+      "Resource": "arn:aws:s3:::edullm-data-us-east-2/*",
+      "Condition": {
+        "BoolIfExists": {
+          "aws:PrincipalIsAWSService": "false"
+        }
+      }
+    }
+  ]
+}

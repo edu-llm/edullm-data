@@ -1,0 +1,118 @@
+{
+  "_comment": [
+    "Inline policy for the `edullm-final-dataset-build` Batch job role.",
+    "",
+    "Structure copied from 08-reservoir-ingest-policy.json, with the prefix changed to",
+    "`_ingest/final-dataset/*`. Created because the reservoir role is hard-scoped to",
+    "`_ingest/reservoir-dolma2/*` and a reservoir-NAMED role must not silently become the",
+    "final-dataset role -- the failure mode that produced seven separate traps on 2026-08-08.",
+    "",
+    "  aws iam create-role --role-name edullm-final-dataset-build \\",
+    "    --assume-role-policy-document file://infra/11-final-dataset-build-trust-policy.json \\",
+    "    --permissions-boundary arn:aws:iam::<ACCOUNT_ID>:policy/InternSandboxBoundary",
+    "  aws iam put-role-policy --role-name edullm-final-dataset-build \\",
+    "    --policy-name final-dataset-build \\",
+    "    --policy-document file://infra/11-final-dataset-build-policy.json",
+    "",
+    "*** --permissions-boundary IS MANDATORY ***  InternSandboxBoundary's",
+    "`DenyUnboundedPrincipalCreation` denies iam:CreateRole with a StringNotEquals condition on",
+    "`iam:PermissionsBoundary`. The deny is CONDITIONAL, not absolute: omit the flag and CreateRole",
+    "fails with `explicit deny in a permissions boundary`, which reads exactly like a capability you",
+    "do not have. Two agents read it that way on 2026-08-08 before checking the boundary document.",
+    "Every pre-existing edullm role carries this boundary; verified on edullm-reservoir-ingest.",
+    "",
+    "NeverWriteValidatorTriggeringOrTerminalNames is copied BYTE-FOR-BYTE from the reservoir",
+    "policy and must never be dropped. It is the third independent guard against an accidental",
+    "promotion, alongside the disabled `edullm-landing-manifest-created` rule and",
+    "`edullm-validator:16` no longer carrying --promote. A build child physically cannot write a",
+    "key that triggers Gate A.",
+    "",
+    "`ReadTheBootstrapWheel` is deliberately ABSENT: edullm-reservoir-build:11 is digest-pinned and",
+    "bootstraps no wheel, and an unused Allow is a standing hole.",
+    "",
+    "*** BUT _dist/ HOLDS MORE THAN THE WHEEL ***  Dropping `_dist/*` wholesale removed access to the",
+    "54 MB 13-gram decontamination index (`DECON_INDEX_KEY = _dist/eval-decontamination.bin`,",
+    "corpus_filter.py:93), which every build child MUST read. The first smoke test died on it:",
+    "`load_index` RAISES rather than returning an empty index, because -- its own docstring --",
+    "\"a build that quietly skips decontamination produces a corpus indistinguishable from a",
+    "decontaminated one; you find out when a benchmark score looks too good, months later.\"",
+    "`ReadDecontaminationIndex` below therefore names that ONE OBJECT: narrower than the `_dist/*`",
+    "it replaces, and it cannot reach the wheel. The lesson: a prefix is not its best-known file.",
+    "",
+    "*** put-role-policy REPLACES THE WHOLE DOCUMENT ***  Any edit must carry ALL statements. A",
+    "partial document silently deletes NeverWriteValidatorTriggeringOrTerminalNames -- the third",
+    "promotion guard -- and nothing would report it."
+  ],
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadWriteFinalDatasetIngestPrefix",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:GetObjectAttributes",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": "arn:aws:s3:::edullm-landing/_ingest/final-dataset/*"
+    },
+    {
+      "Sid": "NeverWriteValidatorTriggeringOrTerminalNames",
+      "Effect": "Deny",
+      "Action": "s3:PutObject",
+      "Resource": [
+        "arn:aws:s3:::edullm-landing/*manifest.json",
+        "arn:aws:s3:::edullm-landing/*_VALIDATED.json",
+        "arn:aws:s3:::edullm-landing/*_REJECTED.json",
+        "arn:aws:s3:::edullm-landing/*dataset.json"
+      ]
+    },
+    {
+      "Sid": "ListOnlyFinalDatasetIngestPrefix",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::edullm-landing",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "_ingest/final-dataset/*"
+        }
+      }
+    },
+    {
+      "Sid": "ReadLifecycleToVerifyItsOwnStagingExpires",
+      "Effect": "Allow",
+      "Action": "s3:GetLifecycleConfiguration",
+      "Resource": "arn:aws:s3:::edullm-landing"
+    },
+    {
+      "Sid": "ReadTokenizerForEncoding",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectAttributes"
+      ],
+      "Resource": [
+        "arn:aws:s3:::edullm-data/_catalog/*",
+        "arn:aws:s3:::edullm-data/tokenizer/dolma2-bpe/*"
+      ]
+    },
+    {
+      "Sid": "ReadStagedSourceParquet",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectAttributes"
+      ],
+      "Resource": "arn:aws:s3:::edullm-landing/_src/*"
+    },
+    {
+      "Sid": "ReadDecontaminationIndex",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectAttributes"
+      ],
+      "Resource": "arn:aws:s3:::edullm-landing/_dist/eval-decontamination.bin"
+    }
+  ]
+}

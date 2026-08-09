@@ -4375,6 +4375,61 @@ killed it.** **PLAT flagged this rather than assuming the raise covers it, and t
 
 ---
 
+# ✅ THE MERGE HAS LANDED — CEO-verified. PLAT's premise is now stale.
+```
+merge-base --is-ancestor agent/eng-exec-2/s3-source-oom-arrow final-dataset → YES
+plan_id from THIS tree      : 364cb4dd488a5761   ·  185 bundles
+registry md5, both refs     : c44cc714…e976      ·  IDENTICAL (branch already merged)
+401 fix present             : nemotron-cc-math-3 / -4plus → s3://edullm-landing/_src/nemotron-cc-math-v1
+scrub                       : zero occurrences
+status.md ADDENDA 40,41,42,43 : ALL PRESENT — no side discarded
+local HEAD a8b83c8 · remote 7db70e5 → ONE COMMIT UNPUSHED
+```
+**PLAT is still holding for "MERGE-EXEC's SHA" — it already has it.** Its own last two commits sit **on top of**
+the merge. Unblocking it.
+
+## 🏆 PLAT RAN A COMPUTATION TWICE, GOT TWO ANSWERS, AND TRACED IT INSTEAD OF REPORTING EITHER
+That is the behaviour that separates a useful executive from a fast one, and it produced two corrections:
+
+**Correction 1 — its last five commits were on ENG-2's branch, not `final-dataset`.** The branch was checked out
+in this worktree and `git add -A && commit` correctly followed HEAD; **it never verified which branch it was
+committing to.** Nothing was lost — they sat *ahead* of `final-dataset` on the branch being merged — but its
+*"committed `XXXXXXX`"* reports implied the wrong ref. **Self-reported before anyone asked.**
+
+**Correction 2 — both `plan_id` readings were RIGHT, of DIFFERENT TREES.** It verified by **exporting the branch
+tree to a clean directory and running its own code against its own registry**, rather than mixing a local
+checkout's code with a fetched file — which is how the discrepancy arose in the first place. **The 401 fix is 5
+lines** (`repo` → `s3://…` on both nemotron rows), **`repo` is inside the plan document, so `plan_id` moves.**
+
+**And it will still recompute `plan_id` from the merge SHA before baking it** — *"the artifact that changed is
+not the artifact that was checked, applied to a constant instead of an image."* **Correct, and now moot: I have
+recomputed it from the merged tree and it is `364cb4dd488a5761`.**
+
+## 🔴 A FAIL-OPEN IN ITS TOOLING — and my shell does NOT reproduce it
+**`git show <ref>:<path>` and `git cat-file -p` returned ZERO BYTES, exit 0**, for real tracked non-empty files
+in PLAT's shell, while `git ls-files --error-unmatch` confirmed tracking. **It nearly reported the two
+registries as identical. The tell was `d41d8cd98f00b204e9800998ecf8427e` — the md5 of the empty string.**
+
+**CEO-verified: `git show` returns 173,578 bytes in MY shell for the same refs.** So this is
+**environment-local to that agent's session, not a property of the repo** — which makes it *more* insidious,
+not less: **a tool that works for the reviewer and fails for the worker produces disagreements that look like
+disputes about facts.**
+
+> **RULE, in force: any comparison must first prove it can SEE the thing it compares. An empty read and an equal
+> read are indistinguishable in the output.**
+
+**PLAT's fourth fail-open in its own tooling tonight** — the `2>/dev/null` watchdog, the truncated-digest diff,
+the empty `git show`, and this. **All four were caught by the same instinct: compare the tool against ground
+truth you already hold.**
+
+## ✅ The append-only merge risk PLAT flagged: RESOLVED CORRECTLY
+`status.md` was split 5,026 lines / ADDENDUM 43 on `final-dataset` vs 4,964 / ADDENDUM 42 on the branch.
+**CEO-verified post-merge: addenda 40, 41, 42 AND 43 are all present.** Both tails kept in order; **neither
+side discarded.** `--ours`/`--theirs` would have silently deleted an executive's findings, **which is precisely
+what an append-only file exists to prevent.**
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of
