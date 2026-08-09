@@ -5059,3 +5059,68 @@ answer from a broken read.** The pattern is now explicit enough to state as a ru
 
 **I have used only `git archive`/`git diff` for cross-ref reads since discovering this**, and the `plan_id`
 figures in ADDENDUM 43 were produced that way — not by the method that failed.
+
+---
+
+# ✅ ADDENDUM 44 — THE PUSHED SHA IS `a8b83c8` ON THE IMAGE-BUILD BRANCH, and my resume finding is CLOSED
+
+## 🔧 CORRECTION TO THE CEO — `a8b83c8` IS pushed. It is on `edullm/**`, not `final-dataset`.
+The CEO read "one commit unpushed" and offered to push it. **Both readings were of different refs:**
+```
+origin/final-dataset               = f5a4017…      (far behind — 51+ commits)
+origin/edullm/final-dataset-phase0 = a8b83c8…      == local HEAD, IDENTICAL
+origin/main                        = 9f62849…
+```
+**`a8b83c8` is already on `origin/edullm/final-dataset-phase0`, which is the ONLY namespace images build
+from** (CLAUDE.md: images build only from `edullm/**`; a merge to `main` builds nothing, silently).
+**Nothing needs pushing, and pushing to `final-dataset` would not help the build** — that branch is not an
+image source. The CEO's `7db70e5`/`a8b83c8` figures are both on the `edullm/**` ref, not on `final-dataset`.
+
+**Verified from the PUSHED ref, not from my working tree** — extracted with `git archive` (the method that
+works here) and asserted non-empty before comparing, per my own rule:
+```
+registry md5 : c44cc7140ba3f9378c0b93749d88e976   (173,578 B — non-empty ASSERTED first)
+plan_id      : 364cb4dd488a5761      bundles 185
+401 fix      : nemotron-cc-math-3 / -4plus -> repo = s3://edullm-landing/_src/nemotron-cc-math-v1
+__version__  : 0.9.1                  <- UNCHANGED by the merge, so the existing assert still holds
+```
+**`PLAN_ID = 364cb4dd488a5761` independently reproduced from the pushed tree.** Agrees with the CEO's
+recomputation from the merged tree. **That is the recomputation I promised, done against the exact bytes the
+image will be built from.**
+
+## No image exists for `a8b83c8` — and the newest ECR image is an UNRELATED workstream
+```
+32372ba70b12  2026-08-08 13:24  <- NEWEST. corpus_labels.py ABSENT · 401fix NO · arrowfix NO
+e38d007c1a9e  2026-08-08 10:38  sha256:4df94c4c…  (what build:13 pins)
+```
+`32372ba` is **`feat(olmoe-mix-0824): ingest + publish drivers for two nested pretrain releases`** — a
+different workstream that contains **none** of tonight's fixes. **Pinning the newest image by recency would
+have shipped a corpus with no labels, no s3:// sources, and the `combine_chunks` regression.** Third time
+tonight recency has been the wrong selector for an image. **A build is genuinely required.**
+
+## ✅ MY RESUME FINDING IS CLOSED — verified in the merged code, not accepted from the report
+The trap I found (ADDENDUM 37) is fixed on both halves:
+```
+bundle_is_done(bundle, plan_id, s3, bucket, prefix, *, labels: bool = False)   <- NEW parameter
+  body:  if labels and receipt.labels is None:  -> NOT done, rebuild it
+  docstring: "labels=False and the receipt HAS labels -> still done" (strict superset — correct)
+_check_set_labels(receipts) -> emits "bundle-set-mixed-labels"      corpus_receipt.py:1935
+```
+
+## ⚖️ AND I RETRACT AN ALARM I NEARLY FILED
+I grepped for callers of `_check_set_labels`, got only the definition and a docstring, and **started writing
+that it was another `ReadStats.problems()`-style orphan — a check with zero live callers.** **It is called**,
+at **`corpus_receipt.py:1727`, inside `verify_bundle_set`**, alongside `_check_set_shards`,
+`_check_set_provenance` and `_check_set_file_shard_families`.
+
+**My grep pattern was the bug** — I searched a name pattern that matched definitions and prose but scoped the
+file list in a way that missed the call line, then read the absence as meaningful. **That is precisely the
+error PLAT-1 made on B3 (*"absence of a string is not absence of behaviour"*) and precisely the error I
+warned about four addenda ago.** Knowing the failure mode is not the same as not committing it.
+**The check is live. ENG-3's fix is complete. The retraction is the finding.**
+
+## Next, unchanged
+Build the image from **`a8b83c8`** (already pushed to `edullm/final-dataset-phase0`) → behavioural labels
+preflight → prepare the combined revision (**15,806** + **`PLAN_ID=364cb4dd488a5761`** + `--labels` +
+re-derived asserts) → **register only after OOM-DIAGNOSE reports**, since its verdict may move the memory
+figure → report by number. **No launch until the CEO rules on the OOM verdict.**
