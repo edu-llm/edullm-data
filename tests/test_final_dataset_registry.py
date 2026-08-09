@@ -23,8 +23,15 @@ from edullm_data.corpus import CorpusSpec
 
 REGISTRY = Path(__file__).resolve().parents[1] / "artifacts" / "final-dataset" / "corpus-registry.json"
 
-#: The report's 1,000B nominal less the 14B dolma3-QA row struck by CEO ruling 2026-08-08.
-EXPECTED_TOTAL_TOKENS = 986_000_000_000
+#: The committed mix total. **Owner-ruled 936 B on 2026-08-09.**
+#:
+#: History, each move deliberate and each recorded with its cause:
+#:   1,000 B  the report's nominal
+#:     986 B  less the 14 B dolma3-QA row, struck by CEO ruling 2026-08-08
+#:     936 B  less 50 B from `stackv2-edu`, whose target was corrected 108 B -> 58 B because the
+#:            old target was **3.74x THE ENTIRE SOURCE** (true pool 61.64 B MEASURED, not 707 B).
+#: A changed sum is a changed corpus, so this literal moves only alongside the registry.
+EXPECTED_TOTAL_TOKENS = 936_000_000_000
 
 #: Under-1-epoch is the corpus's whole no-repetition claim. FinePDFs-Edu at 0.90 is the max.
 MAX_EPOCHS = 0.99
@@ -101,13 +108,69 @@ def test_every_pinned_revision_is_a_40_char_sha(rows):
 
 
 def test_no_row_draws_more_than_its_pool_holds(rows):
-    """Drawing past the pool means repeating documents, which the epoch guard exists to flag."""
+    """Drawing past the pool means repeating documents, which the epoch guard exists to flag.
+
+    🔴 **THIS GUARD EXISTED AND PASSED THROUGH THE `stackv2-edu` INCIDENT — read why before
+    trusting it.** The row declared `target 108 B` against `pool 707 B`, so `pool >= target` held
+    comfortably. The target really was **3.74x the entire source**; the pool was 24.5x too high,
+    having been joined from `FINAL-DATASET-REPORT.md:85`'s row for `common-pile/stackv2` — the RAW
+    repo — while this row's `repo` is `common-pile/stackv2_edu_filtered`. The edu filter keeps 5.33%
+    of raw bytes.
+
+    **So the lesson is not "add this guard", it is that BOTH sides of it are producer assertions.**
+    A relation between two declared numbers cannot detect that one of them describes a different
+    dataset. What would have caught it is the check below — that the pool is consistent with the
+    source's own measured bytes — and nothing in this suite can do that offline. It is named in
+    `test_the_pool_figures_are_traceable_to_a_measurement` as the gap it is.
+    """
     for r in rows:
         pool = r["pool_tokens"]
         if pool is not None:
             assert pool >= r["target_tokens"], (
                 f"{r['key']}: draws {r['target_tokens']:,} from a {pool:,} pool"
             )
+
+
+def test_every_DRAWN_row_declares_a_pool_so_the_guard_above_is_never_skipped(rows):
+    """The guard is `if pool is not None`, so a drawn row with a null pool is SILENTLY EXEMPT.
+
+    That is the fail-open shape this repo keeps paying for: the check does not fail, it stops
+    applying. MEASURED today: 0 of the 132 drawn rows have a null pool, so the guard covers the whole
+    mix — and this test is what keeps that true when a row is added.
+    """
+    naked = [r["key"] for r in rows if r["target_tokens"] > 0 and r["pool_tokens"] is None]
+    assert naked == [], (
+        f"{len(naked)} DRAWN row(s) declare no pool and are therefore exempt from the "
+        f"target<=pool guard and from the epoch guard: {naked}. A reserve row (target 0) may have a "
+        f"null pool; a drawn one may not."
+    )
+
+
+def test_the_pool_figures_are_traceable_to_a_measurement(rows):
+    """⚠️ **A GAP, asserted as far as it can be offline, and NAMED where it cannot.**
+
+    `pool_tokens` is a producer assertion no offline check can falsify — that is exactly how
+    `stackv2-edu` carried a 24.5x-too-high pool through every gate in this file. What IS checkable is
+    that the tightest rows, where a pool error converts directly into an over-draw, carry their
+    provenance in a trap so the next reader can re-derive it rather than inherit it.
+
+    The two rows above 90% of pool today are `stackv2-edu` (94.09%) and `finepdfs-edu` (90.00%).
+    """
+    tight = sorted(
+        ((r["target_tokens"] / r["pool_tokens"], r) for r in rows
+         if r["pool_tokens"] and r["target_tokens"]),
+        key=lambda t: -t[0],
+    )
+    assert tight[0][0] <= 1.0, f"{tight[0][1]['key']} draws past its pool"
+    for ratio, r in tight:
+        if ratio < 0.90:
+            break
+        blob = " ".join(r.get("traps", []))
+        assert "MEASURED" in blob, (
+            f"{r['key']} draws {ratio:.1%} of its declared pool, so a wrong pool converts straight "
+            f"into an over-draw — but no trap on the row says the pool was MEASURED. The pool is a "
+            f"producer assertion; at this tightness it needs its derivation written down."
+        )
 
 
 def test_the_epoch_table_recomputes_and_nothing_reaches_one_epoch(rows):

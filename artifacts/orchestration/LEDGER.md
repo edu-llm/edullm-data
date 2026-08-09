@@ -4809,6 +4809,141 @@ outside its brief. **Correct restraint.**
 
 ---
 
+# ⚖️ THE SHORTFALL IS MEASURED FROM THE COMPLETED RUN — 61.5 B, not 28.9 B. PLAT's floor wins.
+
+**Six of seven parts SUCCEEDED and printed real counts** (`p00` 8.84 · `p01` 9.03 · `p02` 8.99 · `p03` 8.39 ·
+`p05` 8.77 · `p06` 8.69 B). CEO-recomputed:
+```
+6 parts       = 52.71 B delivered        7-part projection ≈ 61.49 B
+registry target 108.0 B  →  46.5 B UNMET = 43.1%
+corpus unbackfilled: 986 − 46.5 = ~939 B   (not the ~907 B I told the owner)
+```
+🔑 **`p05of07` delivered 8.77 B against a planned 15.35 B — 42.9% short — and EXITED 0.**
+**The `partial_source=True` no-raise path is not a future risk. It already fired, in the run that completed, and
+every child reported success.** The escalation is confirmed by the build's own output.
+
+## The two estimates disagree ~2×, and the floor outranks the estimate
+| method | whole source |
+|---|---|
+| OOM-STACKV2 — gzip ISIZE × text-fraction 0.701 × 4.025 chars/token (darwin) | **28.9 B** |
+| **PLAT — six real `DONE` lines** | **≥52.7 B delivered, ~61.5 B projected** |
+
+**CEO arithmetic: a floor cannot exceed the total, so OOM-STACKV2 is low by at least 1.82×.** Its document count
+is 2.24× off as well. **One of its three calibration constants — text fraction, chars/token, or ISIZE sampling —
+is wrong**, and the likeliest is chars/token: it warned that `chars-per-token.json` sampled **one unrepresentative
+file**, then produced its own figure from **four** files, which is better and still not the 48.
+
+**RULING: the corpus arithmetic uses ~61.5 B. The 32.6 B difference is ≈3.3% of the corpus** — material to what
+the owner is deciding, and **PLAT correctly flagged it rather than adjudicating the mix itself.**
+
+⚠️ **This does NOT retract OOM-STACKV2's finding.** Both methods independently confirm the 707 B pool and 108 B
+target are far too high; **only the magnitude was wrong.** *An over-harsh retraction is still an error* — its
+elimination of both OOM candidates, the `_longest_run_of` int64 find, and the `_gunzip_lines` double-hold all
+stand on their own measurements.
+
+# ✅ CO-SCHEDULING REFUTED — by placement data, not inference
+| idx | instance | outcome |
+|---|---|---|
+| **172, 173, 177** | `7ffccb45` — **three** stackv2 children | **ALL SUCCEEDED** |
+| **175** | `5f0c2834` | 🔴 **OOM 137** |
+| **176** | `5f0c2834` — **same instance as 175** | **SUCCEEDED** |
+
+**The box with three children had zero failures; the box with two lost one — and the survivor shared 175's
+instance for 3.48 h.** Same source, same geometry, same neighbours, opposite outcomes.
+
+⏱ **And a timing fact that sharpens the residual: 175 was killed at 13,531 s while its twin 176 finished at
+12,519 s** — it died **1,012 s after a sibling doing identical work had already exited 0.** **That is slow
+accumulation, not one large allocation** — consistent with the fragmentation candidate and inconsistent with
+every term we have measured. **Untestable read-only; it needs a Linux container. Genuinely unexplained, and I am
+not absorbing it.**
+
+**PLAT also extended my correction:** `p05`'s `mean_tok=981.63` — **~1 KB documents, two orders below
+`pre-1929-books`' 400 KB.** So the char cap never engages, **and with the OOM unexplained, nothing bounds this
+source at all.**
+
+## 🔧 Build 2 failed on `seq -w 0 82` — two-digit output against three-digit `EDULLM_SOURCE_000..082`
+Every lookup unset, `-u` killed it. **PLAT's own assessment is the right one and harsher than mine would be:**
+*"Second cleverness failure running — the stored spec writes 83 explicit lines precisely because this is fiddly,
+and I substituted a loop for it after having just been burned for not reading that spec."*
+**Knowing a failure mode is not the same as not committing it** — its own line from earlier tonight, now
+demonstrated twice by its author. Build 3 writes them explicitly. ~1 min each; payload and guards already
+validated.
+
+---
+
+# ✅ RESOLVED — the 2× discrepancy was PAGINATION. Neither instrument was biased.
+
+**`limit=50` returns exactly 48 `.json.gz` files / 38.139 GB — OOM-STACKV2's exact numbers. The source has 95
+files / 83.038 GB.**
+```
+?recursive=1&limit=50    →  48 files, 38.139 GB, rel="next" TRUE   ← the truncation
+?recursive=1&limit=1000  →  95 files, 83.038 GB, rel="next" false  ← what hf_files sends
+```
+**Its ISIZE method was correct and its `k·2³²` calibration was exact** — files 0000–0047 uncompress to
+165.832 GB against its reported 165.8. **It measured half the source and never saw the `Link` header.**
+
+**CEO-verified: `corpus_build.py:1785-1797` paginates properly** — it follows `rel="next"` until exhausted.
+**So the build always saw all 95 files. This was a measurement bug, never a data bug** — and *"a 200 is weaker
+evidence than a 404"* has a sibling: **a complete-looking response can be a first page.**
+
+**Both agents were right about what they measured, and both would have been wrong to retract.** PLAT's floor was
+real; OOM-STACKV2's method was sound. **The disagreement was the finding.**
+
+## `stackv2-edu` MEASURED at **61.64 B** — and the instrument was validated against the packer FIRST
+| part | predicted | delivered | err |
+|---|---|---|---|
+| p00–p06 (6 parts) | **52.74 B** | **52.71 B** | **+0.06%** |
+
+**It ran the calibration check I ordered before trusting its own numbers.** Three further independent
+confirmations: uncompressed total **byte-identical** to `artifacts/recount/code.json` (364,981,987,035);
+`github_archive_filtered` likewise; text bytes 254.7 GB vs the card's 255. Method: ISIZE + `k·2³²` on **all 95**
+files, text fraction and chars/token from 24 MiB prefixes of **all 95 shards** (20,519 docs), plus **one file
+fully streamed** to prove the wrap correction.
+
+## 🔑 THE REGISTRY ERROR, DIAGNOSED EXACTLY — a pool figure joined to the wrong repo
+**CEO-verified at `FINAL-DATASET-REPORT.md:85`:**
+```
+| `common-pile/stackv2` (code) | 10% | 90.0B | 707.0B | 0.13 | DERIVED |
+```
+**The row is labelled `common-pile/stackv2` — the RAW repo — while the registry's `repo` field points at
+`stackv2_edu_filtered`.** The edu filter keeps **5.33% of raw bytes**, and **707 × 5.33% is the shape of the
+24.5× error.** **A pool number and a repo field were joined across two different datasets**, and the reservoir
+registry had the correct `74,810,000,000` all along. The residual 74.81 → 61.64 gap is chars/token: the recount
+sampled 4,275 docs from shard **heads**; this sampled 20,519 across full prefixes → **4.126 chars/token, CV
+0.077.**
+
+# 🛑 NO BACKFILL EXISTS — and the reason is structural, not a search failure
+| candidate | measured | verdict |
+|---|---|---|
+| `common-pile/stackv2` raw | ~2,042 B tok | 🛑 **43% CSV, 8.7% ipynb, 3.4% HTML — only 30.8% real code.** And **`CorpusSpec` has no predicate field**, so a row cannot express `score >= 2` |
+| `stackv2_html_filtered` | ~1 B tok | too small by 46× |
+| `HuggingFaceTB/stack-edu` | — | 🛑 **ships no text** — `blob_id`/`language`/`score` only; SWHID needs a Software Heritage agreement |
+| `swallow-code-v2` | 59.39 B | 🛑 **74% `license_type: no_license`**; near-duplicate at similarity 0.064 so **no dedup catches it** |
+| `the-stack-v2*`, `starcoderdata` | — | 🛑 **`gated: auto`** — per-account, ours not accepted |
+| `github_archive_filtered` | 10.33 B | ⚠️ **not code** — issue/PR prose, already claimed by QA |
+
+> **Every code candidate descends from `bigcode/the-stack-v2`.** The edu set is the Blue Oak re-filter, swallow
+> is a rewrite of the same blobs, stack-edu is pointers to the same blobs. **Summing any two is not pool
+> growth.**
+
+**Licence on what we keep is CLEAN and measured, not asserted:** 26,147/26,147 docs `license_type ==
+"permissive"`, all Blue Oak certified. **No second licence exposure added.**
+
+## ⚖️ RULING — take the correction, ship **936 B**. No backfill row.
+`pool_tokens: 61,642,058,302` · `target_tokens: 58,000,000,000` (94.1% of pool — real headroom against per-part
+variance **without relying on `partial_source`**, which is the mechanism that hid this for hours). Identity
+strings **inherited unchanged**; **no new `source_label`, so no prefix-collision risk**; `_file_shards` stays 7,
+per-part draw ~8.3 B against a measured ~8.8 B stride — **every part clears.**
+
+**Corpus 986 → 936 B (−5.1%). Code 10.95% → 6.2%.** And the mix consequence is mild where it matters: **the
+report's §4 cooldown wants code at 18%, and 58 B fully serves a 100 B stage 2 — the loss lands in the bulk
+phase, which is where the report's own 64-run sweep says code matters least.**
+
+**No rows added or removed** — smaller than the brief anticipated, and **no ordinal reallocation needed.**
+`plan_id` moves off `364cb4dd488a5761`; expected, not a defect.
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of

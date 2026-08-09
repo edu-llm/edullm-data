@@ -58,19 +58,28 @@ REGISTRY = "artifacts/final-dataset/corpus-registry.json"
 
 #: The plan id THIS REGISTRY produces. **A LITERAL, on purpose, and UPDATED DELIBERATELY.**
 #:
-#: History, because the update is the interesting part: this was ``29968a2b04008a8c`` for the
-#: pre-labels build. It moved when the registry's two Nemotron-CC-Math rows were repointed from the
-#: GATED HF repo to the staged ``s3://edullm-landing/_src/`` copy — the fix for 7 of the 16 bundle
-#: failures on 2026-08-09, 61 B tokens of the math pillar. **`plan_id` is a content address over the
-#: plan document, and `repo` is in it, so it MUST move; that it moved is the fix working.** What the
-#: literal is for is that the move be a deliberate edit to this line rather than a number that
-#: drifted. Recomputed independently before updating: 185 bundles, 39,205 train / 102 val shards,
-#: 982,752,985,088 tokens — the same work, a different source path.
-FROZEN_PLAN_ID = "364cb4dd488a5761"
+#: History, because the updates are the interesting part. TWO deliberate moves so far, each recorded
+#: with what was recomputed before the literal was touched:
+#:
+#:   29968a2b04008a8c  the pre-labels build.
+#:   364cb4dd488a5761  the 401 fix — the two Nemotron-CC-Math rows repointed from the GATED HF repo
+#:                     to the staged `s3://edullm-landing/_src/` copy (7 of 16 bundle failures,
+#:                     61 B tokens of the math pillar). 185 bundles, 39,205/102 shards,
+#:                     982,752,985,088 tokens — the SAME work, a different source path.
+#:   79e53d1e5e131649  the stackv2-edu pool/target correction, owner-ruled 2026-08-09 (ship 936 B).
+#:                     pool 707 B -> 61,642,058,302 (24.5x too high) and target 108 B -> 58 B
+#:                     (which had been 3.74x THE ENTIRE SOURCE). 185 bundles UNCHANGED — no rows
+#:                     added or removed, so no ordinal reallocation — 37,215 train / 92 val shards,
+#:                     932,749,017,088 tokens, exactly -50.00 B.
+#:
+#: **`plan_id` is a content address over the plan document, and both `repo` and `target_tokens` are
+#: in it, so each move was REQUIRED; that it moved is the change working.** What the literal is for
+#: is that every move be a deliberate edit to this line rather than a number that drifted.
+FROZEN_PLAN_ID = "79e53d1e5e131649"
 
 #: What it was before the 401 fix. Kept so the move is legible in the file that asserts it, and so a
 #: revert of the registry is recognised as a revert rather than read as a fresh baseline.
-PREVIOUS_PLAN_ID = "29968a2b04008a8c"
+PREVIOUS_PLAN_ID = "364cb4dd488a5761"
 
 
 # ======================================================================================
@@ -140,7 +149,7 @@ def test_the_plan_id_of_THIS_registry_is_the_literal_recorded_above():
     # Pinned alongside, so a legitimate re-cut has to update BOTH and the arithmetic's dependence on
     # them stays visible. These did NOT change across the 401 fix — same work, different source path.
     assert len(plan["bundles"]) == 185
-    assert sum(b["tokens"] for b in plan["bundles"]) == 982_752_985_088
+    assert sum(b["tokens"] for b in plan["bundles"]) == 932_749_017_088
 
 
 def test_the_two_plan_id_assertions_fail_for_DIFFERENT_reasons():
@@ -179,8 +188,8 @@ def test_the_plan_shape_the_order_vector_depends_on_is_also_pinned():
     train = [b for b in plan["bundles"] if b["split"] == "train"]
     val = [b for b in plan["bundles"] if b["split"] == "val"]
     assert len(plan["bundles"]) == 185
-    assert sum(len(b["shards"]) for b in train) == 39205
-    assert sum(len(b["shards"]) for b in val) == 102
+    assert sum(len(b["shards"]) for b in train) == 37215
+    assert sum(len(b["shards"]) for b in val) == 92
     assert plan["shard_tokens"] == SHARD_TOKENS == 25001984
 
 

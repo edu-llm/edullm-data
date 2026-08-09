@@ -39,18 +39,20 @@ import datetime
 import json
 import sys
 
-#: 🔴 **MOVED for the 401 fix — was `29968a2b04008a8c`.** The registry's two Nemotron-CC-Math rows
-#: were repointed from the GATED HF repo (HTTP 401, 7 of 16 bundle failures on 2026-08-09, 61 B
-#: tokens of the math pillar) to the staged `s3://edullm-landing/_src/` copy. `repo` is inside the
-#: plan document and `plan_id` is its content address, so the move is the fix working — not a
-#: regression. Recomputed independently: 185 bundles, 39,205 train / 102 val shards,
-#: 982,752,985,088 tokens — the SAME work under a new identity.
+#: 🔴 **MOVED TWICE — was `29968a2b04008a8c`, then `364cb4dd488a5761`.**
+#: (1) the 401 fix: the two Nemotron-CC-Math rows repointed from the GATED HF repo to the staged
+#:     `s3://edullm-landing/_src/` copy (7 of 16 bundle failures, 61 B tokens of the math pillar).
+#: (2) the stackv2-edu pool/target correction, owner-ruled 2026-08-09 (ship 936 B): pool 707 B ->
+#:     61,642,058,302 and target 108 B -> 58 B, the latter having been 3.74x the ENTIRE source.
+#:     185 bundles unchanged, 37,215 train / 92 val shards, 932,749,017,088 tokens.
+#: Both `repo` and `target_tokens` are inside the plan document, of which `plan_id` is the content
+#: address, so each move was required.
 #:
 #: ⚠️ This constant is a PREFIX. A stale value here reads `_ingest/final-dataset/<old>/` — an empty
 #: or half-built prefix — and the driver would report "no labels" / "no receipts" rather than
 #: anything that looks like a wrong-plan error. Verify against
 #: `tests/test_curriculum_labels.FROZEN_PLAN_ID`, which is asserted against the checked-in registry.
-PLAN_ID = "364cb4dd488a5761"
+PLAN_ID = "79e53d1e5e131649"
 BUCKET = "edullm-landing"
 PREFIX = "_ingest/final-dataset"
 DATASET_ID = "pretrain/edu-mix-983b"

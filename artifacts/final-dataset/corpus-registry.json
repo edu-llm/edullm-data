@@ -141,7 +141,7 @@
   "dclm-100"
  ],
  "_source_priority_basis": "EXPLICIT, authored by ENG-EXEC per CEO ruling 5. Highest-quality-source-wins on a cross-source duplicate: public-domain/curated reference > academic > targeted math+reasoning > code/forum > curated web > synthetic > bulk web. Split children inherit their parent's rank and are ordered within it. Replaces alphabetical order, under which 'dclm' beat every other source by accident of the letter d. NOT a measured ranking -- a judgement, recorded so it can be argued with rather than inherited silently.",
- "_wave_shape": "Split families: DCLM 100 x one local-shard dir, FineWeb-Edu 16 x one CC-MAIN dir, FinePhrase 4 configs (reading B). 161 bundles. MEASURED makespan at 8 vCPU is 51.38 h and is set by stackv2-edu--train (107.5B, one bundle) -- NOT by the child count, which no longer binds. stackv2-edu and finepdfs-edu are FLAT upstream (zero subdirectories) so no walk can split them; ESCALATED to the CEO rather than carved on a guess.",
+ "_wave_shape": "Split families: DCLM 100 x one local-shard dir, FineWeb-Edu 16 x one CC-MAIN dir, FinePhrase 4 configs (reading B). 161 bundles. MEASURED makespan at 8 vCPU is 51.38 h and is set by stackv2-edu--train (107.5B, one bundle) -- NOT by the child count, which no longer binds. stackv2-edu and finepdfs-edu are FLAT upstream (zero subdirectories) so no walk can split them; ESCALATED to the CEO rather than carved on a guess. ⚠️ STALE DERIVED FIGURE: the 107.5B/51.38h figures here were computed from stackv2-edu's PRE-CORRECTION target of 108B, which was 3.74x the entire source. The corrected target is 58B (pool 61.64B MEASURED). The RANKING these figures justify is unchanged -- stackv2-edu is still the largest single stream and still needs K=7 -- but the absolute hours are not to be re-quoted from here.",
  "corpora": [
   {
    "key": "arxiv-papers",
@@ -178,7 +178,7 @@
    "traps": [
     "config is `data`, the parent of ALL 8 configs -- NOT a single config. MEASURED at the pinned revision: `/` holds only `data/`, and `data/` holds all 8, so a bare `web_samples_v2` 404s. It was never a valid path at any revision.",
     "WHY ALL 8 AND NOT ONE: the report's stated 21.7B pool is bracketed by all-8 (25.8-32.3B DERIVED at 0.28-0.35 tok/parquet-byte), while web_samples_v2 alone is 9.1-11.4B. A 4.0B draw from one config runs 44% of its low-end pool vs the report's 0.18 epochs -- buildable, green, and a DIFFERENT corpus.",
-    "\u26a0\ufe0f OPEN, CEO/DATA: the dossier row 16 says '5 of 8 configs (a DECISION)' and never records WHICH 5. `data` takes all 8. If the exclusion was deliberate -- plausibly auto_math_text, whose `prompt` is 58.9% of `text` -- this needs 5 rows instead, and `config` is a single tree path so 5-of-8 is NOT expressible as one row.",
+    "⚠️ OPEN, CEO/DATA: the dossier row 16 says '5 of 8 configs (a DECISION)' and never records WHICH 5. `data` takes all 8. If the exclusion was deliberate -- plausibly auto_math_text, whose `prompt` is 58.9% of `text` -- this needs 5 rows instead, and `config` is a single tree path so 5-of-8 is NOT expressible as one row.",
     "NO ID COLUMN in any of the 8 configs (leaves: prompt, text_token_length, text, seed_data, format, audience) -> id_surrogate=true. The reader builds (file path, row index) per dossier B12: 'cosmopedia/data/openstax/train-00000-of-00002.parquet#87676'. B12 said file_basename, but under config 'data' basenames COLLIDE across configs (train-00000-of-00002.parquet is in BOTH openstax and wikihow, MEASURED), so the FULL path is used -- B12's design with the config segment carried by the path.",
     "A SURROGATE ID IS NOT COMPARABLE ACROSS SOURCES. It comes from our read of the file tree, not from upstream, so any cross-source anti-join or dedup keyed on `id` SILENTLY EXCLUDES this row. Not in the FinePhrase anti-join today, so no live interaction -- check id_surrogate before ever joining.",
     "NEVER ingest `prompt`: 8-59% real web text (auto_math_text 58.9%). FinePhrase's trap in a different column.",
@@ -206,10 +206,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7328000000,
    "traps": [
-    "Child 1 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 1 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -228,10 +228,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7326000000,
    "traps": [
-    "Child 2 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 2 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -250,10 +250,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7324000000,
    "traps": [
-    "Child 3 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 3 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -272,10 +272,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7327000000,
    "traps": [
-    "Child 4 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 4 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -294,10 +294,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7329000000,
    "traps": [
-    "Child 5 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 5 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -316,10 +316,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7328000000,
    "traps": [
-    "Child 6 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 6 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -338,10 +338,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7326000000,
    "traps": [
-    "Child 7 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 7 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -360,10 +360,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7325000000,
    "traps": [
-    "Child 8 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 8 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -382,10 +382,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7328000000,
    "traps": [
-    "Child 9 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 9 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -404,10 +404,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7325000000,
    "traps": [
-    "Child 10 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 10 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -426,10 +426,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7326000000,
    "traps": [
-    "Child 11 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 11 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -448,10 +448,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7334000000,
    "traps": [
-    "Child 12 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 12 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -470,10 +470,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7328000000,
    "traps": [
-    "Child 13 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 13 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -492,10 +492,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7325000000,
    "traps": [
-    "Child 14 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 14 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -514,10 +514,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7329000000,
    "traps": [
-    "Child 15 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 15 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -536,10 +536,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7328000000,
    "traps": [
-    "Child 16 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 16 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -558,10 +558,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7331000000,
    "traps": [
-    "Child 17 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 17 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -580,10 +580,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7330000000,
    "traps": [
-    "Child 18 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 18 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -602,10 +602,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7329000000,
    "traps": [
-    "Child 19 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 19 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -624,10 +624,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7324000000,
    "traps": [
-    "Child 20 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 20 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -646,10 +646,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7325000000,
    "traps": [
-    "Child 21 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 21 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -668,10 +668,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7325000000,
    "traps": [
-    "Child 22 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 22 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -690,10 +690,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7332000000,
    "traps": [
-    "Child 23 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 23 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -712,10 +712,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7330000000,
    "traps": [
-    "Child 24 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 24 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -734,10 +734,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7329000000,
    "traps": [
-    "Child 25 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 25 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -756,10 +756,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7328000000,
    "traps": [
-    "Child 26 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 26 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -778,10 +778,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7331000000,
    "traps": [
-    "Child 27 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 27 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -800,10 +800,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7335000000,
    "traps": [
-    "Child 28 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 28 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -822,10 +822,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7337000000,
    "traps": [
-    "Child 29 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 29 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -844,10 +844,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7326000000,
    "traps": [
-    "Child 30 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 30 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -866,10 +866,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7330000000,
    "traps": [
-    "Child 31 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 31 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -888,10 +888,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7335000000,
    "traps": [
-    "Child 32 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 32 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -910,10 +910,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7340000000,
    "traps": [
-    "Child 33 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 33 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -932,10 +932,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7328000000,
    "traps": [
-    "Child 34 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 34 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -954,10 +954,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7332000000,
    "traps": [
-    "Child 35 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 35 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -976,10 +976,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7337000000,
    "traps": [
-    "Child 36 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 36 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -998,10 +998,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7335000000,
    "traps": [
-    "Child 37 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 37 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1020,10 +1020,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7339000000,
    "traps": [
-    "Child 38 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 38 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1042,10 +1042,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7333000000,
    "traps": [
-    "Child 39 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 39 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1064,10 +1064,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7332000000,
    "traps": [
-    "Child 40 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 40 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1086,10 +1086,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7337000000,
    "traps": [
-    "Child 41 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 41 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1108,10 +1108,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7339000000,
    "traps": [
-    "Child 42 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 42 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1130,10 +1130,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7340000000,
    "traps": [
-    "Child 43 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 43 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1152,10 +1152,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7334000000,
    "traps": [
-    "Child 44 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 44 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1174,10 +1174,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7336000000,
    "traps": [
-    "Child 45 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 45 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1196,10 +1196,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7338000000,
    "traps": [
-    "Child 46 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 46 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1218,10 +1218,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7334000000,
    "traps": [
-    "Child 47 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 47 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1240,10 +1240,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7336000000,
    "traps": [
-    "Child 48 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 48 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1262,10 +1262,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7342000000,
    "traps": [
-    "Child 49 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 49 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1284,10 +1284,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7338000000,
    "traps": [
-    "Child 50 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 50 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1306,10 +1306,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7327000000,
    "traps": [
-    "Child 51 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 51 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1328,10 +1328,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7333000000,
    "traps": [
-    "Child 52 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 52 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1350,10 +1350,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7333000000,
    "traps": [
-    "Child 53 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 53 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1372,10 +1372,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7330000000,
    "traps": [
-    "Child 54 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 54 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1394,10 +1394,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7330000000,
    "traps": [
-    "Child 55 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 55 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1416,10 +1416,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7328000000,
    "traps": [
-    "Child 56 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 56 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1438,10 +1438,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7334000000,
    "traps": [
-    "Child 57 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 57 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1460,10 +1460,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7333000000,
    "traps": [
-    "Child 58 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 58 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1482,10 +1482,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7329000000,
    "traps": [
-    "Child 59 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 59 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1504,10 +1504,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7333000000,
    "traps": [
-    "Child 60 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 60 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1526,10 +1526,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7332000000,
    "traps": [
-    "Child 61 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 61 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1548,10 +1548,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7336000000,
    "traps": [
-    "Child 62 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 62 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1570,10 +1570,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7333000000,
    "traps": [
-    "Child 63 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 63 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1592,10 +1592,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7333000000,
    "traps": [
-    "Child 64 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 64 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1614,10 +1614,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7331000000,
    "traps": [
-    "Child 65 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 65 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1636,10 +1636,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7335000000,
    "traps": [
-    "Child 66 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 66 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1658,10 +1658,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7333000000,
    "traps": [
-    "Child 67 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 67 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1680,10 +1680,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7329000000,
    "traps": [
-    "Child 68 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 68 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1702,10 +1702,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7334000000,
    "traps": [
-    "Child 69 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 69 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1724,10 +1724,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7333000000,
    "traps": [
-    "Child 70 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 70 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1746,10 +1746,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7342000000,
    "traps": [
-    "Child 71 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 71 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1768,10 +1768,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7338000000,
    "traps": [
-    "Child 72 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 72 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1790,10 +1790,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7338000000,
    "traps": [
-    "Child 73 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 73 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1812,10 +1812,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7338000000,
    "traps": [
-    "Child 74 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 74 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1834,10 +1834,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7338000000,
    "traps": [
-    "Child 75 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 75 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1856,10 +1856,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7338000000,
    "traps": [
-    "Child 76 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 76 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1878,10 +1878,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7337000000,
    "traps": [
-    "Child 77 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 77 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1900,10 +1900,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7340000000,
    "traps": [
-    "Child 78 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 78 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1922,10 +1922,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7336000000,
    "traps": [
-    "Child 79 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 79 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1944,10 +1944,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7339000000,
    "traps": [
-    "Child 80 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 80 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1966,10 +1966,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7317000000,
    "traps": [
-    "Child 81 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 81 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -1988,10 +1988,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7322000000,
    "traps": [
-    "Child 82 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 82 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2010,10 +2010,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7318000000,
    "traps": [
-    "Child 83 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 83 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2032,10 +2032,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7320000000,
    "traps": [
-    "Child 84 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 84 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2054,10 +2054,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7324000000,
    "traps": [
-    "Child 85 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 85 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2076,10 +2076,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7323000000,
    "traps": [
-    "Child 86 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 86 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2098,10 +2098,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7318000000,
    "traps": [
-    "Child 87 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 87 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2120,10 +2120,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7320000000,
    "traps": [
-    "Child 88 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 88 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2142,10 +2142,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7321000000,
    "traps": [
-    "Child 89 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 89 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2164,10 +2164,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7320000000,
    "traps": [
-    "Child 90 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 90 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2186,10 +2186,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7322000000,
    "traps": [
-    "Child 91 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 91 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2208,10 +2208,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7320000000,
    "traps": [
-    "Child 92 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 92 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2230,10 +2230,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7318000000,
    "traps": [
-    "Child 93 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 93 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2252,10 +2252,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7323000000,
    "traps": [
-    "Child 94 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 94 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2274,10 +2274,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7321000000,
    "traps": [
-    "Child 95 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 95 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2296,10 +2296,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7322000000,
    "traps": [
-    "Child 96 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 96 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2318,10 +2318,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7324000000,
    "traps": [
-    "Child 97 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 97 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2340,10 +2340,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7326000000,
    "traps": [
-    "Child 98 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 98 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2362,10 +2362,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7321000000,
    "traps": [
-    "Child 99 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 99 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2384,10 +2384,10 @@
    "target_tokens": 4100000000,
    "pool_tokens": 7319000000,
    "traps": [
-    "Child 100 of 100 \u2014 ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
-    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock \u2014 100 ways is 1.96 h/child against a 9.96 h floor.",
+    "Child 100 of 100 — ONE local-shard dir, the finest DISJOINT unit the tree offers and the only one `config` can name (config is a single tree path, so a multi-dir row is not expressible).",
+    "100 ways, NOT the 20 the CEO ruled and NOT the 10 I first wrote. 20 was REFUSED BY THE POOL GUARD: one local dir holds ~7.33B UNIQUE tokens and a 20-way row draws 20.5B. The binding constraint is the 733B unique pool, not wall clock — 100 ways is 1.96 h/child against a 9.96 h floor.",
     "Pool is the 733B UNIQUE figure (artifacts/recount/web.json), NOT 3,764B all-copies; DCLM used a per-shard Bloom filter and Zyphra measured ~80% duplicates.",
-    "Draw is ~52% of the unique pool corpus-wide \u2014 dossier B10, escalated, NOT resolved here."
+    "Draw is ~52% of the unique pool corpus-wide — dossier B10, escalated, NOT resolved here."
    ]
   },
   {
@@ -2404,7 +2404,8 @@
    "target_tokens": 63000000000,
    "pool_tokens": 70000000000,
    "traps": [
-    "0.90 epochs -- the MAX in the corpus and the binding constraint on the under-1-epoch claim. Any reweighting that raises this breaks it."
+    "0.90 epochs -- the MAX in the corpus and the binding constraint on the under-1-epoch claim. Any reweighting that raises this breaks it.",
+    "⚠️ POOL PROVENANCE UNRECORDED. This row draws 90.0% of its declared 70 B pool -- the second-tightest in the corpus after stackv2-edu -- and nothing on the row says where 70 B came from or that it was MEASURED. That is exactly the shape of the stackv2-edu defect, which carried a 24.5x-too-high pool through every offline gate because a pool is a PRODUCER ASSERTION no relation between declared numbers can falsify. At 90% a pool error converts directly into an over-draw and breaks the under-1-epoch claim. FLAGGED, NOT FIXED: ENG-EXEC-3 did not measure it and will not invent a figure. Settle it the way stackv2-edu was settled -- gzip ISIZE across all files plus a sampled chars/token -- before FREEZE."
    ],
    "domain_column": null,
    "share_alike": false
@@ -3017,9 +3018,10 @@
    "id_column": "id",
    "domain_column": "metadata.gha_language",
    "license": "Blue Oak (100% permissive per-doc)",
-   "target_tokens": 108000000000,
-   "pool_tokens": 707000000000,
+   "target_tokens": 58000000000,
+   "pool_tokens": 61642058302,
    "traps": [
+    "⚠️ POOL AND TARGET CORRECTED 2026-08-09 (owner-ruled, ship 936 B). pool_tokens was 707,000,000,000 and target_tokens 108,000,000,000 -- the pool was 24.5x too high and the target was 3.74x THE ENTIRE SOURCE. ROOT CAUSE: FINAL-DATASET-REPORT.md:85 tabulates `common-pile/stackv2` (code) at a 707.0B pool -- the RAW repo -- while this row's `repo` is common-pile/stackv2_edu_filtered. A POOL FIGURE AND A REPO FIELD WERE JOINED ACROSS TWO DIFFERENT DATASETS. The edu filter keeps 5.33% of raw bytes, and 707 x 5.33% is the shape of the error. The reservoir registry had the correct 74.81 B all along. DO NOT restore 707 B from that report row: it describes a DIFFERENT REPO. NEW POOL 61,642,058,302 MEASURED: gzip ISIZE + k*2^32 across all 95 files, text fraction and chars/token from 24 MiB prefixes of all 95 shards (20,519 docs, real dolma2 tokenizer), one file streamed whole to prove the wrap correction. VALIDATED before being trusted against the packer's own DONE lines: predicted 52.74 B vs delivered 52.71 B across six real parts, +0.06%. Target 58 B = 94.1% of pool, which leaves headroom for per-part filter variance WITHOUT relying on partial_source -- the no-raise mechanism that hid this. Per-part draw ~8.3 B against a measured ~8.8 B stride, so every part clears.",
     "73 gha_language values -> 73 PERMANENT directories inside manifest_sha256. Fold to top ~20 + 'other'; the fold map is a READER ARGUMENT, not a spec field.",
     "SLUG THE VALUE: 'C#' publishes clean, then urlparse sends everything after '#' into the URI fragment. C#->c-sharp, C++->c-plus-plus.",
     "Files at repo root as stack-edu-NNNN.json.gz -- the prefix does not match the repo name."
@@ -3028,13 +3030,13 @@
    "share_alike": false
   }
  ],
- "_total_target_tokens": 986000000000,
- "_total_note": "986B = the report's 1,000B nominal less the 14B dolma3-QA row struck by CEO ruling. Per-source targets are the COMBINED stage-1 + stage-2 draw because a source is READ ONCE; the report's two tables are per stage and are never summed there. Nemotron-CC-Math's 61B combined is split 38/23 across configs 3 and 4plus in proportion to their measured 83.6B/50.4B pools.",
+ "_total_target_tokens": 936000000000,
+ "_total_note": "986B = the report's 1,000B nominal less the 14B dolma3-QA row struck by CEO ruling. Per-source targets are the COMBINED stage-1 + stage-2 draw because a source is READ ONCE; the report's two tables are per stage and are never summed there. Nemotron-CC-Math's 61B combined is split 38/23 across configs 3 and 4plus in proportion to their measured 83.6B/50.4B pools. ⚠️ CORRECTED 2026-08-09 (owner-ruled, ship 936 B): was 986,000,000,000. stackv2-edu's target went 108,000,000,000 -> 58,000,000,000 (-50 B) because the old target was 3.74x THE ENTIRE SOURCE -- its pool was 707 B, joined in error from FINAL-DATASET-REPORT.md:85's row for the RAW `common-pile/stackv2`, while this row reads `common-pile/stackv2_edu_filtered`. True pool 61,642,058,302 MEASURED.",
  "_file_shards": {
   "stackv2-edu": 7,
   "finepdfs-edu": 4,
   "nemotron-cc-math-3": 3,
   "nemotron-cc-math-4plus": 2
  },
- "_file_shards_basis": "CEO-authorized 2026-08-08. K parts per source for FILE-sharding: each part reads hf_files(spec)[i::K] -- a STRIDE, never a contiguous block. These four sources are FLAT upstream (0 subdirectories: 95/100/57/46 payload files MEASURED at the pinned revisions), so registry-row splitting on disjoint subdirectories cannot reach them and file-sharding is the only lever. Unsplit, stackv2-edu--train is 107.5B = 51.38 h on one 8-vCPU child and sets the whole makespan while 47 children idle. With these K: longest child 7.53 h, makespan 11.07 h at 48x8 -- 40.3 h saved. K chosen so every part clears the 9.96 h floor with headroom; striding holds worst-case load imbalance to 2.6% (contiguous would be 14.1% on stackv2-edu). VAL is what binds K, not train: stackv2-edu has 4,298 train shards but only 21 val -- verified by the CEO to yield zero empty parts at every K here. Absent this key, plan_document emits the UNSHARDED plan (2dee727972725556, 161 bundles); with it, 68ebedaaddc7eb06 / 185 bundles is authoritative."
+ "_file_shards_basis": "CEO-authorized 2026-08-08. K parts per source for FILE-sharding: each part reads hf_files(spec)[i::K] -- a STRIDE, never a contiguous block. These four sources are FLAT upstream (0 subdirectories: 95/100/57/46 payload files MEASURED at the pinned revisions), so registry-row splitting on disjoint subdirectories cannot reach them and file-sharding is the only lever. Unsplit, stackv2-edu--train is 107.5B = 51.38 h on one 8-vCPU child and sets the whole makespan while 47 children idle. With these K: longest child 7.53 h, makespan 11.07 h at 48x8 -- 40.3 h saved. K chosen so every part clears the 9.96 h floor with headroom; striding holds worst-case load imbalance to 2.6% (contiguous would be 14.1% on stackv2-edu). VAL is what binds K, not train: stackv2-edu has 4,298 train shards but only 21 val -- verified by the CEO to yield zero empty parts at every K here. Absent this key, plan_document emits the UNSHARDED plan (2dee727972725556, 161 bundles); with it, 68ebedaaddc7eb06 / 185 bundles is authoritative. ⚠️ STALE DERIVED FIGURE: the 107.5B/51.38h figures here were computed from stackv2-edu's PRE-CORRECTION target of 108B, which was 3.74x the entire source. The corrected target is 58B (pool 61.64B MEASURED). The RANKING these figures justify is unchanged -- stackv2-edu is still the largest single stream and still needs K=7 -- but the absolute hours are not to be re-quoted from here."
 }
