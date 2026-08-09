@@ -5323,3 +5323,83 @@ has now caught five times, and I will not copy it forward even from a working ar
 
 **Cost of the error: ~1 minute of CodeBuild.** The payload, the digest guard and the fix-presence checks were
 all validated by build 1, so build 2 reuses proven inputs.
+
+---
+
+# 🔴 ADDENDUM 47 — CO-SCHEDULING REFUTED · AND THE POOL SHORTFALL IS **ALREADY MEASURED** IN THE COMPLETED RUN
+
+## 1. The co-scheduling hypothesis is REFUTED — placement `MEASURED` from `containerInstanceArn`
+| idx | instance | wall | outcome |
+|---|---|---|---|
+| 171 | `680c36bf` | 3.59 h | SUCCEEDED |
+| **172, 173, 177** | **`7ffccb45`** (THREE stackv2 children) | 3.5–3.7 h | **ALL SUCCEEDED** |
+| 174 | `5feb26e2` | 3.03 h | SUCCEEDED |
+| **175** | **`5f0c2834`** | 3.76 h | 🔴 **OOM exit 137** |
+| **176** | **`5f0c2834`** — same instance as 175 | 3.48 h | **SUCCEEDED** |
+
+**The instance hosting THREE stackv2 children had zero failures; the one hosting TWO lost one.** And
+**176 shared 175's instance for 3.48 h and survived.** Same source, same geometry, same neighbours, same
+box — one died, one did not. **Co-scheduling does not explain it. Eliminated.**
+
+**The remaining candidate is the one OOM-STACKV2 could not test: Rust allocator behaviour under Linux
+cgroups**, since all its figures are darwin. **I cannot separate that from a read-only session either** —
+it needs a container. **Recorded as genuinely unexplained, not absorbed.**
+
+⏱ **One timing fact that sharpens it:** 175 was killed at **13,531 s**, while its twin 176 **finished
+completely at 12,519 s**. **175 died 1,012 s AFTER a twin doing the same work had already exited 0.** So it
+was not killed early in tokenization — it was still alive past the point its sibling had finished, which is
+consistent with a slow accumulation (fragmentation), not a single large allocation.
+
+## 2. 🔴 THE POOL SHORTFALL IS VISIBLE IN THE COMPLETED RUN — six `DONE` lines, no estimation
+**Six of the seven `stackv2-edu` parts SUCCEEDED and printed their real token counts.** This is not a footer
+extrapolation; it is what the packer actually emitted:
+
+| part | tokens | docs |
+|---|---:|---:|
+| p00 | 8,837,996,544 | 10,105,926 |
+| p01 | 9,027,166,208 | 10,147,220 |
+| p02 | 8,987,754,496 | 9,938,619 |
+| p03 | 8,390,238,208 | 9,750,430 |
+| p05 | 8,767,111,168 | 9,121,389 |
+| p06 | 8,689,590,272 | 9,416,781 |
+| **6 parts** | **52,699,856,896** | 58,480,365 |
+| **×7/6 projection** | **61.5 B** | ~68.2 M |
+
+```
+registry target : 108.0 B        ACTUAL yield : 61.5 B        shortfall 46.5 B = 43.1% UNMET
+```
+🔑 **`p05of07` delivered 8.77 B against a planned 15.35 B — 42.9% short — and EXITED 0.** The
+`partial_source=True` no-raise path is not a hypothetical end-of-run risk: **it already happened, in the
+completed run, and every one of those six children reported success.** The CEO's escalation is confirmed
+**from the build's own output** rather than from source geometry.
+
+## 3. ⚖️ But my magnitude DISAGREES with OOM-STACKV2's, and the difference matters for the ruling
+| quantity | OOM-STACKV2 (gzip footers, darwin) | **mine (real `DONE` lines)** |
+|---|---|---|
+| whole-source tokens | **28.9 B** | **≥61.5 B delivered** |
+| whole-source docs | ~30.4 M | **~68.2 M** (2.24×) |
+
+**I measure MORE tokens actually delivered than its method estimated the entire source contains.** Both
+agree the registry's **707 B pool and 108 B target are far too high** — that direction is now confirmed
+twice, independently — **but the size of the correction is unsettled by roughly 2×.**
+
+**Mine is a floor from real output** (the packer emitted these bytes) and is therefore hard to argue below;
+**its 28.9 B is an estimate that my floor exceeds**, which means one of its calibration steps
+(text fraction 0.701, or 4.025 chars/token, or the ISIZE sampling) is likely low. ⚠️ **The corpus arithmetic
+should use ~61.5 B, not 28.9 B** — the difference is **32.6 B ≈ 3.3% of the corpus**, which is material to
+the owner's decision about what the corpus actually contains.
+
+**I am not adjudicating the mix.** Reporting the measurement and the disagreement; the ruling is the CEO's.
+
+## 4. 🔧 The CEO's correction to me, confirmed and extended
+It said the char cap does not bound `stackv2-edu` (max batch 8.47 MiB vs a 32 MiB cap). **Confirmed by these
+logs:** `mean_tok=981.63` on p05, i.e. ~1 KB documents — **two orders below `pre-1929-books`' 400 KB.** The
+cap genuinely never engages here. **What bounds this source is its data, not our control** — and since the
+OOM is unexplained, **there is no control bounding it at all.** Stated plainly rather than smoothed over.
+
+## Build status
+Build 2 FAILED at INSTALL — **my `for i in $(seq -w 0 82)` produced two-digit `00..82` while the vars are
+three-digit `EDULLM_SOURCE_000..082`**, so every lookup was unset and `-u` killed it. **Second cleverness
+failure in a row: the stored spec writes 83 explicit lines precisely because this is fiddly.** Build 3
+(`43301ee0`) writes the 83 lines explicitly, no `eval`, no `seq`. **~1 min of CodeBuild each; payload and
+guards unchanged and already validated.**

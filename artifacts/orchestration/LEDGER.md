@@ -4677,6 +4677,138 @@ irrelevant.
 
 ---
 
+# 🔧 BUILD 1 FAILED IN 0 s — by design. Build 2 in flight. Cost: ~1 minute.
+```
+INSTALL ✅ · PRE_BUILD ✅ · BUILD FAILED in 0 s
+ERROR: base name (${BASE_IMAGE}) should not be blank
+```
+**The payload was fine** — it reassembled, the digest guard passed, and PRE_BUILD confirmed
+`_ENCODE_BATCH_CHARS` and `corpus_labels.py` were present. **PLAT wrote a buildspec from scratch and omitted the
+build-arg the Dockerfile requires.**
+
+## 🏆 The Dockerfile is designed to fail exactly this way, and that is the finding
+Its own comment: *"Keep this bare so the image cannot silently build from an unregistered base."*
+**A default would have built our corpus against whatever `python:latest` resolved to, inside a digest-pinned
+pipeline.** **The refusal is the feature** — and it is the same shape as every fail-closed control that has
+saved us tonight: the `NeverWrite…` Deny, ECR tag immutability, the tarball digest guard, `load_index` raising
+rather than returning an empty index. **A pipeline whose weakest link is "someone remembered" would have shipped
+a corpus tokenized by an unpinned interpreter and nothing downstream could have seen it.**
+
+## 🔧 PLAT's own diagnosis, and it is the ninth instance of a question this ledger keeps re-learning
+> *"The value was one API call away, **in the artifact I was overriding**. I searched `infra/`, `docs/`,
+> `.edullm/`, then queried a base ECR repo that doesn't exist — while `batch-get-projects --query
+> source.buildspec` held `BASE_IMAGE=python@sha256:57cd7c3a…`. **'How did prior sessions do this?' is a
+> first-class question here, and I wrote a replacement for a working thing without reading the working thing
+> first.**"*
+
+**That is exactly the error I made on `CreateRole`** — I escalated a solved problem to the owner as impossible
+because I read an error message instead of the policy that produced it, when `infra/09` and `infra/10` recorded
+the working invocation. **Same shape, different agent, four hours apart.** Build 2 adopts the stored spec's
+conventions rather than invented ones.
+
+## ✅ And PLAT kept two things from its own version, plus ONE DELIBERATE DEPARTURE it declared
+Kept: the digest guard computes over **the bytes actually sent** (the stored spec hardcodes the PRM line's
+digest, *"which is why it could never have built our tree"*), and PRE_BUILD asserts the fix is in the payload
+**before** spending the build.
+
+🔴 **Departure, stated rather than silent:** *"the stored spec's post_build does `exit 0` when no image was
+produced — **a build that produces nothing reports SUCCESS**. I use `exit 1`."*
+**Correct, and it is the fail-open shape this ledger has now caught six times.** **Adopting a working
+artifact's conventions does not mean adopting its defects** — and knowing which is which requires reading it,
+which is the same lesson from the other direction. **Recorded as a fix to the shared buildspec that should
+outlive tonight.**
+
+---
+
+# 🔴🔴 LAUNCH HELD — OOM-STACKV2 found something bigger than the OOM: **8% of the corpus does not exist**
+
+## The finding that outranks everything else on this page
+Registry claims `stackv2-edu` `pool_tokens: 707,000,000,000`. **MEASURED**: 48 files, 38.14 GB compressed,
+**165.8 GB uncompressed** (gzip ISIZE + k·2³², calibration **EXACT** on all 7 fully-scanned files), text
+fraction 0.701, **4.025 chars/token measured with the real dolma2 tokenizer** on 1,600 docs across 4 files.
+
+```
+whole source        ≈  28.9 B tokens
+registry pool       = 707.0 B   → 24.5× TOO HIGH
+registry target     = 108.0 B   → 3.74× THE ENTIRE SOURCE
+CEO-computed blast radius:
+  shortfall ≈ 79.1 B tokens = 8.0% of the 986 B corpus
+  the corpus lands at ~907 B, not 986 B
+```
+**All 7 siblings will read to end-of-files and leave ~70% of their 614 shards unfilled.**
+🔴 **`partial_source=True` means this does NOT raise.** It surfaces at `verify` as an ambiguous shortfall
+**after ~14 h of billable work** — the exact end-of-run shape this ledger has recorded twice.
+
+**This is a `pool_tokens` figure that was never measured against the bytes.** DATA's dossier graded every
+identity string, and the pool numbers came from a different provenance. **"Was this sized on the reservoir?" —
+yes, three times over on this one source:** the 120 M doc count (a pre-split reservoir bundle), `_ENCODE_BATCH`'s
+"~2 KB mean" (reservoir web prose), and `chars-per-token.json`'s **3.66 measured on 400 docs of file 0000 only**
+— a file whose 3.26× ratio is unrepresentative of the 4.4–5.3× files p04 actually reads (per-file range
+**3.39–4.83**). `_CHARS_PER_TOKEN = 6.0` still covers the budget; **the pool number does not.**
+
+## ✅ Both inherited OOM candidates ELIMINATED by measurement
+**B — `domain_column` 73 values: eliminated STRUCTURALLY, and CEO-verified.** `plan_document:455` reads `doms`
+from a `domain_map` argument **no caller ever passes** — the only call site is
+`plan_document(drawn, registry_meta=meta)` at `:1507`. So `doms == [None]`, one stream, **one packer, one 95 MiB
+buffer, one `SeenHashes`.** **There is no 73-way fan-out in the build path at all** — the 73 values are a
+*publish-time* trap, not a runtime one.
+
+**A — `SeenHashes` "~120 M docs → 10.3 GB": eliminated. The 120 M was an estimate of the wrong thing.**
+MEASURED by full streaming scan: **p04 holds 4,568,298 documents**, not 120 M → **501 MiB**, not 10.3 GB —
+**20.6× smaller.** The whole 48-file source is ~30.4 M docs, so **no** stackv2 bundle can approach the ~118 M
+kill threshold (**26× margin**).
+
+**And it corrected the ledger's own counter-argument rather than merely accepting it:** the four OOM bundles do
+**not** have the four smallest dedup sets — `finepdfs p03of04` and `stackv2 p04of07` are among the **largest**
+bundles in the plan. **The conclusion survives** (p04's 501 MiB vs `finephrase-table`'s 5.51 GiB, 11× smaller,
+and that one succeeded) **but the "four smallest" framing was wrong.** Right answer, wrong reason, corrected.
+
+## The real p04 difference — and it is honest about being too small
+**p04 is the unluckiest stride.** The seven siblings are byte-identical in the plan; only `items[4::7]` differs.
+Gzip ISIZE footers of all 48 files (ranged 4-byte reads):
+| | p00 | p01 | p02 | p03 | **p04** | p05 | p06 |
+|---|---|---|---|---|---|---|---|
+| uncompressed GB | 23.18 | 23.07 | 23.30 | 23.54 | **25.85** | 25.21 | 21.68 |
+p04 holds the three highest-ratio files (up to **5.30×**), and **`JSONL_CHUNK_BYTES = 8 MiB` bounds COMPRESSED
+bytes, not memory** — one `decompress()` returns **27.0–46.9 MiB**. **The same category error as
+`_ENCODE_BATCH`, one layer up.** `_gunzip_lines` holds `pending` **and** its `split(b'\n')` list simultaneously
+— MEASURED **2.0–3.0×** → ~141 MiB at worst. **Real, p04-specific, and far too small to be the OOM.**
+
+## 🔴 THE RESIDUAL, STATED PLAINLY — and it is why I am not declaring victory
+Summed pessimistically: **2,330 MiB — 6.15× headroom.** End-to-end on **63.2 MiB of REAL p04 text** through the
+real pipeline: **RSS 1,351–1,496 MiB over 6 clean draws, spread 1.13× — reproducible**, unlike the 2.9× parquet
+case. Projected full bundle **~2,118 MiB**.
+> **"Nothing I can measure gets p04 within 6× of 14,336 MiB."**
+
+Two candidates it could not distinguish: **Rust allocator fragmentation inside `tokenizers`** (invisible to
+tracemalloc, and **all its RSS figures are darwin — no Linux, no cgroup**), or **the exit-137 was not this
+bundle's own geometry at all — e.g. two children co-scheduled on one instance.** **Needs the container logs.**
+**Recorded as the honest residual; I am not launching on the assumption it is benign.**
+
+## 🔴 And my "the char cap bounds it regardless" was FALSE
+> **"`_ENCODE_BATCH_CHARS` never binds on this source: MEASURED max batch 8.47 MiB against the 32 MiB cap."**
+
+**The cap never engages for stackv2-edu.** What bounds it is that its documents are small — **which is a property
+of the data, not a control we added.** I told PLAT the cap made this bundle safe; **it does not.**
+
+## ✅ A two-line fix found on the way, and it is NOT p04-specific
+`profiles/pretrain_tokens_v1.py:654`, `_longest_run_of`, **called by `_verify_shard` on EVERY shard of EVERY
+bundle** — CEO-verified verbatim:
+```python
+edges = np.flatnonzero(np.diff(np.concatenate(([0], hits.view(np.int8), [0]))))
+```
+**The Python list `[0]` promotes int8 → int64.** On a real 25,001,984-token shard: `concatenate` 200,015,888 B +
+`diff` 200,015,880 B, both live. **MEASURED 405 MiB where int8 sentinels give 106 MiB — 334 MiB saved per shard
+verify.** **Exactly the `combine_chunks` shape: a hidden whole-buffer copy every byte-identity test passes over,
+visible only to an allocation counter. Third instance tonight.**
+
+⚠️ **And it declared its own test partly decoration:** mutation **M2 (uint8 instead of int8) was NOT CAUGHT,
+0/46** — `np.diff` on uint8 wraps and the fixture never produced a wrapping case. **So `int8` must be explicit
+and must never be "simplified" to `uint8".** It did **not** apply the edit — the file is a Gate A profile,
+outside its brief. **Correct restraint.**
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of
