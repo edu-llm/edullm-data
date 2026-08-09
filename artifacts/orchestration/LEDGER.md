@@ -3844,6 +3844,64 @@ Provenance cross-check: `curriculum_loader.py` is **byte-identical** (sha256 `60
 
 ---
 
+# 🛑 THE BUILD IS TERMINAL — 169 SUCCEEDED / 16 FAILED / 88.22% of tokens. Nothing to kill.
+
+## 1. The resume trap I hypothesised is REAL, and it FAILS OPEN. Option (c) refused.
+`bundle_is_done` (`corpus_build.py:892-931`) checks **receipt + shard paths + shard sizes. No label term** —
+and `ef732ee` did not change it (digest `a0ed6953a6bbb931` on both sides). Worse:
+`Receipt.labels` defaults to `None`; `_check_labels` returns `[]` on `None`; **its own docstring says the
+mixed-set check "belongs in `verify_bundle_set`" — and `verify_bundle_set` does not implement it** (its whole
+vocabulary is `bundle-set-incomplete` / `bundle-set-unexpected-stream`).
+**A labeled relaunch would skip 169 bundles, label 16, and NO GATE WOULD FIRE** — a permutation owning 6.1% of
+the corpus. **Exactly the failure I asked about; PLAT proved it rather than reasoning about it.**
+
+## 2. The 16 failures — three causes, all from logs
+| n | exit | cause | retryable? |
+|---|---|---|---|
+| 4 | 137 | **OOM** — AWS `OutOfMemoryError` | ❌ needs more memory |
+| 5 | 1 | transient `ConnectionResetError [Errno 104]` in `hf_files` | ✅ |
+| 7 | 2 | **HTTP 401 on the GATED Nemotron repo** | ❌ needs the fix below |
+
+## 🔴 CEO ERROR #18 — I ruled `_src/` and my OWN LEDGER said the reader cannot read it
+DATA copied Nemotron to `_ingest/_src/`, byte-verified, and I ruled *"Registry rows must read `_src/`."*
+**But this ledger already recorded, from ENG:** *"`_src/` doesn't rescue it. Every reader resolves
+`huggingface.co/.../resolve/{revision}/{path}`. **No registry row can read `s3://` at all.**"*
+**Two entries in my own ledger contradicted each other, I never reconciled them, and nobody wired the staging
+up. It cost 7 bundles and the math pillar — 61B tokens, the source the owner accepted licence exposure to
+keep.** A contradiction inside the accountability artifact is worse than one outside it.
+
+## 🔴 THE OOM WAS PREDICTED HOURS AGO AND I RECORDED IT AS MITIGATED
+PLAT-1's table: *"**1.0T `stackv2-edu` ~168 M docs → 14.4 GB + 2.1 other = 16.5 GB** ❌ **exceeds 14,336 MiB by
+~1.5 GB.**"* I wrote *"fixed by the bundle-splitting already on the critical path."* **It was not.** 4 OOMs.
+**A predicted failure recorded as mitigated, without anyone checking that the mitigation covered it.**
+
+## ⚖️ RULING — OPTION (b): FULL LABELED REBUILD, with the 401 and OOM fixed. Approved.
+**PLAT's collapsing argument is correct and decisive:** fixing the 401 changes the registry → **moves
+`plan_id`** → `bundle_is_done` returns False for all 185 (`receipt.plan_id != plan_id`) → **under a new
+`plan_id`, (a) IS (b).** The ~$53 figure for (a) only holds if we ship *without* the math pillar. So ~$122 and
+~4 h more buys **both** the math pillar and the curriculum. **Approved.**
+
+**Consequence nobody has stated yet, and it lands on `ef732ee`:** the new registry means **`plan_id` will NOT be
+`29968a2b04008a8c`**, so CURRICULUM-EXEC's literal assertion **will fail — correctly.** The test must become
+**two** assertions: (i) labeled vs unlabeled plans from the *same* registry are **equal** — which is what
+actually proves labels don't touch the plan surface — and (ii) the current registry's `plan_id` equals a literal
+that is updated **deliberately**. Keeping only the literal makes it brittle; keeping only the comparison lets
+two runs of the same bug agree.
+
+## 📊 THE LAST UNMEASURED BAND, MEASURED — and PLAT corrected itself before reporting
+**PDF 0.804× · CODE 1.121×** the anchor, per container. **PDF set the makespan exactly as predicted.**
+Its first pass read 3.2× and 7.8× — **aggregates of K concurrent parts sharing one source prefix**; dividing
+wall span by shards across all parts credits one container with K containers' work. **Divided by K they are
+physically sensible.** Self-caught pre-report.
+
+🔴 **But one outlier is unexplained and it is not small: FinePhrase at 0.10–0.27×** — **4–10× slower than every
+other source**, which all land 0.80–1.12×. **Hypothesis to test, not to assume: FinePhrase's text is in the
+NESTED column `rollout_results[0].text`, and nested-column parquet reads are far more expensive than flat
+ones.** At 36B tokens across 4 rows (reading B), a 10× slowdown moves the makespan. **Assigned; must be
+explained before the rebuild's ETA is quoted.**
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of

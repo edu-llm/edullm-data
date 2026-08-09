@@ -4601,3 +4601,82 @@ own `source_label`, hence its own prefix). Only the four file-sharded sources ne
 **The uniform-rate assumption holds far better than feared: every source lands 0.80–1.12× except FinePhrase
 (0.10–0.27×, the slowest by 4×).** PDF is the slowest of the big four and it set the makespan, exactly as
 predicted — `finepdfs-edu p03of04` is the 9.31 h critical child.
+
+---
+
+# ✅ ADDENDUM 38 — THE FinePhrase OUTLIER IS EXPLAINED. Nested-column hypothesis **CONFIRMED**, and the cost is **REDUCIBLE**.
+
+## Hypothesis 2 (K-aggregation) — REFUTED first, since it was the artifact I had just caught
+```
+_file_shards = {stackv2-edu:7, finepdfs-edu:4, nemotron-cc-math-3:3, nemotron-cc-math-4plus:2}
+finephrase-{faq,math,table,tutorial} -> K=1, and each is its OWN source_label => its OWN prefix
+```
+**No K-aggregation is possible here.** I also caught a *second* artifact risk on my own numbers —
+**train and val DO share a source prefix** — and re-measured **train-only**, plus `finephrase-faq` is one of
+the 16 FAILED children so its series is a partial. **The outlier survives all three corrections:**
+
+| source | s/shard | tok/s/container | vs anchor |
+|---|---|---|---|
+| finephrase-tutorial | 126.4 | 197,830 | **0.341×** |
+| finephrase-faq (partial) | 137.2 | 182,186 | 0.314× |
+| finephrase-math | 157.5 | 158,736 | 0.273× |
+| finephrase-table | 165.0 | 151,514 | **0.261×** |
+| *flat controls* — pes2o / finewiki / stackexchange / cosmopedia | 41.6–55.3 | 451,774–601,626 | **0.78–1.04×** |
+
+## ✅ The CEO's hypothesis is CONFIRMED — and I localised the cost to one call
+`text_column = 'rollout_results.list.element.text'` on all four rows (the dossier's trap: `text` is the
+**source** doc, the rewrite is nested). Benchmarked against a **synthetic control pair** — identical text,
+one flat column vs one `list<struct<text>>`, 4,000 rows, 7 reps:
+
+```
+                     arrow READ      to_pylist()
+FLAT   text          0.0009 s        0.0021 s
+NESTED rollout..text 0.0009 s        0.0076 s     <- 3.6x
+end-to-end                           2.7x slower
+```
+
+🔑 **The arrow read is IDENTICAL (0.0009 s both). The entire penalty is `to_pylist()`** — it builds a
+Python **list of dicts per row** for the nested case versus a bare `str` for the flat one. Column
+projection works fine; **the cost is Python object allocation in materialisation**, at
+`corpus_read.py:579` (`for row in table.to_pylist()`).
+
+**The arithmetic closes:**
+| source | implied slowdown vs flat control | measured penalty |
+|---|---|---|
+| tutorial | 2.86× | **2.7× end-to-end** |
+| faq | 3.11× | |
+| math | 3.57× | **3.6× on `to_pylist`** |
+| table | 3.74× | |
+
+**2.86–3.74× needed, 2.7–3.6× measured.** The nested-column cost accounts for the outlier; the residual sits
+inside the flat controls' own spread. **This is a REAL cost, not an artifact.**
+
+## 🟢 But it is NOT irreducible — a 3.4× speedup exists, in Arrow, with no schema change
+```
+current   to_pylist(list<struct>)            0.0096 s
+arrow-native  list_flatten + .field('text')  0.0028 s     -> 3.4x faster, same 4,000 rows
+```
+**Flattening in Arrow and calling `to_pylist()` on the resulting flat string column recovers essentially
+all of it.** This contradicts the CEO's framing that the cost is *"irreducible without a schema change"* —
+**the schema is fine; the materialisation strategy is the cost.** It is a change to `_walk`/the read loop,
+i.e. ENG's surface, not mine, and **not on tonight's critical path** (see below).
+
+## Scheduling consequence for the rebuild — small, and I am NOT quoting an ETA yet
+FinePhrase is 4 rows × ~9B = **36B tokens (3.7%)**. At the measured 151,514–197,830 tok/s/container each row
+is a **12.6–16.5 h child** — 🔴 **longer than the 9.31 h PDF child that set the last makespan, so FinePhrase
+becomes the new critical path.** Two facts bound it:
+- `finephrase-*` is **not** in `_file_shards`, so **K=1 — these cannot currently be split.**
+- Reading (B) already cut them from one 36B bundle to four ~9B bundles; a further split needs a
+  `_file_shards` entry, which **moves `plan_id`** (already moving for the 401 fix).
+
+**Options for the CEO, costed but not chosen:** (i) accept a ~12.6–16.5 h critical child; (ii) add
+`_file_shards` for the four FinePhrase rows — free, since `plan_id` is already moving; (iii) land the
+Arrow-native read, which cuts all four to ~4–5 h. **(ii) is nearly free and (iii) is the real fix.**
+
+**Per instruction I am not reporting a rebuild ETA until the CEO rules**, because the makespan now depends on
+three pending decisions (the 401 registry fix, the OOM memory raise, and FinePhrase splitting) — **any ETA I
+gave now would be a number quoted before its inputs exist**, which is the error this ledger has caught most.
+
+## What I have NOT done
+Nothing killed (the array is terminal), nothing registered, nothing submitted. The Arrow-native read and the
+`_file_shards` addition are both **ENG surfaces**; the memory raise is A2 but **awaits ENG's measured peak**.
