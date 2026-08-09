@@ -5024,3 +5024,38 @@ tonight** (the `2>/dev/null` watchdog, the truncated digest diff, this).
 Nothing registered pending **MERGE-EXEC's SHA** and **OOM-DIAGNOSE's verdict on `pre-1929-books`**. On the
 SHA I will: build the image → behavioural labels preflight → **recompute `plan_id` from that exact tree** →
 one combined revision (memory 15,806 + `PLAN_ID` + `--labels` + re-derived asserts) → report by number.
+
+## ⚠️ MERGE-EXEC MUST KNOW: `status.md` IS SPLIT ACROSS BOTH BRANCHES, AND WILL CONFLICT
+
+`MEASURED` via `git archive` (see the tooling note below):
+
+| ref | `status.md` lines | highest addendum |
+|---|---|---|
+| `final-dataset` | **5,026** | **ADDENDUM 43** |
+| `agent/eng-exec-2/s3-source-oom-arrow` | 4,964 | ADDENDUM 42 |
+
+**Both branches contain a different tail of the same append-only file.** Addenda 37–42 were committed to the
+BRANCH; 43 to `final-dataset`. **A merge will conflict at the end of `status.md`, and the correct resolution
+is to KEEP BOTH TAILS in addendum order — never to take one side.** Taking `--ours` or `--theirs` silently
+discards a whole executive's findings, and this file is append-only precisely so that cannot happen by
+accident. **Same for `LEDGER.md`, which I also appended to on both.**
+
+## 🔧 THE TOOLING NOTE, because it bit me three times in ten minutes
+**`git show <ref>:<path>` and `git cat-file -p <ref>:<path>` both returned ZERO bytes** for real, tracked,
+non-empty files in this shell — while `git ls-files --error-unmatch` confirmed the path is tracked,
+`git check-ignore` found no ignore rule, and `git show --stat HEAD` proved my commit contained 62 lines of it.
+**`git archive <ref> <path> | tar -x` and `git diff --stat` both read correctly.**
+
+**The failure mode is the dangerous one: it returns empty and exit 0, so a comparison built on it concludes
+"identical" or "absent."** I nearly reported that the two registries matched — the tell was
+**`d41d8cd98f00b204e9800998ecf8427e`, the md5 of the empty string**, which I recognised.
+
+**This is the FOURTH fail-open instance in my own tooling tonight** — the `2>/dev/null` watchdog, the
+truncated-digest diff, the empty `git show` on the registry, and this. **Every one produced a reassuring
+answer from a broken read.** The pattern is now explicit enough to state as a rule:
+
+> **Any comparison must first prove it can SEE the thing it compares.** An empty read and an equal read are
+> indistinguishable in the output. Assert non-emptiness before asserting equality.
+
+**I have used only `git archive`/`git diff` for cross-ref reads since discovering this**, and the `plan_id`
+figures in ADDENDUM 43 were produced that way — not by the method that failed.
