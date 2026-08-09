@@ -920,3 +920,351 @@ def test_the_curriculum_family_default_does_not_supply_a_max_order_bytes():
         "the family now sets max_order_bytes — reconcile it with curriculum_driver.MAX_ORDER_BYTES "
         "before publishing, because _cfg prefers the GROUP value and the two could disagree"
     )
+
+
+# ======================================================================================
+# 6. F3 — THE FILE-SHARD PART BOUNDARY. Owner IDENTITY, not permutation validity.
+# ======================================================================================
+#
+# 🔴 THE FINDING THESE TESTS EXIST FOR, in one sentence: `build_order` returned a PERFECT
+# PERMUTATION with every chunk after a file-shard part boundary attributed to the WRONG DOCUMENT,
+# and nothing caught it. 23.5% of this corpus (232 B of 986 B tokens) is in a file-sharded stream —
+# stackv2-edu 7 parts, finepdfs-edu 4, nemotron-cc-math-3 3, -4plus 2.
+#
+# ⚠️ WHY EVERY PRE-EXISTING TEST MISSED IT, and this is the lesson rather than the bug:
+#   * every `_axis()` fixture above uses UNIFORM `tokens_each`, and
+#   * no fixture built a MULTI-PART stream, and
+#   * `assert np.array_equal(np.sort(order), np.arange(n))` — permutation validity — is satisfied
+#     by the drift. So is Gate A's `bincount`. So is `labelled >= held`, which the drift makes MORE
+#     satisfied, not less.
+# The only assertion that can see this failure is one on WHICH DOCUMENT owns a given chunk. That is
+# what these tests assert, and it is why they construct documents that are distinguishable by score.
+
+
+def _two_part_fixture():
+    """Two parts of ONE stream, each with its own tail drop — the real shape, minimally.
+
+    part 0: `tokens_in` 8,692, its 2 shards hold `tokens_out` 8,192 (500 dropped)
+    part 1: `tokens_in` 8,492, its 2 shards hold `tokens_out` 8,192 (300 dropped)
+
+    The two gaps DIFFER, which matters: equal gaps would let a single averaged correction look right.
+
+    🔴 **THE SCORES ARE CHOSEN SO THE DRIFT CHANGES THE ANSWER, and that took a correction.** My
+    first version scored part 0's documents 1..n and part 1's 1000..1000+n — ascending overall. Under
+    those scores the correct owners (0, 5, 11, 16) and the DRIFTED owners (0, 5, 10, 15) are both
+    ascending, so **both produce the identical permutation [0,1,2,3]** and the test passed on the
+    broken code. That is the audit's finding restated as a fixture property: *a monotone score
+    assignment cannot distinguish a drifted owner from a correct one.*
+
+    So part 1 scores BELOW part 0 (50+i against 100+i). Now the correct owners give order [2,3,0,1]
+    and the drifted ones give [3,0,1,2]. `test_the_fixture_scores_actually_discriminate_the_drift`
+    asserts that difference, so this reasoning is checked rather than trusted.
+    """
+    keys = tuple(f"tokens/src/train-{i:05d}.u32le.bin" for i in range(4))
+    tokens = (4096, 4096, 4096, 4096)
+    axis = ChunkAxis(
+        keys=keys, tokens=tokens, chunks=tuple(chunk_counts(list(tokens))),
+        seq_len=SEQ_LEN_CHUNK, rule=CHUNKS_MINUS_ONE,
+    )
+
+    def strides_for(total: int) -> np.ndarray:
+        out, at = [], 0
+        while at + 801 <= total:
+            out.append(801)
+            at += 801
+        if total - at:
+            out.append(total - at)
+        return np.array(out, dtype=np.int64)
+
+    s0, s1 = strides_for(8692), strides_for(8492)
+    # Part 1 scores BELOW part 0 — see the docstring. Distinct within each part so ranks are a
+    # bijection and a chunk's owner is recoverable from its rank.
+    m0 = 100.0 + np.arange(s0.size, dtype=np.float64)
+    m1 = 50.0 + np.arange(s1.size, dtype=np.float64)
+    p0 = StreamLabels(source="src", domain=None, split="train", strides=s0, mtld=m0, part=0)
+    p1 = StreamLabels(source="src", domain=None, split="train", strides=s1, mtld=m1, part=1)
+    # Shards 0,1 were written by part 0; shards 2,3 by part 1. NOT recoverable from the keys — all
+    # four live under `tokens/src/` with globally-allocated ordinals, which is the whole reason
+    # `shard_stream` must come from receipts.
+    mapping = {keys[0]: ("src", None, "train", 0), keys[1]: ("src", None, "train", 0),
+               keys[2]: ("src", None, "train", 1), keys[3]: ("src", None, "train", 1)}
+    return axis, [p0, p1], mapping, (s0, s1)
+
+
+def _expected_order_for(owners, s0, s1) -> list[int]:
+    """The permutation implied by a given owner-per-chunk list. Independently computed.
+
+    Global document ids are part 0's documents then part 1's; scores match `_two_part_fixture`.
+    `lexsort((idx, rank))` sorts by rank then chunk index, which is `sorted(key=(rank, idx))`.
+    """
+    scores = np.concatenate([100.0 + np.arange(s0.size), 50.0 + np.arange(s1.size)])
+    rank_of_doc = np.empty(scores.size, dtype=np.int64)
+    rank_of_doc[np.argsort(scores, kind="stable")] = np.arange(scores.size)
+    return sorted(range(len(owners)), key=lambda c: (int(rank_of_doc[owners[c]]), c))
+
+
+def _owners_correct(axis, s0, s1) -> list[int]:
+    """The TRUE owner of each chunk: each part's chunk offsets restart at 0 in ITS OWN labelled
+    space, and part 1's documents are numbered after part 0's."""
+    ends0, ends1 = np.cumsum(s0), np.cumsum(s1)
+    out = []
+    for i in range(len(axis.keys)):
+        within = (i % 2) * axis.tokens[i]
+        ends, base = (ends0, 0) if i < 2 else (ends1, int(s0.size))
+        for c in range(axis.chunks[i]):
+            out.append(base + int(np.searchsorted(ends, within + c * SEQ_LEN_CHUNK, "right")))
+    return out
+
+
+def _owners_drifted(axis, s0, s1) -> list[int]:
+    """What the PRE-F3 code computed: ONE cursor across both parts, advanced by `tokens_out`."""
+    ends = np.cumsum(np.concatenate([s0, s1]))
+    out, cursor = [], 0
+    for i in range(len(axis.keys)):
+        for c in range(axis.chunks[i]):
+            out.append(int(np.searchsorted(ends, cursor + c * SEQ_LEN_CHUNK, "right")))
+        cursor += axis.tokens[i]
+    return out
+
+
+def test_the_owner_of_every_chunk_after_a_part_boundary_is_the_RIGHT_DOCUMENT():
+    """🔴 **THE F3 REGRESSION TEST. Owner IDENTITY across the boundary, not permutation validity.**
+
+    Before the fix, `build_order` advanced one cursor across both parts by `axis.tokens[i]`
+    (`tokens_out`) while the labelled space advanced by `tokens_in`, so the gap accrued once per part.
+    MEASURED at the time: shard 2's chunk was attributed to document 10 when the true owner is
+    document 11, and shard 3's to 15 instead of 16 — **and `build_order` returned a perfect
+    permutation and raised nothing.**
+
+    The expected permutation is derived from INDEPENDENTLY recomputed owners (`_owners_correct`,
+    which restarts each part's offsets in its own space), never from `build_order`'s own output.
+    """
+    axis, parts, mapping, (s0, s1) = _two_part_fixture()
+    order = build_order(axis, parts, shard_stream=mapping)
+
+    # Still a valid permutation. Stated so the test is known not to be passing on a raise, AND to
+    # record that this is precisely the assertion that could NOT see the defect.
+    assert np.array_equal(np.sort(order), np.arange(axis.n_chunks))
+
+    want = _expected_order_for(_owners_correct(axis, s0, s1), s0, s1)
+    assert list(order) == want, (
+        f"order {list(order)} != {want} implied by the true owners "
+        f"{_owners_correct(axis, s0, s1)}. This is the F3 drift: the cursor crossed a pack() "
+        f"boundary and the tokens_in/tokens_out gap accrued."
+    )
+    # And it is NOT what the drifted cursor would have produced.
+    assert list(order) != _expected_order_for(_owners_drifted(axis, s0, s1), s0, s1)
+
+
+def test_the_fixture_scores_actually_discriminate_the_drift():
+    """Guards the fixture. **A monotone score assignment cannot see this defect at all** — correct
+    and drifted owners are both ascending, so both yield the identical permutation. My first version
+    of the test above did exactly that and passed on broken code. This asserts the current scores
+    give two DIFFERENT answers, which is what makes the regression test a test."""
+    axis, _p, _m, (s0, s1) = _two_part_fixture()
+    correct, drifted = _owners_correct(axis, s0, s1), _owners_drifted(axis, s0, s1)
+    assert correct != drifted, "the fixture must straddle a boundary where the owners differ"
+    assert correct == [0, 5, 11, 16] and drifted == [0, 5, 10, 15], (correct, drifted)
+    assert _expected_order_for(correct, s0, s1) != _expected_order_for(drifted, s0, s1), (
+        "the two owner lists imply the SAME permutation, so this fixture cannot detect the drift"
+    )
+    # The specific values, recorded: [2,3,0,1] correct vs [3,0,1,2] drifted.
+    assert _expected_order_for(correct, s0, s1) == [2, 3, 0, 1]
+    assert _expected_order_for(drifted, s0, s1) == [3, 0, 1, 2]
+
+
+def test_the_two_parts_have_DIFFERENT_tokens_in_minus_out_gaps():
+    """Guards the fixture, not the code.
+
+    Equal per-part gaps would let a single averaged correction pass, so the fixture must have unequal
+    ones for the test above to discriminate. 500 and 300.
+    """
+    _axis_, parts, _m, (s0, s1) = _two_part_fixture()
+    assert int(s0.sum()) - 8192 == 500
+    assert int(s1.sum()) - 8192 == 300
+    assert parts[0].part == 0 and parts[1].part == 1
+    assert parts[0].key == ("src", None, "train", 0)
+    assert parts[0].stream == parts[1].stream, "same stream, different parts — the whole point"
+    assert float(parts[1].mtld.min()) < float(parts[0].mtld.min()), (
+        "part 1 must score BELOW part 0 or the drift is invisible — see _two_part_fixture"
+    )
+
+
+def test_merging_two_parts_into_one_stream_is_now_REFUSED_rather_than_silently_drifting():
+    """The pre-F3 representation must not be expressible.
+
+    Concatenating the two parts into ONE `StreamLabels` is exactly what the driver used to do. With
+    a part-keyed mapping it no longer type-checks as the same thing: the concatenated part-0 label
+    set does not cover part 1's shards, and the per-part `labelled >= held` check fires NAMING the
+    shard — where before it was satisfied and the drift went through.
+    """
+    axis, parts, mapping, (s0, s1) = _two_part_fixture()
+    merged = StreamLabels(
+        source="src", domain=None, split="train",
+        strides=np.concatenate([s0, s1]),
+        mtld=np.concatenate([parts[0].mtld, parts[1].mtld]),
+        part=0,
+    )
+    with pytest.raises(BuildError, match="supplied NO labels"):
+        build_order(axis, [merged], shard_stream=mapping)
+
+
+def test_a_three_tuple_mapping_still_works_and_means_part_zero():
+    """Backwards compatibility, asserted rather than hoped.
+
+    Every fixture and caller written before F3 passes a 3-tuple. An unsharded stream IS part 0, so
+    the 3-tuple must keep working — but it must not become a way to merge K parts again, which the
+    test above covers.
+    """
+    axis, mapping = _axis(2, 20 * SEQ_LEN_CHUNK)
+    total = sum(axis.tokens)
+    n_docs = -(-total // 2049) + 1
+    rng = np.random.default_rng(11)
+    stream = _stream(n_docs, 2048, rng.random(n_docs) * 100)
+    assert stream.part == 0, "the default must be part 0, or every old fixture silently re-keys"
+    three = build_order(axis, [stream], shard_stream=mapping)
+    four = build_order(axis, [stream],
+                       shard_stream={k: (*v, 0) for k, v in mapping.items()})
+    assert np.array_equal(three, four), "a 3-tuple and (…, 0) must be the same mapping"
+
+
+def test_shard_stream_from_receipts_recovers_the_part_the_KEY_cannot_name():
+    """🔴 The mapping must come from RECEIPTS. A shard key structurally cannot name its writer.
+
+    Asserted both ways: `labels_from_path` really does lose the part (so the alternative is not
+    merely inconvenient, it is impossible), and the receipt-derived mapping really does recover it.
+    """
+    from dataclasses import dataclass
+
+    from edullm_data.corpus_order import shard_stream_from_receipts
+    from edullm_data.manifest import labels_from_path
+
+    # The measurement that forces this design: 7 children, one prefix, global ordinals.
+    got = labels_from_path("tokens/stackv2-edu/train-35260.u32le.bin")
+    assert "part" not in got and "file_shard" not in got, (
+        "if a shard key ever carries its part, this whole function becomes redundant — but today it "
+        f"yields {got!r} and the part is unrecoverable"
+    )
+
+    @dataclass
+    class _Shard:
+        path: str
+
+    @dataclass
+    class _Receipt:
+        bundle_id: str
+        source: str
+        domain: object
+        split: str
+        file_shard: int
+        shards: tuple
+
+    receipts = [
+        _Receipt("stackv2-edu--train--p00of02", "stackv2-edu", None, "train", 0,
+                 (_Shard("tokens/stackv2-edu/train-00000.u32le.bin"),
+                  _Shard("tokens/stackv2-edu/train-00001.u32le.bin"))),
+        _Receipt("stackv2-edu--train--p01of02", "stackv2-edu", None, "train", 1,
+                 (_Shard("tokens/stackv2-edu/train-00002.u32le.bin"),)),
+    ]
+    mapping = shard_stream_from_receipts(receipts)
+    assert mapping["tokens/stackv2-edu/train-00000.u32le.bin"] == ("stackv2-edu", None, "train", 0)
+    assert mapping["tokens/stackv2-edu/train-00002.u32le.bin"] == ("stackv2-edu", None, "train", 1)
+    # Two ordinals apart in ONE prefix, different parts — the case `labels_from_path` collapses.
+    assert mapping["tokens/stackv2-edu/train-00001.u32le.bin"][3] == 0
+
+
+def test_two_receipts_claiming_one_shard_are_REFUSED_by_the_mapping_builder():
+    """Keeping the last writer would map a shard's chunks onto the wrong part's documents — the F3
+    failure arriving by a different route, so it is refused here as well as in `verify_bundle_set`."""
+    from dataclasses import dataclass
+
+    from edullm_data.corpus_order import shard_stream_from_receipts
+
+    @dataclass
+    class _S:
+        path: str
+
+    @dataclass
+    class _R:
+        bundle_id: str
+        source: str
+        domain: object
+        split: str
+        file_shard: int
+        shards: tuple
+
+    dup = "tokens/src/train-00000.u32le.bin"
+    with pytest.raises(BuildError, match="claimed by two different bundles"):
+        shard_stream_from_receipts([
+            _R("a--p00of02", "src", None, "train", 0, (_S(dup),)),
+            _R("a--p01of02", "src", None, "train", 1, (_S(dup),)),
+        ])
+
+
+def test_two_label_sets_for_the_SAME_part_are_refused():
+    """A retry that wrote a second sidecar without removing the first. Their documents would be
+    ranked twice and one set would own every chunk of the part — silently, since both are real."""
+    axis, parts, mapping, _s = _two_part_fixture()
+    with pytest.raises(BuildError, match="two label sets claim part"):
+        build_order(axis, [parts[0], parts[0], parts[1]], shard_stream=mapping)
+
+
+# ======================================================================================
+# 7. F9 — the degenerate zero-chunk shard. UNREACHABLE from our packer, now ASSERTED.
+# ======================================================================================
+
+
+def test_a_zero_chunk_shard_in_the_parent_manifest_is_REFUSED():
+    """🔴 The consumer SKIPS a zero-chunk file SILENTLY, which renumbers everything after it.
+
+    `curriculum_loader.py:67-68` does a bare `continue` when a file's chunk count is `<= 0`. So a
+    vector built over an axis that INCLUDED that file is a perfect permutation of the right length
+    indexing a different axis than the trainer walks — and Gate A's `bincount` structurally cannot
+    see it, because the corruption is in the correspondence between paths and indices, not in the
+    vector.
+
+    MEASURED before this guard: a 20-byte shard gave `chunks=(9, 0, 9)` and `build_order` SUCCEEDED.
+    """
+    manifest = {"entries": [
+        {"path": "tokens/s/train-00000.u32le.bin", "bytes": 20 * SEQ_LEN_CHUNK * 4},
+        {"path": "tokens/s/train-00001.u32le.bin", "bytes": 20},   # 5 tokens -> 0 chunks
+        {"path": "tokens/s/train-00002.u32le.bin", "bytes": 20 * SEQ_LEN_CHUNK * 4},
+    ]}
+    with pytest.raises(BuildError, match="yield ZERO chunks"):
+        chunk_axis_from_manifest(manifest)
+
+
+def test_the_zero_chunk_refusal_names_the_loader_and_every_offending_shard():
+    """A diagnostic naming one shard when three are broken sends the reader back to find the rest."""
+    manifest = {"entries": (
+        [{"path": f"tokens/s/train-{i:05d}.u32le.bin", "bytes": 20} for i in range(3)]
+        + [{"path": "tokens/s/train-00003.u32le.bin", "bytes": 20 * SEQ_LEN_CHUNK * 4}]
+    )}
+    with pytest.raises(BuildError) as exc:
+        chunk_axis_from_manifest(manifest)
+    msg = str(exc.value)
+    assert "3 of 4" in msg
+    assert "curriculum_loader.py:67-68" in msg, "the refusal must name WHY, not just refuse"
+    for i in range(3):
+        assert f"train-{i:05d}" in msg
+    assert "train-00003" not in msg, "the healthy shard must not be blamed"
+
+
+def test_the_guard_does_NOT_fire_on_the_smallest_shard_our_packer_can_write():
+    """The complement, and it is what stops this guard from being a false alarm.
+
+    `corpus_pack.py:840-846` refuses a shard under one whole `SEQ_LEN` (8,192 tokens), which is 4
+    chunks at 2,048 — so the smallest REAL shard clears `chunks <= 0` with margin. A guard that also
+    rejected that would block every legitimate short tail shard, of which this corpus has one per
+    stream.
+    """
+    from edullm_data.corpus import SEQ_LEN
+
+    smallest = SEQ_LEN * 4  # bytes of the smallest shard corpus_pack will emit
+    axis = chunk_axis_from_manifest(
+        {"entries": [{"path": "tokens/s/train-00000.u32le.bin", "bytes": smallest}]}
+    )
+    assert axis.chunks == (3,), "8,192 tokens is 3 chunks under (t-1)//2048"
+    assert min(axis.chunks) > 0
+    # And the two formulas agree that this is NOT skippable, which is the property being relied on.
+    assert chunk_counts([SEQ_LEN], rule=CHUNKS_FLOOR)[0] == 4

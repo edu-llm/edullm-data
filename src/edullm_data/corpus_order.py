@@ -71,6 +71,7 @@ __all__ = [
     "chunk_counts",
     "build_order",
     "identity_order",
+    "shard_stream_from_receipts",
 ]
 
 #: The name of the coordinate model, carried in the curriculum group's metadata. A consumer that
@@ -140,15 +141,42 @@ class ChunkAxis:
 
 @dataclass(frozen=True)
 class StreamLabels:
-    """One (source, domain, split) stream's documents, in tokenization order, with their strides.
+    """One BUNDLE's documents, in tokenization order, with their strides.
 
     ``strides`` is ``n_tokens + 1`` per document — the EOS included, because the EOS occupies a token
     slot in the packed stream. ``mtld`` is parallel to it.
 
-    ⚠️ **A stream, not a bundle.** Under file-sharding one stream is K bundles built by K separate
-    Batch children, and the packer fills the stream's ordinal block part by part, so the stream's
-    token space is the CONCATENATION of its parts in ``file_shard`` index order. Assembling them in
-    any other order silently reassigns every document past the first part.
+    🔴 **A PART, not a stream — and the rename of this concept is the F3 fix.**
+    ------------------------------------------------------------------------
+    Under file-sharding one ``(source, domain, split)`` stream is **K bundles built by K separate
+    Batch children**, and each child is its own :func:`~.corpus_pack.pack` call with its own tail
+    truncation and its own surplus drop. So each part's ``tokens_in`` exceeds the ``tokens_out`` its
+    shards hold, **by a different amount**.
+
+    **The defect that made this field necessary.** These K parts used to be concatenated into one
+    ``StreamLabels`` and mapped as one token space, while ``build_order`` advanced its cursor by
+    ``axis.tokens[i]`` — which is ``tokens_out``. The gap therefore accrued **once per part**, and
+    every chunk after the first boundary was attributed to the WRONG DOCUMENT. MEASURED on a
+    constructed 2-part stream: ``build_order`` **returned a perfect permutation** with the owner of
+    every post-boundary chunk off by one document, and **no check fired** — the ``labelled >= held``
+    test becomes *more* satisfied by the drift, and Gate A's ``bincount`` sees a valid bijection.
+    23.5% of this corpus (232 B of 986 B tokens) is in a file-sharded stream.
+
+    **Why a field and not a corrected cursor.** Resetting the cursor at each boundary would work and
+    is strictly worse: it requires ``build_order`` to know where the boundaries are, i.e. to be told
+    the same part structure by another route, and it leaves the concatenated representation — in
+    which the drift is still *expressible* — in place. Carrying ``part`` makes each part its own key,
+    so its cursor starts at 0 in its own labelled space and **the drift becomes structurally
+    unrepresentable**. The existing ``labelled >= held`` check also becomes meaningful *per part*,
+    which it was not before.
+
+    ⚠️ **``part`` cannot be recovered from a shard key.** MEASURED:
+    ``labels_from_path("tokens/stackv2-edu/train-35260.u32le.bin")`` → ``{'source': 'stackv2-edu'}``.
+    The key carries the source and the GLOBAL ordinal, and nothing about which of the K children
+    wrote it — parts share the ``source`` path segment by design (that is the whole difference from
+    ``split_source_rows``). It IS recoverable from the receipts, each of which names its
+    ``bundle_id`` and lists its shard paths, so a caller must build ``shard_stream`` from **receipts**
+    rather than from ``labels_from_path``. See :func:`shard_stream_from_receipts`.
     """
 
     source: str
@@ -156,6 +184,9 @@ class StreamLabels:
     split: str
     strides: np.ndarray  # int64, per document, = n_tokens + 1
     mtld: np.ndarray  # float64 or float32, parallel to strides
+    #: The ``file_shard`` index of the bundle that produced these labels; 0 for an unsharded stream.
+    #: Part of the IDENTITY (see :attr:`key`), not metadata.
+    part: int = 0
 
     def __post_init__(self) -> None:
         if self.strides.shape != self.mtld.shape:
@@ -164,6 +195,24 @@ class StreamLabels:
                 f"{self.mtld.size} scores — the two arrays must be parallel, since index i of one "
                 f"is the same document as index i of the other."
             )
+        if int(self.part) < 0:
+            raise BuildError(
+                f"{self.source}/{self.split}: part must be >= 0; got {self.part!r}"
+            )
+
+    @property
+    def key(self) -> tuple[str, str | None, str, int]:
+        """The identity ``build_order`` maps on: ``(source, domain, split, part)``.
+
+        The 4-tuple, not the 3-tuple, and that IS the fix — see the class docstring. One place
+        computes it so a caller cannot spell it a second way and reintroduce the collision.
+        """
+        return (self.source, self.domain, self.split, int(self.part))
+
+    @property
+    def stream(self) -> tuple[str, str | None, str]:
+        """The ``(source, domain, split)`` this part belongs to — for reporting, never for mapping."""
+        return (self.source, self.domain, self.split)
 
     @property
     def documents(self) -> int:
@@ -172,6 +221,50 @@ class StreamLabels:
     @property
     def n_tokens(self) -> int:
         return int(self.strides.sum())
+
+
+def shard_stream_from_receipts(receipts: Iterable[Any]) -> dict[str, tuple[str, str | None, str, int]]:
+    """``{shard key: (source, domain, split, part)}``, from the receipts that WROTE those shards.
+
+    🔴 **The only correct source for this mapping, and the reason is a measurement.**
+    ``manifest.labels_from_path`` recovers ``source`` from a shard key and **cannot recover the
+    part** — MEASURED: ``labels_from_path("tokens/stackv2-edu/train-35260.u32le.bin")`` returns
+    ``{'source': 'stackv2-edu'}``. All 7 of ``stackv2-edu``'s children write into the same
+    ``tokens/stackv2-edu/`` prefix with globally-allocated ordinals, so the key is *structurally
+    incapable* of naming its writer. A receipt names both: its ``bundle_id`` carries the
+    ``--pNNofNN`` suffix and its ``shards`` list names exactly the keys that child wrote.
+
+    Refuses a shard claimed by two receipts. That is ``bundle-set-shard-path-collision`` /
+    ``bundle-set-file-shard-overlap`` territory, but it must also be refused HERE: silently keeping
+    the last writer would map a shard's chunks onto the wrong part's documents, which is the exact
+    failure this function exists to prevent, arriving by a different route.
+
+    ``receipts`` are duck-typed on ``source``/``domain``/``split``/``file_shard``/``shards`` so this
+    module does not import ``corpus_receipt`` (which would be a cycle at module scope) and so a test
+    can pass a simple stand-in.
+    """
+    out: dict[str, tuple[str, str | None, str, int]] = {}
+    owner: dict[str, str] = {}
+    for r in receipts:
+        key = (r.source, getattr(r, "domain", None), r.split, int(getattr(r, "file_shard", 0)))
+        for shard in r.shards:
+            path = shard.path if hasattr(shard, "path") else str(shard)
+            if path in out and out[path] != key:
+                raise BuildError(
+                    f"shard {path!r} is claimed by two different bundles — "
+                    f"{owner.get(path)!r} as {out[path]!r} and {getattr(r, 'bundle_id', '?')!r} as "
+                    f"{key!r}. Keeping either one would map this shard's chunks onto the wrong "
+                    f"part's documents, and the resulting permutation would still be bijective."
+                )
+            out[path] = key
+            owner[path] = getattr(r, "bundle_id", "?")
+    if not out:
+        raise BuildError(
+            "no receipts named any shard, so no axis key can be attributed to a part. An empty "
+            "mapping makes build_order refuse every key, which is correct but reports the wrong "
+            "cause."
+        )
+    return out
 
 
 def chunk_counts(tokens: Sequence[int], *, seq_len: int = SEQ_LEN_CHUNK,
@@ -228,6 +321,19 @@ def chunk_axis_from_manifest(
 
     Only ``split`` shards are included. A val shard in the train axis would shift every chunk index
     past it AND make the curriculum order held-out data.
+
+    ⚠️ **A shard yielding ZERO chunks is REFUSED (F9).** ``curriculum_loader.py:67-68`` *silently
+    ``continue``s* past a file whose chunk count is ``<= 0``, which RENUMBERS every chunk after it —
+    so the vector built here would index a different axis than the trainer walks, while remaining a
+    perfect permutation of the right length. The corruption is in the CORRESPONDENCE between paths
+    and indices, not in the vector's structure, so ``bincount`` cannot see it.
+
+    ``corpus_pack.py:840-846`` makes this unreachable from OUR packer — it refuses to write a shard
+    under one whole ``SEQ_LEN`` (8,192 tokens = 3 chunks), 4x above the loader's skip threshold — but
+    **nothing asserted it**, and this function accepts any ``bytes``: MEASURED, a 20-byte shard
+    yielded ``chunks=(9, 0, 9)`` and ``build_order`` succeeded on it. The 150B corpus's two 20-byte
+    shards came from a *different* producer, so the shape is real, just not ours today. Converting an
+    invisible loader-side renumbering into a build-time refusal costs one loop.
     """
     from .manifest import parse_shard_name
 
@@ -251,10 +357,29 @@ def chunk_axis_from_manifest(
             f"the parent manifest holds no {split!r} shards, so there is no token space to order. "
             f"An empty axis would make a zero-length 'permutation' that passes every length check."
         )
+    counts = chunk_counts(tokens, seq_len=seq_len, rule=rule)
+    # F9. Checked over the WHOLE axis and reported together, because "which shards" is the actionable
+    # question and failing on the first hides how widespread it is.
+    degenerate = [(k, t) for k, t, c in zip(keys, tokens, counts) if c <= 0]
+    if degenerate:
+        shown = ", ".join(f"{k} ({t:,} tokens)" for k, t in degenerate[:5])
+        raise BuildError(
+            f"{len(degenerate)} of {len(keys)} {split!r} shards yield ZERO chunks at seq_len "
+            f"{seq_len} under rule {rule!r}: {shown}"
+            f"{f' (+{len(degenerate) - 5} more)' if len(degenerate) > 5 else ''}. "
+            f"⚠️ The consumer SKIPS a zero-chunk file silently (curriculum_loader.py:67-68), which "
+            f"RENUMBERS every chunk after it — so a vector built over this axis would be a perfect "
+            f"permutation of the right length pointing at the wrong tokens, and Gate A's bincount "
+            f"cannot see it because the corruption is in the path/index correspondence rather than "
+            f"in the vector. Our packer cannot emit such a shard (corpus_pack.py:840-846 refuses "
+            f"under one SEQ_LEN = 8,192 tokens = 3 chunks), so a manifest containing one means the "
+            f"shard came from elsewhere or the entry's `bytes` is wrong. Exclude it from the parent "
+            f"or fix the manifest; do not order around it."
+        )
     return ChunkAxis(
         keys=tuple(keys),
         tokens=tuple(tokens),
-        chunks=tuple(chunk_counts(tokens, seq_len=seq_len, rule=rule)),
+        chunks=tuple(counts),
         seq_len=seq_len,
         rule=rule,
     )
@@ -297,25 +422,66 @@ def _owner_of_each_chunk(
     return np.searchsorted(ends, chunk_starts, side="right")
 
 
+def _as_part_key(
+    value: tuple, *, where: str
+) -> tuple[str, str | None, str, int]:
+    """Normalise a ``shard_stream`` value to the 4-tuple ``(source, domain, split, part)``.
+
+    A 3-tuple is accepted and read as **part 0**, which is exactly right for an unsharded stream and
+    is what keeps every pre-F3 caller and fixture working. It is NOT a silent fallback for a sharded
+    one: a 3-tuple naming a source that has K > 1 parts resolves to part 0, whose labelled space does
+    not cover the other parts' shards, and ``build_order``'s per-part ``labelled >= held`` check then
+    fires with the shard's own key in the message. **The drift is unrepresentable either way** — what
+    a 3-tuple can no longer do is quietly merge K parts into one token space.
+    """
+    if len(value) == 4:
+        src, dom, split, part = value
+        return (str(src), None if dom is None else str(dom), str(split), int(part))
+    if len(value) == 3:
+        src, dom, split = value
+        return (str(src), None if dom is None else str(dom), str(split), 0)
+    raise BuildError(
+        f"{where}: shard_stream values must be (source, domain, split) or "
+        f"(source, domain, split, part); got {value!r}. The 4-tuple is what makes a file-shard "
+        f"part its own token space — see StreamLabels' F3 note."
+    )
+
+
 def build_order(
     axis: ChunkAxis,
     streams: Iterable[StreamLabels],
     *,
-    shard_stream: Mapping[str, tuple[str, str | None, str]],
+    shard_stream: Mapping[str, tuple],
     metric: str = "mtld",
 ) -> np.ndarray:
     """The permutation. ``order[i]`` is the global chunk index that trains *i*-th.
 
-    ``shard_stream`` maps each axis key to the ``(source, domain, split)`` stream that wrote it —
-    recoverable from the key itself (``manifest.labels_from_path``) but passed in so this function
-    does no path parsing of its own and a caller can be explicit about a nested layout.
+    ``shard_stream`` maps each axis key to the ``(source, domain, split, part)`` **PART** that wrote
+    it. A 3-tuple is read as part 0 (see :func:`_as_part_key`), which is correct for an unsharded
+    stream.
+
+    🔴 **THE PART IS IN THE KEY, AND THAT IS WHAT MAKES THIS FUNCTION CORRECT UNDER FILE-SHARDING.**
+    Each of a stream's K parts is its own :func:`~.corpus_pack.pack` call with its own tail
+    truncation and surplus drop, so each part's ``tokens_in`` exceeds its shards' ``tokens_out`` by a
+    **different** amount. This function advances its cursor by ``axis.tokens[i]`` — ``tokens_out`` —
+    which is right *within* a part and wrong *across* parts: concatenating K parts into one token
+    space made the gap accrue once per boundary, and **every chunk after the first boundary was
+    attributed to the wrong document while the vector remained a perfect permutation.** MEASURED on a
+    2-part fixture; no existing check fired, because the ``labelled >= held`` test becomes *more*
+    satisfied by the drift and ``bincount`` sees a valid bijection. Keying on the part gives each one
+    a cursor starting at 0 in its own labelled space, so **the drift is not merely detected, it is
+    unrepresentable.**
+
+    ⚠️ **``shard_stream`` must be built from RECEIPTS, not from ``manifest.labels_from_path``** — a
+    shard key carries the source and the global ordinal and **cannot** name which of the K children
+    wrote it (MEASURED). Use :func:`shard_stream_from_receipts`.
 
     **Fails closed on every one of these**, each of which otherwise yields a bijective, meaningless
     vector:
 
-    * an axis key whose stream has no labels;
-    * a stream whose labelled token space is SHORTER than the tokens its shards hold — the handoff's
-      stream-length check;
+    * an axis key whose part has no labels;
+    * a part whose labelled token space is SHORTER than the tokens its shards hold — the handoff's
+      stream-length check, now applied PER PART, which is the level at which it is meaningful;
     * a chunk whose first token falls past the last labelled document;
     * a result that is not a complete permutation of ``[0, n_chunks)``.
 
@@ -323,6 +489,9 @@ def build_order(
     chunk index as the explicit secondary, so the output is a pure function of the inputs. ``rank``
     is the document's position in the difficulty order, not its raw score: ranks are small integers
     that sort exactly, where float32 scores would make the tie set depend on rounding.
+
+    Ranks are still GLOBAL across every part of every stream, which is unchanged and deliberate: a
+    document's difficulty must not depend on which child happened to tokenize it.
     """
     if metric not in METRIC_SORT:
         raise BuildError(
@@ -333,15 +502,25 @@ def build_order(
     _field, descending = METRIC_SORT[metric]
     _assert_axis_is_read_order(axis)
 
-    by_stream = {(s.source, s.domain, s.split): s for s in streams}
+    by_stream: dict[tuple[str, str | None, str, int], StreamLabels] = {}
+    for s in streams:
+        if s.key in by_stream:
+            raise BuildError(
+                f"two label sets claim part {s.key!r}. Their documents would be ranked twice and "
+                f"one of the two would own every chunk of that part — silently, since both are real "
+                f"documents with real scores."
+            )
+        by_stream[s.key] = s
     if not by_stream:
         raise BuildError("no labelled streams supplied; there is nothing to rank")
 
-    # 1. GLOBAL DOCUMENT RANKS, over every stream at once. Ranking per stream and interleaving would
-    #    make a document's rank depend on which stream it came from — i.e. a curriculum that is
-    #    easy-to-hard WITHIN a source and arbitrary across sources, which is not the schedule.
-    stream_keys = sorted(by_stream, key=lambda s: (s[0], s[1] or "", s[2]))
-    doc_base: dict[tuple[str, str | None, str], int] = {}
+    # 1. GLOBAL DOCUMENT RANKS, over every part of every stream at once. Ranking per stream and
+    #    interleaving would make a document's rank depend on which stream it came from — i.e. a
+    #    curriculum that is easy-to-hard WITHIN a source and arbitrary across sources, which is not
+    #    the schedule. Parts are ordered by index inside their stream, so the global document
+    #    numbering is the concatenation order the packer used.
+    stream_keys = sorted(by_stream, key=lambda s: (s[0], s[1] or "", s[2], s[3]))
+    doc_base: dict[tuple[str, str | None, str, int], int] = {}
     at = 0
     for key in stream_keys:
         doc_base[key] = at
@@ -366,32 +545,41 @@ def build_order(
     rank_of_doc = np.empty(total_docs, dtype=np.int64)
     rank_of_doc[ordering] = np.arange(total_docs, dtype=np.int64)
 
-    # 2. PER SHARD: which stream, which documents, and the token offset the shard begins at.
+    # 2. PER SHARD: which PART, which documents, and the token offset the shard begins at.
     #    A shard's chunks are numbered from the shard's own start, so a per-shard cursor into the
-    #    stream's token space is what connects the two coordinate systems.
-    cursor: dict[tuple[str, str | None, str], int] = {k: 0 for k in stream_keys}
-    ends_cache: dict[tuple[str, str | None, str], np.ndarray] = {}
+    #    part's token space is what connects the two coordinate systems. **Keyed on the PART, so a
+    #    cursor never crosses a pack() boundary — see the F3 note on StreamLabels.**
+    cursor: dict[tuple[str, str | None, str, int], int] = {k: 0 for k in stream_keys}
+    ends_cache: dict[tuple[str, str | None, str, int], np.ndarray] = {}
     for key in stream_keys:
         ends_cache[key] = np.cumsum(by_stream[key].strides, dtype=np.int64)
 
-    # The stream-length check, per stream, BEFORE any chunk is mapped: the labelled token space must
-    # cover the tokens the stream's shards hold. It may legitimately EXCEED them — tokens_out is a
+    # The stream-length check, PER PART, BEFORE any chunk is mapped: the labelled token space must
+    # cover the tokens that part's shards hold. It may legitimately EXCEED them — tokens_out is a
     # prefix of tokens_in, short by tail_dropped + surplus_dropped — but it must never be shorter.
-    shard_tokens_by_stream: dict[tuple[str, str | None, str], int] = {k: 0 for k in stream_keys}
+    # Per PART rather than per stream is what makes this check meaningful: summed over a stream, one
+    # part's surplus masks another's shortfall.
+    part_key: dict[str, tuple[str, str | None, str, int]] = {}
+    shard_tokens_by_stream: dict[tuple[str, str | None, str, int], int] = {k: 0 for k in stream_keys}
     for k, t in zip(axis.keys, axis.tokens):
-        st = shard_stream.get(k)
-        if st is None:
+        raw = shard_stream.get(k)
+        if raw is None:
             raise BuildError(
-                f"axis key {k!r} maps to no stream. Every shard was written by exactly one "
-                f"(source, domain, split) stream; a shard with no stream has no documents and so "
-                f"its chunks have no difficulty."
+                f"axis key {k!r} maps to no part. Every shard was written by exactly one "
+                f"(source, domain, split, file_shard) bundle; a shard with no part has no documents "
+                f"and so its chunks have no difficulty. ⚠️ If this mapping was built with "
+                f"`manifest.labels_from_path`, that is the cause: a shard key cannot name which of "
+                f"a stream's K children wrote it. Use `shard_stream_from_receipts`."
             )
+        st = _as_part_key(raw, where=f"axis key {k!r}")
+        part_key[k] = st
         if st not in by_stream:
             raise BuildError(
-                f"axis key {k!r} belongs to stream {st!r}, which supplied NO labels. Its chunks "
+                f"axis key {k!r} belongs to part {st!r}, which supplied NO labels. Its chunks "
                 f"would have no owning document, so ordering them would mean inventing a "
                 f"difficulty for real training tokens. Refusing: a partial curriculum that silently "
-                f"omits a source is worse than none."
+                f"omits a source is worse than none. Parts with labels: "
+                f"{sorted(k2 for k2 in by_stream if k2[:3] == st[:3])}"
             )
         shard_tokens_by_stream[st] += int(t)
     for key in stream_keys:
@@ -399,12 +587,13 @@ def build_order(
         held = shard_tokens_by_stream[key]
         if labelled < held:
             raise BuildError(
-                f"{key}: the labels describe {labelled:,} tokens but this stream's shards hold "
+                f"{key}: the labels describe {labelled:,} tokens but this PART's shards hold "
                 f"{held:,} ({held - labelled:,} unlabelled). The labelled space must COVER the "
                 f"shard space — it may exceed it, since tokens_out is a prefix of tokens_in short "
                 f"by tail_dropped + surplus_dropped, but it must not fall short. This is the "
-                f"handoff's stream-length check and it is what proves the labels line up with the "
-                f"tokens."
+                f"handoff's stream-length check, applied PER PART: summed over a stream, one part's "
+                f"surplus masks another's shortfall, which is how the pre-F3 form could be satisfied "
+                f"by a set of parts that did not individually line up."
             )
 
     # 3. RANK EVERY CHUNK.
@@ -418,12 +607,18 @@ def build_order(
     chunk_rank = np.empty(n_chunks, dtype=np.int64)
     for i, key in enumerate(axis.keys):
         n = int(axis.chunks[i])
-        st = shard_stream[key]
+        st = part_key[key]
         start_tok = cursor[st]
-        # The shard consumes its FULL token count from the stream's space even when the last
-        # partial chunk is dropped by the `- 1` rule, so the next shard's cursor advances by
+        # The shard consumes its FULL token count from the PART's space even when the last partial
+        # chunk is dropped by the `- 1` rule, so the next shard's cursor advances by
         # `axis.tokens[i]` and not by `n * seq_len`. Advancing by the chunked amount would drift
         # the cursor by one chunk per shard and misattribute every document downstream.
+        #
+        # 🔴 `axis.tokens[i]` is `tokens_OUT`, and that is correct only WITHIN one pack() call. The
+        # cursor is keyed on the PART for exactly this reason: `tokens_in - tokens_out` (tail +
+        # surplus) is a per-part quantity, so a cursor that ran across K parts accumulated K-1 gaps
+        # and misattributed every post-boundary chunk while the vector stayed a perfect permutation.
+        # Per part, the cursor never crosses a boundary and the gap has nowhere to accrue. See F3.
         cursor[st] = start_tok + int(axis.tokens[i])
         if n == 0:
             continue
@@ -433,7 +628,7 @@ def build_order(
         if int(owners.max()) >= n_docs:
             past = int(np.count_nonzero(owners >= n_docs))
             raise BuildError(
-                f"{key}: {past} of {n} chunks start past the last labelled document of stream "
+                f"{key}: {past} of {n} chunks start past the last labelled document of part "
                 f"{st!r} ({n_docs:,} documents, {by_stream[st].n_tokens:,} labelled tokens). Those "
                 f"chunks hold real training tokens whose difficulty is unknown, and assigning them "
                 f"rank 0 or rank N would be a plausible-looking curriculum over unlabelled data."
