@@ -5197,3 +5197,80 @@ ready to drop into the job def verbatim. Nothing registered, nothing built, noth
 `memory 15,806` (or OOM-DIAGNOSE's figure) + **`PLAN_ID=364cb4dd488a5761`** + `--labels` +
 the 4-part behavioural assert + the existing corpus/file-shards/tokenizer guards, image = the digest the
 `b7bdfb8` build produces.
+
+---
+
+# 🚀 ADDENDUM 46 — IMAGE BUILD LAUNCHED from `b1b8c01`. Memory stays **14,336**. Cap assert MUTATION-PROVEN.
+
+## The ref, confirmed before building
+```
+origin/edullm/final-dataset-phase0 = b1b8c0175b33f4f626a4775e0b15ccbb613992e1   <- THE BUILD REF
+origin/final-dataset               = f5a4017…  (51+ behind, NOT an image source)
+```
+Verified from the pushed ref via `git archive`, non-emptiness asserted first:
+```
+registry md5 c44cc714…e976 (173,578 B) · plan_id 364cb4dd488a5761 · 185 bundles · __version__ 0.9.1
+_ENCODE_BATCH_CHARS = 33,554,432 (32.0 MiB)   _ENCODE_BATCH = 1000 (retained, as the doc bound)
+_batched(items, n, max_chars: int = 33554432)
+```
+
+## ✅ THE CAP ASSERT — proven to BIND, proven to FAIL on the old image, and immune to the trap
+**Observed batch sizes on the real `pre-1929-books` shape (400 KB/doc), not a constant check:**
+```
+200 docs x 400,000 chars, n=1000  ->  3 batches [83, 83, 34], peak 31.7 MiB <= cap 32.0 MiB
+```
+**Unbounded would be ONE batch of 200.** The cap binds.
+
+| check | result |
+|---|---|
+| cap binds on big docs | ✅ 3 batches, peak 31.7 MiB |
+| **small docs UNAFFECTED** | ✅ 2,500 × ~600 B → `[1000, 1000, 500]` — bounded by `n`, not chars |
+| **run against PRE-FIX `a8b83c8`** | ✅ **1 batch, peak 76.3 MiB → AssertionError.** The OOM mechanism reproduced. |
+| the default-arg trap | ✅ **CONFIRMED REAL** — setting `P._ENCODE_BATCH_CHARS = 1` changed nothing (still 3 batches) |
+
+🔑 **The trap is exactly as the CEO warned.** `max_chars` is a **default argument bound at definition time**,
+so a test that monkeypatches the module attribute **passes while exercising the original bound**. **My assert
+observes BATCH SIZES**, so it cannot be fooled that way. **Sixth instance tonight of a check that would have
+passed on the wrong artifact — and the first I was warned about in advance.**
+
+## Payload — round-tripped AND proven to carry the fix, before spending the build
+```
+tar.xz     293,700 B      sha256 8bc30fca430c651f1fcd54fb6c9c4fa7b659650bac3b747a7f4ddbd99f1d8b9c
+base64     391,600 chars across 83 vars of ~4,719      + CTX_SHA256, IMAGE_TAG, ECR_REPO
+reassembled 293,700 B, sha256 MATCHES
+_ENCODE_BATCH_CHARS in corpus_pack.py : 3 hits
+corpus_labels.py present              : True
+'labels' in corpus_build.py           : 46 hits
+s3:// staged source support           : True
+.edullm/Dockerfile                    : present
+```
+**Exported from the PUSHED ref, never the working tree** — my local HEAD is docs-only ahead, but taking the
+context from the ref removes the question entirely.
+
+**The digest guard fails closed** inside the buildspec (`assert got == want`), computed from the bytes I am
+actually sending. **Project config confirmed untouched**: `source.type NO_SOURCE`, `triggers: null`,
+`privilegedMode: true` — and `--buildspec-override`/`--environment-variables-override` are **per-build**, so
+the PRM/vendored line's stored spec is unaffected.
+
+## Build in flight
+```
+edullm-prm800k-image-build:7a176de9-c52c-455c-9484-3cb6fa72b776   IN_PROGRESS   14:53:33 CDT
+tag b1b8c0175b33
+```
+⚠️ **ECR tag immutability has refused two of my predecessors' pushes tonight** when a concurrent session got
+there first. **If POST_BUILD fails on `tag already exists`, that is the protection working** — the image
+exists and the preflight decides it, exactly as it did for `4df94c4c…`.
+
+## Memory: 14,336 MiB, UNCHANGED — and why that is the right call
+The raise I recommended (15,806) gave **1.45×** against a term with **no upper bound** — a doc-count batch
+against a source whose docs are 371–402 KB. **The fix bounds the actual quantity**, giving 4.12× headroom at
+14,336. **A bound beats a bigger number**, and this is the second time tonight a two-line fix beat a memory
+raise. **Both were found by refusing a raise as the remedy for an unexplained failure.**
+
+## 🔴 Carried into the run: `stackv2-edu`'s OOM is still UNVERIFIED
+The CEO's corrected tally: **2 of 4 row-group** (`finepdfs-edu`, `reasoning-traces`), **2 of 4 `json.gz`**
+(`pre-1929-books`, `stackv2-edu`). The batch fix explains `pre-1929-books` (400 KB docs). **`stackv2-edu`'s
+mean is ~7 KB, so the batch term does not explain it.** Live candidates: its `SeenHashes` is the largest of
+the four (~120 M docs), and `domain_column: metadata.gha_language` fans out to 73 values.
+**Watch `stackv2-edu--train--p00..06of07` specifically. If one dies again, the cause is neither of the two
+already fixed.**
