@@ -5403,3 +5403,79 @@ three-digit `EDULLM_SOURCE_000..082`**, so every lookup was unset and `-u` kille
 failure in a row: the stored spec writes 83 explicit lines precisely because this is fiddly.** Build 3
 (`43301ee0`) writes the 83 lines explicitly, no `eval`, no `seq`. **~1 min of CodeBuild each; payload and
 guards unchanged and already validated.**
+
+---
+
+# 🚀 ADDENDUM 48 — BUILDING `912f17c`. `PLAN_ID` recomputed. Two of my own defects caught pre-launch.
+
+## The ref and the plan id, both verified from the PUSHED tree
+```
+origin/edullm/final-dataset-phase0 = 912f17cd3bbd095eac9a664b44c7d1ebc430ce17
+registry md5 : a9912ca3d3296dfed355834003db759b   (186,549 B — non-emptiness asserted first)
+plan_id      : 79e53d1e5e131649   <- RECOMPUTED, matches the CEO exactly
+bundles 185 · shards 37,307 · tokens 932,749,017,088
+finepdfs-edu  pool 126,000,000,000  target 63,000,000,000
+stackv2-edu   pool  61,642,058,302  target 58,000,000,000   (94.1% — tightest row)
+```
+⚠️ **The corpus is now 932.7 B / 37,307 shards**, down from 982.8 B / 39,307. **Both the token total and the
+shard count moved**, so any figure I quoted against 982.7 B is stale — including my makespan projections.
+**I will re-derive the makespan from this plan after launch, not carry the old one forward.**
+
+## 🔴 DEFECT 1 (mine) — I shipped `__pycache__` into the build context
+The first `912f17c` payload was **355,124 B against b1b8c01's 293,700 B — +21%.** Cause: **I ran
+`PYTHONPATH=src python3` inside the extracted context to recompute `plan_id`, and CPython wrote
+`__pycache__/*.pyc` into the tree I was about to ship.** `git ls-tree | grep -c __pycache__` → **0**: not one
+is tracked. **The pollution was entirely mine, created by my own verification step.**
+
+**And `.dockerignore` — which excludes `__pycache__/` and `*.py[cod]` explicitly — was NOT in my context**,
+because my `git archive` list never included it. So Docker could not have filtered them either.
+
+**Fixed both ways:** `.dockerignore` is now in the export list, and **I verify the payload with `grep`/`test`
+only — never by running Python inside the context.** Clean: **294,576 B, 0 `__pycache__`, 0 `.pyc`.**
+
+> **The lesson generalises: a verification step that WRITES into the artifact it verifies has corrupted the
+> artifact.** I checked the payload by importing from it, and the import is what changed it. Same family as
+> the `2>/dev/null` watchdog — the instrument altering the measurement, rather than merely failing to see it.
+
+## 🔴 DEFECT 2 — a hard AWS ceiling nobody had hit, found by measurement not by docs
+```
+StartBuild -> InvalidInputException: The size of build configuration exceeds the limit
+```
+Bisected against a known-good request rather than trusting a documented number:
+```
+ACCEPTED (b1b8c01) : env 393,123 + spec 8,752 = 401,875
+REJECTED (912f17c) : env 394,291 + spec 8,752 = 403,043
+=> the real ceiling is between 401,875 and 403,043 — we were ~1,200 chars over
+```
+**Resolved by trimming the buildspec's prose (8,752 → 6,127 chars), NOT by dropping a guard.** Every control
+survives verbatim: `sha256sum -c -` on the sent bytes, the `_ENCODE_BATCH_CHARS`/`corpus_labels.py`
+fix-presence checks, the digest-pinned `BASE_IMAGE`, `--pull`, and **my `docker image inspect || exit 1`
+anti-fail-open departure from the stored spec.** Final request **400,418** — inside the proven ceiling.
+
+⚠️ **Standing constraint for the handoff: this payload mechanism is within ~1,500 chars of a hard AWS limit.**
+The 83-var base64 scheme is at end of life; **the durable fix is the dedicated CodeBuild project with a real
+git source that the ledger already defers.** The next person to add a source file may find it simply will not
+start, with an error that names neither the cause nor the margin.
+
+## ⚠️ A stale build I could not cancel — recorded, not hidden
+Build `43301ee0` (the superseded `b1b8c01`) was still QUEUED when the new ref landed. **`stop-build` returned
+`InternalFailure` on two attempts.** I did not keep retrying.
+**Assessed impact: none.** It tags **`b1b8c0175b33`**, a different tag from `912f17cd3bbd`, so **it cannot
+collide with or overwrite the image we will pin**, and ECR tag immutability blocks any overwrite regardless.
+**If it completes it produces a superseded-but-harmless image. Do not pin it.**
+
+## Build in flight
+```
+edullm-prm800k-image-build:56599af4-de86-440f-b54f-b805028a5150   IN_PROGRESS   tag 912f17cd3bbd
+payload 294,576 B  sha256 ade28f47a6728e8dd9be09be8b0c09dff6095587f2034735aa32cbad6cf4ce86
+round-tripped: reassembled 294,576 B, sha256 MATCH
+carries: _ENCODE_BATCH_CHARS(3) · corpus_labels.py · s3:// reader(14) · labels in corpus_build(46)
+```
+
+## Watch list for the launch, both named by the CEO and neither hidden
+1. **`stackv2-edu`'s OOM is UNEXPLAINED** — the char cap does not bound it (measured 8.47 MiB max batch vs a
+   32 MiB cap; `mean_tok=981.63`, ~1 KB docs). **If any of `p00..06of07` dies, report immediately; do not
+   reach for a raise.**
+2. **`stackv2-edu` will legitimately under-deliver** — 58 B target against a 61.64 B pool = **94.1%**, the
+   tightest row in the corpus. **Expected, not a defect.** My six measured `DONE` lines put the realistic
+   yield near 61.5 B, so a small shortfall here is the honest outcome.

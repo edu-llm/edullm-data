@@ -5006,6 +5006,64 @@ is unchanged, the hours are not to be re-quoted.**
 
 ---
 
+# ✅ `finepdfs-edu` IS CLEAR — the pool was UNDERSTATED 1.81×, the opposite defect. Applied, `plan_id` held.
+```
+MEASURED pool 126.4 B (declared 70 B)  ·  100 files paginated via Link/rel="next"
+575,753,674,201 text bytes — reproduces artifacts/recount/_footer-finepdfs-edu.json BYTE-FOR-BYTE
+true epoch at the unchanged 63 B target: 0.498, not 0.900
+APPLIED: pool 70e9 → 126e9 · plan_id 79e53d1e5e131649 UNCHANGED · 1,574 passing · pushed 912f17c
+```
+**CEO-verified why it is free:** `pool_tokens` **does not appear in `plan_document`'s source**; `target_tokens`
+does. **So the pool correction preserves the 169 completed bundles — and raising the target would VOID them.**
+That is the argument against opportunistically drawing more from the larger pool, and POOL-AUDIT made it before
+I could ask.
+
+## 🔑 It found a better instrument than I briefed — the build's own receipts
+I told it to validate against three `DONE` lines. **It used the receipts in S3 instead**
+(`_receipts/finepdfs-edu--train--p0{0,1,2}of04.json`), which carry exact `filter.seen` and `pack.tokens_in`,
+and it ran a **true holdout**: fitted tokens/byte on **p00 alone**, then predicted the two parts it had not
+used — **p01 −0.027%, p02 −0.283%.** *"A self-check is not a holdout"* is the distinction, and it drew it
+unprompted.
+
+**The decisive evidence is not the arithmetic, it is `unfilled: []`.** p00–p02 delivered **100.0% of budget,
+627/627 shards each** — they stopped because they **hit budget**, not because the source ran out. **Contrast
+`stackv2-edu`, whose receipts carry 1,579 unfilled refs. That is what exhaustion looks like, and finepdfs shows
+none of it.** The 78.1% source shortfall is entirely p03of04's OOM — **a memory failure, not a pool failure.**
+
+**Prior 161 B figure corrected in place, not retracted:** `artifacts/recount/edu-web-finepdfs-edu.json`'s 161 B
+is **raw tokenizer output**; 126.4 B is the **deliverable** pool after length filter, decontamination and val
+carve. **Both are right about different quantities, and `pool_tokens` means the second.**
+
+# ✅ THE SWEEP — 125 of 132 drawn rows PROVEN BY THE BUILD ITSELF
+**169 receipts cover 128 of 132 drawn rows. 125 rows at 100.0% fill, 0 unfilled — 793 B of the 936 B target.**
+**This includes every `fineweb-edu-*` row (63–84% draw, all round unattributed numbers — exactly the tier I
+would have flagged as risky) and all 100 `dclm-*`.** Their pools may be imprecise but **cannot bite: the build
+already drew the full target without exhausting them.**
+> **A completed run is a stronger pool measurement than any footer scan** — and nobody, including me, thought to
+> use it that way until now.
+
+| rank | row | draw | status |
+|---|---|---|---|
+| 1 | `stackv2-edu` | 94.1% | 🔴 **CONFIRMED SHORT** — 1,579 unfilled; already ruled at 936 B |
+| 2 | `nemotron-cc-math-3` | 45.5% | ✅ MEASURED 77–81 B vs 83.6 declared — slightly optimistic, 1.8× headroom |
+| 3 | `nemotron-cc-math-4plus` | 45.6% | ✅ MEASURED 51.2–51.6 B vs 50.4 — pool is **conservative** |
+| 4 | `pre-1929-books` | 23.1% | ⚠️ unmeasured, 4.3× headroom — **cannot bite** |
+| 5 | `math-textbooks` | 10.9% | ⚠️ unmeasured, 9.2× headroom — **cannot bite** |
+
+**It did not guess the two it could not measure** — and correctly argued that at 23% and 11% draw they cannot
+over-draw even if 4× wrong.
+
+## 🔴 AND IT FOUND MY NEW GUARD IS ALREADY VACUOUS
+`test_the_pool_figures_are_traceable_to_a_measurement` greps traps for the literal string **"MEASURED"**.
+**`finepdfs-edu`'s trap contained that word while explicitly saying "ENG-EXEC-3 did not measure it" — so the row
+PASSED the provenance test on a trap that stated the opposite.**
+**Same shape as CEO error #24, one round later: a correct check fed an input it cannot falsify.** I ordered a
+guard against unmeasured pools and it shipped satisfiable by the word "MEASURED" appearing in a sentence
+denying measurement. **Not launch-blocking — the trap I just wrote carries a numeric derivation — but the check
+must require the number, not the word.** Recorded for the handoff.
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of
