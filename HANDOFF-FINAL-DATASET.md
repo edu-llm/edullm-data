@@ -1,5 +1,22 @@
 # HANDOFF — `pretrain/final-dataset`
 
+> ## ⛔ SUPERSEDED FOR EXECUTION — 2026-08-09. READ `HANDOFF-REBUILD.md` FIRST.
+>
+> This file is accurate about the corpus **design** and the reasoning behind the mix. **Its NUMBERS are
+> stale** and must not be quoted:
+>
+> | this file says | actual, as of 2026-08-09 |
+> |---|---|
+> | `pretrain/final-dataset` | **`pretrain/edu-mix-983b`** — `final` is a version token the validator REJECTS |
+> | ~1.0T / 986 B | **936 B** (row-sum) / **932,749,017,088** (plan-sum) |
+> | 39,307 shards | **37,307** |
+> | 13.31 / 21.31 / 15.5 h critical path | **all withdrawn** — re-derive from the current plan |
+> | 10.85 h per-child | withdrawn (computed at a rate later found 4.52× optimistic) |
+>
+> Also changed since: `stackv2-edu`'s pool was **24.5× too high**, `finepdfs-edu`'s was **1.81× too low**,
+> and the corpus now ships **inline MTLD labels** plus a `curriculum/edu-mix-983b` token-order dataset.
+> **`plan_id` is `79e53d1e5e131649` and has moved four times — always recompute it.**
+
 **Last updated 2026-08-07.** Read this file alone and you can continue with no other context.
 Branch `final-dataset`, worktree
 `/Users/ericwu/Developer/Capstone_LLM-worktrees/edullm-data/final-dataset`, based on

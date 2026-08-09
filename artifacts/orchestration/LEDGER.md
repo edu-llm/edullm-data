@@ -5064,6 +5064,59 @@ must require the number, not the word.** Recorded for the handoff.
 
 ---
 
+# 🚀 BUILDING `912f17c` — `PLAN_ID 79e53d1e5e131649` independently recomputed and matched
+```
+edullm-prm800k-image-build:56599af4-…  IN_PROGRESS  tag 912f17cd3bbd
+registry md5 a9912ca3… · bundles 185 · shards 37,307 · tokens 932,749,017,088
+finepdfs-edu 126.0/63.0 B  ·  stackv2-edu 61.64/58.0 B (94.1%, the tightest row)
+payload 294,576 B · sha256 ade28f47… · round-trip MATCH
+carries: _ENCODE_BATCH_CHARS(3) · corpus_labels.py · s3:// reader(14) · labels(46)
+```
+⚠️ **The corpus is 932.7 B / 37,307 shards** — both the token total **and the shard count** moved from
+982.8 B / 39,307. **Every makespan figure quoted against the old plan is stale**, including my own; PLAT will
+re-derive after launch rather than carry a stale number forward. **Correct instinct — that is the discipline I
+failed at with 11.07 h.**
+
+## 🔴 DEFECT 1 — PLAT's verification step CORRUPTED the artifact it was verifying
+The first payload was **+21% (355 KB vs 294 KB)**. Cause: it ran `PYTHONPATH=src python3` **inside the extracted
+context** to recompute `plan_id`, and **CPython wrote `.pyc` files into the tree it was about to ship.** Zero are
+tracked in git. And `.dockerignore` — which excludes them explicitly — **was not in the export list**, so Docker
+could not filter them either.
+> **The generalisable form, PLAT's own: a verification step that WRITES into the artifact it verifies has
+> corrupted the artifact.**
+
+**Same family as the `2>/dev/null` watchdog, but worse: there the instrument failed to see; here the instrument
+altered the thing measured.** Both fixed — `.dockerignore` exported, and the payload is now verified with
+`grep`/`test` only.
+
+## 🔴 DEFECT 2 — A HARD `StartBuild` CEILING, FOUND BY BISECTION. THIS IS A HANDOFF BLOCKER.
+```
+ACCEPTED (b1b8c01) : 401,875 chars
+REJECTED (912f17c) : 403,043 chars     → the wall sits between them; we were ~1,200 over
+final request      : 400,418 chars
+```
+**Resolved by trimming buildspec PROSE 8,752 → 6,127 — not by dropping a control.** Every guard survives
+verbatim: `sha256sum -c -`, the fix-presence greps, digest-pinned `BASE_IMAGE`, `--pull`, and its own
+`docker image inspect || exit 1` departure from the stored spec.
+
+⚠️ **The payload mechanism is now ~1,500 characters from a hard wall.** The 83-var base64 scheme is at **end of
+life**. **RULING: the dedicated CodeBuild project with a real git source is no longer a deferred nicety — it is
+the next blocking infrastructure task**, and it goes in the handoff as such. *"The next person to add a source
+file will find builds simply won't start, with an error naming neither cause nor margin."* **A limit discovered
+by bisection, documented nowhere, ~0.4% from the edge.**
+
+## Two items recorded rather than hidden
+- **Stale build `43301ee0` still QUEUED; `stop-build` returned `InternalFailure` twice and PLAT stopped
+  retrying.** Impact **none** — different tag (`b1b8c0175b33` vs `912f17cd3bbd`), so no collision, and ECR
+  immutability blocks overwrites regardless. **⚠️ Do not pin it if it completes.**
+- **The watchdog reported `WATCHDOG-BLIND rc=255`** on a broker credential expiry — **it failed CLOSED exactly as
+  designed, refusing to report a verdict rather than inventing one.** The build was healthy (PROVISIONING)
+  throughout. **That is the third iteration of that watchdog earning its rewrite:** attempt 1 was fail-open,
+  attempt 2 would have drowned the channel, attempt 3 declines to guess. Re-armed with transient tolerance that
+  still gives up loudly after 5 consecutive failures.
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of
