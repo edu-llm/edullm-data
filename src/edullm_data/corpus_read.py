@@ -40,6 +40,14 @@ A second, quieter half of the same trap, also verified by execution: asking pyar
 columns** and `to_pylist()` of `[{}]` — an empty corpus, silently. Only `path_in_schema` taken
 from the file's own footer is safe, which is why the selectors here are never spelled by hand.
 
+TWO TRANSPORTS, ONE CONTRACT
+----------------------------
+A registry row's `repo` is either an HF repo id (`owner/name`, read over HTTPS Range at the pinned
+revision) or an `s3://bucket/prefix` URI naming a STAGED copy. The second form exists because a
+GATED upstream returns 401 to every credential we hold, and reading it at all requires copying the
+bytes into our own bucket first. **Only the transport differs** — see the `s3://` section below;
+column resolution, ordering, ids, and every filter are the same code on the same footer.
+
 WHAT THIS MODULE DELIBERATELY DOES NOT DO
 -----------------------------------------
 No decontamination and no dedup — both are later steps in §5.6 phase 1's ordering, and neither
@@ -68,13 +76,18 @@ __all__ = [
     "GZIP_WBITS",
     "JSONL_CHUNK_BYTES",
     "LIST_MARKER_SEGMENTS",
+    "S3_SCHEME",
     "AttritionWarning",
     "READABLE_FORMATS",
     "FilterStats",
     "ReadError",
+    "S3RangeFile",
     "filter_documents",
+    "is_s3_source",
+    "parse_s3_uri",
     "read_documents",
     "read_jsonl_gz_documents",
+    "s3_files",
     "surrogate_id",
     "read_parquet_documents",
     "reader_for_format",
@@ -438,6 +451,235 @@ def _pinned_url(repo: str, path: str, revision: str | None) -> str:
     return f"https://huggingface.co/datasets/{repo}/resolve/{revision}/{path}"
 
 
+# --------------------------------------------------------------------------------------
+# The `s3://` SOURCE — a staged copy of an upstream we cannot fetch over HTTPS
+# --------------------------------------------------------------------------------------
+#
+# WHY THIS EXISTS, AND THE FAILURE IT COST
+# ----------------------------------------
+# Every reader above resolves `https://huggingface.co/datasets/{repo}/resolve/{revision}/{path}`.
+# For a GATED repo that is a 401 no credential of ours can clear — *someone else's* accepted gate
+# is not our access. The bytes for one such source (Nemotron-CC-Math-v1) were copied to
+# `s3://edullm-landing/_src/nemotron-cc-math-v1/` and byte-verified (103 files,
+# 169,606,727,240 B, on the one landing prefix with NO expiry rule) — **and no registry row could
+# name them, because `repo` was interpreted as an HF repo id unconditionally.** That cost 7 of 16
+# bundles and 61 B tokens of the math pillar on the 2026-08-09 build.
+#
+# So `repo` becomes a two-form field: an HF repo id (`owner/name`), or an `s3://bucket/prefix`
+# URI. **Nothing here is Nemotron-specific.** A hardcoded path would have to be re-hardcoded for
+# the next gated source, and the next session would not know to look.
+#
+# WHAT AN `s3://` ROW STILL OWES, AND WHY IT IS NOT RELAXED
+# ---------------------------------------------------------
+# `text_column`, `id_column`, `domain_column`, `path_in_schema` resolution, `id_surrogate`, the
+# short-document filter, dedup, decontamination: all unchanged. The ONLY thing that changes is the
+# transport. That is deliberate — the trap this module exists to close (a bare `text` resolving to
+# the ORIGINAL document, not the rewrite) is a property of the parquet footer, not of how the
+# footer arrived, so relaxing any of it for the staged path would reopen the trap on exactly the
+# sources whose provenance is already one step removed from upstream.
+
+#: The URI scheme that switches `repo` from an HF repo id to a staged S3 prefix.
+S3_SCHEME = "s3://"
+
+
+def is_s3_source(repo: str) -> bool:
+    """True when this registry row's ``repo`` names a staged S3 prefix rather than an HF repo.
+
+    One predicate, used by the readers, by ``corpus_build.hf_files``' dispatch, and by the plan-time
+    revision check — so "is this row staged?" has exactly one answer. A second spelling of this test
+    is how a plan-time gate and a run-time dispatch come to disagree, which this package has already
+    paid for three times (the three format tables).
+    """
+    return repo.startswith(S3_SCHEME)
+
+
+def parse_s3_uri(uri: str) -> tuple[str, str]:
+    """``s3://bucket/prefix`` → ``(bucket, prefix)``, with the prefix normalised to no leading or
+    trailing ``/``.
+
+    Refuses a bucket-only URI. A row reading ``s3://edullm-landing`` would enumerate the WHOLE
+    landing bucket — every other source's staged bytes, every shard of every in-flight build — and
+    the failure would not look like a bad row: it would look like an enormous source that happens to
+    contain a lot of parquet. The prefix is what scopes a row to its own data, so it is mandatory.
+
+    Normalising the trailing slash matters for enumeration, not for tidiness: `_src/nemo` and
+    `_src/nemo/` are different `list_objects_v2` prefixes only in that the first also matches
+    `_src/nemotron-…`. A row is required to name a directory, so the separator is appended at
+    enumeration time from a normalised value rather than depending on how the row was typed.
+    """
+    if not is_s3_source(uri):
+        raise ReadError(f"{uri!r} is not an {S3_SCHEME} URI")
+    rest = uri[len(S3_SCHEME):]
+    bucket, _, prefix = rest.partition("/")
+    if not bucket:
+        raise ReadError(f"{uri!r} names no bucket")
+    prefix = prefix.strip("/")
+    if not prefix:
+        raise ReadError(
+            f"{uri!r} names a bucket with no prefix. A bucket-only row would enumerate every "
+            f"object in it — every other source's staged bytes and every shard of every in-flight "
+            f"build — and would read as an enormous source rather than as an error. Name the "
+            f"prefix that holds THIS source's files."
+        )
+    return bucket, prefix
+
+
+def s3_files(
+    spec: CorpusSpec, *, s3: Any, extensions: Sequence[str],
+) -> list[dict]:
+    """Every payload file under a staged prefix, as ``{"path": ..., "size": ...}``.
+
+    **The `hf_files` equivalent, and it returns the same shape for the same reason** — the readers
+    take either a path string or an entry mapping carrying ``size``, because a Range read needs the
+    object length up front, and `_bundle_files`/`_reader_for` pass the entry through unchanged.
+
+    ORDERING — the property `source_doc` and the whole permutation rest on
+    ------------------------------------------------------------------------
+    **Sorted by `path`, byte-lexicographically, exactly as `hf_files` sorts its HF listing**
+    (`corpus_build.py:1714`, `sorted(out, key=lambda e: e["path"])`). Three consequences, and each
+    one is a property the build already depends on for the HTTPS path:
+
+    * `_bundle_files` takes `files[i::K]` — a *stride*. A stride is a pure function of the list only
+      if the list is ordered, so an unordered listing would give each of the K children a different
+      slice on every re-run, with no error: the token counts still add up and every shard still
+      decodes.
+    * `surrogate_id` is `(file path, row index)`, so an id is stable across re-reads only while the
+      *set* of files is; and the ordinals a child writes come from the plan, so a re-run that read
+      the files in a different order would put different documents at the same shard ordinals.
+    * The curriculum's `source_doc` is a COUNTER over the documents the packer pulled, so document
+      order IS document identity. Re-ordering the file list silently re-labels every chunk.
+
+    **`list_objects_v2` already returns keys in UTF-8 binary order** (S3's documented contract), so
+    the sort is a re-assertion rather than a repair — which is the point: it is not ours to depend on
+    a transport's ordering promise when a `sorted()` makes it OUR invariant, testable without S3, and
+    identical to the branch that reads HF. `FakeS3.list` iterates a dict and is deliberately NOT in
+    key order, so the tests exercise the sort rather than a coincidence.
+
+    A `config` on the row is appended to the prefix, exactly as `hf_files` appends it to the HF tree
+    path — that is how one staged repo holding `3/` and `4plus/` serves two registry rows without a
+    glob. Matching is by explicit prefix and never by pattern, which is what physically excludes the
+    `4plus_MIND` rewrite from a `4plus` row.
+    """
+    bucket, prefix = parse_s3_uri(spec.repo)
+    if spec.config:
+        prefix = f"{prefix}/{spec.config.strip('/')}"
+    # The trailing `/` is what makes this a DIRECTORY prefix. Without it a `4plus` row also matches
+    # `4plus_MIND/…` — the exact double-count the registry's own trap line warns about, and a
+    # `startswith` that reads as correct.
+    listing = s3.list(bucket, f"{prefix}/")
+    exts = tuple(extensions)
+    out = [
+        {"path": item["key"], "size": int(item["size"]), "bucket": bucket}
+        for item in listing
+        if item["key"].endswith(exts) and int(item["size"]) > 0
+    ]
+    if not out:
+        raise ReadError(
+            f"{spec.key}: no {list(exts)} objects under s3://{bucket}/{prefix}/. The staged prefix "
+            f"is empty, wrong, or holds a different extension than file_format {spec.file_format!r} "
+            f"implies. An empty source is not a smaller corpus, it is a missing category."
+        )
+    # See ORDERING above. `key` is the FULL object key, so this is a total order over the objects
+    # this row reads and it is independent of listing order, pagination, and insertion order.
+    return sorted(out, key=lambda e: e["path"])
+
+
+class S3RangeFile:
+    """A seekable read-only file over ``S3.get_range``, for pyarrow's footer + column reads.
+
+    Deliberately NOT a subclass of, nor a caller of, `_RangeFile`. That class is an HTTP client —
+    CDN URL resolution, a 429 rate gate, the 8-attempt retry ladder, `Authorization` headers — and
+    none of it applies to `s3://`: boto3 already retries, S3 is not per-IP metered, and there is no
+    signed URL to expire. Inheriting would carry a rate gate that throttles S3 reads for a 429 that
+    an HF worker in the same process suffered.
+
+    ⚠️ **The short-read loop IS carried over, and it is the one part that must be.** A `read(n)` that
+    returns fewer than `n` bytes is what pyarrow turns into a SIGSEGV: it takes the short buffer,
+    reads a page header at an offset now inside the wrong bytes, and dereferences a garbage length
+    (`ingest_reservoir.py:388-407` — exit 139 in 3 of 4 array children, and the reason `pre_buffer`
+    is False everywhere). `Boto3S3.get_range` issues one `get_object` with a `Range` header and
+    `.read()`s the body, which is *permitted* to come back short; so the loop is not optional here
+    just because the transport changed.
+    """
+
+    def __init__(self, s3: Any, bucket: str, key: str, size: int) -> None:
+        self._s3, self._bucket, self._key, self.size = s3, bucket, key, int(size)
+        self.pos = 0
+        self.bytes_fetched = 0
+
+    # pyarrow probes these; `io.RawIOBase` is not inherited because none of its buffering is wanted.
+    def seekable(self) -> bool:
+        return True
+
+    def readable(self) -> bool:
+        return True
+
+    def writable(self) -> bool:
+        return False
+
+    def closed_check(self) -> bool:  # pragma: no cover - pyarrow uses `closed`
+        return False
+
+    closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+    def tell(self) -> int:
+        return self.pos
+
+    def seek(self, off: int, whence: int = 0) -> int:
+        if whence == 0:
+            self.pos = off
+        elif whence == 1:
+            self.pos += off
+        else:
+            self.pos = self.size + off
+        return self.pos
+
+    def read(self, n: int = -1) -> bytes:
+        """EXACTLY `n` bytes, or fewer only at true end-of-object. See the class docstring."""
+        if n is None or n < 0:
+            n = self.size - self.pos
+        n = min(n, self.size - self.pos)
+        if n <= 0:
+            return b""
+        out = bytearray()
+        while len(out) < n:
+            chunk = self._s3.get_range(
+                self._bucket, self._key, self.pos + len(out), n - len(out)
+            )
+            if not chunk:
+                raise ReadError(
+                    f"short read: got {len(out)} of {n} bytes at offset {self.pos} in "
+                    f"s3://{self._bucket}/{self._key}. Returning a short buffer here is what "
+                    f"pyarrow turns into a SIGSEGV — it reads a page header at an offset inside "
+                    f"the wrong bytes and dereferences a garbage length."
+                )
+            out += chunk
+        self.pos += len(out)
+        self.bytes_fetched += len(out)
+        return bytes(out)
+
+    def readinto(self, b) -> int:  # pragma: no cover - pyarrow prefers read()
+        data = self.read(len(b))
+        b[: len(data)] = data
+        return len(data)
+
+
+def _s3_entry(spec: CorpusSpec, path: str | Mapping[str, Any]) -> tuple[str, str, int | None]:
+    """``(bucket, key, size)`` for one staged object, from a path string or an `s3_files` entry.
+
+    The bucket is taken from the ENTRY when present and from `spec.repo` otherwise, so a caller
+    holding what `s3_files` returned never re-parses the URI, and a caller holding a bare key still
+    resolves against the row's own bucket rather than a default.
+    """
+    bucket = parse_s3_uri(spec.repo)[0]
+    if isinstance(path, Mapping):
+        return str(path.get("bucket") or bucket), str(path["path"]), path.get("size")
+    return bucket, str(path), None
+
+
 def _open_parquet(
     repo: str,
     path: str,
@@ -503,6 +745,7 @@ def read_parquet_documents(
     domain_map: Mapping[str, str] | None = None,
     fileobj: Any | None = None,
     parquet_file: Any | None = None,
+    s3: Any | None = None,
 ) -> Iterator[Document]:
     """Stream one parquet file as :class:`~.corpus.Document` objects, a row group at a time.
 
@@ -528,6 +771,26 @@ def read_parquet_documents(
     entry_size = size
     if isinstance(path, Mapping):
         entry_size = path.get("size", size)
+
+    # THE STAGED-SOURCE BRANCH. Only the transport differs: every column resolution, every walk,
+    # every id and domain rule below is the same code on the same footer. See the `s3://` section.
+    if fileobj is None and parquet_file is None and is_s3_source(repo):
+        if s3 is None:
+            raise ReadError(
+                f"{spec.key}: repo {repo!r} is a staged {S3_SCHEME} prefix but no `s3=` client was "
+                f"passed. The staged path reads through S3.get_range, not HTTPS — a row cannot be "
+                f"read without a client, and falling back to the HF URL would 401 on exactly the "
+                f"gated sources this branch exists to serve."
+            )
+        bucket, key, ent_size = _s3_entry(spec, path)
+        if ent_size is None:
+            ent_size = entry_size
+        if ent_size is None:
+            ent_size = int(s3.head(bucket, key)["size"])
+        fileobj = S3RangeFile(s3, bucket, key, int(ent_size))
+        path = key
+
+    if isinstance(path, Mapping):
         path = str(path["path"])
     if fileobj is None and parquet_file is None and entry_size is None:
         raise ReadError(
@@ -733,6 +996,7 @@ def read_jsonl_gz_documents(
     size: int | None = None,
     domain_map: Mapping[str, str] | None = None,
     chunks: Iterable[bytes] | None = None,
+    s3: Any | None = None,
 ) -> Iterator[Document]:
     """Stream one `.json.gz` shard as :class:`~.corpus.Document` objects.
 
@@ -754,6 +1018,31 @@ def read_jsonl_gz_documents(
     payload key is confirmed for that source; the `id` and metadata keys are not. To settle one:
         python3 artifacts/recount/_filtered_tpb.py  # reads real shard heads over HTTP Range
     """
+    # THE STAGED-SOURCE BRANCH, and note it is the SAME `_range_chunks` over the same
+    # `_gunzip_lines`: multi-member gzip, the byte carry across chunk boundaries, and the
+    # `decompressobj.eof` truncation check are all transport-independent and none of them is
+    # duplicated or relaxed here.
+    if chunks is None and is_s3_source(repo):
+        if s3 is None:
+            raise ReadError(
+                f"{spec.key}: repo {repo!r} is a staged {S3_SCHEME} prefix but no `s3=` client was "
+                f"passed. The staged path reads through S3.get_range, not HTTPS."
+            )
+        bucket, key, ent_size = _s3_entry(spec, path)
+        if ent_size is None:
+            ent_size = size
+        if ent_size is None:
+            ent_size = int(s3.head(bucket, key)["size"])
+        # No `_RATE_GATE.wait()`: the gate brakes on HF 429s and S3 is not per-IP metered, so
+        # blocking here would throttle staged reads for a limit another worker's HF read hit.
+        chunks = _range_chunks(S3RangeFile(s3, bucket, key, int(ent_size)))
+        path = key
+        # `where` is built below as f"{repo}/{path}", and for a staged row `repo` ALREADY contains
+        # the prefix that `key` starts with — so the naive form prints the prefix twice. The
+        # object's own URI is the unambiguous name, and every error message in this reader is a
+        # diagnostic someone has to paste into an `s3api` call.
+        repo = f"{S3_SCHEME}{bucket}"
+
     if isinstance(path, Mapping):
         size = path.get("size", size)
         path = str(path["path"])
@@ -901,6 +1190,11 @@ def read_documents(
     trap 1 — suffix dispatch throws `BadGzipFile` mid-stream, hours in, on a subset of shards), so
     a format this module has not been taught is a registry bug to fix, not something to sniff at
     read time.
+
+    ``s3=`` reaches both readers through ``**kwargs`` and is required for an ``s3://`` row. It is not
+    dispatched on HERE — the *format* table stays about formats, and the transport is chosen inside
+    each reader from ``repo`` — because a transport branch at this seam would be a second place that
+    has to know which rows are staged, and two such places are how the three format tables diverged.
     """
     reader = reader_for_format(spec.file_format)
     if reader is None:

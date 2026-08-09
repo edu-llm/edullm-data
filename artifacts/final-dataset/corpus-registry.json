@@ -2864,7 +2864,7 @@
    "key": "nemotron-cc-math-3",
    "category": "math",
    "source_label": "nemotron-cc-math-3",
-   "repo": "nvidia/Nemotron-CC-Math-v1",
+   "repo": "s3://edullm-landing/_src/nemotron-cc-math-v1",
    "config": "3",
    "revision": "397a2502f2028c659ba411a6c4935b464a7f03aa",
    "file_format": "parquet",
@@ -2874,7 +2874,7 @@
    "target_tokens": 38000000000,
    "pool_tokens": 83600000000,
    "traps": [
-    "Read from s3://edullm-landing/_src/nemotron-cc-math-v1/ (byte-verified, expiry-free). NAME 3/ AND 4plus/ BY EXPLICIT PREFIX, NEVER A GLOB.",
+    "STAGED SOURCE. `repo` is s3://edullm-landing/_src/nemotron-cc-math-v1 because the UPSTREAM repo (nvidia/Nemotron-CC-Math-v1, = nvidia/Nemotron-CC-Math-v1) is GATED and returns HTTP 401 to every credential we hold -- it cost 7 of 16 bundles on the 2026-08-09 build. The bytes were copied server-side and byte-verified (103 files, 169,606,727,240 B) to the one landing prefix with NO expiry rule. `config` selects 3/ or 4plus/ by EXPLICIT PREFIX; corpus_read.s3_files appends a trailing '/' so a '4plus' row cannot sweep in '4plus_MIND'. `revision` is UPSTREAM provenance only -- an S3 prefix carries no content pin, which is a real weakening stated, not hidden.",
     "4plus_MIND is a REWRITE of 4plus; including both double-counts. Match config with == : startswith('4plus') also catches 4plus_MIND.",
     "LICENCE BLOCKER: NVIDIA Data Agreement 2.2.2 forbids 'making available to others'; 3.3 demands deletion on termination, which a frozen vN cannot honour. OWNER DECISION, unresolved.",
     "source_label is nemotron-cc-math-* ONLY. math-textbooks is CC-BY-4.0 and carved OUT of this agreement."
@@ -2886,7 +2886,7 @@
    "key": "nemotron-cc-math-4plus",
    "category": "math",
    "source_label": "nemotron-cc-math-4plus",
-   "repo": "nvidia/Nemotron-CC-Math-v1",
+   "repo": "s3://edullm-landing/_src/nemotron-cc-math-v1",
    "config": "4plus",
    "revision": "397a2502f2028c659ba411a6c4935b464a7f03aa",
    "file_format": "parquet",
@@ -2896,7 +2896,7 @@
    "target_tokens": 23000000000,
    "pool_tokens": 50400000000,
    "traps": [
-    "Read from s3://edullm-landing/_src/nemotron-cc-math-v1/ (byte-verified, expiry-free). NAME 3/ AND 4plus/ BY EXPLICIT PREFIX, NEVER A GLOB.",
+    "STAGED SOURCE. `repo` is s3://edullm-landing/_src/nemotron-cc-math-v1 because the UPSTREAM repo (nvidia/Nemotron-CC-Math-v1, = nvidia/Nemotron-CC-Math-v1) is GATED and returns HTTP 401 to every credential we hold -- it cost 7 of 16 bundles on the 2026-08-09 build. The bytes were copied server-side and byte-verified (103 files, 169,606,727,240 B) to the one landing prefix with NO expiry rule. `config` selects 3/ or 4plus/ by EXPLICIT PREFIX; corpus_read.s3_files appends a trailing '/' so a '4plus' row cannot sweep in '4plus_MIND'. `revision` is UPSTREAM provenance only -- an S3 prefix carries no content pin, which is a real weakening stated, not hidden.",
     "4plus_MIND is a REWRITE of 4plus; including both double-counts. Match config with == : startswith('4plus') also catches 4plus_MIND.",
     "LICENCE BLOCKER: NVIDIA Data Agreement 2.2.2 forbids 'making available to others'; 3.3 demands deletion on termination, which a frozen vN cannot honour. OWNER DECISION, unresolved.",
     "source_label is nemotron-cc-math-* ONLY. math-textbooks is CC-BY-4.0 and carved OUT of this agreement."

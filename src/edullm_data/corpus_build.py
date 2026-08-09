@@ -87,7 +87,7 @@ from .corpus import (
     carve,
     partition_ordinals,
 )
-from .corpus_read import READABLE_FORMATS
+from .corpus_read import READABLE_FORMATS, is_s3_source, s3_files
 from .ingest_reservoir import (
     FINEPHRASE_REPO,
     IngestError,
@@ -1515,7 +1515,12 @@ def _cmd_run(args) -> int:
         t0 = time.monotonic()
         info = run_bundle(
             bundle, plan, specs[bundle.spec_key], s3=s3, bucket=args.bucket, prefix=args.prefix,
-            documents=_reader_for, tokenizer=tok, eos_id=eos, vocab_size=vocab,
+            # BOUND to this run's client, so a staged (`s3://`) registry row reads through the
+            # same credentials the shards are written with. `run_bundle` calls
+            # `documents(spec, bundle)` positionally, so the client travels in the closure rather
+            # than through a signature every test would have to grow.
+            documents=lambda sp, bu: _reader_for(sp, bu, s3=s3),
+            tokenizer=tok, eos_id=eos, vocab_size=vocab,
             # `getattr` with the off default, matching `_cmd_verify`'s `hash_workers` handling: a
             # hand-built Namespace (every test constructs one) has no `labels` attribute, and an
             # AttributeError there would make an unrelated flag's addition break the driver's own
@@ -1667,7 +1672,9 @@ def _assert_payload_extensions_cover_readers() -> None:
 _assert_payload_extensions_cover_readers()
 
 
-def hf_files(spec: CorpusSpec, *, headers: Mapping[str, str] | None = None) -> list[dict]:
+def hf_files(
+    spec: CorpusSpec, *, headers: Mapping[str, str] | None = None, s3: Any | None = None,
+) -> list[dict]:
     """Every payload file for one source, listed AT ITS PINNED REVISION.
 
     Not `ingest_reservoir.hf_tree`, for two reasons that both matter here. It filters to
@@ -1677,8 +1684,36 @@ def hf_files(spec: CorpusSpec, *, headers: Mapping[str, str] | None = None) -> l
 
     Paginated via the `Link` header rather than trusting one page: `fineweb-edu` and
     `essential-web` hold thousands of files, and a truncated listing is a silently short corpus.
+
+    **A STAGED (`s3://`) row is enumerated by `corpus_read.s3_files` instead**, and the branch is
+    here rather than at the call sites so `_bundle_files`' stride, its `K > len(files)` refusal, and
+    the union property its tests check all apply to both transports with no second code path. The
+    two listings return the same shape and BOTH are sorted by `path` — see `s3_files`' ORDERING
+    paragraph for why an unsorted listing silently re-labels every chunk of the curriculum.
+
+    ⚠️ **A staged row needs NO pinned revision, and that is a real weakening stated rather than
+    hidden.** An HF revision pins the bytes: a re-listing at the same sha returns the same files.
+    An S3 prefix has no such pin — an overwrite under the same key is invisible here. What stands in
+    for it is that the prefix is OURS (`_src/`, on the one landing prefix with no expiry rule), that
+    it was byte-verified at copy time, and that only the validator role can write it. That is weaker
+    than a content address and it is why `revision` is still carried on the row as the UPSTREAM
+    provenance the copy was taken from.
     """
     import urllib.request
+
+    if is_s3_source(spec.repo):
+        if s3 is None:
+            raise BuildDriverError(
+                f"{spec.key}: repo {spec.repo!r} is a staged prefix and needs an `s3=` client to "
+                f"enumerate. Listing it over the HF tree API would 404 — or worse, resolve a "
+                f"same-named public repo."
+            )
+        exts = _PAYLOAD_EXT.get(spec.file_format)
+        if exts is None:
+            raise BuildDriverError(
+                f"{spec.key}: no payload extension known for {spec.file_format!r}"
+            )
+        return s3_files(spec, s3=s3, extensions=exts)
 
     if not spec.revision:
         raise BuildDriverError(
@@ -1788,7 +1823,7 @@ def _finephrase_format(spec: CorpusSpec) -> str | None:
     return spec.config
 
 
-def _bundle_files(spec: CorpusSpec, bundle: Bundle) -> list[dict]:
+def _bundle_files(spec: CorpusSpec, bundle: Bundle, *, s3: Any | None = None) -> list[dict]:
     """The source files THIS bundle reads: the whole list, or its stride of it.
 
     One function so there is exactly one place that decides which files a child touches, and so the
@@ -1807,7 +1842,13 @@ def _bundle_files(spec: CorpusSpec, bundle: Bundle) -> list[dict]:
     `verify` at the END of the run as an ambiguous shortfall. A source with fewer files than the
     plan's K is a planning error and is cheap to catch here, before the first byte.
     """
-    files = hf_files(spec)
+    # `s3=` is passed ONLY for a staged row, and that is a compatibility decision worth stating:
+    # `hf_files` is monkeypatched by ~20 driver tests with a bare `lambda spec: [...]`, and passing
+    # an unused keyword to every one of them would make an unrelated transport addition break the
+    # suite that guards the stride. A staged row is exactly the case where the argument is load-
+    # bearing, so the branch costs nothing and is not a silent fallback: `hf_files` itself REFUSES a
+    # staged row with no client rather than reaching for the HF tree API.
+    files = hf_files(spec, s3=s3) if is_s3_source(spec.repo) else hf_files(spec)
     if bundle.file_shard_count == 1:
         return files
     if bundle.file_shard_count > len(files):
@@ -1822,7 +1863,9 @@ def _bundle_files(spec: CorpusSpec, bundle: Bundle) -> list[dict]:
     return _shard_slice(files, bundle.file_shard_index, bundle.file_shard_count)
 
 
-def _reader_for(spec: CorpusSpec, bundle: Bundle) -> Iterable[Document]:
+def _reader_for(
+    spec: CorpusSpec, bundle: Bundle, *, s3: Any | None = None
+) -> Iterable[Document]:
     """Documents for one bundle, dispatched on the registry's `file_format`.
 
     **Stops once the bundle's character budget is met, and that bound is what makes the build
@@ -1946,8 +1989,12 @@ def _reader_for(spec: CorpusSpec, bundle: Bundle) -> Iterable[Document]:
     # own 1/K share because the plan allocated its refs separately.
     budget = int(bundle.tokens * _CHARS_PER_TOKEN * _FILTER_HEADROOM / keep_rate)
     seen_chars = 0
-    for entry in _bundle_files(spec, bundle):
-        for doc in read_documents(spec.repo, entry, spec):
+    # `s3=` is passed unconditionally, not only for a staged row: `read_documents` forwards it into
+    # a reader that ignores it on the HTTPS path, so there is no transport `if` here. A branch here
+    # would be a second place that decides which rows are staged, and the readers already decide it
+    # from `repo` — the drift channel the three format tables taught this module about.
+    for entry in _bundle_files(spec, bundle, s3=s3):
+        for doc in read_documents(spec.repo, entry, spec, s3=s3):
             # Charged against the budget BEFORE the partition drops it. The budget is denominated
             # in characters READ, not characters kept, and the `/ N_PARTITIONS` above is what turns
             # one into the other — counting only survivors here would apply the correction twice
