@@ -447,6 +447,18 @@ def _parse_file_shard(doc: Mapping[str, Any]) -> tuple[int, int]:
     return index, of
 
 
+def _label_record_from(doc: Mapping[str, Any]) -> Any:
+    """``doc["labels"]`` -> ``corpus_labels.LabelRecord``, imported lazily.
+
+    Lazy because this module's header promises it "stays importable without numpy" (the verifier may
+    run on a laptop or in the validator image), and ``corpus_labels`` imports numpy at module scope
+    for the record dtype. A top-level import here would make every receipt read require numpy.
+    """
+    from .corpus_labels import LabelRecord
+
+    return LabelRecord.from_dict(doc)
+
+
 @dataclass(frozen=True)
 class Receipt:
     """One bundle's completion claim.
@@ -505,6 +517,20 @@ class Receipt:
     #: How this bundle fared against the global dedup keep-list. See :class:`KeepRecord`.
     #: ``None`` means it ran under per-bundle dedup — a different build regime, not a null result.
     keep: KeepRecord | None = None
+    #: The curriculum labels sidecar this bundle wrote. See ``corpus_labels.LabelRecord``.
+    #:
+    #: ``None`` means **no labels were emitted** — either a receipt written before the curriculum
+    #: workstream existed, or a build run without ``labels=``. It is NOT a zeroed record, for the
+    #: same reason :attr:`filter` is not: "the producer recorded nothing" and "the producer emitted
+    #: an empty sidecar" have opposite consequences, and only the second is a defect.
+    #:
+    #: **Why the receipt carries it at all.** A bundle that wrote its shards and lost its labels
+    #: passes every existing check — the shards are present at the right size, the conservation
+    #: identity closes, ``verify`` reports OK — and the curriculum built over the corpus would
+    #: silently omit that bundle's chunks from the ordering. Nothing else can see that, because
+    #: nothing else knows a sidecar was supposed to exist. :func:`_check_labels` recomputes the
+    #: sidecar's digest and its document count against the numbers stored here.
+    labels: Any = None
     #: Planned refs the stream had no data for. Data, not an error (``corpus_pack.pack``: ordinal
     #: gaps are legal). Recorded so a reader of the receipt can tell "this bundle underran its plan"
     #: from "this bundle wrote every shard it was asked for" — otherwise the two are the same
@@ -609,6 +635,11 @@ class Receipt:
             doc["filter"] = self.filter.to_dict()
         if self.keep is not None:
             doc["keep"] = self.keep.to_dict()
+        # OMITTED when absent, for the digest reason `file_shard` documents: every receipt already
+        # in S3 was written without this key, and emitting it unconditionally would change the
+        # canonical bytes — hence `receipt_sha256` — of work that is bit-for-bit identical.
+        if self.labels is not None:
+            doc["labels"] = self.labels.to_dict()
         # OMITTED for an unsharded bundle, for the digest reason above and not for tidiness.
         # `receipt_sha256` is documented as an idempotency key a resumed driver may compare, and
         # every receipt already in S3 was written without this key; emitting `{"index": 0, "of": 1}`
@@ -682,6 +713,11 @@ class Receipt:
                 if isinstance(raw_keep := doc.get("keep"), Mapping)
                 else None
             ),
+            labels=(
+                _label_record_from(raw_labels)
+                if isinstance(raw_labels := doc.get("labels"), Mapping)
+                else None
+            ),
             unfilled=tuple(str(p) for p in doc.get("unfilled", []) or []),
             # Absent parses to the DEFAULT (0, 1) = "the whole stream", never to a zero that looks
             # like data. This is eng-06's Wave-0 precedent and it is what keeps every v1 and every
@@ -706,6 +742,7 @@ class Receipt:
         keep_filter: Any = None,
         file_shard: int = 0,
         file_shards: int = 1,
+        labels: Any = None,
     ) -> "Receipt":
         """Build a receipt from what the packer actually produced.
 
@@ -780,6 +817,7 @@ class Receipt:
             unfilled=tuple(ref.path for ref in result.unfilled),
             file_shard=file_shard,
             file_shards=file_shards,
+            labels=labels,
         )
 
 
@@ -931,6 +969,97 @@ def verify_receipt(
     v += _check_source_pins(receipt)
     v += _check_recorded_conservation(receipt)
     v += _check_objects(receipt, s3, bucket, deep=deep, hash_workers=hash_workers)
+    v += _check_labels(receipt, s3, bucket)
+    return v
+
+
+def _check_labels(receipt: Receipt, s3: S3, bucket: str) -> list[Violation]:
+    """Falsify the curriculum labels sidecar's claims by RE-READING it. Skipped when absent.
+
+    Unlike a shard, a labels object is small enough (~14 B/document, ~91 MB at the largest bundle)
+    that re-reading it whole is affordable in the cheap tier — so this is a genuine re-hash plus a
+    full re-verification of the sidecar's internal identities, not a metadata comparison. That is
+    the opposite of the situation for shards, where the re-hash is 100 MB per object and has to be
+    ``deep=True``.
+
+    ⚠️ **Absent labels are NOT a violation here**, and that is a deliberate scope limit rather than
+    an oversight: this function cannot know whether the build was *supposed* to emit them. Whether a
+    corpus destined for a curriculum may publish without labels is a policy question for the plan —
+    ``verify_bundle_set`` is where it belongs, because "some bundles have labels and some do not" is
+    a property of the SET and is the failure mode that actually matters (a partial ordering that
+    silently omits whole sources). Smuggling the policy in as a per-receipt default would fail every
+    historical receipt.
+    """
+    record = receipt.labels
+    if record is None:
+        return []
+    v: list[Violation] = []
+    try:
+        raw = s3.get(bucket, record.key)
+    except NotFound:
+        return [
+            Violation(
+                "receipt-labels-missing",
+                f"{receipt.label}: the receipt names a labels sidecar at "
+                f"s3://{bucket}/{record.key} and it does not exist. This is the commit-then-die "
+                f"case for labels: the shards are all present, so every other check passes and "
+                f"`verify` reports OK, while the curriculum built over this corpus would silently "
+                f"omit this bundle's chunks from the ordering.",
+            )
+        ]
+    if len(raw) != record.bytes:
+        v.append(
+            Violation(
+                "receipt-labels-size-mismatch",
+                f"{receipt.label}: the receipt claims the labels object is {record.bytes:,} bytes "
+                f"but S3 holds {len(raw):,} ({len(raw) - record.bytes:+,}).",
+            )
+        )
+    actual = hashlib.sha256(raw).hexdigest()
+    if actual != record.sha256:
+        v.append(
+            Violation(
+                "receipt-labels-digest-mismatch",
+                f"{receipt.label}: re-hashed the labels object and got {actual}, but the receipt "
+                f"claims {record.sha256}. Unlike a shard, this IS re-read in the cheap tier — the "
+                f"object is ~14 bytes per document, so there is no reason to defer it to --deep.",
+            )
+        )
+        return v
+
+    from .corpus_labels import decode_labels, verify_labels
+
+    try:
+        labels = decode_labels(raw)
+    except Exception as exc:  # noqa: BLE001 - unparseable is one finding, not a crash
+        return v + [
+            Violation(
+                "receipt-labels-unparseable",
+                f"{receipt.label}: the labels object at {record.key} will not parse: {exc}",
+            )
+        ]
+    if labels.plan_id != receipt.plan_id or labels.bundle_id != receipt.bundle_id:
+        v.append(
+            Violation(
+                "receipt-labels-identity-mismatch",
+                f"{receipt.label}: the labels object declares "
+                f"plan/bundle {labels.plan_id!r}/{labels.bundle_id!r} but this receipt is "
+                f"{receipt.plan_id!r}/{receipt.bundle_id!r}. A labels file from another bundle "
+                f"would map this bundle's chunks onto another bundle's documents — a permutation "
+                f"that is still bijective and still passes Gate A.",
+            )
+        )
+    if labels.tokens_in != receipt.tokens_in:
+        v.append(
+            Violation(
+                "receipt-labels-tokens-in-mismatch",
+                f"{receipt.label}: the labels object records tokens_in={labels.tokens_in:,} "
+                f"against the receipt's {receipt.tokens_in:,}. The labels' own conservation "
+                f"identity is stated over that number, so a wrong one makes the identity vacuous.",
+            )
+        )
+    # The sidecar's own internal recomputes: contiguity, sum(n_tokens+1), path ids, finiteness.
+    v += verify_labels(labels, declared_documents=receipt.documents)
     return v
 
 

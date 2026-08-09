@@ -1001,6 +1001,7 @@ def run_bundle(
     wheel_version: str = "0.0.0",
     index: Any = None,
     keep_list: Any = None,
+    labels: bool = False,
 ) -> dict[str, Any]:
     """Read → carve → filter → tokenize → pack → upload → receipt, for one bundle.
 
@@ -1034,6 +1035,26 @@ def run_bundle(
     ⚠️ **What splitting bundles does NOT fix, so the win is not double-counted.** §8A.3: splitting a
     bundle relieves the OOM; the flat pre-pass is what actually fixes dedup. Splitting only stops it
     crashing. This parameter is the dedup half.
+
+    ``labels`` — THE CURRICULUM LABELS SIDECAR (§curriculum)
+    -------------------------------------------------------
+    ``True`` computes MTLD inline and writes one ``_labels/<bundle_id>.labels`` object alongside the
+    shards, from the SAME sink pass, so it inherits the receipt's conservation checks. ``False``, the
+    default, is byte-for-byte today's behaviour — **including the shard bytes**, which is the property
+    that makes this safe to add to a build whose ``plan_id`` must not move: the labels are a second
+    output, not a change to the first.
+
+    **Nothing about this touches the plan surface.** ``plan_document`` is a pure function of the
+    registry plus scalars (``:540``); no flag, wheel version, or output shape enters it. So
+    ``PLAN_ID`` stays ``29968a2b04008a8c`` and the 6,750 shards already written by the pre-labels
+    build remain byte-identical to what a labelled run produces — determinism was measured
+    (9 bundles / 4,137 shards re-run byte-identical on a new wheel).
+
+    ⚠️ **The labels describe ``tokens_in``, not ``tokens_out``.** ``sum(n_tokens + 1)`` over the
+    sidecar equals the packer's ``tokens_in``; the shards hold ``tokens_out``, which is short by
+    ``tail_dropped + surplus_dropped``. So the shard token space is a PREFIX of the labelled space.
+    The chunk mapping in ``corpus_order`` relies on exactly that and states it too. A check written
+    against "shard tokens" instead would fail every healthy bundle — the ``_drain_surplus`` shape.
 
     ATTRITION — this function WARNS, it does not fail
     -------------------------------------------------
@@ -1118,9 +1139,39 @@ def run_bundle(
     from .corpus_read import FilterStats as LengthStats
 
     length_stats = LengthStats(min_tokens=plan["min_doc_tokens"])
+
+    # THE LABEL HOOK. `on_document` fires immediately before `tokenize_documents` yields a
+    # document's array, so it records exactly the documents `pack` PULLED — pack stops when its
+    # refs are full and never drains the iterator, so a hook after the yield would miss the last
+    # document of every bundle and break the sidecar's conservation identity by one document.
+    #
+    # MTLD is computed here rather than in a second pass because this is the only place the TEXT
+    # exists: the corpus ships no text group and no document-offset sidecar, so a later pass would
+    # have to re-read HF, and a re-read that does not reproduce the identical document order
+    # invalidates the permutation the labels are for.
+    collector = None
+    if labels:
+        from .corpus_labels import LabelCollector
+        from .corpus_mtld import mtld as _mtld
+
+        collector = LabelCollector()
+
+        def _label(doc: Any, n_content_tokens: int) -> None:
+            # `doc.source_path`, never a shared "current file" variable: `tokenize_documents`
+            # batches 1,000 documents and pack pulls lazily, so the reader is ~1,000 documents ahead
+            # and may already be in the next file. A shared path mislabels provenance at every file
+            # boundary, silently, because both values are real files of the same source.
+            text = doc.text if hasattr(doc, "text") else str(doc)
+            collector.add(
+                n_tokens=n_content_tokens,
+                source_path=getattr(doc, "source_path", "") or "",
+                mtld=_mtld(text),
+            )
+
     arrays = tokenize_documents(
         surviving, tokenizer, eos_id=eos_id, vocab_size=vocab_size,
         min_tokens=plan["min_doc_tokens"], stats=length_stats,
+        on_document=None if collector is None else _label,
     )
     # partial_source=True because `_reader_for` DELIBERATELY over-delivers: the registry draws
     # 252B tokens from a 1,094B pool, and the budget carries `_FILTER_HEADROOM` slack so filter
@@ -1217,11 +1268,45 @@ def run_bundle(
     # otherwise unrecoverable, which is the whole §5.6 argument. `length` is not — it is returned
     # below and printable — so it stays out rather than putting a third denominator in the same
     # block, which is exactly the `category_attrition` mistake.
+    # THE LABELS SIDECAR — written BEFORE the receipt, for the same reason the shards are: a
+    # receipt is a claim that the work is done, and one written over a missing sidecar is how a
+    # later run skips a bundle whose labels never landed. `verify_receipt._check_labels` re-reads
+    # and re-hashes this object, so the digest recorded here is one a gate falsifies rather than a
+    # producer assertion (contrast the shard `sha256`, which nothing re-reads outside `--deep`).
+    label_record = None
+    if collector is not None:
+        from .corpus_labels import LabelRecord, encode_labels, labels_key, verify_labels
+
+        label_set = collector.finish(
+            plan_id=plan_id, bundle_id=bundle.bundle_id, stream=bundle.stream,
+            tokens_in=result.tokens_in,
+        )
+        # Verified BEFORE the PUT, from the in-memory arrays. Every one of these is a recompute
+        # (contiguity elementwise, sum(n_tokens+1) against the packer's own tokens_in, path-id
+        # range, finiteness), and catching a break here costs one object rather than a full Gate A.
+        problems = verify_labels(label_set, declared_documents=result.documents)
+        if problems:
+            raise BuildDriverError(
+                f"{bundle.bundle_id}: refusing to write a labels sidecar over "
+                f"{len(problems)} violation(s): {'; '.join(str(p) for p in problems[:3])}"
+            )
+        body = encode_labels(label_set)
+        lkey = labels_key(prefix, plan_id, bundle.bundle_id)
+        digest = s3.put_bytes_verified(bucket, lkey, body)
+        label_record = LabelRecord(
+            key=lkey,
+            sha256=digest,
+            bytes=len(body),
+            documents=label_set.documents,
+            tokens_in=label_set.tokens_in,
+        )
+
     receipt = Receipt.from_pack_result(
         result,
         plan_id=plan_id,
         prefix=root,
         digests=digests,
+        labels=label_record,
         bundle_id=bundle.bundle_id,
         wheel_version=wheel_version,
         # WITHOUT THESE TWO, E15 IS NOT FIXED END-TO-END. `verify_bundle_set` distinguishes K
@@ -1431,7 +1516,12 @@ def _cmd_run(args) -> int:
         info = run_bundle(
             bundle, plan, specs[bundle.spec_key], s3=s3, bucket=args.bucket, prefix=args.prefix,
             documents=_reader_for, tokenizer=tok, eos_id=eos, vocab_size=vocab,
+            # `getattr` with the off default, matching `_cmd_verify`'s `hash_workers` handling: a
+            # hand-built Namespace (every test constructs one) has no `labels` attribute, and an
+            # AttributeError there would make an unrelated flag's addition break the driver's own
+            # tests. Off is also the correct reading of "not requested".
             wheel_version=_wheel_version(), index=index,
+            labels=getattr(args, "labels", False),
         )
         done += 1
         f = info["filter"]
@@ -1898,6 +1988,13 @@ def _build_parser() -> argparse.ArgumentParser:
     r.add_argument("--force", action="store_true", help="rebuild even if a receipt verifies")
     r.add_argument("--no-decontaminate", action="store_true",
                    help="DELIBERATELY skip the eval decontamination pass (§4.2)")
+    # OPT-IN, and the polarity matters. Default-on would change what every existing build writes
+    # (a second object per bundle) on nothing but a wheel upgrade, and a build that silently gained
+    # an output is a build whose receipts no longer match the ones already in S3. Default-off means
+    # a curriculum build is a DECLARED build.
+    r.add_argument("--labels", action="store_true",
+                   help="also emit the per-document MTLD labels sidecar (curriculum/*). Does NOT "
+                        "change plan_id or any shard byte — the labels are a second output.")
     r.set_defaults(func=_cmd_run)
 
     v = sub.add_parser("verify", help="refuse an incomplete build")

@@ -30,7 +30,7 @@ when ``families/`` is missing (which is its own historical failure; see ``CLAUDE
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, Iterator, Sequence
 
 __all__ = [
@@ -217,12 +217,28 @@ class Document:
     ``domain`` is ``None`` for the majority of sources and that is CORRECT, not missing data —
     §1.2's rule is that a source gets a domain segment if and only if it SHIPS one upstream. A
     flat key legally yields ``{"source": ...}`` alone.
+
+    ``source_path`` is the upstream FILE this document was read from, and it exists for the
+    curriculum labels sidecar (``corpus_labels``), which records it per document.
+
+    ⚠️ **It has to travel WITH the document rather than being read from a "current file" variable
+    at label time, and that is not a style preference.** ``tokenize_documents`` batches 1,000
+    documents and ``pack`` pulls lazily, so by the time the packer takes record 1 of a batch the
+    reader has advanced ~1,000 documents and may already be inside the NEXT file. A shared mutable
+    path would mislabel provenance at every file boundary — silently, because both values are real
+    files of the same source, so no count changes and no check fires.
+
+    ``compare=False`` so ``__eq__``/``__hash__`` are byte-for-byte what they were before this field
+    existed. Two readings of one document from two mirrors of the same file are the same document;
+    more importantly, 49 existing construction sites compare ``Document``\\ s and none of them
+    should start failing because a path string differs.
     """
 
     id: str
     text: str
     source: str
     domain: str | None = None
+    source_path: str = field(default="", compare=False)
 
     def __post_init__(self) -> None:
         if not self.id:

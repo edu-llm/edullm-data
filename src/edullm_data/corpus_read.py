@@ -599,6 +599,11 @@ def read_parquet_documents(
                 text=text,
                 source=spec.source_label,
                 domain=_domain_of(row, spec, domain_map=domain_map, walk=domain_walk),
+                # Carried per document for the curriculum labels sidecar. `str(path)` because a
+                # caller may pass the HF tree entry mapping rather than a plain path, and the two
+                # must produce the same interned string or one bundle's path table gains a
+                # duplicate entry that reads as two different files.
+                source_path=str(path),
             )
         del table
 
@@ -818,6 +823,11 @@ def read_jsonl_gz_documents(
             text=text,
             source=spec.source_label,
             domain=_domain_of(record, spec, domain_map=domain_map),
+            # `str(path)`, NOT `where`: `where` is `f"{repo}/{path}"` for error messages, and the
+            # parquet reader interns the bare path. Two readers disagreeing about the spelling of
+            # the same file would put two entries in one bundle's path table that read as two
+            # different upstream files.
+            source_path=str(path),
         )
 
 

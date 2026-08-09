@@ -278,6 +278,7 @@ def tokenize_documents(
     batch_size: int = _ENCODE_BATCH,
     min_tokens: int | None = None,
     stats: Any = None,
+    on_document: Callable[[Document | str, int], None] | None = None,
 ) -> Iterator[np.ndarray]:
     """Yield one ``<u4`` array per input document, in input order, with EOS appended.
 
@@ -322,6 +323,30 @@ def tokenize_documents(
     belongs inside the unit whose contract guarantees it, and a re-pack is a rebuild that runs
     in-region anyway (§5.7). If a re-pack sweep ever becomes routine, move the append into
     :func:`pack` and delete this paragraph rather than doing both.
+
+    ``on_document(doc, n_content_tokens)`` — THE PER-DOCUMENT LABEL HOOK (§curriculum)
+    ---------------------------------------------------------------------------------
+    Called once per document immediately BEFORE that document's array is yielded, with the
+    CONTENT token count (``len(text_ids)``, excluding the EOS this function appends). ``None``, the
+    default, is byte-for-byte the previous behaviour.
+
+    **Immediately before the yield, and the position is the whole contract.** A generator's body
+    runs only when the consumer calls ``next()``, and ``corpus_pack.pack`` stops as soon as its
+    planned shards are full rather than draining the iterator (MEASURED: offered 200,015 documents
+    it pulled 50,264). So:
+
+    * a hook placed BEFORE the yield fires exactly for the documents the packer PULLED — which is
+      exactly the set that reached a shard, and therefore exactly the set a chunk mapping can
+      resolve;
+    * a hook placed AFTER the yield would miss the final document of every bundle, because the
+      consumer stops without resuming the generator. One missing label at the end of a stream
+      shifts nothing and breaks the conservation identity by one document — a defect that looks
+      like an off-by-one in the *checker*.
+
+    The count is the pre-EOS length because ``n_tokens + 1`` is the document's stride through the
+    stream, and a consumer that has to guess whether the boundary is included will guess wrong on
+    half the corpus. Filtered documents (empty, or under ``min_tokens``) are NOT reported: they
+    never reach a shard, so they own no chunks.
     """
     if not isinstance(eos_id, int) or isinstance(eos_id, bool):
         raise BuildError(f"eos_id must be an int; got {eos_id!r}")
@@ -417,6 +442,11 @@ def tokenize_documents(
             out = np.empty(wide.size + 1, dtype=DTYPE_LE)
             out[: wide.size] = wide
             out[wide.size] = eos_id  # the ONLY document boundary this corpus will ever have
+            # BEFORE the yield, deliberately — see the docstring's `on_document` paragraph. After
+            # it, the last document of every bundle would go unlabelled, because `pack` stops
+            # without resuming this generator.
+            if on_document is not None:
+                on_document(doc, int(wide.size))
             yield out
 
 
