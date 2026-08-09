@@ -4827,3 +4827,58 @@ applies now**, and nothing in tonight's grants (A1–A7, or the two revisions ju
 3. ⚠️ **Either way, note the standing trap: the target is UNVERSIONED.** Any future revision that adds
    `--promote` to `edullm-validator` would **silently arm auto-promotion**. That is a permanent structural
    hazard, not a state — worth a note wherever the release checklist lives.
+
+---
+
+# ✅ ADDENDUM 41 — RULE DISABLED (2nd time tonight), owner-authorized. All four obligations discharged.
+
+## Authorization
+**Owner, verbatim, relayed by the CEO:** *"no, disable it again and then continue"* — overriding a prior
+selection to accept it. Direct, explicit, current. Same single reversible mutation performed under R1 earlier.
+
+## Obligation 1 — verified by RECOMPUTATION, not by the return code
+`disable-rule` returned empty/exit 0. **That is a claim, so I re-read the rule:**
+```
+Name         : edullm-landing-manifest-created
+State        : "DISABLED"          <-- VERIFIED
+EventPattern : {"detail-type":["Object Created"],"source":["aws.s3"],
+                "detail":{"bucket":{"name":["edullm-landing"]},
+                          "object":{"key":[{"suffix":"manifest.json"}]}}}
+EventBusName : default        CreatedBy: <ACCOUNT_ID>
+```
+⚠️ **Note the pattern, unchanged and still the hazard it always was: key SUFFIX `manifest.json` with NO
+prefix constraint** — it matches *any* path in landing, including one a reader would assume is scratch.
+
+## 🔓 Obligation 2 — THE RE-ENABLE COMMAND. Do not reconstruct it.
+```
+aws events enable-rule --name edullm-landing-manifest-created
+```
+Single call, no other arguments. Only `State` changes.
+
+## Obligation 3 — nothing else touched, verified against the pre-change read
+```
+Targets[0].Id                          validator-batch-queue                    unchanged
+          .Arn                         …job-queue/sbsandbox-intern-edullm-cpu   unchanged
+          .RoleArn                     …role/CloudWatchSendEventsToVdi          unchanged
+          .BatchParameters.JobDefinition  edullm-validator (UNVERSIONED)        unchanged
+          .BatchParameters.JobName     edullm-validate-on-manifest              unchanged
+          .RetryPolicy.MaximumRetryAttempts  2                                  unchanged
+```
+**Only `State` moved.** Pattern, target, role and retry policy are byte-identical to what I read before.
+
+## Obligation 4 — the broker did NOT refuse
+No error. Recorded because a refusal would have been a finding, not a failure.
+
+## 🔴 STANDING TASK, carried into the publish step — re-verify IN THE SAME BREATH
+**This rule has now drifted twice**, so a control set once is not a control. **Before writing ANY
+`manifest.json`, re-run `describe-rule` and require `"State": "DISABLED"`.**
+
+**If it has drifted a THIRD time: STOP. Do not disable-and-proceed.** Per the CEO: a third drift means
+something is actively re-enabling it, which changes the risk picture rather than repeating a known fix.
+**Report before any publish.** This is now a hard precondition on the publish step, not a hygiene check.
+
+## The permanent hazard, filed separately from the state
+**`BatchParameters.JobDefinition` is `edullm-validator` — UNVERSIONED.** Disabling the rule postpones this;
+it does not remove it. **Any future `edullm-validator` revision that adds `--promote` silently arms
+auto-promotion regardless of the rule's state.** Today `:17` cannot promote, which is the only reason the
+drift was survivable. **Release-checklist note, not a state to re-check.**

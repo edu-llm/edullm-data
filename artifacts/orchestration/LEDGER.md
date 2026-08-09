@@ -4144,6 +4144,61 @@ takes a **stride** and `source_doc` is a counter over the pulled stream.
 
 ---
 
+# ✅ `edullm-validator:17` + `edullm-promote:3` REGISTERED at 12,288 MiB — CEO-verified
+```
+rev 17 · 4 vCPU / 12,288 MiB · command: validate --landing-bucket --data-bucket --head-workers 16
+                                        ← NO --promote.  Containment CONFIRMED by me.
+```
+28% headroom over the 9,585 MiB Gate A peak. PLAT diffed field-by-field first; **`memory 8192 → 12288` is the
+only real difference.**
+
+**🔧 And its own diff harness lied — it caught that before registering.** The harness reported *"image
+CHANGED"*; the cause was **comparing an 8-char truncation against a 9-char one.** It then asserted **full digest
+equality** before proceeding. The direction is the interesting part, and it is new tonight:
+> **A comparison harness can INVENT a difference, not only hide one** — the mirror image of ENG's
+> `verify_bundle_set` set-vs-sequence near-miss.
+
+# 🔴 `edullm-landing-manifest-created` IS ENABLED AGAIN — SECOND DRIFT ON THE SAME RULE
+**CEO-verified just now:** `State: ENABLED`, pattern still key-**suffix** `manifest.json` with **no prefix
+constraint**. **This ledger records it DISABLED — applied and verified tonight as an owner-authorized
+mutation.** Nobody on this team touched it; `describe-rule` carries no `LastModified`, so who/when is
+**UNVERIFIED**. Almost certainly a concurrent session.
+
+**This is the second time this exact rule has drifted against documents asserting it was off** — the Wave-0
+recovery found the identical thing. **A control that has now silently re-armed twice is not a state you verify
+once; it is a state that must be checked immediately before every write to landing.**
+
+## Containment holds — CEO-verified, not accepted
+The target is **unversioned** → resolves to **top ACTIVE = rev 17** → **no `--promote` → Gate A only. It cannot
+cross the airlock.** And PLAT's raise incidentally improved the failure mode:
+| unversioned resolves to | before | after |
+|---|---|---|
+| | rev 16, 8,192 MiB → **would OOM at 117%** | rev 17, 12,288 MiB → **fits** |
+**PLAT recorded this as luck, not design.** Correct — and worth keeping, because the same accident could as
+easily have gone the other way.
+
+## The live hazard, stated without inflation
+**`publish()` writes `manifest.json` to `edullm-landing/pretrain/edu-mix-983b/vN/`, so with the rule ENABLED that
+PUT auto-fires a Gate A job** — possibly **concurrent** with the one we submit deliberately. It **cannot
+promote**, so the irreversible step stays gated. The verdict depends on the violation **set**, not order
+(`validate.py:713`), and the promote path guards mutated sources via `PreconditionFailed` →
+`LandingSourceChangedError` (`:2074`). **But PLAT will not certify two runs racing on one `_VALIDATED.json`
+read-only, and I will not either.** The real cost is **losing sequencing control** — an unbidden Gate A inserts
+itself between publish and our submission.
+
+## ⛔ PLAT REFUSED TO DISABLE IT, AND THAT IS EXACTLY RIGHT
+Its reasoning is the rule I set after the first security warning: **that mutation was escalated to the owner the
+first time precisely because a CEO cannot delegate it inside a subagent prompt, and nothing in A1–A7 or
+tonight's two approvals names it.** **→ Escalated to the owner. Seventh consecutive time this rule has caught
+something real.**
+
+## ⚠️ THE STRUCTURAL HAZARD OUTLIVES THE STATE — release-checklist item, not a fix
+**The target names the job def UNVERSIONED.** So **any future `edullm-validator` revision that adds `--promote`
+silently arms auto-promotion**, whatever the rule's state at the time. **Disabling the rule today does not
+remove this; it postpones it.** Recorded as a standing note.
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of
