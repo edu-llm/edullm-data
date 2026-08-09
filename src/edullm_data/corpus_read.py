@@ -291,6 +291,87 @@ def _compile_walk(
     return top, tuple(walk)
 
 
+def _arrow_column_values(table: Any, walk: Sequence[str]) -> list[Any]:
+    """One column's leaf values as a Python list, extracted with ARROW compute — not ``to_pylist()``.
+
+    **The whole FinePhrase penalty was one call, and it was this one.** MEASURED (PLAT, then
+    reproduced here on a 20,000-row fixture): a NESTED ``list<struct<text>>`` column costs 2.3-3.6x a
+    flat ``string`` column, and **the arrow READ is identical** — column projection works fine. The
+    entire difference is ``to_pylist()`` building a Python list-of-dicts-in-lists per row, where the
+    flat case builds a bare string. Replacing it with ``list_flatten`` + ``.field(name)`` measured
+    **2.46x faster than the nested ``to_pylist``** and 0.94x the FLAT baseline — i.e. the nested
+    penalty essentially disappears. Reproduced byte-identically against the old path element by
+    element; see ``tests/test_corpus_read_arrow_native.py``.
+
+    **GENERAL, not a FinePhrase special case, and driven by the COMPILED WALK** — the same
+    ``(top, walk)`` :func:`_compile_walk` already produces from the file's own footer. So it serves
+    any depth of struct nesting and any list level, and a new nested source needs no code. A
+    hardcoded ``rollout_results`` would have to be re-hardcoded for the next one, and the next session
+    would not know to look.
+
+    Returns ``None`` for a row whose list is empty or whose struct hop is null, matching
+    :func:`_walk` exactly — that is a row with no payload, which is skipped and counted, not a build
+    failure.
+
+    ⚠️ **``list_flatten`` DROPS empty lists rather than yielding a null**, so the row alignment would
+    silently shift by one for every payload-less row — every subsequent document would take the next
+    one's text. That is why this uses ``list_parent_indices`` to scatter the flattened values back to
+    their OWN row positions instead of zipping them in order. A fixture with an interior empty list is
+    what catches it, and a fixture without one cannot.
+    """
+    import pyarrow as pa
+    import pyarrow.compute as pc
+
+    if not walk:
+        raise ReadError("empty walk")
+    top, steps = walk[0], list(walk[1:])
+    col = table.column(top)
+    if isinstance(col, pa.ChunkedArray):
+        col = col.combine_chunks()
+    n_rows = len(col)
+
+    # `row_of[i]` is the output row each surviving value belongs to. It starts as the identity and is
+    # remapped at every list hop, so an empty list simply has no value pointing at it.
+    row_of = list(range(n_rows))
+    for step in steps:
+        if step == "[0]":
+            if not (pa.types.is_list(col.type) or pa.types.is_large_list(col.type)
+                    or pa.types.is_fixed_size_list(col.type)):
+                raise ReadError(
+                    f"walk step '[0]' applied to {col.type}, which is not a list. The walk was "
+                    f"compiled from this file's footer, so a mismatch here means the table was "
+                    f"projected from a different schema than the walk was compiled against."
+                )
+            parents = pc.list_parent_indices(col).to_pylist()
+            flat = pc.list_flatten(col)
+            # Keep only the FIRST element of each list, matching `_walk`'s `[0]`. Verified for
+            # FinePhrase that every list has exactly one element (min == max == 1 over 160 row
+            # groups, all four configs), so this discards nothing there — but it must be enforced
+            # rather than assumed, or a 2-element list would contribute two documents.
+            first_of: dict[int, int] = {}
+            for pos, parent in enumerate(parents):
+                if parent not in first_of:
+                    first_of[parent] = pos
+            keep = sorted(first_of.values())
+            col = flat.take(pa.array(keep, type=pa.int64()))
+            row_of = [row_of[parents[p]] for p in keep]
+            continue
+        if not pa.types.is_struct(col.type):
+            raise ReadError(
+                f"walk step {step!r} applied to {col.type}, which is not a struct. See above — the "
+                f"walk and the projection disagree about this file's schema."
+            )
+        col = col.field(step)
+
+    out: list[Any] = [None] * n_rows
+    for value, row in zip(col.to_pylist(), row_of):
+        # First writer wins, which cannot happen after the `[0]` filter above but is stated because
+        # a future list hop that kept every element would otherwise overwrite silently.
+        if out[row] is None:
+            out[row] = value
+    return out
+
+
 def _walk(row: Mapping[str, Any] | None, walk: Sequence[str]) -> Any:
     """Follow a compiled walk through one projected row, or a parsed JSON record.
 
@@ -403,6 +484,22 @@ def _domain_of(
         return None
 
     raw = _walk(row, walk) if walk is not None else _json_walk(row, spec.domain_column)
+    return _fold_domain(raw, spec, domain_map=domain_map)
+
+
+def _fold_domain(
+    raw: Any, spec: CorpusSpec, *, domain_map: Mapping[str, str] | None = None
+) -> str | None:
+    """:func:`_domain_of`'s second half, over an ALREADY-EXTRACTED value.
+
+    Split out so the arrow-native parquet path (which extracts columns in bulk, never building a
+    per-row dict) applies the identical fold — the same ``other`` rule, the same collision-checked
+    map, the same non-string refusal. **Not a copy of the logic: `_domain_of` now calls this**, so the
+    two cannot diverge. Two spellings of the domain fold would put different directory names inside
+    ``manifest_sha256`` depending on which reader ran.
+    """
+    if spec.domain_column is None:
+        return None
     if raw is None or (isinstance(raw, str) and not raw.strip()):
         # A row missing its own domain value. Not fatal and not silently flat: a flat key and a
         # nested key are DIFFERENT label sets to `labels_from_path`, so mixing them inside one
@@ -839,16 +936,35 @@ def read_parquet_documents(
     row_index = 0
     for rg in range(md.num_row_groups):
         table = pf.read_row_group(rg, columns=leaves)
-        for row in table.to_pylist():
-            text = _walk(row, text_walk)
+        # COLUMN-AT-A-TIME via arrow compute, NOT `table.to_pylist()`. `to_pylist()` was the entire
+        # nested-column penalty: MEASURED 2.3-3.6x a flat column, with the arrow READ identical, and
+        # `list_flatten` + `.field()` measured 2.46x faster than it and 0.94x the FLAT baseline — so
+        # the nested penalty essentially vanishes. FinePhrase (36 B tokens, the new critical path at
+        # 12.6-16.5 h/child) is what forced this, but nothing here is FinePhrase-specific: the
+        # extraction is driven by the walk `_compile_walk` derived from the file's own footer, so any
+        # nesting depth works and a new nested source needs no code.
+        #
+        # ⚠️ The FLAT path goes through the same function and must not regress — a flat column has no
+        # `[0]` step, so `_arrow_column_values` reduces to one `to_pylist()` on ONE column, which is
+        # strictly less work than `to_pylist()` on the whole table. Asserted byte-identically both
+        # ways in `tests/test_corpus_read_arrow_native.py`.
+        texts = _arrow_column_values(table, text_walk)
+        ids = None if id_walk is None else _arrow_column_values(table, id_walk)
+        domains = None if domain_walk is None else _arrow_column_values(table, domain_walk)
+        for i, text in enumerate(texts):
             if id_walk is None:
                 doc_id = surrogate_id(spec.repo, str(path), row_index)
                 row_index += 1
             else:
-                doc_id = _walk(row, id_walk)
+                doc_id = ids[i]
             if not isinstance(text, str) or not text:
                 # No rewrite for this row (an empty `rollout_results` list is legal), or a null.
                 # Skipped rather than raised; `filter_documents` is where losses get counted.
+                #
+                # ⚠️ The surrogate `row_index` is incremented ABOVE this check, exactly as it was
+                # when the loop ran over `to_pylist()`. A skipped row still consumes its index, or a
+                # re-read with a different filter would renumber every later document under the same
+                # `plan_id`.
                 continue
             if doc_id is None:
                 raise ReadError(
@@ -861,14 +977,15 @@ def read_parquet_documents(
                 id=str(doc_id),
                 text=text,
                 source=spec.source_label,
-                domain=_domain_of(row, spec, domain_map=domain_map, walk=domain_walk),
+                domain=(None if domains is None
+                        else _fold_domain(domains[i], spec, domain_map=domain_map)),
                 # Carried per document for the curriculum labels sidecar. `str(path)` because a
                 # caller may pass the HF tree entry mapping rather than a plain path, and the two
                 # must produce the same interned string or one bundle's path table gains a
                 # duplicate entry that reads as two different files.
                 source_path=str(path),
             )
-        del table
+        del table, texts, ids, domains
 
 
 # --------------------------------------------------------------------------------------
