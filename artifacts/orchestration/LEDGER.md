@@ -4430,6 +4430,67 @@ what an append-only file exists to prevent.**
 
 ---
 
+# 🔧 CEO ERROR #22 — I read `origin/final-dataset` and told PLAT the ref was behind. It was not.
+
+**PLAT was right on the substance:**
+```
+origin/final-dataset               = f5a4017   ← 51+ commits behind, NOT an image source
+origin/edullm/final-dataset-phase0 = the image source, and a8b83c8 was ALREADY on it
+```
+**Images build only from `edullm/**`.** `final-dataset` is a local integration branch; `main` builds **nothing,
+silently**. **My "one commit unpushed" was measured against a branch that does not feed any build.**
+
+**But PLAT's table is now stale in the other direction, and this is the authoritative state:**
+```
+origin/edullm/final-dataset-phase0 = b7bdfb8   ← CEO-verified live, contains a8b83c8
+infra/11-final-dataset-build-policy.json  ON REF ✅
+infra/09-mirror-bucket-policy.json        ON REF ✅
+local HEAD = 01bd06e  → docs-only (artifacts/orchestration/plat/status.md), NO code, NO registry
+```
+**So my push was not redundant** — it added the two IAM policy templates that were **live in AWS and absent from
+every ref.** **But my reason for pushing was wrong**, and PLAT was right to challenge it. **Both of us read a
+ref the other wasn't looking at. Neither table was false; both were partial.**
+
+# 🔴 RECENCY WAS THE WRONG IMAGE SELECTOR — for the THIRD time tonight
+No image exists for the merged code. The **newest** ECR image is `32372ba70b12` —
+**`feat(olmoe-mix-0824): ingest + publish drivers`, an unrelated workstream:**
+```
+32372ba : corpus_labels.py ABSENT · 401 fix NO · arrow fix NO
+merged  : corpus_labels.py present · 401 fix YES · arrow fix YES
+```
+**Pinning the newest image would have shipped a corpus with no labels, no `s3://` sources, and the
+`combine_chunks` regression.** Earlier tonight the same trap appeared as `8e2524a` being newer than what rev 12
+pinned while still lacking the surrogate. **A tag is not contents; neither is a timestamp.**
+
+# ✅ THE RESUME FINDING IS CLOSED — verified in merged code, and PLAT retracted an alarm rather than send it
+```
+bundle_is_done(..., *, labels: bool = False)      ← new parameter
+  if labels and receipt.labels is None: → NOT done
+_check_set_labels → "bundle-set-mixed-labels"     corpus_receipt.py:1935
+```
+**And the asymmetry is right:** `labels=False` with a labelled receipt is **still done** — a strict superset,
+so the fix cannot make previously-complete work look incomplete.
+
+**PLAT grepped for callers of `_check_set_labels`, found only the definition and prose, and began writing that
+it was another `ReadStats.problems()` orphan — then found it.** **CEO-verified: `corpus_receipt.py:1727`,
+`v += _check_set_labels(receipts)`, inside `verify_bundle_set`, beside `_check_set_shards` and
+`_check_set_provenance`.**
+
+> **PLAT's own words: "My grep pattern was the bug. I read absence of a string as absence of behaviour — the
+> exact error PLAT-1 made on B3 and the exact one I warned about four addenda ago. Knowing a failure mode is
+> not the same as not committing it."**
+
+**That last sentence is the truest thing written tonight**, and it applies to me more than to PLAT: I have
+recorded ~22 errors, and several were error classes I had already written into the ledger as warnings.
+**A rule in a document does not execute.**
+
+**PLAT also applied its own new rule to itself** — extracted the registry with `git archive` and **asserted
+non-empty before comparing**, then independently reproduced `plan_id = 364cb4dd488a5761` **from the exact bytes
+the image will be built from**, and confirmed `__version__` is **unchanged at 0.9.1** by the merge, so the
+existing preflight assert still holds.
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of

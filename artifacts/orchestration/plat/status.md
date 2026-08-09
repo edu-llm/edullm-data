@@ -5124,3 +5124,76 @@ Build the image from **`a8b83c8`** (already pushed to `edullm/final-dataset-phas
 preflight → prepare the combined revision (**15,806** + **`PLAN_ID=364cb4dd488a5761`** + `--labels` +
 re-derived asserts) → **register only after OOM-DIAGNOSE reports**, since its verdict may move the memory
 figure → report by number. **No launch until the CEO rules on the OOM verdict.**
+
+---
+
+# ✅ ADDENDUM 45 — `b7bdfb8` VERIFIED AS THE BUILD REF · BEHAVIOURAL LABELS ASSERT WRITTEN AND MUTATION-PROVEN
+
+## The ref, confirmed before building — and my local HEAD is docs-only ahead
+```
+origin/edullm/final-dataset-phase0 = b7bdfb857215bb99a93c7a99f2251ad59b998922   <- THE BUILD REF
+origin/final-dataset               = f5a4017…   (51+ behind, NOT an image source)
+local HEAD                         = 01bd06e    (merge-base IS b7bdfb8, so no divergence)
+git show --stat 01bd06e            -> artifacts/orchestration/plat/status.md ONLY, 1 file
+```
+**`b7bdfb8` is the merge-base of my local HEAD**, so I am exactly one **docs-only** commit ahead — no code, no
+registry. **The bytes I verified are the bytes that will build.** Both `infra/09-mirror-bucket-policy.json`
+and `infra/11-final-dataset-build-policy.json` are on the ref (confirmed via `git ls-tree`).
+
+**Verified from the pushed ref via `git archive`, non-emptiness ASSERTED before comparing:**
+```
+registry md5 : c44cc7140ba3f9378c0b93749d88e976   (173,578 B)
+plan_id      : 364cb4dd488a5761        bundles 185   shards 39,307
+__version__  : 0.9.1                   corpus_labels PRESENT (LabelRecord, LabelCollector)
+bundle_is_done labels-aware : True
+```
+
+## ✅ THE BEHAVIOURAL LABELS ASSERT — dry-run clean, and it EXERCISES the whole path
+Not an import check and not a version comparison. It runs **collect → finish → encode → decode → verify**
+with real MTLD computed on real text:
+```
+OK labels BEHAVIOURAL: records=3 bytes=371 tokens_in=49 mtld=[54.88, 63.0, 17.0]
+   schema=edullm-doc-labels/v1  spec=mtld-bidirectional-mccarthy-jarvis-2010/ttr0.72
+OK mixed-set guard wired into verify_bundle_set
+LABELS_BEHAVIOURAL_OK=1
+```
+It asserts: `run_bundle` accepts `labels=`; **`bundle_is_done` accepts `labels=`** (the resume trap);
+`verify_labels` returns **no** problems on a clean set; **MTLD values are real positive floats**, not
+placeholders; `mtld_spec` and `schema` match the module constants; and **`_check_set_labels(` appears in
+`verify_bundle_set`'s source** — so the mixed-set guard is wired, not merely defined.
+
+## 🔑 MUTATION-PROVEN — 4 mutations, 4 caught. It can FAIL.
+| mutation | caught by |
+|---|---|
+| `corpus_labels` absent (**the pre-labels image**) | ✅ `ModuleNotFoundError` |
+| token conservation wrong (`tokens_in` missing the per-doc EOS) | ✅ `labels-token-conservation-broken` |
+| `declared_documents` disagrees with record count | ✅ `labels-document-count-mismatch` |
+| truncated sidecar bytes | ✅ `BuildError: labels header claims 252 bytes but the object holds only 127` |
+
+**M1 is the one that matters: the assert fails on exactly the image we must not ship.** An unlabelled image
+cannot pass it, which is what "behavioural, not a version string" was supposed to buy.
+
+## 🔧 And the code caught THREE of my own errors while I wrote it
+1. I assumed `LabelCollector.add(doc_id=…, text=…)` → **`TypeError`**. Real API is
+   `add(*, n_tokens, source_path, mtld)` — **the collector never sees the text**, which is why MTLD is
+   computed by the caller and passed in.
+2. I assumed `M.mtld(words_list)` → **`AttributeError: 'list' object has no attribute 'lower'`**. It is
+   `mtld(text: str)`.
+3. 🔑 I set `tokens_in = sum(n_tokens)` and **`verify_labels` REFUSED it** with the exact arithmetic:
+   *"sum(n_tokens + 1) over 3 labels is 49 but the bundle's PackResult.tokens_in is 46 (+3). Every document
+   the packer pulled contributes exactly its content tokens plus one EOS; there is no fourth channel."*
+
+**That third one is the golden rule working on me.** I wrote a plausible test, the recomputing check rejected
+it, and **the check was right and I was wrong.** A validator that only confirmed my arithmetic would have
+taught me nothing; this one taught me the token model. **Three API errors in a preflight I was writing to
+prevent a silent failure — which is the argument for dry-running a job def's assert locally before
+registering it, not after.**
+
+## Status — holding, per instruction
+**The image build, the combined revision, and the launch all wait on OOM-DIAGNOSE.** The assert above is
+ready to drop into the job def verbatim. Nothing registered, nothing built, nothing submitted.
+
+**Prepared and pending, so the registration is one call when the verdict lands:**
+`memory 15,806` (or OOM-DIAGNOSE's figure) + **`PLAN_ID=364cb4dd488a5761`** + `--labels` +
+the 4-part behavioural assert + the existing corpus/file-shards/tokenizer guards, image = the digest the
+`b7bdfb8` build produces.
