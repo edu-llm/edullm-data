@@ -605,3 +605,132 @@ Both repinned to `364cb4dd488a5761`, and
 `tests/test_curriculum_driver.test_BOTH_drivers_pin_the_SAME_plan_id_as_the_checked_in_registry`
 now asserts all three agree — against the value **recomputed from the registry**, not against a
 second literal. Three places had to agree and nothing made them.
+
+---
+
+# 🔬 ENG-EXEC-3 — THE INSTRUMENT QUESTION ANSWERED, AND IT FOUND A DEFECT I HAD SHIPPED
+
+CEO asked one thing: **is `~13.35 GiB` RSS or `tracemalloc`?** Answering it honestly required
+re-measuring, and the re-measurement found two errors — one of mine in shipped code.
+
+## 1. The instrument, per term — ALL RSS, no `tracemalloc` in the total
+
+| term | instrument | grade |
+|---|---|---|
+| row group 3.95 / 6.98 GiB | `resource.getrusage(RUSAGE_SELF).ru_maxrss`, clean subprocess | MEASURED-RSS |
+| `SeenHashes` 114.97 B/entry | same | MEASURED-RSS |
+| decon index 527 MiB | same | MEASURED-RSS |
+| interpreter baseline ~0.35 GiB | **estimated, not measured** | was UNVERIFIED |
+
+**So 13.35 GiB carries no `tracemalloc` term and is NOT subject to the 34% gap.** The 85.9-vs-114.97
+correction was me *replacing* a `tracemalloc` figure with an RSS one, not importing one.
+
+**The baseline is now MEASURED: 94.1 MiB, not ~0.35 GiB.** Bare interpreter 15.3 → +numpy/boto3/
+pyarrow 66.8 → +all `edullm_data` modules 69.3 → +a live boto3 S3 client 92.4 → +`tokenizers` 94.1.
+**My estimate was 3.8× too high.** It is 0.6% of a 15,806 MiB container, not 16% of the margin.
+
+## 2. 🔴 BUT `ru_maxrss` IS THE WRONG INSTRUMENT FOR SIZING — it is not reproducible
+
+Six runs of the *same* 3.73 GiB row group gave peaks of **2.52, 3.66, 5.10, 5.47, 6.38, 7.28 GiB** —
+a **2.9× spread on identical input.** `ru_maxrss` is a high-water mark over a process whose
+allocator reuse and page residency vary run to run. **Sizing a container from one draw of that
+distribution is sizing to a coin flip**, and my 6.98 GiB was one draw.
+
+*(I briefly suspected macOS memory compression and tested it — 800 MB of `urandom` appeared to cost
++0.0 MiB. **That test was wrong**: `ru_maxrss` is a MAXIMUM, and the preceding zeros allocation had
+already set it. Re-run in fresh processes, zeros and urandom both cost 763 MiB. Compression is not
+the explanation; variance is. Recorded because I nearly reported a wrong mechanism.)*
+
+**Replacement instrument, and it is the one that transfers to a Linux cgroup:**
+`pyarrow.default_memory_pool().max_memory()` (bytes arrow ASKED the OS for) + `tracemalloc` peak for
+the Python side. **Deterministic — repeated runs agree to 0.02 GiB.**
+
+## 3. ALLOCATED BYTES at the row-group shapes DATA actually measured
+
+| shape | rg uncompressed | arrow pool max | python peak | **TOTAL** |
+|---|---|---|---|---|
+| **250,000 rows × 2,500 B — the 600 MB row group DATA MEASURED** | 0.59 GiB | 0.70 | 0.63 | **1.33 GiB** |
+| 250,000 × 5,251 B (Nemotron-CC-Math's measured bytes/doc) | 1.23 GiB | 1.52 | 1.27 | **2.79 GiB** |
+| 250,000 × 12,000 B | 2.80 GiB | 4.41 | 2.84 | **7.25 GiB** |
+| 100,000 × 20,000 B | 1.87 GiB | 3.23 | 1.88 | **5.11 GiB** |
+
+**Law: TOTAL ≈ 2.3–2.6 × the uncompressed row-group size.** DATA measured *"4 row groups of
+~250,000 rows (~600 MB each)"*, and at that shape the cost is **1.33 GiB, not 6.98.** My 6.98 came
+from a 3.73 GiB fixture — **a row group 6.3× larger than any DATA observed. I sized from a fixture I
+invented, not from the corpus.**
+
+## 4. 🔴 THE TERMS DO NOT CO-PEAK ANYWHERE NEAR THEIR SUM — MEASURED
+
+Built in `run_bundle`'s real order, all live simultaneously: decon index (live size) + `SeenHashes` at
+2.0 M documents + one row group read and extracted:
+
+```
+baseline (imports)            0.051 GiB
++ decon index (live size)     0.490 GiB   (+449.7 MiB)
++ SeenHashes 2.0M docs        0.642 GiB   (+154.8 MiB)
++ ONE row group read+extract  2.441 GiB   (+1843.0 MiB)
+OBSERVED CO-PEAK              2.441 GiB
+```
+
+⚠️ **`SeenHashes` added 154.8 MiB where 2.0 M × 114.97 B predicts 219 MiB, and the decon index
+449.7 MiB where I measured 527.** Adding independently-measured maxima **over-counts**, because the
+allocator reuses freed pages between phases. **13.35 GiB was a sum of separate maxima — an upper
+bound, never an observed peak.**
+
+## 5. 🔧 AND THE RE-MEASUREMENT CAUGHT A DEFECT I INTRODUCED IN `b659bbd`
+
+`pa.ChunkedArray.combine_chunks()` on a **ONE-CHUNK** array **copies the whole buffer** — MEASURED
++2,188 MiB on one 3.73 GiB row group, with `buffers()[2].address` differing afterwards. One chunk is
+the *normal* case for `read_row_group`. Peak RSS on the reasoning-traces shape:
+
+| path | peak RSS |
+|---|---|
+| `to_pylist` (pre-branch) | 5.10 / 6.38 GiB |
+| **arrow + `combine_chunks` — MY CHANGE** | **7.70 / 8.47 / 8.66 GiB** |
+| arrow + `chunk(0)` — fixed | 3.66 / 5.47 GiB |
+
+**My 2.76× throughput win was making the OOM it sits next to ~2 GiB WORSE**, on the exact source
+that OOMed. Fixed in `3eab271` (`chunk(0)` costs +0.0 MiB); post-fix, allocated bytes are
+**identical** to the `to_pylist` path (12.17 vs 12.19 GiB on the large fixture), so the arrow change
+is now memory-neutral and time-positive. **16 byte-identity tests could not see this — a redundant
+copy returns identical values. Only an allocation counter could.**
+
+*A change justified by one instrument must be re-measured on every instrument the system is gated by.
+I corrected two inherited `tracemalloc`-vs-RSS confusions this session and then created a third.*
+
+## 6. ⚖️ ANSWER: **15,806 MiB CLEARS IT, with margin I am willing to defend**
+
+Worst realistic build child, in allocated bytes at DATA's measured row-group shape:
+
+| term | GiB | grade |
+|---|---|---|
+| one row group (2.3–2.6× of ~600 MB) | **1.33** | MEASURED |
+| decon index, resident | 0.49 | MEASURED |
+| `SeenHashes` at the largest bundle (51.5 M docs read, `finephrase-table`) | **5.51** | DERIVED from 114.97 B/elem MEASURED |
+| interpreter + boto3 + numpy + tokenizers | **0.09** | **MEASURED** (was estimated 0.35) |
+| **total** | **7.42** | |
+
+**7.42 GiB against 15,806 MiB = 15.44 GiB is 48% — 8.02 GiB of headroom, 2.1× the requirement.** Even
+substituting my invented 3.73 GiB row group (6.3× anything observed) the total is 12.5 GiB = 81%,
+still inside.
+
+🔴 **I WITHDRAW THE 24,576 RECOMMENDATION. It was sized from a sum of separate maxima over a fixture
+larger than any real row group, plus a baseline I over-estimated 3.8×, against a counter with a 2.9×
+run-to-run spread. Take 15,806 and keep the 4-children packing — my earlier number would have cost
+~5.8 h for headroom nothing needed.**
+
+Gate A is unaffected by any of this and still needs its own raise: **9.36 GiB** (of which the
+`bincount` intp cast is 3.57, MEASURED at exactly 8.00 B/elem) **is 117% of 8,192 MiB.** CEO's
+8,192 → 12,288 for `edullm-validator` and `edullm-promote` puts it at **78%**, and Gate A runs as a
+single job so packing is irrelevant. That is sound.
+
+## What I could NOT verify
+- **No Linux, no cgroup, no c7i.** `arrow_pool.max_memory() + tracemalloc` is the closest portable
+  proxy for what a cgroup counts, but glibc's allocator is not macOS's, and **the OOM killer acts on
+  RSS, which includes allocator fragmentation neither counter sees.** The 2.1× margin is what covers
+  that, and it is the reason I would not defend a tighter number.
+- **The row-group geometry of `pre-1929-books` and `reasoning-traces` specifically.** DATA measured
+  ~250,000 rows / ~600 MB on the Nemotron files; I have applied that shape to the others. If
+  `reasoning-traces` (11,310 tok/doc) ships materially larger row groups, its child scales by the
+  2.3–2.6× law — **one `ParquetFile(...).metadata.row_group(0).total_byte_size` read against the real
+  file settles it in seconds and is the one measurement I would still want before relaunch.**
