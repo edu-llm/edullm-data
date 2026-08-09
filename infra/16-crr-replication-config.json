@@ -1,0 +1,16 @@
+{
+  "Role": "arn:aws:iam::<ACCOUNT>:role/edullm-data-crr-us-east-2",
+  "Rules": [
+    {
+      "ID": "mirror-published-corpora-to-us-east-2",
+      "Priority": 0,
+      "Status": "Enabled",
+      "Filter": { "Prefix": "" },
+      "DeleteMarkerReplication": { "Status": "Disabled" },
+      "Destination": {
+        "Bucket": "arn:aws:s3:::edullm-data-us-east-2",
+        "StorageClass": "STANDARD"
+      }
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "jobDefinitionName": "edullm-olmoe-mix-0824-ingest",
+  "type": "container",
+  "platformCapabilities": ["EC2"],
+  "propagateTags": true,
+  "timeout": { "attemptDurationSeconds": 21600 },
+  "retryStrategy": { "attempts": 1 },
+  "containerProperties": {
+    "image": "<ACCOUNT>.dkr.ecr.us-east-1.amazonaws.com/sbsandbox-intern-edullm-data@sha256:eca04a3bc91b1b5ffe52b77d5cc2d2b7e69973a535af69fea800dffee01f0c4a",
+    "jobRoleArn": "arn:aws:iam::<ACCOUNT>:role/edullm-reservoir-ingest",
+    "executionRoleArn": "arn:aws:iam::<ACCOUNT>:role/sbsandbox-intern-edullm-batch-execution",
+    "resourceRequirements": [
+      { "type": "VCPU", "value": "8" },
+      { "type": "MEMORY", "value": "16384" }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/aws/batch/sbsandbox-intern-edullm-cpu",
+        "awslogs-stream-prefix": "olmoe-ingest"
+      }
+    },
+    "environment": [
+      { "name": "INGEST_RELEASE", "value": "50b" },
+      { "name": "INGEST_WORKERS", "value": "37" },
+      { "name": "INGEST_MODE", "value": "--dry-run" }
+    ],
+    "command": [
+      "sh",
+      "-lc",
+      "set -e; python -c \"import edullm_data; assert edullm_data.__version__=='0.9.1', 'WRONG IMAGE VERSION: '+edullm_data.__version__; print('PREFLIGHT_OK version='+edullm_data.__version__)\"; python -c \"import boto3; s=boto3.client('s3'); [s.download_file('edullm-landing','_ingest/olmoe-mix-0824/DRIVERS/'+f,'/tmp/'+f) for f in ('olmoe_ingest_driver.py','olmoe_final_50b.json','olmoe_final_100b.json','olmoe_0824_sizes.json')]; print('FETCH_OK')\"; cd /tmp && echo INGEST_START release=${INGEST_RELEASE} mode=${INGEST_MODE}; set +e; python /tmp/olmoe_ingest_driver.py --release ${INGEST_RELEASE} --workers ${INGEST_WORKERS} ${INGEST_MODE}; RC=$?; echo INGEST_DONE_RC=${RC}; exit ${RC}"
+    ]
+  }
+}

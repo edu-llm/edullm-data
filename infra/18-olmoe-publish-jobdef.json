@@ -1,0 +1,33 @@
+{
+  "jobDefinitionName": "edullm-olmoe-mix-0824-publish",
+  "type": "container",
+  "platformCapabilities": ["EC2"],
+  "propagateTags": true,
+  "timeout": { "attemptDurationSeconds": 21600 },
+  "retryStrategy": { "attempts": 1 },
+  "containerProperties": {
+    "image": "<ACCOUNT>.dkr.ecr.us-east-1.amazonaws.com/sbsandbox-intern-edullm-data@sha256:eca04a3bc91b1b5ffe52b77d5cc2d2b7e69973a535af69fea800dffee01f0c4a",
+    "jobRoleArn": "arn:aws:iam::<ACCOUNT>:role/edullm-dataset-publish",
+    "executionRoleArn": "arn:aws:iam::<ACCOUNT>:role/sbsandbox-intern-edullm-batch-execution",
+    "resourceRequirements": [
+      { "type": "VCPU", "value": "16" },
+      { "type": "MEMORY", "value": "32768" }
+    ],
+    "logConfiguration": {
+      "logDriver": "awslogs",
+      "options": {
+        "awslogs-group": "/aws/batch/sbsandbox-intern-edullm-cpu",
+        "awslogs-stream-prefix": "olmoe-publish"
+      }
+    },
+    "environment": [
+      { "name": "PUBLISH_RELEASE", "value": "50b" },
+      { "name": "PUBLISH_MODE", "value": "--dry-run" }
+    ],
+    "command": [
+      "sh",
+      "-lc",
+      "set -e; python -c \"import inspect, edullm_data, edullm_data.profiles.registry as R, edullm_data.publish as P; assert edullm_data.__version__=='0.9.1', 'WRONG IMAGE VERSION: '+edullm_data.__version__; assert 'hash_workers' in inspect.signature(P.publish).parameters, 'NO HASH WORKERS'; m=R.get_profile('pretrain-tokens/v1'); assert m.NAME=='pretrain-tokens/v1', m.NAME; print('PREFLIGHT_OK version='+edullm_data.__version__+' profile='+m.NAME)\"; python -c \"import boto3; s=boto3.client('s3'); [s.download_file('edullm-landing','_ingest/olmoe-mix-0824/DRIVERS/'+f,'/tmp/'+f) for f in ('olmoe_publish_driver.py','olmoe_final_50b.json','olmoe_final_100b.json','olmoe_0824_sizes.json')]; print('FETCH_OK')\"; cd /tmp && echo PUBLISH_START release=${PUBLISH_RELEASE} mode=${PUBLISH_MODE}; set +e; python /tmp/olmoe_publish_driver.py --release ${PUBLISH_RELEASE} ${PUBLISH_MODE}; RC=$?; echo PUBLISH_DONE_RC=${RC}; exit ${RC}"
+    ]
+  }
+}
