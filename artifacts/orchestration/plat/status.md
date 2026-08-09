@@ -4485,3 +4485,119 @@ both logs : awslogs, prefixes 'gatea' / 'promote'              <- output observa
 unversioned to top ACTIVE — still cannot freeze anything. **Promotion remains a deliberate, separate
 submission.** `4 vCPU` is correct per the earlier ruling: `CopyObject` moves zero payload bytes through the
 container, so concurrency, not container size, is the lever.
+
+---
+
+# 🔴🔴 ADDENDUM 37 — THE BUILD IS **TERMINAL WITH 16 FAILURES**. Option (c) is UNSAFE. Nothing to kill.
+
+**The premise of the sequencing question has changed: there is no running build to terminate.**
+`MEASURED`: `SUCCEEDED 169 · FAILED 16 · RUNNING 0 · RUNNABLE 0`.
+
+## 1. THE RESUME QUESTION — ANSWERED: resume is REAL but **NOT label-aware**. Option (c) fails.
+
+`bundle_is_done` (`corpus_build.py:892-931`) checks exactly three things:
+```
+receipt = read_receipt(...)                      # exists, parses
+if receipt.plan_id != plan_id: return False
+declared = {r.path for r in receipt.shards}
+if declared != {r.path for r in bundle.shards}: return False
+for shard in receipt.shards:
+    head = s3.head(bucket, f"{root}{shard.path}")
+    if int(head.get("size",-1)) != shard.bytes: return False
+```
+**Receipt + shard paths + shard SIZES. No label term anywhere.**
+
+**And `ef732ee` did not change it — proven, not assumed:**
+```
+bundle_is_done digest @8360abc : a0ed6953a6bbb931
+bundle_is_done digest @ef732ee : a0ed6953a6bbb931   -> BYTE-IDENTICAL
+```
+`ef732ee` touches 8 files (+1,525 lines) and `bundle_is_done` is not among the changes.
+
+**So a labeled relaunch SKIPS all 169 complete bundles and writes labels for only the 16 rebuilt ones.**
+
+### The gap is real, and the curriculum author *documented* it as out of scope
+- `Receipt.labels` defaults to **`None`**, and its comment says `None` means *"no labels were emitted"*.
+- `_check_labels` (`corpus_receipt.py`): **`record = receipt.labels; if record is None: return []`** — with an
+  explicit note: *"**Absent labels are NOT a violation here** … `verify_bundle_set` is where it belongs,
+  because 'some bundles have labels and some do not' is a property of the SET and **is the failure mode that
+  actually matters (a partial ordering that silently omits whole sources)**."*
+- 🔴 **`verify_bundle_set` does NOT implement it.** Its complete violation vocabulary at `ef732ee` is
+  **`bundle-set-incomplete`** and **`bundle-set-unexpected-stream`**. All five label violations
+  (`receipt-labels-{missing,digest-mismatch,identity-mismatch,size-mismatch,tokens-in-mismatch,unparseable}`)
+  are **per-receipt** and every one is skipped when `labels is None`.
+
+**Verdict: the CEO's hypothesised trap is exactly right, and it fails OPEN.** A mixed set produces a
+complete token corpus with labels for 16 of 185 bundles — **a permutation owning 6.1% of the corpus** —
+and **no gate emits a violation.** The author named the check and put it in the one function that doesn't
+have it. **Option (c) is refused.**
+
+## 2. CURRENT STATE — `MEASURED`
+```
+169/185 bundles SUCCEEDED · 16 FAILED · 0 RUNNING (TERMINAL)
+33,633 shards / 3.363 TB / 866,943,795,200 tokens = 88.22% of plan
+label objects: 0        missing: 115,809,189,888 tokens (11.78%)
+```
+
+### The 16 failures are THREE causes, all diagnosed from logs (not guessed)
+| cause | n | bundles | retryable? |
+|---|---|---|---|
+| **exit 137 OOM** — AWS states `OutOfMemoryError: Container killed due to memory usage` | 4 | `finepdfs-edu p03of04`, `stackv2-edu p04of07`, `pre-1929-books`, `reasoning-traces` | needs **more memory**, not a retry |
+| **exit 1 HF `ConnectionResetError [Errno 104]`** in `hf_files` | 5 | `finephrase-faq`, `math-textbooks`, `nemotron-cc-math-3 train ×3` | **yes — transient** |
+| 🔴 **exit 2 HTTP 401** on `nvidia/Nemotron-CC-Math-v1/resolve/…/3/part_000000.parquet` | 7 | `nemotron-cc-math-3 val ×3`, `-4plus ×4` | **no — needs a registry fix** |
+
+🔴 **The 401 is the gated-repo failure this ledger predicted and thought it had routed around.** The
+Nemotron bytes were copied to `s3://edullm-landing/_src/nemotron-cc-math-v1/` precisely because
+*"someone else's accepted gate is not our access"* — **but the registry rows still point at the HF repo,
+and `corpus_read.py` cannot read `s3://` at all (`grep -c "s3://"` → 0).** So the `_src/` copy is
+**unreachable by any registry row**. The staging was done and never wired up. **Same shape as wall 6: a
+known gap that stayed written down.**
+⚠️ **Fixing it means changing `config`/`repo` in the registry → `plan_id` MOVES → a new corpus identity.**
+
+## 3. THE OPTIONS, COSTED — and (c) is off the table
+
+| option | wall clock | $ | outcome |
+|---|---|---|---|
+| **(a) fix-forward UNLABELED** — re-run 16 failed only | **~9.3 h** (longest = `finepdfs p03of04` at the measured PDF rate) | **~$53** | 983B unlabeled corpus. **Still needs the 401 fix, which moves `plan_id`.** |
+| **(b) full labeled rebuild** | **~13–14 h** | **~$175** | 983B **fully labeled**, one identity, no mixed set |
+| ~~(c) labeled + resume~~ | ~1.5 h | ~$5 | 🔴 **REFUSED — 169 unlabeled + 16 labeled, no gate catches it** |
+
+**"Kill now" is a no-op — the array is already terminal.** Nothing needs terminating in any option.
+
+### The decision is smaller than it looks, because (a) is not actually cheap
+**(a) and (b) both require re-running the Nemotron rows against a fixed registry, and that moves
+`plan_id`.** Once `plan_id` moves, **`bundle_is_done` returns False for all 185** (`receipt.plan_id !=
+plan_id`), so **the 169 completed bundles stop counting as done — under a new `plan_id`, (a) IS (b).**
+The $53/9.3 h figure only holds if we keep `29968a2b04008a8c` and therefore keep the 401, i.e. **ship
+without Nemotron-CC-Math (61B, 6.2%, the math pillar).**
+
+**So the real choice:**
+- **983B minus the math pillar**, on the current `plan_id`, unlabeled, ~9.3 h / ~$53 — and a corpus missing
+  the source the owner accepted licence exposure to include; or
+- **a new `plan_id`, labeled, everything wired** — ~13–14 h / ~$175, which is **the same order as (a) once
+  the registry has to change anyway.**
+
+**My recommendation: (b), with the registry 401 fix folded in**, because the 401 fix forces a new `plan_id`
+regardless, and once you are paying that you get labels for the marginal difference. **~$122 and ~4 h buys
+the math pillar AND the curriculum.**
+
+## What I have NOT done
+**Nothing killed, nothing registered, nothing submitted.** The 401 fix is a **registry content change that
+moves `plan_id`** — that is ENG/DATA's lane and the CEO's ruling, not mine. The OOM fix is a **job-def
+memory raise** (14,336 MiB → higher), which is A2 but **not named for this purpose**, so I am asking.
+
+## 4. ✅ THE LAST UNMEASURED BAND — PDF AND CODE ARE MEASURED
+```
+PDF  finepdfs-edu : 466,976 tok/s/container =  58,372 tok/s/vCPU = 0.804x anchor
+CODE stackv2-edu  : 651,085 tok/s/container =  81,386 tok/s/vCPU = 1.121x anchor
+```
+🔧 **I corrected these before reporting.** My first pass read **1,867,904** and **4,557,596** tok/s —
+3.2× and 7.8× the anchor. **Those are AGGREGATES of K concurrent parts, not per-container rates**: the 4
+finepdfs parts and 7 stackv2 parts share ONE source prefix, so dividing the wall span by shards across all
+parts credits one container with K containers' work. **Divided by K they land at 0.80× and 1.12×** — which
+is physically sensible, where 7.8× was not. **`dclm-NNN`/`fineweb-edu-NN` are unaffected** (each row is its
+own `source_label`, hence its own prefix). Only the four file-sharded sources needed it.
+
+**The uniform-rate assumption holds far better than feared: every source lands 0.80–1.12× except FinePhrase
+(0.10–0.27×, the slowest by 4×).** PDF is the slowest of the big four and it set the makespan, exactly as
+predicted — `finepdfs-edu p03of04` is the 9.31 h critical child.

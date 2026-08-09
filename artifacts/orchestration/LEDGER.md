@@ -3408,6 +3408,442 @@ Committed **`ec41837`** (not pushed), with `infra/12-dataset-publish-jobdef-rev2
 
 ---
 
+# 🟠 DISPATCH ORDER COSTS ~2 h — and PLAT-2 corrected its OWN makespan to find it
+
+**Array index == plan bundle position, and Batch dispatches in index order.** The four longest sources sit at the
+**END**:
+```
+indices 0-46     cosmopedia + dclm-001..047        1.92-1.97 h each   ← running now
+indices 101-104  finepdfs-edu--train--p00..03of04   7.55-7.56 h each
+indices 171-177  stackv2-edu--train--p00..06of07    7.40 h each
+```
+| dispatch order | makespan |
+|---|---|
+| **index order (what Batch actually does)** | **13.30 h** |
+| longest-first | 11.34 h |
+| **penalty** | **1.97 h (17%)** |
+
+`stackv2-edu--train--p06of07` starts at ~5.90 h and finishes at **13.30 h — last thing running, alone, while 46
+slots idle.**
+> **The makespan is set by the longest bundle that starts LAST, which is not the same quantity as "the longest
+> bundle."**
+
+**🔧 This corrects PLAT-2's own Addendum 28/30 figures**, and the diagnosis is precise: its 11.49–12.87 h came
+from bin-packing simulations **free to place any bundle in any slot** — freedom the array dispatch does not grant.
+*"I measured the rate correctly and fed it to a scheduler the platform doesn't implement."* **Corrected: ~13.3 h.
+Still inside "quote 11–15 h" — the band held, which is the argument for having quoted a band rather than a
+point.** My own 11.07 h and 12.5–12.9 h figures are superseded by the same reasoning.
+
+**Correctly NOT actioned:** re-ordering changes `plan_id` (proven below) and discards work already done; Batch has
+no array-order control; submitting the long children separately is an unauthorised new pattern **risking two
+writers per bundle.** **The durable fix is free at plan time: emit bundles DESC by tokens** — LPT, the classic
+4/3 approximation, no schema change, ~17% for every future build. **Queued for the handoff, not tonight.**
+
+## ✅ PLAT-2 settled the caveat it raised instead of leaving it open — CEO-verified
+```
+plan_id from the staged doc            : 29968a2b04008a8c   ← reproduces EXACTLY
+plan_id with bundles sorted DESC       : 6dbff19b87175cc0   ← CHANGED
+CEO check: json.dumps(sort_keys=True) canonicalises list ORDER? → False
+```
+**`sort_keys=True` sorts dict KEYS, not list ELEMENTS, and `bundles` is a list — so order is in the hashed
+bytes.** Re-ordering is a **new corpus identity**, confirming the rejection. **Bonus, and it is real evidence:**
+`plan_id` reproducing exactly proves **the staged plan is byte-intact and PLAT-2's tooling agrees with what the 47
+children are reading.** A caveat converted into a positive verification.
+
+# ✅ THE TWO-IMAGE HAZARD IS CLEARED — provably, at the level of the executed symbol
+`edullm-validator:16` and `edullm-promote:2` pin **`5fb76f66…a906`** (from `5450f53`, **pre-file-sharding,
+pre-surrogate**) while the build runs `4df94c4c…`. **Two images in one pipeline is the known failure mode**
+(CLAUDE.md: "two parallel lines each shipped an image; either regresses the other"), so PLAT-2 settled it rather
+than assuming version parity:
+
+**Every file on their code path is byte-identical at both commits** — `validate.py`, `pretrain_tokens_v1.py`,
+`manifest.py`, `s3.py`. Only `corpus.py` differs, and its diff is **purely additive** (`MAX_FILE_SHARDS`,
+`partition_ordinals`).
+
+**🔧 And it corrected itself mid-check.** It grepped `validate.py`'s imports, saw no `corpus`, and concluded it
+doesn't import it. **Wrong** — CEO-verified: there is **no top-level `corpus` import in `validate.py`**, but the
+transitive closure reaches it through a **function-local** `from .corpus import epoch_verdict` at
+**`read.py:199`**. *"My grep saw top-level imports only — absence of a string is not absence of behaviour"*, the
+same shape as PLAT-1's B3 near-miss. It then compared the **symbol**: `epoch_verdict` **AST digest
+`8ffba35f45b54251` at both commits — identical.**
+
+> **The general form, worth keeping: the right unit of comparison is the SYMBOL the code path executes.** Images
+> say *"stale, rebuild"*; files say *"investigate"*; **the reachable symbol settles it.** That is the mature form
+> of "diff the artifact, not the version string" — **diff the artifact at the granularity of what actually runs.**
+
+**Verdict: no rebuild, no re-registration, no mutation.** Also re-verified: **`:16` genuinely has no `--promote`**,
+so the unversioned EventBridge target still cannot freeze anything.
+
+## Monitoring — third iteration, and PLAT-2 owns the first two
+Attempt 2 was credentialled and fail-closed (its reading **matched the manual one exactly**) but would emit **~20
+identical no-change events over 3.4 h** — *"noise that trains a reader to ignore the channel."* Attempt 3 is a
+**single-notification `until` loop** that exits on the condition and prints `WATCHDOG-BLIND rc=…` on failure. It
+also removed **a stray no-op left inside the loop** — *"a no-op inside a health check is exactly the decoration
+the golden rule forbids."*
+**Three iterations, each caught by comparing the tool against ground truth it already held.** Attempt 1 was
+fail-open; attempt 2 was correct but would have destroyed its own signal-to-noise. **A monitor that is right and
+unreadable is not a working monitor.**
+
+## State
+```
+47 RUNNING · 138 RUNNABLE · 0 FAILED · 384/384 vCPU · every shard exactly 100,007,936 B
+PDF/code/math start ~20:03 UTC (t+3.95 h) · projected terminal ~05:24 UTC (t+13.30 h)
+committed 8360abc (not pushed), scrub clean
+```
+
+---
+
+# 📅 ETA TO A PUBLISHED, PROMOTED DATASET — **~15:00–17:00 UTC Sunday**
+
+**CEO-verified progress at 17:51 UTC (t+1.75 h):**
+```
+6,750 shards · 675,053,568,000 B · 17.17% of 39,307 · 168,763,392,000 tokens
+47 sources writing · 0 FAILED · every shard EXACTLY 100,007,936 B (one distinct size)
+```
+**Progress is ahead of the linear projection** (17.17% at 1.75 h of a 13.3 h build), consistent with the short
+dclm/cosmopedia bundles running first — which is the same dispatch-order fact that costs 2 h at the *end*.
+
+| stage | duration | cumulative | grade |
+|---|---|---|---|
+| **build** (running) | 13.3 h | ends **~05:24 Sun** | **MEASURED** rate + dispatch sim |
+| dry-run receipt check | ~0.1 h | 13.4 h | trivial |
+| **`publish()`** — hash + copy 3.93 TB | **6.0–7.3 h** | 19.4–20.7 h | DERIVED from 300–362 MB/s |
+| Gate A | 0.4–0.5 h | 19.8–21.2 h | DERIVED post-B3 |
+| **promote** | **3.1–3.7 h** | **22.9–24.9 h** | **DERIVED, NEVER MEASURED** |
+
+**Build throughput now 71,991 tok/s/vCPU = 0.991× the anchor** — a third independent corroboration (cosmopedia
+0.956×, DCLM 0.911×, fleet 0.991×). **The 72,615 figure the entire schedule rests on has now been confirmed three
+times on this corpus.**
+
+## The three honest caveats, stated by PLAT-2 unprompted
+1. **The build's 13.3 h is the firmest part**, but **PDF and code are still UNMEASURED and hold the longest
+   children** (start ~20:03 UTC). If they tokenize slower than web text, everything shifts.
+2. **`publish()` is the biggest single block and the least certain** — 6–7.3 h stream-hashing 3.93 TB, and
+   **nobody has run it at this scale.**
+3. **Promote's 3–4 h is DERIVED, not measured** — two analysts converged independently, **and it is exactly the
+   figure the owner's original release-gate question turned on. Still unproven.**
+
+**So: the build finishes overnight; the dataset lands Sunday afternoon UTC.** The post-build stages add ~10 h on
+their own — **publish + Gate A + promote are not a rounding error on a 13 h build, they are 43% of the total.**
+That is worth stating plainly because every earlier estimate tonight quoted only the build.
+
+**Nothing is blocked and nothing needs a human between now and ~05:24 UTC.**
+
+---
+
+# 📋 NEW WORKSTREAM — MTLD curriculum labeling on `pretrain/edu-mix-983b`
+
+Owner request, 2026-08-08: implement the RegMix MTLD curriculum-labeling handoff against **this** corpus.
+**Feasibility assessed before committing. Verdict: the publish half is ready; the LABELING half is BLOCKED by a
+structural property of our build, and the blocker is one the handoff itself names as the critical constraint.**
+
+## ✅ What already exists and needs no work
+- **`token_order_v1.py` is a shipped profile in this repo.** `NAME = "token-order/v1"`, `depends_on` required
+  (min 1), `ordering` ∈ {permutation, subset, repeating}, and it **recomputes** the permutation:
+  `np.bincount(order, minlength=n) == 1` everywhere (`:138`). **Gate A will actually verify the order vector** —
+  not a decoration.
+- **The parent is already being built** and will be `pretrain/edu-mix-983b`, `pretrain-tokens/v1`, dolma2, uint32
+  LE headerless — **exactly the parent shape the loader expects.**
+- The publish path (`publish()` → landing → validator → `edullm-data`) is registered and tested tonight.
+
+## 🛑 THE BLOCKER — this corpus ships NO TEXT and NO PER-DOCUMENT PROVENANCE. CEO-verified.
+```
+corpus.py:141        GROUP = "tokens"                       ← the ONLY group
+corpus_pack.py:117   "the EOS is the only document boundary this corpus ships
+                      (§2.3, no .csv.gz sidecars), so there is no second signal"
+ShardReceipt fields  path · tokens · bytes                  ← no per-document record
+grep text/ | doc_offsets | sidecar in the build path → NONE
+```
+**MTLD is computed on TEXT, per document.** The handoff's Phase 2 requires *"trimmed domain JSON/JSONL shards —
+the same documents that were tokenized"*, and Phase 3 requires per-document `source_doc`, `n_tokens`,
+`source_path` provenance to map documents → chunks. **Our build reads text from HF, tokenizes it in-memory, and
+writes only packed `uint32` shards. The text is never persisted, and no document index survives.**
+
+**So the handoff's own critical constraint bites exactly here:** *"`parent_layout.json` must describe the exact
+shard order, token counts and offsets of the parent that will eventually be published. **Re-staging or
+re-tokenizing after building the order invalidates the permutation.**"* We cannot recover the text post-hoc
+**and** keep the permutation valid, because re-reading HF would have to reproduce the identical document order —
+which is only guaranteed by re-running the same build.
+
+**Scale, for the record:** at `SHARD_TOKENS` 25,001,984 and seq 2048, each full shard is **12,207 chunks**, so
+`n_chunks ≈ 4.8 × 10⁸` and the order vector alone is **~1.92 GB** of `uint32`. Feasible to publish; the cost is
+in the labeling pass, not the artifact.
+
+## ⚖️ RULING — do NOT bolt text capture onto the running build. Three reasons.
+1. **It would invalidate the corpus.** Adding a `text/` group or a doc-offset sidecar changes `corpus_build`,
+   hence the image, hence — by tonight's own findings — nothing until a rebuild, and **the running 185-child
+   build would have to be discarded and re-run.** 17% is done; a restart costs the whole 13.3 h.
+2. **It changes `plan_id`.** Any registry or plan change re-derives the id (proven twice tonight), so the
+   in-flight work becomes an orphan.
+3. **The owner's stated priority is a dataset as soon as possible.** MTLD arms are a *training* concern; the
+   parent is useful to every non-curriculum arm the moment it lands.
+
+**Sequenced, not refused:** the parent publishes first, then curriculum labeling runs as **a second pass with its
+own build**, which is also what makes the permutation sound — a labeling run that re-reads the same pinned
+revisions in the same plan order reproduces the document stream by construction.
+
+---
+
+# ⚖️ OWNER DECISION — ADD TEXT CAPTURE AND RESTART THE BUILD
+
+**Owner chose "Add text capture and restart the build"** over the three cheaper options, having been shown that it
+discards 17% of a 13.3 h run. **Their call and it governs.** But two facts I verified *after* putting the question
+change how it should be executed, and both make it cheaper than I described:
+
+## 🔑 FINDING 1 — `plan_id` does NOT change. My warning was wrong.
+```
+corpus_build.py:540   doc["plan_id"] = sha256(json.dumps(doc, sort_keys=True, …))
+```
+**`plan_id` is the sha256 of the PLAN DOCUMENT ONLY** — sources, splits, file_shards, tokens, shard paths.
+**Nothing code-derived enters it**; the plan doc carries no wheel version, no image digest. **So a rebuild that
+adds label emission keeps `PLAN_ID = 29968a2b04008a8c`.**
+
+**That is the difference between a restart and a disaster.** The handoff's critical constraint — *"re-staging or
+re-tokenizing after building the order invalidates the permutation"* — is satisfied **because the plan is
+unchanged**: same bundles, same order, same shard geometry, same ordinals. **The permutation stays valid, and the
+6,750 shards already written are byte-identical to what the new build will write** (determinism was proven
+earlier: 9 bundles / 4,137 shards re-ran byte-identical). **Ruling: I was wrong that this orphans the in-flight
+work. It does not.**
+
+## 🔑 FINDING 2 — capture LABELS, not TEXT. 143× cheaper, and it is what MTLD actually needs.
+```
+documents ≈ 1,206 M  (982.75B tokens ÷ 815 tok/doc)
+per-doc labels @ 24 B  →      28.9 GB
+full text     @ 4.2 B/token →  4.13 TB      ← 143× larger
+```
+**The handoff asks for text because RegMix labels text in a separate pass. We do not need to.** MTLD is computed
+**from the text that is already in memory at tokenize time**, and only the *scalar result* plus provenance need to
+persist:
+`(source_doc, n_tokens, source_path, mtld)` — exactly the four fields Phase 3's chunk-mapping requires.
+**Computing MTLD inline and shipping 28.9 GB of labels replaces re-persisting 4.13 TB of text and re-reading it.**
+It also removes the handoff's whole Phase-2-step-3 "attach stream provenance by re-walking in tokenization order"
+— **we are already in tokenization order, so `source_doc` is a counter, not a reconstruction.**
+
+## ⚖️ RULING — one build that emits tokens AND labels. Same `plan_id`. No text group.
+**Scope:**
+1. **Inline MTLD** at tokenize time, exactly per spec: bidirectional McCarthy & Jarvis, **TTR factor 0.72**,
+   word regex `[A-Za-z]+(?:'[A-Za-z]+)?|[A-Za-z]*\d+[A-Za-z0-9]*`, lowercased, **`len(set(tokens))` for docs
+   <10 tokens**, score `0.5*(forward+backward)`. **Never re-derive these constants — they must match RegMix
+   bit-for-bit or the arms are not comparable.**
+2. **A `labels/` sidecar per bundle** carrying `(source_doc, n_tokens, source_path, mtld)`, written by the same
+   sink that writes shards, so it inherits the receipt's conservation checks.
+3. **`plan_id` MUST remain `29968a2b04008a8c`** — asserted in a test, not hoped for. If it moves, the change
+   touched the plan surface and is wrong.
+4. **No `text/` group, no `text-corpus/v1` companion.** The handoff lists it as optional; at 4.13 TB it is not
+   worth it, and `_dist`-style storage of source text is a licence question (NVIDIA §2.2.2) we settled by *not*
+   redistributing text.
+5. **The order vector** is `~4.8 × 10⁸` chunks → **~1.92 GB** `uint32`, published as `curriculum/edu-mix-983b`
+   group `mtld`, `token-order/v1`, `depends_on` the exact parent manifest. **Gate A recomputes the permutation**
+   (`token_order_v1.py:138`, `np.bincount(order, minlength=n) == 1`) — so a wrong order is rejected, not shipped.
+6. **Sort ascending** — `METRIC_SORT["mtld"] = ("mtld", False)`, lower MTLD = easier = rank 0.
+
+**Cost of the restart, stated honestly:** ~2 h of compute already spent is re-done (~$25 at the measured rate),
+and the ETA moves from ~15:00–17:00 UTC Sunday to roughly **+2 h later**, plus the labeling overhead — MTLD is
+O(words) per document, and the build is already **78% filter-bound**, so I expect a **single-digit percent**
+slowdown, to be measured rather than assumed.
+
+---
+
+# ✅ MTLD CURRICULUM IMPLEMENTED — branch `agent/curriculum-exec/mtld-labels`, `ef732ee`, NOT merged
+
+**CEO-verified:** `1490 passed, 2 deselected` (baseline 1424, **+66**); `plan_document(...)['plan_id']` returns
+**`29968a2b04008a8c`** — **unmoved**, 185 bundles. Nothing touched AWS.
+
+**The `plan_id` guard is stronger than I specified.** I asked for an assertion against the literal; it also added
+`test_the_shard_bytes_are_IDENTICAL_with_and_without_labels` — same bundle twice through `run_bundle`, **every
+shard payload byte compared.** And an unlabelled `Receipt` serialises with **no `labels` key**, so
+`receipt_sha256` is unchanged for the 6,750 shards already written. *"Two runs of the same bug agree"* — so it
+asserted against the literal, not a recomputation. Correct instinct.
+
+# 🔴 THE FINDING THAT MATTERS MOST — OLMo-core computes 12,208 chunks/shard, the handoff says 12,207
+**CEO-verified arithmetic:**
+```
+handoff:    (25,001,984 − 1) // 2048 = 12,207
+OLMo-core:  file_size // (item_size × seq_len)  (numpy_dataset.py:679) = 12,208
+25,001,984 = 12,208 × 2048 EXACTLY  → the −1 changes the floor only because we divide evenly
+n_chunks:   478,575,435 (handoff)  vs  478,614,640 (OLMo-core)   Δ = 39,205
+```
+**This bites only because `SHARD_TOKENS` is an exact multiple of 2048** — on a corpus with ragged shards the two
+formulas agree. **Δ 39,205 chunks, and every index past the first shard shifts**, so a permutation built one way
+and consumed the other is silently misaligned — not rejected. Implemented **as the handoff specifies**,
+**parameterised**, and declared in the published `limitations`. **This is a genuine incompatibility between two
+public specs and it must be settled with the OLMo-core side before any curriculum arm trains.** Escalated in the
+handoff, not resolved tonight.
+
+# 🔴 FIVE CORRECTIONS TO MY BRIEF — each would have shipped something wrong
+1. **`sum(n_tokens+1) == shard tokens` is FALSE BY CONSTRUCTION.** `PackResult` is
+   `tokens_in == tokens_out + tail_dropped + surplus_dropped`, and under `partial_source=True`
+   **`surplus_dropped` is nonzero normally.** So my check *"fires on healthy bundles after full billable
+   work"* — **the `_drain_surplus` shape, the exact defect eng-06 refuted earlier tonight, and I re-created it.**
+   Checked against `tokens_in`; `tokens_out` is a prefix.
+2. **`source_doc` contiguous per STREAM is unachievable by a counter** — K file-shard siblings are **separate
+   Batch children** (stackv2-edu 7, finepdfs-edu 4). Per-**bundle** contiguous; identity is
+   `(bundle_id, source_doc)`; the driver reassembles in `file_shard` index order and **refuses a missing part.**
+   **My own file-sharding ruling created this, and I did not carry it into the labeling brief** — the
+   scope-widening lesson, third instance.
+3. **`max_order_bytes` MUST be declared** — default 512 MiB, our vector is **1,914,301,740 B = 3.57×**.
+   Undeclared → `order-too-large`, Gate A never loads it.
+4. **train + val cannot share one group** — `check_order_domain` reads ONE `block_count` and applies it to every
+   entry; **proved by execution** (the val object trips `permutation-wrong-length`). Two groups staged.
+5. **F-C3 — Gate A needs 7.13 GiB in an 8.00 GiB container. MEASURED at full scale**, N=478,575,435:
+   vector 1.78 + **`bincount` int64 3.57** + the `s3.get()` bytes a `frombuffer` **view pins** 1.78 = **7.13 GiB
+   = 89% of rev 14's `memory: 8192`.** CEO-confirmed `np.bincount` at `token_order_v1.py:209` is int64.
+   It *passed* — with no headroom for boto3 or the rest of Gate A. **Correctly did NOT patch
+   `token_order_v1`** — shared by every curriculum dataset, so it is a platform call. **Three fixes ranked in
+   `curriculum/status.md`.**
+
+# 🔴 THE VACUOUS-CHECK PROOF — why no `manifest_sha256` placeholder is safe
+`PARENT_MANIFEST_SHA256 = None` and the driver **exits 1**. It proved by execution *why*:
+> **omitting `depends_on`'s `block_count` makes the permutation check VACUOUS, not failing. A 64-index
+> permutation offered as the order over a 478 M-chunk parent PASSES with zero violations** — `_block_count()`
+> returns `None`, so `bincount==1` is checked against the vector's **own** length.
+
+**A placeholder would not have failed loudly; it would have passed silently on a toy vector.** Regression test
+included. **This is the single best argument tonight for required-and-unfilled over a plausible default.**
+
+## MTLD implementation — 6 hand-traced vectors, and it corrected 3 of its OWN tests
+Constants frozen and pinned as equalities (`TTR_THRESHOLD == 0.72`, regex as a **pattern string**). Vectors:
+`['a']*12 → 2.0`; `'abcde' → 5.0` (the factors==0 case a naive impl divides by zero on); `[a,b,a,a] → 4.0` fwd
+**and** rev traced separately; `[a,b,c,a] → 4.48` — **the only vector that discriminates 0.72 from 0.75 and `<=`
+from `<`.**
+Three self-corrections: **`x86 → ['x','86']`** (alternation is first-match; it had asserted the wrong thing, kept
+the regex since it is the compatibility surface, pinned the consequence); **a VACUOUS threshold test** where
+inclusive and strict both returned the same value, replaced with one where all three candidates differ; and an
+**"asymmetric" text that scored identically in both directions**, replaced by a genuinely direction-dependent one
+found by search (fwd 6.0, bwd 4.8, mtld 5.4).
+
+## Labels: 14.2 B/doc MEASURED → ~17 GB (I estimated 24 B / 28.9 GB)
+numpy structured dtype **`align=False` asserted at import** — *"a padded 16 B would shift every offset of a 17 GB
+file and parse as garbage."* `source_path` interned into a JSON header (2 B/record vs ~60). Magic `EDULLBL1` so
+**a token shard cannot parse as ~7 M plausible records.** JSONL would have been ~145 GB.
+
+## ⏱️ Overhead 2.80% MEASURED (+0.27 h) — and it hit the 16.4× gap a THIRD time
+MTLD 314 µs/doc vs build 11,224 µs/doc. **But the ratio route gave 51%, so it checked the denominator** — its own
+decon measurement lands at **1,294,919 windows/s/core**, 1.10× DATA's and 1.02× PLAT's: **three analysts, three
+machines, one rate.** At that rate **decon is 4.23% of the build budget, not 78%.** It does not claim 78% is
+wrong — *"claiming it is the wrong multiplier here."* **The cap×rate error class, caught by a fourth independent
+route.**
+
+**Named UNVERIFIED:** the absolute MTLD rate on c7i (ratio is hardware-independent; the 2.80% mixes a laptop
+numerator with a c7i denominator — **conservative in the safe direction**); `_reader_for` populating
+`source_path` from live HF in a container; no end-to-end run at real scale (largest permutation built: 57
+chunks); and **MTLD's ASCII-only regex ranks non-English documents as maximally easy** — pinned as a test and
+declared in `limitations`, *"not fixable without breaking comparability."*
+
+---
+
+# 🔧 THE 12,207 / 12,208 FIX — diagnosed, and the fix is NOT to pick a formula
+
+## Root cause, CEO-verified in the consumer's source
+`numpy_dataset.py:679` (worktree `claude-e0--heldout-eval`) — **the base dataset**:
+```python
+return file_size, file_size // (item_size * self.sequence_length)      # NO −1
+```
+The handoff's `(shard_tokens − 1) // 2048` reserves **one token for the next-token target**: a chunk of 2048
+inputs needs `token[i+2048]` as its label, so the last full chunk needs 2049 tokens. **Both formulas are
+correct — for different questions.** `S//L` counts *slices of the file*; `(S−1)//L` counts *trainable
+input/target pairs*.
+
+## Why it bites US and would not bite RegMix
+```
+S = 25,001,984  (S−1)//L = 12,207   S//L = 12,208   → DIFFER
+S = 25,001,983  (S−1)//L = 12,207   S//L = 12,207   → agree
+S = 25,000,000  (S−1)//L = 12,207   S//L = 12,207   → agree
+```
+**The two formulas differ ONLY when `shard_tokens` is an exact multiple of `seq_len`.** `SHARD_TOKENS =
+25,001,984 = 12,208 × 2048` exactly (it is `3052 × 8192`, and `8192 = 4 × 2048`). **RegMix's ragged shards never
+hit the boundary case, which is why the handoff's formula was never wrong before and is wrong here.**
+**Ninth costume of "was this sized on the reservoir?" — a formula validated on a corpus whose shard size was not
+a multiple of the sequence length.**
+
+## ⚖️ THE FIX — three parts, and the first is the actual one
+**1. DERIVE `n_chunks` FROM THE CONSUMER, NEVER FROM A CONSTANT.** The permutation's length is not ours to
+choose — it is a property of whatever reads it. **`block_count` must be computed with the *same* expression the
+loader uses**, and the build must **assert** the two agree rather than assume. A hard-coded 12,207 or 12,208 is a
+constant that will silently rot the next time either side changes `seq_len` or `SHARD_TOKENS`. **Parameterising
+it (already done) is necessary but not sufficient: it must be *derived* and *checked*, not configured.**
+
+**2. Make the mismatch LOUD, which the platform already does — once `block_count` is declared.**
+`token_order_v1` recomputes `bincount == 1` against `block_count`, so a 478,575,435-long vector offered against a
+478,614,640-chunk parent fails `permutation-wrong-length` **at Gate A, before promotion.** ⚠️ **But only if
+`block_count` is present** — CURRICULUM-EXEC proved that omitting it makes the check **vacuous**. So:
+**`block_count` is what converts this from a silent misalignment into a rejected publish.** It is already
+mandatory in the driver; this is the second reason it must never become optional.
+
+**3. Settle it with the OLMo-core side before any arm trains — and the question is narrow.** Not *"which formula
+is right"* but: **does `curriculum_loader.py` recompute chunk counts itself, or inherit the base dataset's
+`:679`?** If it inherits, **12,208 is the answer** and the handoff's formula is a bug for our shard geometry. If
+it applies its own `−1`, **12,207 is the answer** and the base dataset's count is not the one in play.
+**I could not verify this: `.edullm/curriculum_loader.py` is in NO local worktree** — I searched all 21. So the
+answer is **UNVERIFIED**, and it is a one-file read for whoever has that checkout.
+
+**Cost of being wrong is small and bounded**, which is why this is not an escalation: Δ = 39,205 chunks =
+**0.2 MB** of order vector, and **Gate A rejects the mismatch rather than shipping it** (given part 2). The
+expensive outcome is not a wrong corpus — it is a rejected publish after a 6–7 h `publish()`.
+
+**Interim ruling: keep the handoff's 12,207 as implemented** — it is the conservative choice, because a chunk
+that lacks its next-token target is a *training* bug that no gate can see, while an under-count merely leaves the
+last 2048-token slice of each shard unused. **Under-reading the corpus by 0.008% is recoverable; training on a
+chunk with no label is not.**
+
+---
+
+# ✅ 12,207 CONFIRMED — MEASURED-IN-CODE. The loader applies its own `−1`.
+
+`.edullm/curriculum_loader.py:66` (`edu-llm/OLMo-core`, branch **`edullm/curriculum-370m`**, commit `200bc81517d9`):
+```python
+chunks = (len(array) - 1) // self.sequence_length
+```
+Class docstring `:43` — *"Shard-local `(tokens - 1) // sequence_length` flat chunk coordinates."*
+Error string `:73` — *"parent pool contains no complete **next-token** chunks."* **The `−1` deliberately reserves
+the next-token target, exactly as the handoff assumed.**
+
+**It RECOMPUTES; it does not inherit.** `ParentChunkDataset` is a **standalone class, not a subclass** — zero
+grep hits for `NumpyDataset` / `numpy_dataset` / `max_target_sequence_length` across the four curriculum files;
+the only OLMo-core imports are `TextDataLoaderBase` and `DataCollator`, and neither carries chunk math. **So
+`numpy_dataset.py:679` is never on this path** and its `:681` branch is unreachable. **Declare 478,575,435.**
+
+**And it reads NO declared `block_count`** — it memmaps the staged bytes and counts. So our declared value is
+validated only by having to *agree*, which makes the mismatch behaviour decisive:
+
+**It RAISES — length check `:27-39` then full sort-equality `:38`, called at `:162` before any model is built.**
+Had we shipped 12,208 the failure would have been **a crashing training launch, not a silently corrupt run.**
+`sequence_length = 2048` confirmed twice (`curriculum_entrypoint.py:63`, `curriculum_recipe.json`).
+`<u4` hard-enforced and `header_bytes` must be 0 (`curriculum_data.py:117-124`) — **our `.u32le.bin` satisfies
+both.**
+
+**Interim ruling upheld on the merits, not merely on caution.** My asymmetry argument picked the right side, but
+for a weaker reason than the real one: the `−1` is not a safety margin, it is the loader's actual contract.
+
+## 🔴 THE FINDING I DID NOT ASK FOR — a silent path that shifts every index
+`curriculum_loader.py:67-68`:
+```python
+if chunks <= 0:
+    continue          # ← a shard of ≤2048 tokens VANISHES, no raise
+```
+**A degenerate shard is skipped silently, shifting every downstream flat index.** Only *all* shards degenerate
+(`total <= 0`) raises. **This project has already shipped exactly that shape — the two 20-byte shards in the
+150B build.** `_arrays`/`_ends` stay mutually consistent so indexing is internally correct, but **`self.paths`
+then no longer corresponds positionally to `_arrays`** — so a permutation built against the full path list maps
+to the wrong shards. **Requirement: every train shard must be > 2048 tokens, asserted at build time, not hoped.**
+
+**Two more interactions recorded:**
+- **`np.sort` on 478.6 M int64 in `validate_complete_permutation` ≈ 3.8 GB working set** on the *loader* host —
+  a second instance of the memory class AUDIT flagged for Gate A (7.13 GiB in an 8 GiB container).
+- **Multi-object order vectors are concatenated in `dataset_paths()` order** — so the order shards' ordinal
+  sequence is **load-bearing**, not cosmetic.
+
+## 🔧 CEO ERROR #17 — my "not in any local worktree" was a false negative from a glob
+`.edullm/` **does** exist in 21 local worktrees; none contains `curriculum_*.py`, so **the conclusion held and
+the premise was wrong.** Also: the files are **not on `main`** — `.edullm/` there has only `Dockerfile`,
+`rehearsal.md`, `train_on_corpus.py`, and all four curriculum paths **404**. GitHub code search returns 0
+because it indexes only the default branch. **I briefed the wrong branch and got the right answer anyway.**
+*A search that finds nothing has two explanations, and "it isn't there" is only one of them.*
+Provenance cross-check: `curriculum_loader.py` is **byte-identical** (sha256 `60b95d6a…f56d9`) on both
+`edullm/curriculum-370m` and `reconnect/curriculum-370m` — **no branch ambiguity.**
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of
