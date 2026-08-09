@@ -4944,6 +4944,68 @@ phase, which is where the report's own 64-run sweep says code matters least.**
 
 ---
 
+# ✅ THE REGISTRY IS CORRECTED — `plan_id = 79e53d1e5e131649`, CEO-verified
+```
+plan_id 79e53d1e5e131649   ·  bundles 185 UNCHANGED  ·  row-sum 936,000,000,000
+stackv2-edu: pool 61,642,058,302 · target 58,000,000,000
+tests 1,574 (baseline 1,570)  ·  committed 1050572, nothing merged or pushed
+```
+**Two totals, both correct:** rows sum to **936.00 B**; the *plan* sums to **932.75 B** because
+`plan_document` re-derives every target to whole 25,001,984-token shards. **The 3.25 B gap is shard
+quantisation across 132 rows, not a lost draw.** The build writes the plan figure.
+
+**ENG-3 verified "two fields, nothing else" STRUCTURALLY, not by eye** — a key-by-key diff of the reserialised
+JSON: **2 value changes, 1 key added (the new trap), 0 removed, 133 rows.**
+
+## 🔧 CEO ERROR #24 — "this class of error had no guard at all" was WRONG
+**`test_no_row_draws_more_than_its_pool_holds` has existed all along, and it PASSED — `108 B < 707 B` held
+comfortably.**
+> **The guard was correct and was fed a wrong pool. A relation between two DECLARED numbers cannot detect that
+> one of them describes a different dataset.**
+
+The epoch guard would also have caught it — true epochs **1.752** against `MAX_EPOCHS` 0.99 — **and also only
+with the right pool.** **So the defect was never a missing check; it was an unmeasured input to two correct
+ones.** That is a sharper lesson than the one I ordered, and ENG-3 declined to add my duplicate guard, instead
+strengthening what exists: the check is `if pool is not None` — **fail-open** — so it now asserts **0 of 132
+drawn rows are exempt**, plus a new test that rows drawing ≥90% of pool must carry **MEASURED** provenance.
+
+## 🔴 AND THAT NEW TEST IMMEDIATELY FOUND ANOTHER — `finepdfs-edu`, same shape
+**CEO-verified: `pool_tokens: 70,000,000,000`, `target_tokens: 63,000,000,000` — exactly 90.0%**, the
+second-tightest draw in the corpus, **and nothing on the row says where 70 B came from.** A round number with no
+provenance, on the source that **sets the makespan** and was already one of the four OOM bundles.
+**ENG-3 did not measure it and did not invent a number** — the row now carries a trap naming the gap and the
+method that settles it. **Owner decision before FREEZE.** *A test written to close one hole found a second one
+of the same shape within minutes of existing.*
+
+## 🔧 MY uint8 WARNING IS REFUTED — and ENG-3 proved it rather than complying
+I told it *"never let anyone simplify to `uint8`; `np.diff` wraps."* **The wrap is real (1→0 gives 255) — but
+`flatnonzero` only asks NONZERO, and the diff VALUES are discarded; only edge positions are used.**
+**CEO-verified independently: 8,190 patterns of length 1–12, `int8` 0 mismatches, `uint8` 0 mismatches.**
+ENG-3 went to 32,766 patterns of length 1–14 against brute force — same result.
+
+**`int8` is kept for memory alone; the preference over `uint8` is legibility, not a guard** — recorded in the
+docstring and a test **so nobody re-attaches a claim the data refutes.** **I attached a plausible hazard to a
+correct fix, and a subordinate disproved it instead of obeying.** That is the behaviour I have been asking for
+all night, applied to me.
+The fix itself landed: **762.9 → 302.0 MiB** at n=50 M.
+
+## 🔧 ENG-3's own error, self-caught — and it is the SAME defect twice
+> *"My first sentinel test compared two LOCAL REIMPLEMENTATIONS, so restoring the promotion in the shipped
+> module left it GREEN — the same 'verify the helper while the caller ignores it' defect as F2, and my second
+> time this session."*
+
+**Its first memory bound was also wrong and failed on CORRECT code** (`<4 B/elem`): the int64 **edges** array
+dominates at this density, so the real figures are **9.00 vs 17.00 B/elem — 1.89×, not 8×.** **Bound set from
+the measurement, not from the expectation.** *A test that fails on correct code is as broken as one that passes
+on broken code, and it is discovered later.*
+
+**Also caught by an existing check:** the registry's own `_total_target_tokens` was **stale at 986 B**, flagged
+by the header check. Both driver `PLAN_ID`s and the shard-shape pins updated. `_wave_shape` and
+`_file_shards_basis` cite 107.5 B/51.38 h from the old target — **annotated stale; the K=7 ranking they justify
+is unchanged, the hours are not to be re-quoted.**
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of
