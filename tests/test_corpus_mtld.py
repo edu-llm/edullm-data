@@ -212,9 +212,26 @@ def test_a_nonzero_partial_factor_is_computed_by_the_specified_formula():
     factors = 0.8928571428571429
     score = 4 / 0.8928571428571429 = 4.48
 
-    The `w4` step is why the threshold comparison must be `<=` and not `<` at exactly 0.72 — and why
-    0.75-vs-0.72 is worth a test: an implementation using a threshold of 0.75 or a `<` comparison
-    lands on a different factor count here and a different score.
+    🔧 **CORRECTED — the earlier claim that this vector discriminates `<=` from `<` is REFUTED.**
+    It said *"the `w4` step is why the threshold comparison must be `<=` and not `<` at exactly
+    0.72"*. It is not, and the trace above says so: at `w4` the ratio is **0.75, which is ABOVE
+    0.72**, so NEITHER spelling closes a factor there. **The vector never touches the boundary**, and
+    a full 6-variant mutation matrix (threshold 0.70/0.71/0.72/0.75 x `<=`/`<`) MEASURED 4.48 under
+    both `0.72,<=` and `0.72,<`.
+
+    **What this vector DOES discriminate is the THRESHOLD VALUE**, and that is worth a test on its
+    own: 0.72 -> 4.48, 0.75 -> 4.00, 0.71 -> 4.64, 0.70 -> 4.80. All four differ, so an
+    implementation that used any other threshold fails here.
+
+    **The `<=`-vs-`<` case is covered by `test_the_threshold_comparison_is_inclusive_at_exactly_the
+    _boundary`**, whose vector reaches a running TTR of exactly 18/25 = 0.72 — hand-traced, and
+    MEASURED to give inclusive 15.3208, strict 29.435, `float(n)` 29.0, all three distinct. That test
+    is genuine; this one was carrying an explanation that belonged to it.
+
+    ⚠️ The CONSTANTS themselves are bit-for-bit correct and unchanged — all five claimed vectors
+    reproduce exactly. Only the reason attached to this one was wrong. Recorded rather than quietly
+    deleted, because a docstring that explains why a test matters is how the next reader decides
+    whether it is safe to delete, and this one would have said "yes" for the wrong reason.
     """
     assert mtld_one_direction(["a", "b", "c", "a"]) == pytest.approx(4.48, abs=1e-9)
 

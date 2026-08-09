@@ -2,10 +2,13 @@
 
 Three things are proved here and each one is load-bearing on an irreversible decision:
 
-1. **``plan_id`` is still ``29968a2b04008a8c``.** If it moved, label emission touched the plan
-   surface and the 6,750 shards already written by the pre-labels build became orphans. This is the
-   single most consequential assertion in the file and it is an EQUALITY on the literal, not a
-   comparison of two computed values — two runs of the same bug agree with each other.
+1. **``plan_id`` is ``364cb4dd488a5761``, and labels are inert on the plan surface.** TWO
+   assertions, because neither is sufficient: a repeated-construction EQUALITY proves labels cannot
+   move the plan and survives any legitimate registry change, while a LITERAL catches the registry
+   change the equality is blind to (two runs of the same bug agree with each other). The literal was
+   ``29968a2b04008a8c`` and moved deliberately when the gated Nemotron rows were repointed to their
+   staged ``s3://`` copy — a `repo` edit, and `plan_id` is a content address over the plan document,
+   so that move IS the 401 fix working.
 2. **The labels sidecar's identities are recomputed, not asserted.** Contiguity elementwise, the
    conservation identity against the packer's own ``tokens_in``, path-id range, finiteness.
 3. **The order vector is a complete permutation, and the failures fail CLOSED.** A bijection over
@@ -53,39 +56,115 @@ from edullm_data.corpus_order import (
 
 REGISTRY = "artifacts/final-dataset/corpus-registry.json"
 
-#: The plan id the in-flight build is running under. **A LITERAL, on purpose.** Comparing two
-#: freshly-computed plans would pass even if both were wrong; comparing to a constant recorded
-#: before this change is what makes the assertion evidence.
-FROZEN_PLAN_ID = "29968a2b04008a8c"
+#: The plan id THIS REGISTRY produces. **A LITERAL, on purpose, and UPDATED DELIBERATELY.**
+#:
+#: History, because the update is the interesting part: this was ``29968a2b04008a8c`` for the
+#: pre-labels build. It moved when the registry's two Nemotron-CC-Math rows were repointed from the
+#: GATED HF repo to the staged ``s3://edullm-landing/_src/`` copy — the fix for 7 of the 16 bundle
+#: failures on 2026-08-09, 61 B tokens of the math pillar. **`plan_id` is a content address over the
+#: plan document, and `repo` is in it, so it MUST move; that it moved is the fix working.** What the
+#: literal is for is that the move be a deliberate edit to this line rather than a number that
+#: drifted. Recomputed independently before updating: 185 bundles, 39,205 train / 102 val shards,
+#: 982,752,985,088 tokens — the same work, a different source path.
+FROZEN_PLAN_ID = "364cb4dd488a5761"
+
+#: What it was before the 401 fix. Kept so the move is legible in the file that asserts it, and so a
+#: revert of the registry is recognised as a revert rather than read as a fresh baseline.
+PREVIOUS_PLAN_ID = "29968a2b04008a8c"
 
 
 # ======================================================================================
-# 1. plan_id — the assertion the whole restart rests on
+# 1. plan_id — TWO assertions, and neither is sufficient alone
 # ======================================================================================
 
 
-def test_plan_id_is_unchanged_by_the_labels_work():
-    """🔴 **THE ASSERTION THE OWNER'S RESTART DECISION RESTS ON.**
+def test_labels_do_not_touch_the_plan_surface_at_all():
+    """🔴 **THE ASSERTION THAT ACTUALLY PROVES THE PROPERTY, and it survives any registry change.**
 
-    ``plan_id`` is ``sha256`` of the plan DOCUMENT only (``corpus_build.py:540``) — sources, splits,
-    file_shards, tokens, shard paths. Nothing code-derived enters it: no wheel version, no image
-    digest, no output flag. So adding label emission must not move it, and if it does, the change
-    touched the plan surface and is wrong.
+    The claim the restart decision rests on is *"label emission does not change the plan"* — and the
+    right way to test that is to build the plan **the same way twice** and require byte equality,
+    because that is the property. A literal cannot express it: a literal conflates "labels are inert"
+    with "the registry has not changed", and when the registry legitimately changes (the 401 fix) the
+    literal fires for a reason that has nothing to do with labels.
 
-    What that buys, stated so the test's purpose is not lost: the plan being unchanged is what makes
-    the handoff's critical constraint — *"re-staging or re-tokenizing after building the order
-    invalidates the permutation"* — SATISFIED rather than violated. Same bundles, same order, same
-    shard geometry, same ordinals, so the permutation stays valid across the restart and the shards
-    already written are byte-identical to what the labelled build writes.
+    ``plan_document`` takes no ``labels`` argument — there is nothing to pass — so this asserts the
+    stronger and more useful thing: the plan is a PURE function of the registry, byte-identical
+    across repeated construction, with no clock, no environment, and nothing the label flag can
+    reach. Compared as full JSON documents, not just the digest, so a failure names the field.
     """
     specs, meta = load_registry(REGISTRY)
     drawn = [s for s in specs if s.target_tokens > 0]
-    plan = plan_document(drawn, registry_meta=meta)
-    assert plan["plan_id"] == FROZEN_PLAN_ID, (
-        f"plan_id moved to {plan['plan_id']!r}. The curriculum change touched the PLAN SURFACE, "
-        f"which orphans every shard the in-flight build has written and invalidates the "
-        f"permutation. Revert whatever entered plan_document."
+    a = plan_document(drawn, registry_meta=meta)
+    b = plan_document(drawn, registry_meta=meta)
+    assert a == b, "plan_document is not a pure function of its inputs"
+    # The label flag reaches `run_bundle`, never `plan_document` — asserted on the signature rather
+    # than believed, since "it isn't passed" is a claim about code.
+    import inspect
+
+    assert "labels" not in inspect.signature(plan_document).parameters, (
+        "plan_document grew a `labels` parameter, so labels can now move plan_id"
     )
+    assert "labels" in inspect.signature(
+        __import__("edullm_data.corpus_build", fromlist=["run_bundle"]).run_bundle
+    ).parameters, "the labels flag should be an OUTPUT-stage argument; it is not on run_bundle"
+    # And no key of the plan document mentions labels, at any depth.
+    assert "label" not in json.dumps(a).lower()
+
+
+def test_the_plan_id_of_THIS_registry_is_the_literal_recorded_above():
+    """🔴 **THE SECOND HALF, and it is not redundant.**
+
+    The comparison above proves labels are inert. It CANNOT catch a registry change — two runs of the
+    same bug agree with each other perfectly. This asserts the content address of the registry that
+    is actually checked in, against a number written down deliberately.
+
+    So: the comparison alone lets a registry edit through silently; the literal alone is brittle and
+    fires for reasons unrelated to what it is named after. **Both, and they fail for different
+    reasons** — which is the whole point of keeping two.
+
+    ⚠️ If this fires, the question is *"did I mean to change the registry?"*, not *"what did the
+    curriculum break?"*. Recompute, confirm the bundle/shard/token counts are what you expect, and
+    update the literal in the same commit as the registry — never before it.
+    """
+    specs, meta = load_registry(REGISTRY)
+    plan = plan_document([s for s in specs if s.target_tokens > 0], registry_meta=meta)
+    assert plan["plan_id"] == FROZEN_PLAN_ID, (
+        f"plan_id is {plan['plan_id']!r}, not the recorded {FROZEN_PLAN_ID!r}.\n"
+        f"  * If you changed the registry ON PURPOSE: recompute the counts, confirm they are what "
+        f"you intend, and update FROZEN_PLAN_ID in the SAME commit.\n"
+        f"  * If you did not: something entered plan_document that should not have. It is a content "
+        f"address over the plan document only — no wheel version, no image digest, no output flag.\n"
+        f"  * If it is {PREVIOUS_PLAN_ID!r}: the registry was REVERTED to the pre-401 state, which "
+        f"restores the HTTP 401 on the gated Nemotron repo and drops 61 B tokens of the math pillar."
+    )
+    # Pinned alongside, so a legitimate re-cut has to update BOTH and the arithmetic's dependence on
+    # them stays visible. These did NOT change across the 401 fix — same work, different source path.
+    assert len(plan["bundles"]) == 185
+    assert sum(b["tokens"] for b in plan["bundles"]) == 982_752_985_088
+
+
+def test_the_two_plan_id_assertions_fail_for_DIFFERENT_reasons():
+    """Guards the pair against being collapsed back into one.
+
+    A future reader will be tempted to delete one as redundant. They are not: the equality test is
+    blind to a registry change (both sides move together), and the literal test is blind to nothing
+    but also fires on changes that have nothing to do with labels. Demonstrated by construction — a
+    perturbed registry keeps the equality property and breaks the literal.
+    """
+    import dataclasses
+
+    specs, meta = load_registry(REGISTRY)
+    drawn = [s for s in specs if s.target_tokens > 0]
+    # Perturb ONE row's repo, exactly as the 401 fix did.
+    perturbed = [
+        dataclasses.replace(s, repo="s3://edullm-landing/_src/somewhere-else")
+        if s.key == drawn[0].key else s
+        for s in drawn
+    ]
+    a = plan_document(perturbed, registry_meta=meta)
+    b = plan_document(perturbed, registry_meta=meta)
+    assert a == b, "the equality assertion still passes on a changed registry — it is blind to this"
+    assert a["plan_id"] != FROZEN_PLAN_ID, "the literal assertion catches it — it is not blind"
 
 
 def test_the_plan_shape_the_order_vector_depends_on_is_also_pinned():

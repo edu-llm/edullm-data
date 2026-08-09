@@ -1090,8 +1090,12 @@ def run_bundle(
 
     **Nothing about this touches the plan surface.** ``plan_document`` is a pure function of the
     registry plus scalars (``:540``); no flag, wheel version, or output shape enters it. So
-    ``PLAN_ID`` stays ``29968a2b04008a8c`` and the 6,750 shards already written by the pre-labels
-    build remain byte-identical to what a labelled run produces — determinism was measured
+    ``PLAN_ID`` is unmoved BY THIS FLAG and the shards already written by the pre-labels build remain
+    byte-identical to what a labelled run produces — ⚠️ note the plan id itself
+    has since moved to ``364cb4dd488a5761``, for an unrelated reason (the registry's two
+    Nemotron-CC-Math rows were repointed to a staged ``s3://`` copy to fix an HTTP 401 on the gated
+    upstream). That move is a REGISTRY change, which `plan_id` is a content address over; it is not a
+    counterexample to this paragraph. The claim here is scoped to the ``labels`` flag — determinism was measured
     (9 bundles / 4,137 shards re-run byte-identical on a new wheel).
 
     ⚠️ **The labels describe ``tokens_in``, not ``tokens_out``.** ``sum(n_tokens + 1)`` over the

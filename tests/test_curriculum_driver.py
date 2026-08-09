@@ -465,3 +465,43 @@ def test_main_cross_checks_build_order_against_the_derived_axis():
     assert "order . size != n_train" in code, (
         "nothing checks the built vector's length against the number that gets declared"
     )
+
+
+def test_BOTH_drivers_pin_the_SAME_plan_id_as_the_checked_in_registry():
+    """🔴 **A stale `PLAN_ID` in a driver is SILENT, and it is a prefix.**
+
+    `PLAN_ID` is a path component: `_ingest/final-dataset/<PLAN_ID>/`. A stale value points at an
+    empty or half-built prefix, so `load_streams` reports *"no labels"* and `load_receipts` reports
+    *"no receipts"* — diagnostics that read like "the build has not finished", not like
+    "you are looking in the wrong place". `publish_driver`'s `SOURCE` is built from it too, so a
+    stale value there publishes a prefix that is not this corpus.
+
+    Three places must agree and there is no mechanism that makes them: the registry (which DERIVES
+    the id), and the two drivers (which hard-code it). So it is asserted, against the value
+    recomputed from the registry rather than against a second literal.
+    """
+    from edullm_data.corpus_build import load_registry, plan_document
+
+    specs, meta = load_registry("artifacts/final-dataset/corpus-registry.json")
+    derived = plan_document([s for s in specs if s.target_tokens > 0],
+                            registry_meta=meta)["plan_id"]
+
+    from tests.test_curriculum_labels import FROZEN_PLAN_ID
+
+    assert derived == FROZEN_PLAN_ID, "the registry and its own test literal disagree"
+    assert _load().PLAN_ID == derived, (
+        f"curriculum_driver.PLAN_ID is {_load().PLAN_ID!r}, the registry derives {derived!r}. This "
+        f"is a PREFIX: the driver would read an empty _labels/ and report 'no labels'."
+    )
+
+    pub_spec = importlib.util.spec_from_file_location(
+        "publish_driver_under_test",
+        Path(__file__).resolve().parents[1] / "artifacts/final-dataset/publish_driver.py",
+    )
+    pub = importlib.util.module_from_spec(pub_spec)
+    pub_spec.loader.exec_module(pub)
+    assert pub.PLAN_ID == derived, (
+        f"publish_driver.PLAN_ID is {pub.PLAN_ID!r}, the registry derives {derived!r}. Its SOURCE "
+        f"is built from it, so it would publish a prefix that is not this corpus."
+    )
+    assert derived in pub.SOURCE, "SOURCE must be derived from PLAN_ID, not written out separately"
