@@ -5274,3 +5274,52 @@ mean is ~7 KB, so the batch term does not explain it.** Live candidates: its `Se
 the four (~120 M docs), and `domain_column: metadata.gha_language` fans out to 73 values.
 **Watch `stackv2-edu--train--p00..06of07` specifically. If one dies again, the cause is neither of the two
 already fixed.**
+
+## 🔧 BUILD 1 FAILED — my buildspec omitted `BASE_IMAGE`. My error, and the Dockerfile refused correctly.
+
+```
+INSTALL SUCCEEDED · PRE_BUILD SUCCEEDED · BUILD FAILED in 0 s
+ERROR: failed to build: failed to solve: base name (${BASE_IMAGE}) should not be blank
+```
+**The payload was fine** — INSTALL reassembled it and my digest guard passed; PRE_BUILD's `grep -c
+_ENCODE_BATCH_CHARS` and `test -f corpus_labels.py` both succeeded. **The failure is that I wrote a
+buildspec from scratch and never passed the build-arg the Dockerfile requires.**
+
+`.edullm/Dockerfile:3-7` states it outright: *"The platform passes BASE_IMAGE as a digest-pinned build
+argument. **Keep this bare (no default) so the image cannot silently build from an unregistered base.**"*
+**The Dockerfile is designed to fail exactly this way, and it did.** A default would have let my incomplete
+buildspec build against whatever `python:latest` resolved to — an unpinned base in a digest-pinned pipeline.
+**The refusal is the feature.**
+
+### The value was in the STORED buildspec all along — I should have read it FIRST
+I searched the repo (`infra/`, `docs/`, `.edullm/`) and found only the `ARG` line, then queried ECR for a
+base repo that does not exist. **`codebuild batch-get-projects --query projects[0].source.buildspec` had it:**
+```
+--build-arg BASE_IMAGE=public.ecr.aws/docker/library/python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+```
+**"How did prior sessions do this?" is a first-class question** — the ledger says so, having been burned by
+it on the IAM boundary — and **the answer was one API call away in the artifact I was already overriding.**
+I wrote a replacement for a working thing without reading the working thing.
+
+### Build 2 mirrors the stored spec's conventions rather than inventing new ones
+```
+edullm-prm800k-image-build:4277b692-8f3f-488f-a6c4-69ad91bb79a8   IN_PROGRESS
+```
+| what | build 1 (mine) | build 2 (stored-spec conventions) |
+|---|---|---|
+| `BASE_IMAGE` | **absent → failed** | digest-pinned `python@sha256:57cd7c3a…` |
+| env var names | `CTX00..82` | **`EDULLM_SOURCE_000..082`** |
+| tag var | `IMAGE_TAG` | **`EDULLM_IMAGE_TAG`** |
+| `docker build` | no `--pull` | **`--pull`** (base fetched fresh, not from a stale layer cache) |
+| push guard | none | **`docker image inspect \|\| refuse to push`** |
+
+**Two improvements I kept from my own version:** the digest guard is `sha256sum -c -` on the bytes I sent
+(the stored spec hardcodes the PRM line's digest, which is why it could not have built our tree), and
+PRE_BUILD asserts the **fix is present in the payload** before spending the build.
+
+**One deliberate departure, stated:** the stored spec's post_build does `exit 0` when no image was produced —
+**a build that produces nothing reports SUCCESS.** I use `exit 1`. That is the fail-open shape this ledger
+has now caught five times, and I will not copy it forward even from a working artifact.
+
+**Cost of the error: ~1 minute of CodeBuild.** The payload, the digest guard and the fix-presence checks were
+all validated by build 1, so build 2 reuses proven inputs.

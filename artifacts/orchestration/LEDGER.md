@@ -4625,6 +4625,58 @@ image.**
 
 ---
 
+# 🚀 IMAGE BUILD IN FLIGHT from `b1b8c01` — and the cap assert is proven against the OLD image
+```
+edullm-prm800k-image-build:7a176de9-…   IN_PROGRESS   tag b1b8c0175b33
+ref confirmed first: origin/edullm/final-dataset-phase0 = b1b8c017…
+from the PUSHED ref (git archive, non-emptiness asserted):
+  registry md5 c44cc714…  ·  plan_id 364cb4dd488a5761  ·  __version__ 0.9.1
+  _ENCODE_BATCH_CHARS = 33,554,432
+payload: tar.xz 293,700 B · sha256 8bc30fca… · 83 vars · REASSEMBLED SHA MATCHES
+```
+**PLAT exported the build context from the pushed ref rather than its working tree** — *"my HEAD is docs-only
+ahead, but taking the context from the ref removes the question."* **That is the fix for the class of error that
+produced the stale-image trap three times tonight**: it makes "what was verified" and "what was built"
+the same bytes by construction, not by comparison.
+
+## ✅ The cap assert OBSERVES BATCH SIZES — and the trap I warned about is CONFIRMED REAL
+| check | result |
+|---|---|
+| cap binds on the real shape (200 × 400 KB) | ✅ 3 batches `[83,83,34]`, peak 31.7 MiB ≤ 32.0 |
+| small docs unaffected | ✅ 2,500 × ~600 B → `[1000,1000,500]` — `n` still governs |
+| **run against pre-fix `a8b83c8`** | ✅ **1 batch, 76.3 MiB → AssertionError. The OOM mechanism reproduced.** |
+| **the default-arg trap** | ✅ **CONFIRMED — `P._ENCODE_BATCH_CHARS = 1` changed nothing (still 3 batches)** |
+
+**`max_chars` is a default bound at definition time, so a monkeypatching test passes while exercising the
+unbounded path.** PLAT's assert observes **batch sizes**, so it cannot be fooled.
+**Sixth instance tonight of a check that would pass on the wrong artifact — and the FIRST that was warned about
+in advance rather than discovered after the fact.** That is the ledger doing the job it exists for: OOM-DIAGNOSE
+hit the trap, wrote it down, I relayed it, PLAT built immune to it. **A rule in a document does not execute — but
+a rule relayed into the next brief does.**
+
+## PLAT declined credit for the memory call, and its framing is the right one
+> *"My 15,806 gave 1.45× against a term with no upper bound. The fix bounds the actual quantity: 4.12× at
+> 14,336. **A bound beats a bigger number** … Both were found by refusing a raise as the remedy for an
+> *unexplained* failure — I'll take that as the transferable lesson rather than credit."*
+
+**Adopted as doctrine: a raise is not a remedy for an unexplained failure.** Two OOM classes solved by two-line
+fixes tonight (`combine_chunks`, `_ENCODE_BATCH_CHARS`), both because someone refused to pay for headroom
+instead of understanding.
+
+## 🔴 CARRIED INTO THE RUN — `stackv2-edu` is the one to watch
+The corrected tally is **2 row-group, 2 `json.gz`**, and **`stackv2-edu` is explained by NEITHER fix** — its
+~7 KB mean puts it far under the char cap, and its geometry is benign. **If `stackv2-edu--train--p00..06of07`
+dies again, the cause is a third mechanism we have not found.** PLAT is watching those seven specifically.
+**Unverified candidates, recorded so the next session does not re-derive them:** its `SeenHashes` is the
+**largest** of the four OOM'd bundles (~120 M docs → the 10.3 GB the docstring itself names), and
+`domain_column: metadata.gha_language` carries **73 values**.
+
+**Note the ECR tag-immutability protection may fire again** — it has refused two pushes tonight, and **the
+preflight decides the image regardless of who built it.** That is the correct posture: contents proven, name
+irrelevant.
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of
