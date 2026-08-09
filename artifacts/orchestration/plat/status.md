@@ -4962,3 +4962,65 @@ covers it.**
    behavioural assert into ONE revision at step 3, on MERGE-EXEC's SHA.
 2. **15,806 MiB is confirmed sufficient for `reasoning-traces`** at 1.94× headroom, on measured geometry.
 3. 🔴 **`pre-1929-books`'s OOM is still unexplained** — json.gz, no row groups. Worth one look before launch.
+
+---
+
+# 🔧 ADDENDUM 43 — TWO CORRECTIONS TO MY OWN REPORTS, AND `plan_id` IS SETTLED BY MEASUREMENT
+
+**I ran the same command twice and got two different `plan_id`s.** Rather than report either, I traced it —
+and the cause corrects two things I told the CEO.
+
+## The cause: MY WORKTREE IS ON `final-dataset`, AND MY OWN COMMITS ARE NOT
+```
+git rev-parse --abbrev-ref HEAD  -> final-dataset
+git log --oneline -1             -> 8360abc   (my dispatch-order commit)
+
+git merge-base --is-ancestor <each of my last 5 commits> HEAD  -> NOT in HEAD, all five
+git branch --contains a83ec5b   -> agent/eng-exec-2/s3-source-oom-arrow
+```
+**Commits `5a26803`, `00a486f`, `3384ef1`, `9420a12`, `a83ec5b` — every one I made after the build went
+terminal — landed on `agent/eng-exec-2/s3-source-oom-arrow`, not on `final-dataset`.** ENG-EXEC-2's branch
+was checked out in this worktree when I committed, and `git add -A && commit` followed HEAD, exactly as it
+should. **I never verified which branch I was committing to.**
+
+**Nothing is lost** — the commits exist, are reachable, and sit *ahead* of `final-dataset` on the branch
+MERGE-EXEC is about to land. But **my "committed `XXXXXXX`, scrub clean" reports implied `final-dataset`,
+and they were on a branch.** Correcting that on the record.
+
+## ✅ `plan_id` — BOTH of my readings were right, of DIFFERENT TREES
+| tree | registry md5 | `plan_id` |
+|---|---|---|
+| `final-dataset` (my worktree HEAD) | `0cd23fa3…c185` | **`29968a2b04008a8c`** |
+| `agent/eng-exec-2/s3-source-oom-arrow` | **`c44cc714…e976`** | **`364cb4dd488a5761`** |
+
+Recomputed the second by exporting the branch tree to a clean directory and running **the branch's own code
+against the branch's own registry** — not by mixing my checkout's code with a fetched file, which is how the
+discrepancy arose in the first place.
+
+**The 401 fix DOES change the registry** — `git diff --stat` shows **5 lines**, and reading it:
+`repo: "nvidia/Nemotron-CC-Math-v1"` → **`"s3://edullm-landing/_src/nemotron-cc-math-v1"`** on both
+`nemotron-cc-math-3` and `-4plus`, plus rewritten `traps` prose. **`repo` is inside the plan document, so
+`plan_id` moves. My report that it moved was correct; my implicit claim that my worktree contained the fix
+was not.**
+
+⚠️ **A caveat on the diff worth carrying:** `git show <ref>:path > file` produced **0 bytes** for me here (a
+redirect quirk in this shell), and had I trusted it I would have concluded the registries were identical —
+`d41d8cd9…` is the md5 of the **empty string**, which is the tell. **I caught it because an md5 of nothing is
+recognisable.** `git diff --stat` and `git archive` both worked. **A comparison that silently reads nothing
+reports "identical", which is the fail-open shape again — this is the third instance of it in my own tooling
+tonight** (the `2>/dev/null` watchdog, the truncated digest diff, this).
+
+## What this changes about the plan — and what it does not
+- **`PLAN_ID=364cb4dd488a5761` is CONFIRMED** for the combined revision, on measured ground.
+- **It is not final until MERGE-EXEC lands**, because the merge may include further registry edits. **I will
+  recompute from the merge SHA before baking it**, not carry this figure forward on trust. The number I bake
+  must come from the tree the image is built from — that is the same "artifact that changed is not the
+  artifact that was checked" rule, applied to a constant instead of an image.
+- **Nothing I registered is affected.** `edullm-validator:17` and `edullm-promote:3` carry no `PLAN_ID`, and
+  `edullm-dataset-publish:2` fetches its driver from S3 at runtime. **Only the build def bakes it, and I
+  have not registered that.**
+
+## Still holding, as instructed
+Nothing registered pending **MERGE-EXEC's SHA** and **OOM-DIAGNOSE's verdict on `pre-1929-books`**. On the
+SHA I will: build the image → behavioural labels preflight → **recompute `plan_id` from that exact tree** →
+one combined revision (memory 15,806 + `PLAN_ID` + `--labels` + re-derived asserts) → report by number.

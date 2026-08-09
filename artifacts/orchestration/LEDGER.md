@@ -4317,6 +4317,64 @@ the failure it was adjacent to worse.**
 
 ---
 
+# 🛑 CEO ERROR #21 — I ordered a memory-only rev 14. It would have REBUILT THE FAILED CORPUS AND CALLED IT DONE.
+
+**PLAT refused and was right. This is the most dangerous instruction I have given tonight.**
+```
+plan_id from the CURRENT registry : 364cb4dd488a5761
+edullm-reservoir-build:13 bakes   : 29968a2b04008a8c   ← STALE
+```
+I said *"register the build def at 15,806 MiB"* and **named only memory.** `PLAN_ID` is a **second field**, and
+rev 13 still carries the pre-401 value.
+
+**Why that is catastrophic rather than merely wrong:** `29968a2b04008a8c`'s `_ingest/` prefix **still holds
+33,633 shards and 169 receipts from the FAILED run.** `bundle_is_done` would find those receipts **valid for
+that `plan_id`** and **skip them** — so rev 14 would **"succeed" in ~1 h having rebuilt only the 16 failures**,
+producing **exactly the unlabelled mixed corpus that Option (c) was refused for**, against a registry that no
+longer describes it. **A green run, a fast run, and a wrong corpus.**
+
+**I moved `plan_id` deliberately, chased its consumers in the drivers, and then failed to chase it into the job
+definition I was ordering.** Third time tonight a derived constant lived in a place I did not follow.
+
+**Ruling: PLAT's recommendation adopted — ONE combined revision at step 3**, on MERGE-EXEC's SHA, carrying
+**memory 15,806 + `PLAN_ID=364cb4dd488a5761` + `--labels` + the behavioural assert.** Its reasoning is also
+correct that rev 13's inline preflight hard-asserts `__version__=='0.9.1'`, **which the merge may bump**, so the
+assert set must be re-derived against the new image regardless. **Doing it once is cheaper and safer than twice.**
+
+# ✅ ROW-GROUP CHECK 1 — and it EXONERATES ENG-3's "invented" fixture
+Ranged footer read of the real `reasoning-traces` file at the pinned revision, no download:
+```
+num_row_groups : 1
+row_group(0).total_byte_size : 3,278,226,008 B = 3.053 GiB  (50,000 rows)
+```
+| basis | row group | vs measured |
+|---|---|---|
+| DATA's Nemotron figure (**the law's basis**) | ~0.559 GiB | **5.2× SMALLER** |
+| ENG-3's "invented" fixture | 3.73 GiB | **0.82× — REALISTIC** |
+| **MEASURED** | **3.053 GiB** | — |
+
+🔑 **ENG-3's fixture was not 6.3× too large — it was 0.82× of a real file, and its self-criticism was too
+harsh.** Its "81% of container" figure is close to the truth **for this source**. **What would have understated
+the peak is sizing from DATA's Nemotron geometry — by 5.2×**, which is precisely the generalisation ENG-3
+flagged and I assigned. **The flag was right and the retraction was wrong.**
+**Recorded because an over-harsh retraction is still an error**: ENG-3 withdrew a good number under pressure
+from a worse one. **At 2.3–2.6× → 7.02–7.94 GiB = 45–51% of 15.44 GiB. FITS, 1.94× headroom.**
+
+⚠️ **`num_row_groups == 1` cannot be engineered away.** `read_row_group(0)` materialises all 3.05 GiB; **no
+chunking or file-sharding reduces it** — structurally identical to the OOM diagnosis. And **`reasoning-traces`
+was one of the four OOM bundles (idx 167)**, so the measurement **explains that failure directly.**
+
+# 🔴 CHECK 2 — `pre-1929-books` is a CATEGORY ERROR, and its OOM is UNEXPLAINED
+`file_format = json.gz` → **no row groups exist.** It is read by the **streaming gunzip path in 8 MiB chunks**,
+not `read_row_group`. **Applying parquet geometry to it would have been a category error, not a scaling error.**
+
+**So the row-group term cannot explain its OOM (idx 164), and 15,806 is only a 10% raise over the 14,336 that
+killed it.** **PLAT flagged this rather than assuming the raise covers it, and that is the correct call.**
+**Ruling: this must have a cause before launch.** Three of four OOMs are now explained by the row-group term;
+**the fourth is not, and a 10% raise against an unknown cause is not a fix — it is a coin flip at hour 11.**
+
+---
+
 ## Ruling — **B4 is STRUCK.** D3's condition is met.
 
 ENG re-verified that B4's target `data_provenance_initiative` appears in **none of the 17 rows** of
