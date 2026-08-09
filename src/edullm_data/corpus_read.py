@@ -327,7 +327,16 @@ def _arrow_column_values(table: Any, walk: Sequence[str]) -> list[Any]:
     top, steps = walk[0], list(walk[1:])
     col = table.column(top)
     if isinstance(col, pa.ChunkedArray):
-        col = col.combine_chunks()
+        # ⚠️ **`combine_chunks()` COPIES THE WHOLE BUFFER EVEN FOR A SINGLE CHUNK — MEASURED
+        # +2,188 MiB on one 3.73 GiB row group, and it is not the same buffer afterwards
+        # (`buffers()[2].address` differs).** A one-chunk ChunkedArray is the NORMAL case for
+        # `read_row_group`, so the naive form doubled the resident column for no work at all: peak
+        # RSS on the reasoning-traces shape went 6.29 -> 8.47 GiB, i.e. this optimisation made the
+        # OOM it was adjacent to WORSE. Taking `chunk(0)` is +0.0 MiB.
+        #
+        # `combine_chunks` is still correct and still used above one chunk, where it is a real
+        # concatenation rather than a copy of nothing.
+        col = col.chunk(0) if col.num_chunks == 1 else col.combine_chunks()
     n_rows = len(col)
 
     # `row_of[i]` is the output row each surviving value belongs to. It starts as the identity and is
