@@ -587,6 +587,34 @@ def _pinned_url(repo: str, path: str, revision: str | None) -> str:
 #: The URI scheme that switches `repo` from an HF repo id to a staged S3 prefix.
 S3_SCHEME = "s3://"
 
+#: Rows materialised per arrow table inside one row group — **the bound that made the reader's
+#: contribution independent of the writer's row-group size.**
+#:
+#: ⚠️ A ROW GROUP IS A WRITER'S CHOICE, NOT A BUDGET. `read_row_group` materialises the whole
+#: group, so the reader's peak was set by whoever wrote the file. MEASURED on the
+#: `reasoning-traces` shape (1,041.6 MiB of declared text in ONE row group), 3 runs each, worst
+#: case, `use_threads=False` throughout:
+#:
+#:     batch_size      peak RSS      arrow pool     x declared text
+#:     read_row_group  4,178 MiB     1,928.2 MiB        3.84x
+#:        4,000        1,358 MiB       ~1,300 MiB       1.26x
+#:        1,000          783 MiB         598.2 MiB      0.75x   <- chosen
+#:          250          714 MiB         ~560 MiB       0.64x
+#:          100          655 MiB         ~530 MiB       0.58x
+#:
+#: The arrow pool high-water is IDENTICAL across all three runs at a given size (598.2 MiB at
+#: 1,000) while RSS varies by ±60 MiB, so the pool is the trustworthy figure and RSS is the noisy
+#: shadow of it. 1,000 rather than 100: below ~1,000 the curve flattens (655 vs 783 MiB, 16%) while
+#: the per-batch Python overhead keeps rising, and the reader is no longer the binding term once it
+#: is under 1 GiB — `encode_batch` is (see `corpus_pack._ENCODE_BATCH_CHARS`). Optimising past the
+#: point where a term stops binding trades measurable throughput for unmeasurable headroom.
+#:
+#: **This changes no output byte.** Documents are yielded in file order with the same surrogate
+#: `row_index` sequence regardless of how rows are grouped into arrow tables — asserted against the
+#: `read_row_group` path element by element, including at batch sizes that do not divide the row
+#: group evenly, in `test_corpus_read_bounded_rows.py`.
+_READ_BATCH_ROWS = 1_000
+
 
 def is_s3_source(repo: str) -> bool:
     """True when this registry row's ``repo`` names a staged S3 prefix rather than an HF repo.
@@ -860,14 +888,44 @@ def read_parquet_documents(
     `hf_tree` guarantees the field is present and raises if the API stops returning it
     (`ingest_reservoir.py:483-489`).
 
-    ROW GROUP AT A TIME, VIA `read_row_group`, DELIBERATELY. `iter_batches(batch_size=...)` would
-    bound memory tighter and does accept nested leaf paths (verified). It is NOT used, because
-    `read_row_group(rg, columns=[...])` is the exact call the array-segfault A/B was run against
-    (`ingest_reservoir.py:680`) and the crash it was fixing was an IO-dispatch bug several layers
-    below the reading API. Swapping in an unproven IO path here to save memory that FinePhrase's
-    row groups do not need — the measured payload leaf is ~1.77 MB per row group
-    (`artifacts/recount/_fp_footer_leaf.py:19`) — would be trading a known-good configuration for
-    an untested one at the one call site that has already cost days.
+    ROW GROUP AT A TIME, AND WITHIN IT **`iter_batches(..., use_threads=False)`**, NOT
+    `read_row_group`. See :data:`_READ_BATCH_ROWS`. This paragraph used to say the opposite, and the
+    correction is recorded rather than overwritten because the stale reason was load-bearing enough
+    to warn two sessions off a correct fix:
+
+    ~~`read_row_group(rg, columns=[...])` is the exact call the array-segfault A/B was run
+    against, so swapping in an unproven IO path would trade a known-good configuration for an
+    untested one.~~ **That coupling was historical, not causal.** The segfault was
+    :meth:`~.ingest_reservoir._RangeFile.read` returning SHORT — pyarrow took the truncated buffer,
+    read a page header at an offset inside the wrong bytes, and dereferenced a garbage length
+    (`ingest_reservoir.py:387-424`, which is where the fix lives, as a retry loop). `read_row_group`
+    was merely the call that happened to be on the stack. It contributed nothing to the crash and
+    protects against nothing, so "it is what the A/B ran against" was never a safety property.
+
+    **What IS causal, and is the reason for the explicit `use_threads=False`:** `iter_batches`
+    defaults `use_threads=True`, and on the whole-file iterator that flag drives READAHEAD as well
+    as decode — MEASURED with an instrumented file object, 2 of 3 read/seek calls relocate onto
+    pyarrow's own threads (`{MainThread: 8, Dummy-1: 8, Dummy-2: 8}`) where `read_row_group` keeps
+    100% on the caller (`{MainThread: 24}`). `pre_buffer=False` does NOT suppress this; it is a
+    different mechanism from the one `_scan_ids` documents.
+
+    That matters because **`_RangeFile` is not thread-safe by inspection**: `self.pos` is
+    unsynchronized shared mutable state, and `read()` reads it, loops `_read_once(..., self.pos +
+    len(out))`, then mutates it. Two interleaved callers each get bytes from the WRONG OFFSET —
+    which is the *same* corrupt-buffer mechanism as the original SIGSEGV, arriving by a different
+    route. Instrumented runs measured `max_inflight=1` and zero interleavings even with a 20 ms
+    sleep widening the window, i.e. pyarrow serializes these reads today; that is an OBSERVATION ON
+    ONE VERSION, not a guarantee, and production reads are HTTP Range at 10-100 ms under a 429
+    storm, a window ~1000x wider than anything reproducible locally. So the keyword is written
+    explicitly and asserted in `test_corpus_read_bounded_rows.py`, which fails if a future pyarrow
+    default relocates our IO again.
+
+    **And it costs nothing.** MEASURED on a 1,041.6 MiB single row group, 3 runs, worst case:
+    `read_row_group` 4,178 MiB peak / arrow pool high-water 1,928.2 MiB;
+    `iter_batches(use_threads=False)` 783 MiB / **598.2 MiB**, at 943 vs 939 MiB/s. The pool figure
+    is identical to three decimal places across every run and every threading choice, so the 3.22x
+    reduction is a real allocator bound and threads contribute exactly zero of it — the readahead
+    buys nothing because the consumer (`to_pylist` plus tokenize) is far slower than the read.
 
     Only the needed leaves are requested, so the Range reader fetches the footer plus those column
     chunks and nothing else. For FinePhrase that matters twice over: `rollout_results` carries SIX
@@ -875,6 +933,8 @@ def read_parquet_documents(
     (`artifacts/recount/synthetic.json:16`) while also pulling `usage` chunks nobody reads.
     """
     entry_size = size
+    import pyarrow as pa
+
     if isinstance(path, Mapping):
         entry_size = path.get("size", size)
 
@@ -944,57 +1004,65 @@ def read_parquet_documents(
     # re-read, and row-group boundaries are a writer's choice that a re-conversion can move.
     row_index = 0
     for rg in range(md.num_row_groups):
-        table = pf.read_row_group(rg, columns=leaves)
-        # COLUMN-AT-A-TIME via arrow compute, NOT `table.to_pylist()`. `to_pylist()` was the entire
-        # nested-column penalty: MEASURED 2.3-3.6x a flat column, with the arrow READ identical, and
-        # `list_flatten` + `.field()` measured 2.46x faster than it and 0.94x the FLAT baseline — so
-        # the nested penalty essentially vanishes. FinePhrase (36 B tokens, the new critical path at
-        # 12.6-16.5 h/child) is what forced this, but nothing here is FinePhrase-specific: the
-        # extraction is driven by the walk `_compile_walk` derived from the file's own footer, so any
-        # nesting depth works and a new nested source needs no code.
-        #
-        # ⚠️ The FLAT path goes through the same function and must not regress — a flat column has no
-        # `[0]` step, so `_arrow_column_values` reduces to one `to_pylist()` on ONE column, which is
-        # strictly less work than `to_pylist()` on the whole table. Asserted byte-identically both
-        # ways in `tests/test_corpus_read_arrow_native.py`.
-        texts = _arrow_column_values(table, text_walk)
-        ids = None if id_walk is None else _arrow_column_values(table, id_walk)
-        domains = None if domain_walk is None else _arrow_column_values(table, domain_walk)
-        for i, text in enumerate(texts):
-            if id_walk is None:
-                doc_id = surrogate_id(spec.repo, str(path), row_index)
-                row_index += 1
-            else:
-                doc_id = ids[i]
-            if not isinstance(text, str) or not text:
-                # No rewrite for this row (an empty `rollout_results` list is legal), or a null.
-                # Skipped rather than raised; `filter_documents` is where losses get counted.
-                #
-                # ⚠️ The surrogate `row_index` is incremented ABOVE this check, exactly as it was
-                # when the loop ran over `to_pylist()`. A skipped row still consumes its index, or a
-                # re-read with a different filter would renumber every later document under the same
-                # `plan_id`.
-                continue
-            if doc_id is None:
-                raise ReadError(
-                    f"{spec.key}: a row in {path!r} has a null {spec.id_column!r}. The id is the "
-                    f"join key for the §9.7 item 4 partition and the FineWeb-Edu anti-join, and "
-                    f"a row index would make the partition non-reproducible across a "
-                    f"re-download (corpus.py:176-179)."
+        # BOUNDED ROWS PER ARROW TABLE, not the whole row group — see :data:`_READ_BATCH_ROWS` for the
+        # measurement and the docstring for why `use_threads=False` is mandatory rather than tidy.
+        # `row_groups=[rg]` keeps the outer loop the unit of iteration it has always been, so the
+        # surrogate `row_index` below still counts rows within the FILE in file order.
+        for batch in pf.iter_batches(
+            batch_size=_READ_BATCH_ROWS, row_groups=[rg], columns=leaves,
+            use_threads=False,
+        ):
+            table = pa.Table.from_batches([batch])
+            # COLUMN-AT-A-TIME via arrow compute, NOT `table.to_pylist()`. `to_pylist()` was the entire
+            # nested-column penalty: MEASURED 2.3-3.6x a flat column, with the arrow READ identical, and
+            # `list_flatten` + `.field()` measured 2.46x faster than it and 0.94x the FLAT baseline — so
+            # the nested penalty essentially vanishes. FinePhrase (36 B tokens, the new critical path at
+            # 12.6-16.5 h/child) is what forced this, but nothing here is FinePhrase-specific: the
+            # extraction is driven by the walk `_compile_walk` derived from the file's own footer, so any
+            # nesting depth works and a new nested source needs no code.
+            #
+            # ⚠️ The FLAT path goes through the same function and must not regress — a flat column has no
+            # `[0]` step, so `_arrow_column_values` reduces to one `to_pylist()` on ONE column, which is
+            # strictly less work than `to_pylist()` on the whole table. Asserted byte-identically both
+            # ways in `tests/test_corpus_read_arrow_native.py`.
+            texts = _arrow_column_values(table, text_walk)
+            ids = None if id_walk is None else _arrow_column_values(table, id_walk)
+            domains = None if domain_walk is None else _arrow_column_values(table, domain_walk)
+            for i, text in enumerate(texts):
+                if id_walk is None:
+                    doc_id = surrogate_id(spec.repo, str(path), row_index)
+                    row_index += 1
+                else:
+                    doc_id = ids[i]
+                if not isinstance(text, str) or not text:
+                    # No rewrite for this row (an empty `rollout_results` list is legal), or a null.
+                    # Skipped rather than raised; `filter_documents` is where losses get counted.
+                    #
+                    # ⚠️ The surrogate `row_index` is incremented ABOVE this check, exactly as it was
+                    # when the loop ran over `to_pylist()`. A skipped row still consumes its index, or a
+                    # re-read with a different filter would renumber every later document under the same
+                    # `plan_id`.
+                    continue
+                if doc_id is None:
+                    raise ReadError(
+                        f"{spec.key}: a row in {path!r} has a null {spec.id_column!r}. The id is the "
+                        f"join key for the §9.7 item 4 partition and the FineWeb-Edu anti-join, and "
+                        f"a row index would make the partition non-reproducible across a "
+                        f"re-download (corpus.py:176-179)."
+                    )
+                yield Document(
+                    id=str(doc_id),
+                    text=text,
+                    source=spec.source_label,
+                    domain=(None if domains is None
+                            else _fold_domain(domains[i], spec, domain_map=domain_map)),
+                    # Carried per document for the curriculum labels sidecar. `str(path)` because a
+                    # caller may pass the HF tree entry mapping rather than a plain path, and the two
+                    # must produce the same interned string or one bundle's path table gains a
+                    # duplicate entry that reads as two different files.
+                    source_path=str(path),
                 )
-            yield Document(
-                id=str(doc_id),
-                text=text,
-                source=spec.source_label,
-                domain=(None if domains is None
-                        else _fold_domain(domains[i], spec, domain_map=domain_map)),
-                # Carried per document for the curriculum labels sidecar. `str(path)` because a
-                # caller may pass the HF tree entry mapping rather than a plain path, and the two
-                # must produce the same interned string or one bundle's path table gains a
-                # duplicate entry that reads as two different files.
-                source_path=str(path),
-            )
-        del table, texts, ids, domains
+            del table, texts, ids, domains
 
 
 # --------------------------------------------------------------------------------------

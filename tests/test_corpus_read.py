@@ -270,11 +270,24 @@ def test_only_the_needed_columns_are_requested():
             seen.append(list(columns or []))
             return real.read_row_group(i, columns=columns, **kw)
 
+        def iter_batches(self, batch_size=65536, row_groups=None, columns=None, **kw):
+            # The reader moved to `iter_batches` for the memory bound (`_READ_BATCH_ROWS`), so the
+            # projection spy has to record THIS call or it would silently observe nothing and the
+            # `assert seen` below would be the only thing keeping it honest. Both methods are kept:
+            # a wrapper that stopped delegating one of them would hide a partial revert.
+            seen.append(list(columns or []))
+            # ⚠️ `use_threads` is forwarded, NOT dropped. Swallowing it here would make the
+            # thread-provenance test in `test_corpus_read_bounded_rows.py` unfalsifiable through
+            # this seam.
+            return real.iter_batches(
+                batch_size=batch_size, row_groups=row_groups, columns=columns, **kw
+            )
+
     docs = list(
         read_parquet_documents("repo", "f.parquet", _spec(), {}, parquet_file=_Recording())
     )
     assert docs, "the recording wrapper must still produce documents"
-    assert seen, "read_row_group was never called"
+    assert seen, "neither read_row_group nor iter_batches was ever called"
     for columns in seen:
         assert columns == ["rollout_results.list.element.text", "id"]
         assert "usage" not in " ".join(columns), "the sibling usage struct must never be fetched"

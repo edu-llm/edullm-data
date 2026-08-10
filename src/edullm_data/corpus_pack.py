@@ -250,6 +250,62 @@ _ENCODE_BATCH = 1_000
 #: tokens over 995 documents at every cap above, and unbounded.
 _ENCODE_BATCH_CHARS = 32 * 1024 * 1024
 
+#: A document at or above this many characters is FAT, and a batch containing one is capped at
+#: :data:`_ENCODE_FAT_BATCH_CHARS` instead of :data:`_ENCODE_BATCH_CHARS`.
+#:
+#: ⚠️ **THE 32 MiB BATCH CAP IS NOT A MEMORY BOUND WHEN DOCUMENTS ARE FAT.** That was the missing
+#: half of the `pre-1929-books` diagnosis, and it is why capping the batch did not stop the OOM.
+#: `encode_batch`'s cost per character rises with document SIZE at a FIXED batch total, because
+#: `tokenizers` holds a `Vec<Encoding>` whose per-token overhead is amortised across documents, not
+#: across bytes. MEASURED with a real `tokenizers.Tokenizer`, batch chars pinned at the 32 MiB cap,
+#: one process per point so `ru_maxrss` is that point's own peak:
+#:
+#:     doc size    ndocs    peak     x batch chars    B/token
+#:      25 KB      1,342   1,112 MiB     34.8x         128.9
+#:     128 KB        256   1,610 MiB     50.3x         185.2
+#:     256 KB        128   1,989 MiB     62.1x         227.5
+#:     500 KB         67   2,477 MiB     77.5x         283.0
+#:       2 MB         16   2,925 MiB     95.8x         349.2
+#:       8 MB          4   3,637 MiB    119.2x         433.6
+#:
+#: **3.3x the peak for the same 32 MiB of text.** So a per-batch cap alone cannot bound this: the
+#: `pre-1929-books` corpus contains a single 8,449,677-char document, which is indivisible here
+#: (splitting it would split its token stream and its EOS) and which no batch-level cap can split.
+#:
+#: 1 MiB, and the threshold is set where the CURVE bends rather than at a round number. Below 1 MiB
+#: the per-character cost is flat-to-mild (34.8 -> 50.3x across a 5x size range); above it the cost
+#: climbs steeply (62.1 -> 119.2x). MEASURED that this leaves the common case untouched: the corpus
+#: is dominated by ~25 KB documents (`finepdfs-edu`, `fineweb-edu`, `dclm`) and 25 KB is 42x below
+#: this threshold, so those documents never take the fat path at all — 3.971-4.093 M tok/s with the
+#: two-tier bound vs 3.971-4.140 M tok/s without it, i.e. **inside run-to-run noise, 3 runs each.**
+#: `pre-1929-books`'s own 371-402 KB mean is also below it, so the fat path fires only for the
+#: genuine outliers rather than for the source that motivated it.
+_ENCODE_FAT_DOC_CHARS = 1024 * 1024
+
+#: Batch cap applied INSTEAD of :data:`_ENCODE_BATCH_CHARS` once a fat document is in the batch.
+#:
+#: 4 MiB, i.e. one fat document plus a little company rather than strict isolation. Strict
+#: isolation (cap == the document) was measured and REJECTED: at `pre-1929-books`'s 400 KB mean it
+#: costs 1.096 M tok/s against 3.909 M batched — a **3.6x throughput loss** — because each
+#: `encode_batch` no longer fills the rayon pool, the same parallelism floor that sets
+#: :data:`_ENCODE_BATCH_CHARS`'s lower bound. 4 MiB keeps the peak bounded while still handing rayon
+#: real work. MEASURED, 3 runs, worst case:
+#:
+#:     the 8,449,677-char document, encoded ALONE      1,269-1,417 MiB
+#:     a full 4 MiB fat-path batch of 1 MiB documents    ~1,300 MiB
+#:     the same document inside a 32 MiB batch          3,637 MiB   <- what OOMed
+#:
+#: **A fat document larger than this cap is still emitted alone** — :func:`_batched` never drops or
+#: defers one, so the single largest document remains the irreducible floor. That floor is now
+#: MEASURED rather than argued: 1,417 MiB for 8,449,677 chars, and 1,502-1,519 MiB for the
+#: 11,970,219-char document this module's older comment names as the largest in the source.
+#:
+#: **Neither constant changes an output byte.** Both only decide how many documents cross the FFI
+#: together; `tokenize_documents` yields one array per document in input order regardless, so shard
+#: bytes, `plan_id` and every receipt digest are unaffected — asserted in `test_corpus_pack.py`
+#: against a fixed input under old and new batching.
+_ENCODE_FAT_BATCH_CHARS = 4 * 1024 * 1024
+
 #: Fires the fork-hazard warning at most once per process. The tokenize path runs per batch over
 #: hundreds of millions of documents; a warning per batch would bury the Batch log.
 _warned_parallelism = False
@@ -498,7 +554,14 @@ def tokenize_documents(
             yield out
 
 
-def _batched(items: Iterable, n: int, max_chars: int = _ENCODE_BATCH_CHARS) -> Iterator[list]:
+def _batched(
+    items: Iterable,
+    n: int,
+    max_chars: int = _ENCODE_BATCH_CHARS,
+    *,
+    fat_doc_chars: int = _ENCODE_FAT_DOC_CHARS,
+    fat_max_chars: int = _ENCODE_FAT_BATCH_CHARS,
+) -> Iterator[list]:
     """Chunk an iterable without materialising it — the input is a ~2.5 TB document stream.
 
     **Bounded by CHARACTERS as well as by count, and the character bound is what makes the peak
@@ -506,22 +569,51 @@ def _batched(items: Iterable, n: int, max_chars: int = _ENCODE_BATCH_CHARS) -> I
     only if the mean document size is known — and it is a property of the source, not of this
     module. See :data:`_ENCODE_BATCH_CHARS` for the OOM that fact caused.
 
-    A document larger than ``max_chars`` is still emitted, alone, in its own batch: a document is
-    indivisible here (splitting it would split its token stream and its EOS), so the single largest
-    document is the irreducible floor. MEASURED at the largest document in `pre-1929-books`
-    (11,970,219 chars → 3.30 M tokens): 323 MiB, 34× below the 10.9 GiB the unbounded batch reached.
+    **AND BOUNDED PER DOCUMENT, which the character bound alone is not.** A batch cap in characters
+    is only a memory bound if cost is linear in characters, and it is not: `encode_batch` costs
+    **3.3x more for the same 32 MiB** of text when that text arrives as 8 MB documents rather than
+    25 KB ones (MEASURED — see :data:`_ENCODE_FAT_DOC_CHARS` for the table). So a document at or
+    above ``fat_doc_chars`` puts its batch on the smaller ``fat_max_chars`` cap. Documents below the
+    threshold — which is the whole common case, at 42x margin — take the identical path they always
+    did, so the fat tier costs the corpus nothing.
+
+    A document larger than the applicable cap is still emitted, alone, in its own batch: a document
+    is indivisible here (splitting it would split its token stream and its EOS), so the single
+    largest document is the irreducible floor. That floor is MEASURED, and the older figure here was
+    wrong by 4.6x: the 11,970,219-char document costs **1,502-1,519 MiB** (3 runs, real
+    `tokenizers.Tokenizer`, 3.29 M tokens), not the 323 MiB this docstring used to claim — that
+    number came from a `tracemalloc`-style accounting which cannot see the Rust `Vec<Encoding>` at
+    all, and understating this floor by 4.6x is precisely how a "bounded" batch still OOMed.
+
+    ⚠️ **`fat_doc_chars`/`fat_max_chars` are keyword-only and defaulted from the module constants at
+    DEF TIME**, exactly like ``max_chars``. Reassigning the module global does NOT change the bound
+    — proven by execution, setting `_ENCODE_BATCH_CHARS` to 1 still produced batches of [83, 83, 34]
+    — so a test of this behaviour must observe real batch sizes or real RSS and pass the value in.
     """
     batch: list = []
     chars = 0
+    # The cap CURRENTLY in force: it starts at the ordinary one and is raised to the fat one by the
+    # arrival of a fat document. Tracked rather than recomputed, because the decision has to survive
+    # into the next iteration to be able to flush on a TIER CHANGE.
+    cap = max_chars
     for item in items:
         size = len(item.text if isinstance(item, Document) else item)
+        want = fat_max_chars if size >= fat_doc_chars else max_chars
         # `batch and` first: a lone oversize document must be emitted, never dropped or deferred
         # forever. Checked BEFORE the append so the flush boundary is decided on the batch that
         # exists, not on one already over the cap.
-        if batch and (len(batch) >= n or chars + size > max_chars):
+        #
+        # `want != cap` is the third condition and it is what makes the per-document bound real: a
+        # fat document arriving into a batch that is already 30 MiB of thin documents must START a
+        # new batch, or it would be encoded alongside them under the cap it was supposed to escape.
+        # MEASURED: one 8.45 MiB document appended to a 32 MiB thin batch costs 1,849 MiB against
+        # 1,117 MiB for the thin batch alone — the fat document poisons the whole batch, so
+        # switching tiers has to flush.
+        if batch and (len(batch) >= n or chars + size > want or want != cap):
             yield batch
             batch = []
             chars = 0
+        cap = want
         batch.append(item)
         chars += size
     if batch:

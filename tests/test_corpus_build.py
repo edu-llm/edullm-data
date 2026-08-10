@@ -3044,3 +3044,169 @@ def test_a_file_shard_part_records_its_part_in_the_receipt_so_verify_can_tell_it
     # The union is what verify needs: every index present exactly once, so the family is complete
     # and no two siblings collide on the grouping key.
     assert sorted(seen) == [0, 1, 2]
+
+
+# --------------------------------------------------------------------------------------
+# The per-shard peak-memory line — the observability that would have saved five hours
+# --------------------------------------------------------------------------------------
+
+
+def test_every_shard_write_logs_its_peak_rss(capsys):
+    """🔴 THE MISSING LINE. Three bundles died exit 137 and the log said NOTHING.
+
+    All three presented identically: preflight, `DECON index ...`, then HOURS of silence, then
+    `Killed`. The cgroup SIGKILLs, so Python never raises and there is no traceback; and with no
+    per-shard progress the log could not distinguish "hung" from "running fine" from "at 92% of the
+    memory cap and climbing". The OOM had to be reconstructed by local measurement instead of read
+    off the log, which cost about five hours.
+
+    A shard write is the natural place for it: it is already the per-shard checkpoint, and one
+    `getrusage` is a syscall against a ~100 MB upload.
+    """
+    s3 = FakeS3()
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+    _run(bundle, plan, _spec(), s3)
+
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("SHARD_WRITTEN ")]
+    assert lines, (
+        "no SHARD_WRITTEN line was printed. Without it a memory kill is indistinguishable from a "
+        "hang, which is exactly the five-hour diagnosis this line exists to prevent."
+    )
+    # One line per SHARD actually written, and every one carries a usable number. Counted from the
+    # store's token objects rather than from the plan, so a run that wrote fewer shards than planned
+    # cannot pass by luck.
+    written = [k for k in s3.dump(BUCKET) if k.endswith(".u32le.bin")]
+    assert written, "the fixture wrote no shards, so the line count below would be vacuously equal"
+    assert len(lines) == len(written), (
+        f"{len(lines)} SHARD_WRITTEN lines for {len(written)} shards — a shard was written without "
+        f"logging its peak"
+    )
+    for ln in lines:
+        fields = dict(kv.split("=", 1) for kv in ln.split()[2:])
+        assert "peak_rss_mib" in fields, f"no peak_rss_mib in {ln!r}"
+        peak = float(fields["peak_rss_mib"])
+        # Sanity-bounded rather than asserted equal: RSS is not reproducible (2.52-7.28 GiB across
+        # six runs of identical input on this project). What must hold is that the units are right —
+        # a KiB/bytes mix-up on macOS would print ~1e-6 of the true value and a Linux one ~1e6, so
+        # this window catches the error that matters while tolerating the noise that does not.
+        assert 1.0 < peak < 200_000.0, (
+            f"peak_rss_mib={peak} is not a plausible MiB figure. `ru_maxrss` is KiB on Linux and "
+            f"BYTES on macOS; getting it backwards is a 1,048,576x error in the direction that "
+            f"hides an OOM."
+        )
+        assert int(fields["bytes"]) > 0
+
+
+def test_the_peak_rss_helper_normalises_the_platform_units():
+    """`ru_maxrss` is KiB on Linux and BYTES on macOS. A units error hides an OOM by 1,048,576x.
+
+    Driven by faking `getrusage` at BOTH platform settings and checking the SAME raw value converts
+    to two different, each-correct answers. Reading the constant or trusting the comment would prove
+    nothing — this is the one property of the helper that can be silently wrong in production while
+    looking right on a laptop.
+    """
+    import resource as _resource
+
+    class _RU:
+        ru_maxrss = 14_336 * 1024  # a 14 GiB peak expressed in KiB, i.e. the Linux container's cap
+
+    orig_getrusage = _resource.getrusage
+    orig_platform = B.sys.platform
+    try:
+        _resource.getrusage = lambda who: _RU()
+
+        B.sys.platform = "linux"
+        assert B._peak_rss_mib() == pytest.approx(14_336.0), (
+            "on Linux ru_maxrss is KiB, so 14,336 MiB must read as 14336.0"
+        )
+
+        B.sys.platform = "darwin"
+        # The same raw number read as BYTES is 14 MiB, not 14 GiB — the error direction that would
+        # make a container at its cap look idle.
+        assert B._peak_rss_mib() == pytest.approx(14.0)
+    finally:
+        _resource.getrusage = orig_getrusage
+        B.sys.platform = orig_platform
+
+
+def test_the_memory_fix_produces_byte_identical_shards(monkeypatch):
+    """🔴 THE SHIP GATE. 171 bundles / 3.47 TB are ALREADY BUILT by the pre-fix code.
+
+    The three OOM-killed bundles wrote PARTIAL output before dying — 103: 364 shards, 164: 58,
+    167: 30 — and a resubmission will compare the new bytes against those partials. If the memory fix
+    changed one byte, the corpus would be internally inconsistent: half built one way, half another,
+    with no gate able to see it (a shard's `sha256` is computed over whatever was read, so a changed
+    read produces a self-consistent wrong answer).
+
+    Both changes are argued to be resource-only. This asserts it end-to-end at the level that
+    matters — the actual shard payloads out of `run_bundle` — rather than at the level of the two
+    helpers, because the claim is about their COMPOSITION.
+    """
+    import edullm_data.corpus_pack as CP
+
+    plan = B.plan_document([_spec()])
+    bundle = _small(B.bundles_of(plan)[0])
+
+    # ⚠️ THE FIXTURE MUST CONTAIN FAT DOCUMENTS, or the two configurations batch IDENTICALLY and this
+    # test is vacuous. Caught by mutation: with only ~1.5 KB documents, injecting a genuinely
+    # batch-order-dependent output bug (`zip(batch, id_lists[::-1])`) left this test PASSING, because
+    # both sides produced the same single batch and were therefore equally wrong.
+    rng = random.Random(17)
+    def _text(words):
+        return " ".join(f"w{rng.randrange(80000)}" for _ in range(words))
+    docs = (
+        [Document(id=f"t{i}", text=_text(300), source="tiny") for i in range(120)]
+        # ~2.2 MB: above the 1 MiB fat threshold, so it takes the fat tier under the new code and
+        # the ordinary tier under the old one.
+        + [Document(id="fat1", text=_text(370_000), source="tiny")]
+        + [Document(id=f"t{100 + i}", text=_text(300), source="tiny") for i in range(120)]
+        + [Document(id="fat2", text=_text(370_000), source="tiny")]
+        + [Document(id=f"t{300 + i}", text=_text(300), source="tiny") for i in range(120)]
+    )
+
+    # Batch SHAPES are recorded for both configurations, so the identity below cannot be satisfied by
+    # two runs that never diverged.
+    original = CP._batched
+
+    def _record(shape):
+        def wrapper(items, n, max_chars=None, **kw):
+            for b in original(items, n, 32 * 1024 * 1024, **kw):
+                shape.append(len(b))
+                yield b
+        return wrapper
+
+    new_shape: list[int] = []
+    monkeypatch.setattr(CP, "_batched", _record(new_shape))
+    s3_new = FakeS3()
+    _run(bundle, plan, _spec(), s3_new, docs=docs)
+    new_shards = {k: v for k, v in s3_new.dump(BUCKET).items() if k.endswith(".u32le.bin")}
+
+    # THE OLD BATCHING, restored at the seam rather than by editing the module: the fat tier disabled
+    # (no document reaches a 10**9-char threshold) and the single 32 MiB cap in force, which is
+    # exactly what produced the 3.47 TB on disk.
+    old_shape: list[int] = []
+
+    def old_batching(items, n, max_chars=None, **kw):
+        for b in original(items, n, 32 * 1024 * 1024,
+                          fat_doc_chars=10**9, fat_max_chars=32 * 1024 * 1024):
+            old_shape.append(len(b))
+            yield b
+
+    s3_old = FakeS3()
+    monkeypatch.setattr(CP, "_batched", old_batching)
+    _run(bundle, plan, _spec(), s3_old, docs=docs)
+    old_shards = {k: v for k, v in s3_old.dump(BUCKET).items() if k.endswith(".u32le.bin")}
+
+    assert new_shards, "no shards were written, so this comparison would be vacuous"
+    assert new_shape != old_shape, (
+        f"both configurations batched identically ({new_shape}) — the fat tier never engaged, so "
+        f"this test would pass even on code whose output depends on the batch boundary. Add a "
+        f"document above the fat threshold."
+    )
+    assert sorted(new_shards) == sorted(old_shards), "the fix changed which shard KEYS are written"
+    for key in sorted(new_shards):
+        assert new_shards[key] == old_shards[key], (
+            f"{key} differs between the old and new batching. The memory fix must be resource-only "
+            f"— 3.47 TB is already written by the old path."
+        )

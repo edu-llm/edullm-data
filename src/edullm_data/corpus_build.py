@@ -1030,6 +1030,30 @@ def _keep_filter_for(bundle: Bundle, keep_list: Any):
     return KeepFilter(keep_list)
 
 
+def _peak_rss_mib() -> float:
+    """This process's peak resident set, in MiB. See the ``SHARD_WRITTEN`` line in :func:`run_bundle`.
+
+    ⚠️ **``ru_maxrss`` IS KiB ON LINUX AND BYTES ON macOS**, and getting that backwards is a 1,048,576x
+    error in the direction that hides an OOM — a 14 GiB peak would print as 14 MiB. `getrusage(2)`
+    documents the field as kilobytes; Darwin's kernel returns bytes regardless. Normalised by
+    ``sys.platform`` rather than by a units guess, so the number this prints is MiB on the Batch
+    container (Linux, the one that matters) AND on a developer's laptop.
+
+    It is a HIGH-WATER MARK, monotonically non-decreasing for the life of the process: a falling
+    series is impossible, and a flat one means the peak is behind us, not that memory was freed.
+    That is the right shape for the failure this exists to make visible — the cgroup kills on peak.
+
+    ⚠️ Not reproducible run to run, and the log line must be read with that in mind: identical input
+    on this project has drawn 2.52-7.28 GiB across six runs, and 2,456-4,005 MiB across three runs of
+    the reader measurement in this session. So a single draw is a data point, not a measurement;
+    what makes the per-shard series useful is its TREND across hundreds of shards in ONE process.
+    """
+    import resource
+
+    raw = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return raw / (1024 * 1024) if sys.platform == "darwin" else raw / 1024
+
+
 def run_bundle(
     bundle: Bundle,
     plan: Mapping[str, Any],
@@ -1142,6 +1166,18 @@ def run_bundle(
         key = _assert_safe_key(f"{root}/{ref.path}")
         digest = s3.put_bytes_verified(bucket, key, payload)
         digests[ref.path] = (digest, len(payload))
+        # PEAK MEMORY, PER SHARD. One line, and its absence cost five hours: three bundles died
+        # exit 137 presenting as `DECON index ...` then HOURS OF SILENCE then `Killed`, with no
+        # traceback (the cgroup SIGKILLs; Python gets no chance to raise) and no progress signal.
+        # The OOM had to be reconstructed locally instead of read off the log. With this line a
+        # future kill is preceded by a rising series, which turns "it hung" into "it was at 92% of
+        # the cap and climbing" — and a shard write is the natural place for it: it is already the
+        # per-shard checkpoint, and one `getrusage` is a syscall against a ~100 MB upload.
+        #
+        # Unconditional and cheap: `getrusage` allocates nothing, so there is no flag to forget to
+        # set on the one run that needed it.
+        print(f"SHARD_WRITTEN {ref.path} bytes={len(payload)} peak_rss_mib={_peak_rss_mib():.1f}",
+              flush=True)
 
     # Carve routes documents by a pure function of (source, doc_id), so BOTH splits are decided
     # from one read of the source. This bundle keeps only its own side.

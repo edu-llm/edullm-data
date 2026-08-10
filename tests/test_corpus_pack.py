@@ -1373,3 +1373,175 @@ def test_the_guard_is_derived_from_the_table_and_never_narrower_than_it():
     # The shipping table's guard is the WHOLE literal, so the fast path is strictly more selective
     # than the `"<|"` it replaces: text containing `<|` but not the marker now skips the loop.
     assert _boundary_marker_guard(_BOUNDARY_MARKER_REWRITES) == "<|endoftext|>"
+
+
+# --------------------------------------------------------------------------------------
+# The PER-DOCUMENT bound — `_ENCODE_FAT_DOC_CHARS` / `_ENCODE_FAT_BATCH_CHARS`
+# --------------------------------------------------------------------------------------
+#
+# THE OOM THE CHARACTER BOUND DID NOT STOP. `pre-1929-books--train` (array index 164) died exit 137
+# with an explicit `OutOfMemoryError` at 14,336 MiB *with* the 32 MiB character cap in force — the
+# job's own preflight logged `CAP_OK batches=[83, 83, 34]`, so the cap bound and was the WRONG bound.
+#
+# MEASURED with a real `tokenizers.Tokenizer`, batch chars pinned at 32 MiB, one process per point:
+# 25 KB documents cost 1,112 MiB, 8 MB documents cost 3,637 MiB — **3.3x for the same text**, because
+# `encode_batch`'s `Vec<Encoding>` overhead amortises across DOCUMENTS, not across bytes. A batch cap
+# in characters is therefore not a memory bound, and `pre-1929-books` holds a single 8,449,677-char
+# document that no batch-level cap can split.
+
+
+def test_a_fat_document_is_not_grouped_with_thin_ones():
+    """The core of the per-document bound: a fat document must not ride along in a thin batch.
+
+    MEASURED: one 8,449,677-char document appended to a full 32 MiB batch of 25 KB documents costs
+    1,849 MiB, against 1,117 MiB for the same thin batch without it — the fat document poisons the
+    whole batch. So arrival of a fat document has to FLUSH, not merely be accounted for.
+    """
+    from edullm_data.corpus_pack import _batched
+
+    thin = "t" * 25_000
+    fat = "F" * 2_000_000
+    items = [thin] * 10 + [fat] + [thin] * 10
+    batches = list(_batched(items, 1_000, 32 * 1024 * 1024,
+                           fat_doc_chars=1024 * 1024, fat_max_chars=4 * 1024 * 1024))
+
+    assert [t for b in batches for t in b] == items, "documents were lost, duplicated or reordered"
+    fat_batches = [b for b in batches if any(len(t) >= 1024 * 1024 for t in b)]
+    assert len(fat_batches) == 1
+    assert fat_batches[0] == [fat], (
+        "the fat document must be alone: with a 32 MiB cap it would otherwise be grouped with 20 "
+        "thin documents, which is exactly the batch shape that OOMed"
+    )
+
+
+def test_the_fat_tier_does_not_touch_the_common_case():
+    """⚠️ THE THROUGHPUT CONTROL. The corpus is ~25 KB documents; breaking them would be a bad trade.
+
+    `finepdfs-edu`, `fineweb-edu` and `dclm` dominate the mix at a ~25 KB mean, which is 42x below
+    the 1 MiB threshold. So the fat tier must be a strict no-op for them — same batches, byte for
+    byte, as the single-cap code produced. MEASURED end-to-end as well: 3.971-4.093 M tok/s with the
+    two-tier bound vs 3.971-4.140 M tok/s without, i.e. inside run-to-run noise over 3 runs each.
+    """
+    from edullm_data.corpus_pack import _batched
+
+    # 2,000 x 25 KB = 50 MB, so the 32 MiB cap genuinely binds and the comparison is not vacuous.
+    # (500 documents was 12.5 MB — one batch — and the guard at the end of this test caught it.)
+    docs = [f"doc{i} " + "x" * 25_000 for i in range(2_000)]
+    cap = 32 * 1024 * 1024
+
+    # The fat tier disabled (threshold above any document here) vs enabled.
+    without = [len(b) for b in _batched(docs, 1_000, cap, fat_doc_chars=10**9, fat_max_chars=cap)]
+    with_tier = [len(b) for b in _batched(docs, 1_000, cap,
+                                         fat_doc_chars=1024 * 1024, fat_max_chars=4 * 1024 * 1024)]
+
+    assert with_tier == without, (
+        f"the fat tier changed batching for 25 KB documents ({with_tier} vs {without}) — that is a "
+        f"throughput regression on the bulk of the corpus, not a memory fix"
+    )
+    assert len(without) > 1, "the fixture must produce more than one batch or this proves nothing"
+
+
+def test_a_document_above_the_fat_batch_cap_is_still_emitted_alone():
+    """The irreducible floor: a document is INDIVISIBLE, so it must be emitted, never dropped.
+
+    The real one is 8,449,677 chars — larger than the 4 MiB fat cap — so this is not a hypothetical
+    shape. MEASURED alone with a real tokenizer: 1,269-1,417 MiB over 3 runs (2.32 M tokens), which
+    is the floor for this corpus and fits 14,336 MiB with margin.
+    """
+    from edullm_data.corpus_pack import _batched
+
+    huge = "H" * 8_449_677
+    items = ["a", huge, "b"]
+    batches = list(_batched(items, 1_000, 32 * 1024 * 1024,
+                            fat_doc_chars=1024 * 1024, fat_max_chars=4 * 1024 * 1024))
+
+    assert [t for b in batches for t in b] == items, "an oversize document was dropped or reordered"
+    assert [huge] in batches, "the 8.45 MiB document must be alone in its own batch"
+
+
+def test_the_fat_batch_cap_bounds_a_run_of_fat_documents():
+    """Many fat documents must not accumulate: the cap applies to the fat tier too.
+
+    `pre-1929-books` is BOOKS at a 371-402 KB mean, so runs of large documents are the normal case
+    there, not an outlier. Without the fat cap a run of 1 MiB documents would fill to 32 MiB.
+    """
+    from edullm_data.corpus_pack import _batched
+
+    fat = "F" * (2 * 1024 * 1024)
+    batches = list(_batched([fat] * 12, 1_000, 32 * 1024 * 1024,
+                            fat_doc_chars=1024 * 1024, fat_max_chars=4 * 1024 * 1024))
+
+    assert sum(len(b) for b in batches) == 12, "documents were lost or duplicated"
+    for b in batches:
+        chars = sum(len(t) for t in b)
+        assert chars <= 4 * 1024 * 1024 or len(b) == 1, (
+            f"a fat-tier batch reached {chars} chars against a 4 MiB cap"
+        )
+    assert len(batches) >= 6, "a 24 MiB run of fat documents must not fit in one or two batches"
+
+
+def test_the_per_document_bound_changes_grouping_only_never_the_id_stream():
+    """🔴 THE BYTE-IDENTITY ASSERTION. 171 bundles / 3.47 TB are already built by the old batching.
+
+    If the per-document bound changed one token id, the resubmitted bundles would not match the
+    partial output the failed bundles already wrote (103: 364 shards, 164: 58, 167: 30) and the
+    corpus would be internally inconsistent — half built one way, half another.
+
+    ⚠️ Driven by REPLACING `_batched`, not by monkeypatching the constants. All three are DEFAULT
+    ARGUMENTS bound at def time — proven on this project by setting `_ENCODE_BATCH_CHARS` to 1 and
+    still getting batches of [83, 83, 34] — so a test that patched a module global would exercise the
+    unbounded path while asserting nothing.
+    """
+    import edullm_data.corpus_pack as CP
+
+    enc = fake_tokenizer()
+    # A deliberately mixed stream: thin, fat, and one document above the fat cap, so BOTH tiers and
+    # the alone-path all fire in a single comparison.
+    texts = (
+        [f"thin {i} " + "word " * 20 for i in range(30)]
+        + ["FAT " + "word " * 300_000]
+        + [f"thin {i} " + "word " * 20 for i in range(30)]
+        + ["HUGE " + "word " * 1_200_000]
+        + [f"thin {i} " + "word " * 20 for i in range(10)]
+    )
+
+    def ids_with(batched):
+        original = CP._batched
+        seen: list[int] = []
+
+        def wrapper(items, n, max_chars=None, **kw):
+            for b in batched(items, n, original=original):
+                seen.append(len(b))
+                yield b
+
+        try:
+            CP._batched = wrapper
+            out = [
+                a.tobytes()
+                for a in tokenize_documents(texts, enc, eos_id=EOS, vocab_size=VOCAB,
+                                            batch_size=1_000)
+            ]
+        finally:
+            CP._batched = original
+        return out, seen
+
+    single_cap, single_shape = ids_with(
+        lambda items, n, original: original(items, n, 32 * 1024 * 1024,
+                                            fat_doc_chars=10**9, fat_max_chars=32 * 1024 * 1024)
+    )
+    two_tier, two_shape = ids_with(
+        lambda items, n, original: original(items, n, 32 * 1024 * 1024,
+                                            fat_doc_chars=1024 * 1024,
+                                            fat_max_chars=4 * 1024 * 1024)
+    )
+
+    # The two configurations must actually have batched DIFFERENTLY, or the identity below is vacuous.
+    assert two_shape != single_shape, (
+        f"both configurations produced the same batches ({two_shape}) — the fat tier never engaged "
+        f"and this test proves nothing about it"
+    )
+    assert two_tier == single_cap, (
+        "the per-document bound changed the token id stream. It must change GROUPING only — the "
+        "already-built 3.47 TB was produced by the single-cap batching."
+    )
+    assert len(two_tier) == len(texts), "a document was dropped or duplicated"
