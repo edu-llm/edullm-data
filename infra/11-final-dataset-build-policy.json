@@ -41,7 +41,36 @@
     "",
     "*** put-role-policy REPLACES THE WHOLE DOCUMENT ***  Any edit must carry ALL statements. A",
     "partial document silently deletes NeverWriteValidatorTriggeringOrTerminalNames -- the third",
-    "promotion guard -- and nothing would report it."
+    "promotion guard -- and nothing would report it.",
+    "",
+    "*** A FIX THAT RELOCATES A READ INTRODUCES EVERY PERMISSION THE NEW LOCATION NEEDS ***",
+    "`ListStagedSourcePrefix` was added 2026-08-10 after it cost the whole math pillar. The history:",
+    "Nemotron-CC-Math-v1 is a GATED HF repo, so the build got a 401 no credential of ours can clear.",
+    "The remedy was to stage the parquet to `s3://edullm-landing/_src/nemotron-cc-math-v1/` and teach",
+    "`repo` to accept an `s3://` URI (corpus_read.py:560-690). That remedy was reasoned about as a",
+    "TRANSPORT change -- same columns, same filters, same dedup -- and `ReadStagedSourceParquet` was",
+    "added for the GetObject it obviously needed. What nobody re-derived is that the new transport",
+    "ENUMERATES: `s3_files` opens with `s3.list(bucket, prefix + '/')` because a staged prefix has no",
+    "HF tree API to ask for a file list. `ListOnlyFinalDatasetIngestPrefix` is condition-scoped to",
+    "`s3:prefix = _ingest/final-dataset/*`, so the ListObjectsV2 on `_src/...` was denied -- and a",
+    "ListBucket denial is NOT a GetObject denial, so the Allow that was added did not cover it.",
+    "",
+    "Cost: indices 152-161 (all 6 nemotron-cc-math-3 bundles + all 4 nemotron-cc-math-4plus bundles)",
+    "each died ~5 s in on `AccessDenied ... ListObjectsV2`, losing 2,438 planned shards / ~61 B tokens",
+    "-- 6.5% of the corpus and the ENTIRE math pillar -- on the 2026-08-09 build.",
+    "",
+    "The generalisable lesson, which is NOT 'add ListBucket': when a fix MOVES a read to a new",
+    "location, enumerate the operations the new location requires and grant each one. GetObject and",
+    "ListBucket are different actions on different resources (object ARN vs BUCKET ARN), and S3 scopes",
+    "ListBucket by an `s3:prefix` CONDITION rather than by resource path -- so a prefix-scoped list",
+    "grant is invisible in the resource list and reads as though it covers the bucket.",
+    "",
+    "Deliberately a SECOND, SEPARATE statement rather than a second value in the existing condition:",
+    "editing `ListOnlyFinalDatasetIngestPrefix` in place risks widening or narrowing the `_ingest/`",
+    "grant that 175 healthy bundles depend on, and the two prefixes have independent lifetimes (`_src/`",
+    "is staging for gated sources; `_ingest/` is this build's output). `_src/*` is also the narrowest",
+    "form that works: it matches `_src/nemotron-cc-math-v1/3/` and `.../4plus/` -- the only prefix",
+    "under `_src/` -- and cannot list `_ingest/`, `_dist/`, or the bucket root."
   ],
   "Version": "2012-10-17",
   "Statement": [
@@ -75,6 +104,17 @@
       "Condition": {
         "StringLike": {
           "s3:prefix": "_ingest/final-dataset/*"
+        }
+      }
+    },
+    {
+      "Sid": "ListStagedSourcePrefix",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::edullm-landing",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "_src/*"
         }
       }
     },
