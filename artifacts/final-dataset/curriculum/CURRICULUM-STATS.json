@@ -1,0 +1,1740 @@
+{
+ "stats_schema": "edullm-curriculum-stats/v1",
+ "generated_utc": "2026-08-11T00:55:28Z",
+ "documents": 825415196,
+ "chunks": 440806977,
+ "sources": 130,
+ "clamp_threshold": 408.005,
+ "mtld_before_clamp": {
+  "n": 825415196,
+  "mean": 87.58872904202347,
+  "std": 35449.302328644284,
+  "min": 0.0,
+  "max": 315176256.0,
+  "robust_n_le_1000": 825365861,
+  "robust_mean_le_1000": 81.07568327168187,
+  "robust_std_le_1000": 41.1314580712509,
+  "percentiles": {
+   "1": 12.825000000000001,
+   "5": 20.945,
+   "25": 55.585,
+   "50": 79.015,
+   "75": 102.19500000000001,
+   "95": 143.435,
+   "99": 198.895,
+   "99.9": 408.005
+  },
+  "nonfinite": 0,
+  "documents_over_1000": 49335,
+  "documents_over_10000": 3593,
+  "documents_over_1000000": 171,
+  "documents_over_10000000": 49
+ },
+ "mtld_after_clamp": {
+  "n": 825415196,
+  "mean": 81.00397613016565,
+  "std": 40.245785749541255,
+  "min": 0.0,
+  "max": 408.005,
+  "records_clamped": 825103,
+  "fraction_clamped": 0.000999621770956589,
+  "ties_at_threshold": 825533,
+  "robust_n_le_1000": 825415196,
+  "percentiles": {
+   "1": 12.825000000000001,
+   "5": 20.945,
+   "25": 55.585,
+   "50": 79.015,
+   "75": 102.19500000000001,
+   "95": 143.435,
+   "99": 198.895,
+   "99.9": 408.005
+  },
+  "robust_mean_le_1000": 81.00397613016565,
+  "robust_std_le_1000": 40.24578574954126
+ },
+ "clamp_effect": {
+  "std_before": 35449.302328644284,
+  "std_after": 40.245785749541255,
+  "std_shrink_factor": 880.8202316946528,
+  "robust_std_before_le_1000": 41.1314580712509,
+  "robust_std_after_le_1000": 40.24578574954126,
+  "note": "The robust std (mtld <= 1000) is essentially unchanged while the real std collapses \u2014 which is the proof that the runaway tail, not the body of the distribution, produced the variance."
+ },
+ "head_before_stratification_documents": {
+  "easiest_1pct": {
+   "weighting": "documents",
+   "mtld_threshold": 12.83,
+   "documents_in_head": 8273345,
+   "sources_present": 130,
+   "max_over_representation": 10.790922015569038,
+   "composition": [
+    {
+     "source": "stackv2-edu",
+     "documents": 6565784,
+     "share_of_head": 0.7936069389104407,
+     "share_of_corpus": 0.07354394163588915,
+     "over_representation": 10.790922015569038
+    },
+    {
+     "source": "finephrase-table",
+     "documents": 576106,
+     "share_of_head": 0.0696339872204048,
+     "share_of_corpus": 0.04121507353494374,
+     "over_representation": 1.6895271862457408
+    },
+    {
+     "source": "nemotron-cc-math-4plus",
+     "documents": 469150,
+     "share_of_head": 0.056706205289396246,
+     "share_of_corpus": 0.024449026499386135,
+     "over_representation": 2.319364547738538
+    },
+    {
+     "source": "nemotron-cc-math-3",
+     "documents": 327873,
+     "share_of_head": 0.03963004081178773,
+     "share_of_corpus": 0.032614574011307636,
+     "over_representation": 1.2151022054756195
+    },
+    {
+     "source": "finephrase-math",
+     "documents": 79509,
+     "share_of_head": 0.009610260420664193,
+     "share_of_corpus": 0.034948342530878244,
+     "over_representation": 0.27498472673412616
+    },
+    {
+     "source": "stackexchange",
+     "documents": 43546,
+     "share_of_head": 0.005263409177303739,
+     "share_of_corpus": 0.014727700748557579,
+     "over_representation": 0.35738159453159946
+    },
+    {
+     "source": "finewiki",
+     "documents": 32788,
+     "share_of_head": 0.003963088690245602,
+     "share_of_corpus": 0.006403532459317601,
+     "over_representation": 0.6188910129562977
+    },
+    {
+     "source": "finephrase-tutorial",
+     "documents": 31192,
+     "share_of_head": 0.0037701800178766873,
+     "share_of_corpus": 0.025016288893232347,
+     "over_representation": 0.1507090053991435
+    },
+    {
+     "source": "finepdfs-edu",
+     "documents": 20584,
+     "share_of_head": 0.002487990045138937,
+     "share_of_corpus": 0.010155358225316704,
+     "over_representation": 0.24499283924190146
+    },
+    {
+     "source": "finephrase-faq",
+     "documents": 19654,
+     "share_of_head": 0.002375580856352539,
+     "share_of_corpus": 0.024520475389939393,
+     "over_representation": 0.09688151712291948
+    },
+    {
+     "source": "cosmopedia",
+     "documents": 3320,
+     "share_of_head": 0.0004012887169578931,
+     "share_of_corpus": 0.00768817927117494,
+     "over_representation": 0.05219554628004485
+    },
+    {
+     "source": "math-textbooks",
+     "documents": 1803,
+     "share_of_head": 0.00021792878213104856,
+     "share_of_corpus": 0.0018189403433275294,
+     "over_representation": 0.11981084642521835
+    }
+   ],
+   "composition_truncated_to": 12,
+   "composition_rows_total": 130
+  },
+  "easiest_5pct": {
+   "weighting": "documents",
+   "mtld_threshold": 20.95,
+   "documents_in_head": 41299963,
+   "sources_present": 130,
+   "max_over_representation": 10.2952131801981,
+   "composition": [
+    {
+     "source": "stackv2-edu",
+     "documents": 31270290,
+     "share_of_head": 0.7571505572535259,
+     "share_of_corpus": 0.07354394163588915,
+     "over_representation": 10.2952131801981
+    },
+    {
+     "source": "nemotron-cc-math-4plus",
+     "documents": 3563715,
+     "share_of_head": 0.08628857609388173,
+     "share_of_corpus": 0.024449026499386135,
+     "over_representation": 3.52932563985925
+    },
+    {
+     "source": "nemotron-cc-math-3",
+     "documents": 2233843,
+     "share_of_head": 0.05408825668923723,
+     "share_of_corpus": 0.032614574011307636,
+     "over_representation": 1.658407577866403
+    },
+    {
+     "source": "finephrase-table",
+     "documents": 1721836,
+     "share_of_head": 0.041690981660201486,
+     "share_of_corpus": 0.04121507353494374,
+     "over_representation": 1.0115469434951816
+    },
+    {
+     "source": "finephrase-math",
+     "documents": 875557,
+     "share_of_head": 0.021199946353462836,
+     "share_of_corpus": 0.034948342530878244,
+     "over_representation": 0.6066080625921485
+    },
+    {
+     "source": "stackexchange",
+     "documents": 406580,
+     "share_of_head": 0.009844560877693765,
+     "share_of_corpus": 0.014727700748557579,
+     "over_representation": 0.6684384104326627
+    },
+    {
+     "source": "finewiki",
+     "documents": 153320,
+     "share_of_head": 0.0037123519941167984,
+     "share_of_corpus": 0.006403532459317601,
+     "over_representation": 0.5797350162120376
+    },
+    {
+     "source": "finephrase-tutorial",
+     "documents": 107027,
+     "share_of_head": 0.002591455106146221,
+     "share_of_corpus": 0.025016288893232347,
+     "over_representation": 0.1035907091258163
+    },
+    {
+     "source": "finepdfs-edu",
+     "documents": 95072,
+     "share_of_head": 0.002301987534468251,
+     "share_of_corpus": 0.010155358225316704,
+     "over_representation": 0.22667713766408878
+    },
+    {
+     "source": "math-textbooks",
+     "documents": 80719,
+     "share_of_head": 0.001954456956777419,
+     "share_of_corpus": 0.0018189403433275294,
+     "over_representation": 1.0745030555548503
+    },
+    {
+     "source": "finephrase-faq",
+     "documents": 65626,
+     "share_of_head": 0.0015890086874896232,
+     "share_of_corpus": 0.024520475389939393,
+     "over_representation": 0.06480333934070398
+    },
+    {
+     "source": "cosmopedia",
+     "documents": 39011,
+     "share_of_head": 0.0009445771174177566,
+     "share_of_corpus": 0.00768817927117494,
+     "over_representation": 0.12286096409838299
+    }
+   ],
+   "composition_truncated_to": 12,
+   "composition_rows_total": 130
+  }
+ },
+ "head_before_stratification_chunks": {
+  "easiest_1pct": {
+   "weighting": "chunks (== tokens; every chunk is 2048 tokens)",
+   "chunks_in_head": 4408070,
+   "tokens_in_head": 9027727360,
+   "sources_present": 130,
+   "sources_total": 130,
+   "max_over_representation": 11.40364043886752,
+   "composition": [
+    {
+     "source": "stackv2-edu",
+     "chunks": 3212834,
+     "tokens": 6579884032,
+     "share_of_head": 0.7288527632274442,
+     "share_of_corpus": 0.06391404281243943,
+     "over_representation": 11.40364043886752
+    },
+    {
+     "source": "nemotron-cc-math-3",
+     "chunks": 370846,
+     "tokens": 759492608,
+     "share_of_head": 0.08412888180087884,
+     "share_of_corpus": 0.041870898064301734,
+     "over_representation": 2.0092447425340847
+    },
+    {
+     "source": "nemotron-cc-math-4plus",
+     "chunks": 335811,
+     "tokens": 687740928,
+     "share_of_head": 0.07618095901380877,
+     "share_of_corpus": 0.025338539503198473,
+     "over_representation": 3.006525257866282
+    },
+    {
+     "source": "finephrase-table",
+     "chunks": 141688,
+     "tokens": 290177024,
+     "share_of_head": 0.032142865244880414,
+     "share_of_corpus": 0.009913876658082025,
+     "over_representation": 3.242209516362784
+    },
+    {
+     "source": "finepdfs-edu",
+     "chunks": 108925,
+     "tokens": 223078400,
+     "share_of_head": 0.02471036077013296,
+     "share_of_corpus": 0.05206169865138047,
+     "over_representation": 0.4746360839203571
+    },
+    {
+     "source": "finewiki",
+     "chunks": 65763,
+     "tokens": 134682624,
+     "share_of_head": 0.014918773975912361,
+     "share_of_corpus": 0.007698485226108388,
+     "over_representation": 1.9378843418855083
+    },
+    {
+     "source": "stackexchange",
+     "chunks": 34958,
+     "tokens": 71593984,
+     "share_of_head": 0.007930454824900693,
+     "share_of_corpus": 0.009913876658082025,
+     "over_representation": 0.7999347882178461
+    },
+    {
+     "source": "finephrase-math",
+     "chunks": 29576,
+     "tokens": 60571648,
+     "share_of_head": 0.006709512326256162,
+     "share_of_corpus": 0.009913876658082025,
+     "over_representation": 0.6767798871883695
+    },
+    {
+     "source": "finephrase-tutorial",
+     "chunks": 16221,
+     "tokens": 33220608,
+     "share_of_head": 0.0036798417447998786,
+     "share_of_corpus": 0.009913876658082025,
+     "over_representation": 0.3711809085096883
+    },
+    {
+     "source": "finephrase-faq",
+     "chunks": 10634,
+     "tokens": 21778432,
+     "share_of_head": 0.002412393632587504,
+     "share_of_corpus": 0.009913876658082025,
+     "over_representation": 0.24333504599543956
+    },
+    {
+     "source": "math-textbooks",
+     "chunks": 3655,
+     "tokens": 7485440,
+     "share_of_head": 0.0008291610614169013,
+     "share_of_corpus": 0.003295394755060785,
+     "over_representation": 0.2516120595699641
+    },
+    {
+     "source": "cosmopedia",
+     "chunks": 2684,
+     "tokens": 5496832,
+     "share_of_head": 0.0006088832527614126,
+     "share_of_corpus": 0.004403090471047603,
+     "over_representation": 0.13828542855639855
+    }
+   ],
+   "composition_truncated_to": 12,
+   "composition_rows_total": 130
+  },
+  "easiest_5pct": {
+   "weighting": "chunks (== tokens; every chunk is 2048 tokens)",
+   "chunks_in_head": 22040349,
+   "tokens_in_head": 45138634752,
+   "sources_present": 130,
+   "sources_total": 130,
+   "max_over_representation": 11.138914451598177,
+   "composition": [
+    {
+     "source": "stackv2-edu",
+     "chunks": 15691253,
+     "tokens": 32135686144,
+     "share_of_head": 0.7119330551435461,
+     "share_of_corpus": 0.06391404281243943,
+     "over_representation": 11.138914451598177
+    },
+    {
+     "source": "nemotron-cc-math-4plus",
+     "chunks": 2235761,
+     "tokens": 4578838528,
+     "share_of_head": 0.10143945542786097,
+     "share_of_corpus": 0.025338539503198473,
+     "over_representation": 4.003366311426762
+    },
+    {
+     "source": "nemotron-cc-math-3",
+     "chunks": 2214987,
+     "tokens": 4536293376,
+     "share_of_head": 0.10049691136923466,
+     "share_of_corpus": 0.041870898064301734,
+     "over_representation": 2.4001613534751542
+    },
+    {
+     "source": "finepdfs-edu",
+     "chunks": 418536,
+     "tokens": 857161728,
+     "share_of_head": 0.018989535964244485,
+     "share_of_corpus": 0.05206169865138047,
+     "over_representation": 0.36475060276852794
+    },
+    {
+     "source": "finephrase-table",
+     "chunks": 321579,
+     "tokens": 658593792,
+     "share_of_head": 0.014590467691777477,
+     "share_of_corpus": 0.009913876658082025,
+     "over_representation": 1.471721728541275
+    },
+    {
+     "source": "stackexchange",
+     "chunks": 233221,
+     "tokens": 477636608,
+     "share_of_head": 0.01058154750634847,
+     "share_of_corpus": 0.009913876658082025,
+     "over_representation": 1.0673471005635464
+    },
+    {
+     "source": "finewiki",
+     "chunks": 221888,
+     "tokens": 454426624,
+     "share_of_head": 0.010067354196614581,
+     "share_of_corpus": 0.007698485226108388,
+     "over_representation": 1.3077058539350688
+    },
+    {
+     "source": "finephrase-math",
+     "chunks": 195314,
+     "tokens": 400003072,
+     "share_of_head": 0.008861656410250128,
+     "share_of_corpus": 0.009913876658082025,
+     "over_representation": 0.8938638956160402
+    },
+    {
+     "source": "math-textbooks",
+     "chunks": 115124,
+     "tokens": 235773952,
+     "share_of_head": 0.00522332926760824,
+     "share_of_corpus": 0.003295394755060785,
+     "over_representation": 1.5850390183411862
+    },
+    {
+     "source": "finephrase-tutorial",
+     "chunks": 40667,
+     "tokens": 83286016,
+     "share_of_head": 0.001845115973435811,
+     "share_of_corpus": 0.009913876658082025,
+     "over_representation": 0.18611447742106305
+    },
+    {
+     "source": "pubmed",
+     "chunks": 26931,
+     "tokens": 55154688,
+     "share_of_head": 0.001221895352020061,
+     "share_of_corpus": 0.010993879981169173,
+     "over_representation": 0.1111432318810993
+    },
+    {
+     "source": "finephrase-faq",
+     "chunks": 24186,
+     "tokens": 49532928,
+     "share_of_head": 0.0010973510446681222,
+     "share_of_corpus": 0.009913876658082025,
+     "over_representation": 0.11068838987153788
+    }
+   ],
+   "composition_truncated_to": 12,
+   "composition_rows_total": 130
+  }
+ },
+ "head_after_stratification_chunks": {
+  "easiest_1pct": {
+   "weighting": "chunks (== tokens; every chunk is 2048 tokens)",
+   "chunks_in_head": 4408070,
+   "tokens_in_head": 9027727360,
+   "sources_present": 130,
+   "sources_total": 130,
+   "max_over_representation": 1.0096790965137408,
+   "composition": [
+    {
+     "source": "stackv2-edu",
+     "chunks": 281921,
+     "tokens": 577374208,
+     "share_of_head": 0.06395565406175492,
+     "share_of_corpus": 0.06391404281243943,
+     "over_representation": 1.0006510501837227
+    },
+    {
+     "source": "finepdfs-edu",
+     "chunks": 229451,
+     "tokens": 469915648,
+     "share_of_head": 0.05205248555490271,
+     "share_of_corpus": 0.05206169865138047,
+     "over_representation": 0.9998230350388786
+    },
+    {
+     "source": "nemotron-cc-math-3",
+     "chunks": 184514,
+     "tokens": 377884672,
+     "share_of_head": 0.04185822820418006,
+     "share_of_corpus": 0.041870898064301734,
+     "over_representation": 0.9996974065351496
+    },
+    {
+     "source": "nemotron-cc-math-4plus",
+     "chunks": 111998,
+     "tokens": 229371904,
+     "share_of_head": 0.025407491260347498,
+     "share_of_corpus": 0.025338539503198473,
+     "over_representation": 1.00272122065837
+    },
+    {
+     "source": "fineweb-edu-15",
+     "chunks": 76771,
+     "tokens": 157227008,
+     "share_of_head": 0.017416011996179735,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.004647938009659
+    },
+    {
+     "source": "fineweb-edu-01",
+     "chunks": 76719,
+     "tokens": 157120512,
+     "share_of_head": 0.01740421545029911,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.0039674506801137
+    },
+    {
+     "source": "fineweb-edu-13",
+     "chunks": 76718,
+     "tokens": 157118464,
+     "share_of_head": 0.01740398859364756,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.0039543643853148
+    },
+    {
+     "source": "fineweb-edu-04",
+     "chunks": 76717,
+     "tokens": 157116416,
+     "share_of_head": 0.01740376173699601,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.003941278090516
+    },
+    {
+     "source": "fineweb-edu-12",
+     "chunks": 76579,
+     "tokens": 156833792,
+     "share_of_head": 0.017372455519082047,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.0021353694082618
+    },
+    {
+     "source": "fineweb-edu-06",
+     "chunks": 76575,
+     "tokens": 156825600,
+     "share_of_head": 0.017371548092475847,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.0020830242290661
+    },
+    {
+     "source": "fineweb-edu-08",
+     "chunks": 76559,
+     "tokens": 156792832,
+     "share_of_head": 0.017367918386051038,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.0018736435122828
+    },
+    {
+     "source": "fineweb-edu-03",
+     "chunks": 76501,
+     "tokens": 156674048,
+     "share_of_head": 0.017354760700261113,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.0011146384139442
+    }
+   ],
+   "composition_truncated_to": 12,
+   "composition_rows_total": 130
+  },
+  "easiest_5pct": {
+   "weighting": "chunks (== tokens; every chunk is 2048 tokens)",
+   "chunks_in_head": 22040349,
+   "tokens_in_head": 45138634752,
+   "sources_present": 130,
+   "sources_total": 130,
+   "max_over_representation": 1.0029647006410751,
+   "composition": [
+    {
+     "source": "stackv2-edu",
+     "chunks": 1408555,
+     "tokens": 2884720640,
+     "share_of_head": 0.06390801706452108,
+     "share_of_corpus": 0.06391404281243943,
+     "over_representation": 0.9999057210645237
+    },
+    {
+     "source": "finepdfs-edu",
+     "chunks": 1147161,
+     "tokens": 2349385728,
+     "share_of_head": 0.05204822301135068,
+     "share_of_corpus": 0.05206169865138047,
+     "over_representation": 0.9997411601930236
+    },
+    {
+     "source": "nemotron-cc-math-3",
+     "chunks": 923236,
+     "tokens": 1890787328,
+     "share_of_head": 0.04188844741070116,
+     "share_of_corpus": 0.041870898064301734,
+     "over_representation": 1.0004191299258134
+    },
+    {
+     "source": "nemotron-cc-math-4plus",
+     "chunks": 559095,
+     "tokens": 1145026560,
+     "share_of_head": 0.02536688507064929,
+     "share_of_corpus": 0.025338539503198473,
+     "over_representation": 1.0011186740832967
+    },
+    {
+     "source": "fineweb-edu-14",
+     "chunks": 382554,
+     "tokens": 783470592,
+     "share_of_head": 0.01735698468295579,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.0012429295306975
+    },
+    {
+     "source": "fineweb-edu-02",
+     "chunks": 382368,
+     "tokens": 783089664,
+     "share_of_head": 0.017348545615135224,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.0007561193420895
+    },
+    {
+     "source": "fineweb-edu-15",
+     "chunks": 382359,
+     "tokens": 783071232,
+     "share_of_head": 0.017348137273143906,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.0007325640103828
+    },
+    {
+     "source": "fineweb-edu-05",
+     "chunks": 382231,
+     "tokens": 782809088,
+     "share_of_head": 0.017342329742600717,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.00039755484833
+    },
+    {
+     "source": "fineweb-edu-06",
+     "chunks": 382204,
+     "tokens": 782753792,
+     "share_of_head": 0.017341104716626764,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.0003268888532095
+    },
+    {
+     "source": "fineweb-edu-04",
+     "chunks": 382122,
+     "tokens": 782585856,
+     "share_of_head": 0.017337384267372535,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.0001122736087693
+    },
+    {
+     "source": "fineweb-edu-03",
+     "chunks": 382102,
+     "tokens": 782544896,
+     "share_of_head": 0.017336476840725163,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 1.0000599284271987
+    },
+    {
+     "source": "fineweb-edu-11",
+     "chunks": 382016,
+     "tokens": 782368768,
+     "share_of_head": 0.01733257490614146,
+     "share_of_corpus": 0.017335437955193708,
+     "over_representation": 0.9998348441464445
+    }
+   ],
+   "composition_truncated_to": 12,
+   "composition_rows_total": 130
+  }
+ },
+ "verdict": {
+  "max_over_representation": 1.0096790965137408,
+  "bar": 1.5,
+  "passed": true,
+  "meaning": "over_representation = share_of_head / share_of_corpus, chunk-weighted. 1.0 is perfectly proportional. If any source exceeded 1.5 the stratification did not work."
+ },
+ "per_source": [
+  {
+   "source": "cosmopedia",
+   "documents": 6345940,
+   "share_of_documents": 0.00768817927117494,
+   "labelled_tokens": 3975315791,
+   "chunks": 1940913,
+   "share_of_chunks": 0.004403090471047603
+  },
+  {
+   "source": "dclm-001",
+   "documents": 3320162,
+   "share_of_documents": 0.004022414435898028,
+   "labelled_tokens": 4075324354,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-002",
+   "documents": 3363676,
+   "share_of_documents": 0.004075132147191533,
+   "labelled_tokens": 4075357668,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-003",
+   "documents": 3372902,
+   "share_of_documents": 0.004086309552265621,
+   "labelled_tokens": 4075323747,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-004",
+   "documents": 3385991,
+   "share_of_documents": 0.004102167026253779,
+   "labelled_tokens": 4075325652,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-005",
+   "documents": 3369354,
+   "share_of_documents": 0.004082011109473201,
+   "labelled_tokens": 4075323718,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-006",
+   "documents": 3370561,
+   "share_of_documents": 0.0040834734038504425,
+   "labelled_tokens": 4075323657,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-007",
+   "documents": 3370649,
+   "share_of_documents": 0.004083580016862205,
+   "labelled_tokens": 4075323895,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-008",
+   "documents": 3379464,
+   "share_of_documents": 0.004094259490710903,
+   "labelled_tokens": 4075327866,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-009",
+   "documents": 3354336,
+   "share_of_documents": 0.004063816629806752,
+   "labelled_tokens": 4075323839,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-010",
+   "documents": 3400499,
+   "share_of_documents": 0.004119743635056605,
+   "labelled_tokens": 4075324158,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-011",
+   "documents": 3362779,
+   "share_of_documents": 0.004074045421378455,
+   "labelled_tokens": 4075324841,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-012",
+   "documents": 3376590,
+   "share_of_documents": 0.0040907776066676635,
+   "labelled_tokens": 4075325572,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-013",
+   "documents": 3357998,
+   "share_of_documents": 0.004068253184909864,
+   "labelled_tokens": 4075323756,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-014",
+   "documents": 3397111,
+   "share_of_documents": 0.004115639034103753,
+   "labelled_tokens": 4075325135,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-015",
+   "documents": 3330075,
+   "share_of_documents": 0.004034424149370761,
+   "labelled_tokens": 4075323396,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-016",
+   "documents": 3368368,
+   "share_of_documents": 0.004080816559136864,
+   "labelled_tokens": 4075323561,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-017",
+   "documents": 3330192,
+   "share_of_documents": 0.004034565896215945,
+   "labelled_tokens": 4075323731,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-018",
+   "documents": 3354352,
+   "share_of_documents": 0.004063836013990709,
+   "labelled_tokens": 4075323551,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-019",
+   "documents": 3373054,
+   "share_of_documents": 0.004086493702013211,
+   "labelled_tokens": 4075325259,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-020",
+   "documents": 3351157,
+   "share_of_documents": 0.004059965234756836,
+   "labelled_tokens": 4075323589,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-021",
+   "documents": 3343836,
+   "share_of_documents": 0.004051095759085104,
+   "labelled_tokens": 4075323717,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-022",
+   "documents": 3346341,
+   "share_of_documents": 0.00405413059538584,
+   "labelled_tokens": 4075325523,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-023",
+   "documents": 3341490,
+   "share_of_documents": 0.004048253553112439,
+   "labelled_tokens": 4075323900,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-024",
+   "documents": 3353797,
+   "share_of_documents": 0.004063163625109708,
+   "labelled_tokens": 4075325487,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-025",
+   "documents": 3350645,
+   "share_of_documents": 0.004059344940870219,
+   "labelled_tokens": 4075328299,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-026",
+   "documents": 3384220,
+   "share_of_documents": 0.004100021439392061,
+   "labelled_tokens": 4075327983,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-027",
+   "documents": 3376904,
+   "share_of_documents": 0.004091158021277816,
+   "labelled_tokens": 4075323726,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-028",
+   "documents": 3337639,
+   "share_of_documents": 0.004043588022336337,
+   "labelled_tokens": 4075323950,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-029",
+   "documents": 3344333,
+   "share_of_documents": 0.004051697880299262,
+   "labelled_tokens": 4075324581,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-030",
+   "documents": 3371815,
+   "share_of_documents": 0.004084992639268056,
+   "labelled_tokens": 4075323751,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-031",
+   "documents": 3278087,
+   "share_of_documents": 0.003971440089649137,
+   "labelled_tokens": 4075343809,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-032",
+   "documents": 3321151,
+   "share_of_documents": 0.0040236126207688575,
+   "labelled_tokens": 4075324507,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-033",
+   "documents": 3355377,
+   "share_of_documents": 0.004065077813275441,
+   "labelled_tokens": 4075323746,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-034",
+   "documents": 3367609,
+   "share_of_documents": 0.0040798970219104135,
+   "labelled_tokens": 4075325947,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-035",
+   "documents": 3369835,
+   "share_of_documents": 0.004082593846503403,
+   "labelled_tokens": 4075327585,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-036",
+   "documents": 3367345,
+   "share_of_documents": 0.004079577182875126,
+   "labelled_tokens": 4075331580,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-037",
+   "documents": 3397691,
+   "share_of_documents": 0.004116341710772187,
+   "labelled_tokens": 4075324677,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-038",
+   "documents": 3323049,
+   "share_of_documents": 0.004025912069590732,
+   "labelled_tokens": 4075324489,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-039",
+   "documents": 3352937,
+   "share_of_documents": 0.00406212172522203,
+   "labelled_tokens": 4075324738,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-040",
+   "documents": 3358325,
+   "share_of_documents": 0.004068649349169481,
+   "labelled_tokens": 4075323665,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-041",
+   "documents": 3300779,
+   "share_of_documents": 0.003998931708545865,
+   "labelled_tokens": 4075325116,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-042",
+   "documents": 3338080,
+   "share_of_documents": 0.004044122298906647,
+   "labelled_tokens": 4075323708,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-043",
+   "documents": 3367238,
+   "share_of_documents": 0.004079447551144915,
+   "labelled_tokens": 4075323869,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-044",
+   "documents": 3333709,
+   "share_of_documents": 0.004038826782151949,
+   "labelled_tokens": 4075323667,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-045",
+   "documents": 3334919,
+   "share_of_documents": 0.004040292711063681,
+   "labelled_tokens": 4075323794,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-046",
+   "documents": 3353547,
+   "share_of_documents": 0.004062860747235383,
+   "labelled_tokens": 4075323527,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-047",
+   "documents": 3363523,
+   "share_of_documents": 0.004074946785932446,
+   "labelled_tokens": 4075337141,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-048",
+   "documents": 3346112,
+   "share_of_documents": 0.0040538531592529585,
+   "labelled_tokens": 4075325633,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-049",
+   "documents": 3367543,
+   "share_of_documents": 0.0040798170621515915,
+   "labelled_tokens": 4075332873,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-050",
+   "documents": 3352025,
+   "share_of_documents": 0.004061016826736492,
+   "labelled_tokens": 4075344717,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-051",
+   "documents": 3343726,
+   "share_of_documents": 0.004050962492820401,
+   "labelled_tokens": 4075323679,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-052",
+   "documents": 3360949,
+   "share_of_documents": 0.004071828355338396,
+   "labelled_tokens": 4075324812,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-053",
+   "documents": 3345308,
+   "share_of_documents": 0.004052879104009129,
+   "labelled_tokens": 4075328006,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-054",
+   "documents": 3306407,
+   "share_of_documents": 0.004005750095252668,
+   "labelled_tokens": 4075323410,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-055",
+   "documents": 3353004,
+   "share_of_documents": 0.004062202896492349,
+   "labelled_tokens": 4075323664,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-056",
+   "documents": 3332410,
+   "share_of_documents": 0.004037253028716956,
+   "labelled_tokens": 4075323966,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-057",
+   "documents": 3320835,
+   "share_of_documents": 0.0040232297831357105,
+   "labelled_tokens": 4075326811,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-058",
+   "documents": 3343775,
+   "share_of_documents": 0.004051021856883769,
+   "labelled_tokens": 4075324066,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-059",
+   "documents": 3375381,
+   "share_of_documents": 0.004089312889267427,
+   "labelled_tokens": 4075324233,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-060",
+   "documents": 3327330,
+   "share_of_documents": 0.004031098550310673,
+   "labelled_tokens": 4075328208,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-061",
+   "documents": 3357451,
+   "share_of_documents": 0.004067590488120842,
+   "labelled_tokens": 4075323612,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-062",
+   "documents": 3351194,
+   "share_of_documents": 0.004060010060682236,
+   "labelled_tokens": 4075324287,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-063",
+   "documents": 3348196,
+   "share_of_documents": 0.004056377949213331,
+   "labelled_tokens": 4075323507,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-064",
+   "documents": 3372193,
+   "share_of_documents": 0.004085450590614036,
+   "labelled_tokens": 4075324708,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-065",
+   "documents": 3357284,
+   "share_of_documents": 0.004067388165700792,
+   "labelled_tokens": 4075323805,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-066",
+   "documents": 3357242,
+   "share_of_documents": 0.004067337282217906,
+   "labelled_tokens": 4075323870,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-067",
+   "documents": 3341520,
+   "share_of_documents": 0.004048289898457358,
+   "labelled_tokens": 4075324166,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-068",
+   "documents": 3375750,
+   "share_of_documents": 0.0040897599370099316,
+   "labelled_tokens": 4075323494,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-069",
+   "documents": 3356095,
+   "share_of_documents": 0.004065947678530503,
+   "labelled_tokens": 4075323995,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-070",
+   "documents": 3399991,
+   "share_of_documents": 0.004119128187215977,
+   "labelled_tokens": 4075325838,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-071",
+   "documents": 3372044,
+   "share_of_documents": 0.004085270075400938,
+   "labelled_tokens": 4075323745,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-072",
+   "documents": 3376212,
+   "share_of_documents": 0.0040903196553216834,
+   "labelled_tokens": 4075323651,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-073",
+   "documents": 3372004,
+   "share_of_documents": 0.004085221614941046,
+   "labelled_tokens": 4075325815,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-074",
+   "documents": 3358670,
+   "share_of_documents": 0.00406906732063605,
+   "labelled_tokens": 4075323583,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-075",
+   "documents": 3369545,
+   "share_of_documents": 0.004082242508169185,
+   "labelled_tokens": 4075326580,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-076",
+   "documents": 3326521,
+   "share_of_documents": 0.004030118437509358,
+   "labelled_tokens": 4075332128,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-077",
+   "documents": 3334173,
+   "share_of_documents": 0.004039388923486696,
+   "labelled_tokens": 4075324532,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-078",
+   "documents": 3357467,
+   "share_of_documents": 0.0040676098723047985,
+   "labelled_tokens": 4075326001,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-079",
+   "documents": 3310471,
+   "share_of_documents": 0.004010673677977695,
+   "labelled_tokens": 4075323900,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-080",
+   "documents": 3400197,
+   "share_of_documents": 0.0041193777585844206,
+   "labelled_tokens": 4075325998,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-081",
+   "documents": 3370872,
+   "share_of_documents": 0.004083850183926103,
+   "labelled_tokens": 4075324031,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-082",
+   "documents": 3364762,
+   "share_of_documents": 0.004076447848677601,
+   "labelled_tokens": 4075326288,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-083",
+   "documents": 3356736,
+   "share_of_documents": 0.004066724257400272,
+   "labelled_tokens": 4075325855,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-084",
+   "documents": 3368873,
+   "share_of_documents": 0.004081428372443,
+   "labelled_tokens": 4075333583,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-085",
+   "documents": 3340759,
+   "share_of_documents": 0.004047367938207913,
+   "labelled_tokens": 4075323667,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-086",
+   "documents": 3320170,
+   "share_of_documents": 0.004022424127990006,
+   "labelled_tokens": 4075325643,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-087",
+   "documents": 3350834,
+   "share_of_documents": 0.004059573916543208,
+   "labelled_tokens": 4075323830,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-088",
+   "documents": 3341268,
+   "share_of_documents": 0.004047984597560038,
+   "labelled_tokens": 4075323429,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-089",
+   "documents": 3345695,
+   "share_of_documents": 0.004053347958958584,
+   "labelled_tokens": 4075323527,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-090",
+   "documents": 3378310,
+   "share_of_documents": 0.004092861406443019,
+   "labelled_tokens": 4075329351,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-091",
+   "documents": 3326790,
+   "share_of_documents": 0.004030444334102131,
+   "labelled_tokens": 4075323616,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-092",
+   "documents": 3377046,
+   "share_of_documents": 0.0040913300559104315,
+   "labelled_tokens": 4075326585,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-093",
+   "documents": 3331338,
+   "share_of_documents": 0.004035954288391851,
+   "labelled_tokens": 4075324811,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-094",
+   "documents": 3355410,
+   "share_of_documents": 0.004065117793154853,
+   "labelled_tokens": 4075333637,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-095",
+   "documents": 3342713,
+   "share_of_documents": 0.0040497352316736365,
+   "labelled_tokens": 4075342500,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-096",
+   "documents": 3333938,
+   "share_of_documents": 0.00403910421828483,
+   "labelled_tokens": 4075324276,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-097",
+   "documents": 3361380,
+   "share_of_documents": 0.0040723505167937326,
+   "labelled_tokens": 4075324529,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-098",
+   "documents": 3326454,
+   "share_of_documents": 0.004030037266239038,
+   "labelled_tokens": 4075323655,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-099",
+   "documents": 3366333,
+   "share_of_documents": 0.004078351133239858,
+   "labelled_tokens": 4075325936,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "dclm-100",
+   "documents": 3311862,
+   "share_of_documents": 0.004012358890470439,
+   "labelled_tokens": 4075325198,
+   "chunks": 1989741,
+   "share_of_chunks": 0.004513860042646285
+  },
+  {
+   "source": "finepdfs-edu",
+   "documents": 8382387,
+   "share_of_documents": 0.010155358225316704,
+   "labelled_tokens": 47003746094,
+   "chunks": 22949160,
+   "share_of_chunks": 0.05206169865138047
+  },
+  {
+   "source": "finephrase-faq",
+   "documents": 20239573,
+   "share_of_documents": 0.024520475389939393,
+   "labelled_tokens": 8950710851,
+   "chunks": 4370106,
+   "share_of_chunks": 0.009913876658082025
+  },
+  {
+   "source": "finephrase-math",
+   "documents": 28846893,
+   "share_of_documents": 0.034948342530878244,
+   "labelled_tokens": 8950710402,
+   "chunks": 4370106,
+   "share_of_chunks": 0.009913876658082025
+  },
+  {
+   "source": "finephrase-table",
+   "documents": 34019548,
+   "share_of_documents": 0.04121507353494374,
+   "labelled_tokens": 8950711984,
+   "chunks": 4370106,
+   "share_of_chunks": 0.009913876658082025
+  },
+  {
+   "source": "finephrase-tutorial",
+   "documents": 20648825,
+   "share_of_documents": 0.025016288893232347,
+   "labelled_tokens": 8950710685,
+   "chunks": 4370106,
+   "share_of_chunks": 0.009913876658082025
+  },
+  {
+   "source": "fineweb-edu-01",
+   "documents": 14799425,
+   "share_of_documents": 0.017929673540926668,
+   "labelled_tokens": 15651242176,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-02",
+   "documents": 14830221,
+   "share_of_documents": 0.017966983248997516,
+   "labelled_tokens": 15651241984,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-03",
+   "documents": 14515318,
+   "share_of_documents": 0.017585474643963303,
+   "labelled_tokens": 15651243843,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-04",
+   "documents": 15222755,
+   "share_of_documents": 0.01844254270307861,
+   "labelled_tokens": 15651242132,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-05",
+   "documents": 15350827,
+   "share_of_documents": 0.018597703403560793,
+   "labelled_tokens": 15651242124,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-06",
+   "documents": 15149987,
+   "share_of_documents": 0.018354383434443095,
+   "labelled_tokens": 15651244058,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-07",
+   "documents": 15236429,
+   "share_of_documents": 0.018459108911292686,
+   "labelled_tokens": 15651245826,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-08",
+   "documents": 15189702,
+   "share_of_documents": 0.018402498613558357,
+   "labelled_tokens": 15651242724,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-09",
+   "documents": 14555033,
+   "share_of_documents": 0.017633589823078565,
+   "labelled_tokens": 15651242180,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-10",
+   "documents": 15232061,
+   "share_of_documents": 0.01845381702907248,
+   "labelled_tokens": 15651242242,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-11",
+   "documents": 15478932,
+   "share_of_documents": 0.01875290408392239,
+   "labelled_tokens": 15651242689,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-12",
+   "documents": 15232790,
+   "share_of_documents": 0.018454700220954013,
+   "labelled_tokens": 15651242479,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-13",
+   "documents": 15264188,
+   "share_of_documents": 0.018492739258946234,
+   "labelled_tokens": 15651243030,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-14",
+   "documents": 15642668,
+   "share_of_documents": 0.018951272130444275,
+   "labelled_tokens": 15651242159,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-15",
+   "documents": 14997940,
+   "share_of_documents": 0.018170176745813147,
+   "labelled_tokens": 15651242344,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "fineweb-edu-16",
+   "documents": 15237873,
+   "share_of_documents": 0.018460858333894787,
+   "labelled_tokens": 15651242014,
+   "chunks": 7641582,
+   "share_of_chunks": 0.017335437955193708
+  },
+  {
+   "source": "finewiki",
+   "documents": 5285573,
+   "share_of_documents": 0.006403532459317601,
+   "labelled_tokens": 6950551918,
+   "chunks": 3393546,
+   "share_of_chunks": 0.007698485226108388
+  },
+  {
+   "source": "math-textbooks",
+   "documents": 1501381,
+   "share_of_documents": 0.0018189403433275294,
+   "labelled_tokens": 2975237885,
+   "chunks": 1452633,
+   "share_of_chunks": 0.003295394755060785
+  },
+  {
+   "source": "nemotron-cc-math-3",
+   "documents": 26920565,
+   "share_of_documents": 0.032614574011307636,
+   "labelled_tokens": 37803003159,
+   "chunks": 18456984,
+   "share_of_chunks": 0.041870898064301734
+  },
+  {
+   "source": "nemotron-cc-math-4plus",
+   "documents": 20180598,
+   "share_of_documents": 0.024449026499386135,
+   "labelled_tokens": 22876816505,
+   "chunks": 11169405,
+   "share_of_chunks": 0.025338539503198473
+  },
+  {
+   "source": "pes2o",
+   "documents": 1687213,
+   "share_of_documents": 0.002044077947893753,
+   "labelled_tokens": 10925868378,
+   "chunks": 5334459,
+   "share_of_chunks": 0.01210157569715599
+  },
+  {
+   "source": "pubmed",
+   "documents": 1195737,
+   "share_of_documents": 0.0014486491232468175,
+   "labelled_tokens": 9925788534,
+   "chunks": 4846179,
+   "share_of_chunks": 0.010993879981169173
+  },
+  {
+   "source": "stackexchange",
+   "documents": 12156468,
+   "share_of_documents": 0.014727700748557579,
+   "labelled_tokens": 8950710322,
+   "chunks": 4370106,
+   "share_of_chunks": 0.009913876658082025
+  },
+  {
+   "source": "stackv2-edu",
+   "documents": 60704287,
+   "share_of_documents": 0.07354394163588915,
+   "labelled_tokens": 57704924306,
+   "chunks": 28173756,
+   "share_of_chunks": 0.06391404281243943
+  }
+ ]
+}

@@ -79,4 +79,16 @@ artifacts/smoke/samples/
 artifacts/smoke/judges.jsonl
 artifacts/smoke/d_labels.jsonl
 artifacts/smoke/spot-check-50.jsonl
+
+# The MTLD label cache: 11.56 GB of `_labels/` objects pulled from the us-east-2 mirror
+# so the curriculum ordering can be built locally. NOT committed — it is a byte-identical
+# copy of s3://edullm-corpus-use2/pretrain/edu-mix-983b/79e53d1e5e131649/_labels/, which
+# is the authority, and re-fetching it is one `s3 sync`. The DERIVED artifacts (the clamp
+# table, the order vector's digest, the spec and stats) are committed instead.
+artifacts/final-dataset/labels_raw/
+# The order vector itself: 1.68 GB of uint32. Its sha256 is recorded in CURRICULUM-SPEC.json,
+# which is what a reviewer checks; the bytes are reproducible from the committed generator.
+artifacts/final-dataset/curriculum/*.u32le.bin
+# Intermediate memmaps (per-chunk keys, ~4 GB). Pure scratch — deleting them costs a re-run.
+artifacts/final-dataset/curriculum/_scratch/
 __pycache__/
